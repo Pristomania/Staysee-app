@@ -1,0 +1,25 @@
+# Auth email templates (local Supabase). Prod: paste same HTML in Dashboard → Email Templates.
+# See docs/AUTH_EMAILS.md
+[auth]
+site_url = "http://127.0.0.1:5173"
+additional_redirect_urls = ["http://127.0.0.1:5173", "http://localhost:5173"]
+
+[auth.email]
+enable_signup = true
+
+[auth.email.template.recovery]
+subject = "Сброс пароля — StaySee AI"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.confirmation]
+subject = "Добро пожаловать в StaySee AI"
+content_path = "./supabase/templates/confirmation.html"
+
+[functions.weekly-reflection]
+verify_jwt = true
+
+[functions.backfill-conversation-summaries]
+verify_jwt = false
+
+[functions.purge-scheduled-rooms]
+verify_jwt = false

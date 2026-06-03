@@ -1,0 +1,144 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Safe-area bottom padding for iOS */
+  .pb-safe {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Chat compose — soft caret so blink does not pull attention from messages */
+  .chat-compose-input {
+    caret-color: color-mix(in srgb, currentColor 28%, transparent);
+  }
+}
+
+/* ── Message entrance — gentle upward drift ─────────────────────────────────── */
+
+@keyframes msgIn {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-msg-in {
+  animation: msgIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* ── Per-chunk streaming fade — softer than msgIn, no vertical movement ──────── */
+
+@keyframes chunkIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-chunk-in {
+  display: inline;
+  animation: chunkIn 0.35s ease-out forwards;
+}
+
+/* ── Streaming cursor — calm, unhurried blink ───────────────────────────────── */
+
+@keyframes cursorBlink {
+  0%, 45%  { opacity: 0.32; }
+  55%, 95% { opacity: 0.08; }
+  100%     { opacity: 0.32; }
+}
+
+.animate-cursor-blink {
+  background: currentColor;
+  animation: cursorBlink 1.8s ease-in-out infinite;
+}
+
+/* ── Presence indicator — single line, slow breathe ─────────────────────────── */
+
+@keyframes presence {
+  0%, 100% { opacity: 0.2; transform: scaleX(0.5); }
+  50%      { opacity: 0.5; transform: scaleX(1); }
+}
+
+.animate-presence {
+  transform-origin: left center;
+  animation: presence 2.2s ease-in-out infinite;
+}
+
+/* ── Legacy fade-in for non-chat screens ─────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* ── Chat capture nudge — feather hint ───────────────────────────────────────── */
+
+@keyframes featherNudge {
+  0%, 100% {
+    opacity: 0.85;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(201, 169, 110, 0.45));
+  }
+}
+
+.animate-feather-nudge {
+  animation: featherNudge 2.4s ease-in-out infinite;
+}
+
+@keyframes captureChipIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-capture-chip-in {
+  animation: captureChipIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

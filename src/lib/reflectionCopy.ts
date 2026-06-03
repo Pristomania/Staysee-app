@@ -1,0 +1,55 @@
+/** Тёплые формулировки StaySee — «Записки себе». */
+export const REFLECTION_COPY = {
+  title: 'Записки себе',
+  subtitle: 'Только эта беседа — без перекрёста',
+  writeSection: 'Выписываю важное',
+  writeHint:
+    'Пиши любые мысли, чувства или важные для себя вещи — не для чата со StaySee.',
+  insight: 'Инсайт',
+  tension: 'Точка напряжения',
+  insightPlaceholder: 'Что стало яснее, что хочется запомнить…',
+  tensionPlaceholder: 'Что остаётся открытым, на что обратить внимание…',
+  saveInsight: 'Сохранить инсайт',
+  saveTension: 'Сохранить точку напряжения',
+  saving: 'Сохраняю…',
+  weeklySection: 'Динамика недели',
+  weeklyHintLines: [
+    'StaySee создаст динамику за прошедшие семь дней в этой беседе.',
+    'Новую — раз в 7 дней, каждая сохраняется отдельно.',
+  ],
+  weeklyButton: 'Создать динамику недели',
+  weeklyBusy: 'Создаёт динамику…',
+  weeklyCooldown: 'Следующую динамику можно создать',
+  tabInsight: 'Инсайты',
+  tabTension: 'Напряжение',
+  tabDynamics: 'Вся динамика',
+  notesSection: 'Мои записки',
+  fabAria: 'Выписать записку',
+  sheetCloseAria: 'Закрыть',
+  emptyInsight: 'Пока нет инсайтов. Нажмите + внизу.',
+  emptyTension: 'Пока нет точек напряжения. Нажмите + внизу.',
+  emptyDynamics: 'Пока нет сохранённой динамики.',
+  emptyWriteInsight: 'Выписать инсайт',
+  emptyWriteTension: 'Выписать точку напряжения',
+  loading: 'Загружаю…',
+  editAria: 'Изменить',
+  saveAria: 'Сохранить',
+  deleteAria: 'Удалить',
+  deleteConfirm: 'Удалить?',
+  deleteYes: 'Да',
+  deleteCancel: 'Отмена',
+  clearMemoryConfirm: 'Очистить всю память беседы?',
+  clearMemoryYes: 'Очистить',
+  openAria: 'Записки себе — только эта беседа',
+} as const;
+
+export type SelfNoteKind = 'insight' | 'tension';
+
+export const REFLECTION_ENTRY_LABELS: Record<string, string> = {
+  insight: 'Инсайт',
+  tension: 'Точка напряжения',
+  weekly: 'Вся динамика',
+  note: 'Записка',
+  shift: 'Записка',
+  step: 'Записка',
+};
