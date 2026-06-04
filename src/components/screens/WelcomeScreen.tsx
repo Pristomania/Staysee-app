@@ -1,7 +1,7 @@
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { ROOM_COPY } from '../../lib/roomCopy';
-import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
+import { AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
 export function WelcomeScreen() {
   const { setCurrentScreen } = useApp();
@@ -23,10 +23,10 @@ export function WelcomeScreen() {
 
           <div className="text-center mb-10 sm:mb-12">
             <p className={`${theme.textPrimary} text-[19px] sm:text-xl font-light leading-[1.75] tracking-tight`}>
-              Иногда внутри слишком много <span className={ACCENT_TEXT_CLASS}>всего</span>,
+              Иногда внутри слишком много всего,
             </p>
             <p className={`${theme.textPrimary} text-[19px] sm:text-xl font-light leading-[1.75] tracking-tight`}>
-              чтобы держать это в <span className={ACCENT_TEXT_CLASS}>себе</span>.
+              чтобы держать это в себе.
             </p>
           </div>
 
