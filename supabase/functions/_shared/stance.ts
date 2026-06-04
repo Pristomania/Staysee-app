@@ -7,6 +7,7 @@
 import type { SafetyCategory } from "./safety.ts";
 import { userFrustrationAtBot } from "./boundaryFallback.ts";
 import { userSignalsLanguageBoundary } from "./languageGuard.ts";
+import { hasMetaRepairIntent } from "./metaRepair.ts";
 
 export type ConversationStance =
   | "repair_contact"
@@ -14,6 +15,7 @@ export type ConversationStance =
   | "factual_clarification"
   | "recall"
   | "redo"
+  | "writing_repair"
   | "contain"
   | "ground"
   | "reflect"
@@ -50,6 +52,8 @@ const STANCE_GUIDANCE: Record<ConversationStance, string> = {
     "РЕЖИМ: вопрос «помнишь». Только её слова из цитат/архива. Несколько тем в чате — не сливай: ссора отдельно от других линий. Свежие цитаты важнее старых. Если нет дословных слов — так и скажи.",
   redo:
     "РЕЖИМ: «ещё раз». Спроси одним предложением, что переделать (тон, факты, весь ответ). Не повторяй лекцию списком. Один связный абзац 2–4 предложения. Не задавай вопрос и не отвечай «Да.» самой себе.",
+  writing_repair:
+    "РЕЖИМ: она просит исправить формулировку последнего твоего ответа (опечатки, склейки, обрыв), а не новый психологический разбор. Перепиши последнюю реплику ассистента из истории чистым русским: 2–4 предложения, без markdown. Сохрани смысл и тон. Если дословно не видно — попроси процитировать фрагмент одним коротким вопросом.",
   contain:
     "РЕЖИМ: контейнирование. Одна гипотеза чувства с «так?» или короткое присутствие. Без теории.",
   ground:
@@ -239,6 +243,13 @@ export function evaluateStance(input: StanceInput): StanceResult {
 
   if (userSignalsLanguageBoundary(msg) || matches(msg, CORRECTION_NOW)) {
     return { stance: "repair_contact", systemGuidance: STANCE_GUIDANCE.repair_contact };
+  }
+
+  if (hasMetaRepairIntent(msg)) {
+    return {
+      stance: "writing_repair",
+      systemGuidance: STANCE_GUIDANCE.writing_repair,
+    };
   }
 
   if (

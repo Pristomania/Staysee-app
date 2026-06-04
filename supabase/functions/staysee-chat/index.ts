@@ -60,8 +60,11 @@ import {
 } from "../_shared/completeReply.ts";
 import {
   mergeContinuationWithoutOverlap,
+  polishAssistantOutput,
   polishMergedReply,
+  type MergeStrategy,
 } from "../_shared/mergeContinuation.ts";
+import { logReplyCompletion } from "../_shared/replyCompletionLog.ts";
 import { buildTimeGapPrompt, classifyTimeGap, type TimeGapMeta } from "../_shared/timeGap.ts";
 import {
   buildUsageLogRow,
@@ -583,13 +586,31 @@ Deno.serve(async (req: Request) => {
     );
 
     // Auto-complete until publishable (full sentence, no em-dash / half-word cut).
-    let autoSegments = 0;
+    let autoContinueSegments = 0;
+    let finalizeAttempts = 0;
+    let wasAutoContinued = false;
+    let wasFinalizeUsed = false;
+    let lengthBeforeMerge = 0;
+    let lengthAfterMerge = result.content?.trim().length ?? 0;
+    let lastMergeStrategy: MergeStrategy | undefined;
+    let lastOverlapWords = 0;
+    let usedMergeFallback = false;
+    const firstSegmentContent = result.content?.trim() ?? "";
     const segmentBudget = continuationTokenBudget(userTier, responseDepth);
+
+    const applyContinuationMerge = (accumulated: string, continuation: string) => {
+      lengthBeforeMerge = accumulated.length;
+      const merged = mergeContinuationWithoutOverlap(accumulated, continuation);
+      lengthAfterMerge = merged.text.length;
+      lastMergeStrategy = merged.strategy;
+      lastOverlapWords = merged.overlapWords;
+      return polishMergedReply(merged.text);
+    };
 
     while (
       !holdThreadRole &&
       result.content?.trim() &&
-      autoSegments < MAX_AUTO_CONTINUE_SEGMENTS &&
+      autoContinueSegments < MAX_AUTO_CONTINUE_SEGMENTS &&
       needsAutoContinue(result.content, result.finishReason)
     ) {
       const accumulated = result.content.trim();
@@ -606,7 +627,8 @@ Deno.serve(async (req: Request) => {
         tierCfg.temperature,
         turnModel
       );
-      autoSegments++;
+      autoContinueSegments++;
+      wasAutoContinued = true;
 
       if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
         break;
@@ -614,20 +636,17 @@ Deno.serve(async (req: Request) => {
 
       result = {
         ...retry,
-        content: polishMergedReply(
-          mergeContinuationWithoutOverlap(accumulated, retry.content.trim())
-        ),
+        content: applyContinuationMerge(accumulated, retry.content.trim()),
         finishReason: retry.finishReason,
       };
     }
 
-    let finalizeAttempts = 0;
     while (
       !holdThreadRole &&
       result.content?.trim() &&
       finalizeAttempts < MAX_FINALIZE_ATTEMPTS &&
       !isPublishableReply(result.content) &&
-      autoSegments < MAX_AUTO_CONTINUE_SEGMENTS + MAX_FINALIZE_ATTEMPTS
+      autoContinueSegments < MAX_AUTO_CONTINUE_SEGMENTS + MAX_FINALIZE_ATTEMPTS
     ) {
       const accumulated = result.content.trim();
       const retry = await callModel(
@@ -644,7 +663,8 @@ Deno.serve(async (req: Request) => {
         turnModel
       );
       finalizeAttempts++;
-      autoSegments++;
+      wasFinalizeUsed = true;
+      autoContinueSegments++;
 
       if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
         break;
@@ -652,9 +672,7 @@ Deno.serve(async (req: Request) => {
 
       result = {
         ...retry,
-        content: polishMergedReply(
-          mergeContinuationWithoutOverlap(accumulated, retry.content.trim())
-        ),
+        content: applyContinuationMerge(accumulated, retry.content.trim()),
         finishReason: retry.finishReason,
       };
     }
@@ -664,17 +682,54 @@ Deno.serve(async (req: Request) => {
       let safe = ensurePublishableReply(
         polishMergedReply(result.content.trim())
       );
+
+      if (
+        !isPublishableReply(safe) &&
+        wasAutoContinued &&
+        firstSegmentContent.length >= 12
+      ) {
+        safe = ensurePublishableReply(
+          polishAssistantOutput(firstSegmentContent)
+        );
+        usedMergeFallback = true;
+        lengthAfterMerge = safe.length;
+      }
+
       safe = enforceRoleBoundedReply(safe, safety.category, {
         insistenceLoop: safety.insistenceLoop,
         threadEscalated: safety.threadEscalated,
         userMessage: message,
       });
       result = { ...result, content: safe };
-      if (!isPublishableReply(safe)) {
+
+      const publishable = isPublishableReply(safe);
+      if (
+        wasAutoContinued ||
+        wasFinalizeUsed ||
+        finalizeAttempts > 0 ||
+        autoContinueSegments > 0 ||
+        !publishable
+      ) {
+        logReplyCompletion({
+          finishReason: result.finishReason,
+          autoContinueSegments,
+          finalizeAttempts,
+          lengthBeforeMerge,
+          lengthAfterMerge,
+          wasAutoContinued,
+          wasFinalizeUsed,
+          publishable,
+          lastMergeStrategy,
+          overlapWords: lastOverlapWords,
+          usedMergeFallback,
+        });
+      }
+
+      if (!publishable) {
         console.error("[staysee-chat] reply still not publishable after completion");
-      } else if (autoSegments > 0 || safe.length < before) {
+      } else if (autoContinueSegments > 0 || safe.length < before) {
         console.log(
-          `[staysee-chat] completion segments=${autoSegments} len=${before}->${safe.length}`
+          `[staysee-chat] completion segments=${autoContinueSegments} len=${before}->${safe.length}`
         );
       }
     }
