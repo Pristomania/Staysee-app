@@ -16,7 +16,7 @@ const concerns = [
 
 export function OnboardingScreen() {
   const { user, refreshProfile } = useAuth();
-  const { setCurrentScreen } = useApp();
+  const { replaceNavigation } = useApp();
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -34,7 +34,7 @@ export function OnboardingScreen() {
       .eq('id', user.id);
 
     await refreshProfile();
-    setCurrentScreen('main');
+    replaceNavigation('main');
     setLoading(false);
   };
 
@@ -46,7 +46,7 @@ export function OnboardingScreen() {
       .update({ onboarding_completed: true })
       .eq('id', user.id);
     await refreshProfile();
-    setCurrentScreen('main');
+    replaceNavigation('main');
     setLoading(false);
   };
 

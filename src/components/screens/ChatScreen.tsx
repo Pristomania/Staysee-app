@@ -117,6 +117,8 @@ export function ChatScreen() {
     currentScreen,
     messages: appMessages,
     setCurrentScreen,
+    navigateTo,
+    navigateBack,
     setMemoryReturnScreen,
     setNotesReturnScreen,
     setCurrentConversation,
@@ -182,11 +184,13 @@ export function ChatScreen() {
   const leaveChatFor = useCallback(
     (screen: 'conversation-notes' | 'memory') => {
       syncMessagesToApp();
-      setNotesReturnScreen('chat');
-      setMemoryReturnScreen('chat');
-      setCurrentScreen(screen);
+      navigateTo(screen, {
+        notesReturnScreen: 'chat',
+        memoryReturnScreen: 'chat',
+        conversation: currentConversation,
+      });
     },
-    [syncMessagesToApp, setNotesReturnScreen, setMemoryReturnScreen, setCurrentScreen],
+    [syncMessagesToApp, navigateTo, currentConversation],
   );
 
   const isEmptyConversation = isNewRoom && roomMessages.length <= 1 && roomMessages[0]?.id === 'greeting';
@@ -777,7 +781,7 @@ export function ChatScreen() {
         />
         <div className={`relative pt-6 pb-3 flex items-center gap-3 ${LAYOUT_CONTAINER_CLASS}`}>
           <button
-            onClick={() => setCurrentScreen('main')}
+            onClick={() => navigateBack()}
             className={`${theme.textSecondary} transition-opacity duration-200 opacity-80 hover:opacity-100 text-xl leading-none w-8 h-8 flex items-center justify-center shrink-0`}
           >
             ←

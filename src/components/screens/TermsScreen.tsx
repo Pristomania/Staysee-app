@@ -6,16 +6,14 @@ import { ScreenBackHeader, StickyScreenLayout } from '../layout';
 
 export function TermsScreen() {
   const { user } = useAuth();
-  const { setCurrentScreen, legalReturnScreen } = useApp();
-
-  const backTarget = legalReturnScreen ?? (user ? 'profile' : 'register');
+  const { navigateBack } = useApp();
 
   return (
     <StickyScreenLayout
       header={(
         <ScreenBackHeader
           pinned
-          onBack={() => setCurrentScreen(backTarget)}
+          onBack={() => navigateBack()}
           title={OFFER_META.title}
           subtitle={OFFER_META.subtitle}
           backLabel={user ? 'Назад' : 'Назад к регистрации'}

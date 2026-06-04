@@ -6,7 +6,6 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { ensureUserProfile } from '../../lib/ensureProfile';
-import { navigateBackToChat } from '../../lib/chatNavigation';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { CrossMemoryToggle } from '../CrossMemoryToggle';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -226,8 +225,7 @@ export function MemoryScreen() {
   const {
     currentConversation,
     memoryReturnScreen,
-    setCurrentScreen,
-    setMemoryReturnScreen,
+    navigateBack,
   } = useApp();
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
@@ -334,17 +332,7 @@ export function MemoryScreen() {
   }, [load]);
 
   function goBack() {
-    if (memoryReturnScreen === 'chat') {
-      navigateBackToChat({
-        currentConversation,
-        setCurrentScreen,
-        setMemoryReturnScreen,
-      });
-      setMemoryReturnScreen('profile');
-      return;
-    }
-    setCurrentScreen('profile');
-    setMemoryReturnScreen('profile');
+    navigateBack();
   }
 
   async function saveConversationMemory(next: StructuredMemory | null) {

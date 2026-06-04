@@ -85,10 +85,9 @@ function CabinetRow({
 export function ProfileScreen() {
   const { signOut, user } = useAuth();
   const {
-    setCurrentScreen,
-    setMemoryReturnScreen,
-    setLegalReturnScreen,
-    setNotesReturnScreen,
+    navigateTo,
+    navigateBack,
+    replaceNavigation,
     setConversations,
     setMessages,
     setCurrentConversation,
@@ -114,7 +113,7 @@ export function ProfileScreen() {
     setMessages([]);
     setCurrentConversation(null);
     await signOut();
-    setCurrentScreen('welcome');
+    replaceNavigation('welcome');
   }
 
   return (
@@ -122,7 +121,7 @@ export function ProfileScreen() {
       header={(
         <ScreenBackHeader
           pinned
-          onBack={() => setCurrentScreen('main')}
+          onBack={() => navigateBack()}
           title={ROOM_COPY.contextTitle}
           subtitle={ROOM_COPY.contextSubtitle}
           backLabel="К беседам"
@@ -149,8 +148,7 @@ export function ProfileScreen() {
             theme={theme}
             cardClass={card}
             onClick={() => {
-              setNotesReturnScreen('profile');
-              setCurrentScreen('conversation-notes');
+              navigateTo('conversation-notes', { notesReturnScreen: 'profile' });
             }}
           />
           <CabinetRow
@@ -159,8 +157,7 @@ export function ProfileScreen() {
             theme={theme}
             cardClass={card}
             onClick={() => {
-              setMemoryReturnScreen('profile');
-              setCurrentScreen('memory');
+              navigateTo('memory', { memoryReturnScreen: 'profile' });
             }}
           />
           <CrossMemoryToggle cardClass={card} />
@@ -220,8 +217,7 @@ export function ProfileScreen() {
                 theme={theme}
                 cardClass={card}
                 onClick={() => {
-                  setLegalReturnScreen('profile');
-                  setCurrentScreen(screen);
+                  navigateTo(screen, { legalReturnScreen: 'profile' });
                 }}
               />
             ))}

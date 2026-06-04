@@ -8,7 +8,7 @@ import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../lay
 
 export function ResetPasswordScreen() {
   const { completePasswordRecovery, abandonPasswordRecovery } = useAuth();
-  const { setCurrentScreen } = useApp();
+  const { replaceNavigation } = useApp();
   const { theme } = useTheme();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,8 +55,7 @@ export function ResetPasswordScreen() {
       return;
     }
     completePasswordRecovery();
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    setCurrentScreen('main');
+    replaceNavigation('main');
   };
 
   if (!checkedSession) {
@@ -83,7 +82,7 @@ export function ResetPasswordScreen() {
             <button
               type="button"
               onClick={() => {
-                void abandonPasswordRecovery().then(() => setCurrentScreen('login'));
+                void abandonPasswordRecovery().then(() => replaceNavigation('login'));
               }}
               className={`
                 w-full py-4 rounded-xl border mt-4
@@ -177,7 +176,7 @@ export function ResetPasswordScreen() {
             <button
               type="button"
               onClick={() => {
-                void abandonPasswordRecovery().then(() => setCurrentScreen('login'));
+                void abandonPasswordRecovery().then(() => replaceNavigation('login'));
               }}
               className={`${theme.textMuted} text-xs font-light underline underline-offset-2 decoration-dotted`}
             >

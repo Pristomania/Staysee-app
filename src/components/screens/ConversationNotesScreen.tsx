@@ -6,7 +6,6 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { REFLECTION_COPY, type SelfNoteKind } from '../../lib/reflectionCopy';
-import { navigateBackFromNotes } from '../../lib/chatNavigation';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import type { Conversation } from '../../types';
 import {
@@ -371,7 +370,7 @@ export function ConversationNotesScreen() {
     setCurrentConversation,
     conversations,
     setConversations,
-    setCurrentScreen,
+    navigateBack,
     notesReturnScreen,
     notesCaptureLaunch,
     setNotesCaptureLaunch,
@@ -488,11 +487,7 @@ export function ConversationNotesScreen() {
   const notesBackLabel = notesReturnScreen === 'chat' ? 'К беседе' : 'В контекст';
 
   function goBack() {
-    navigateBackFromNotes({
-      notesReturnScreen,
-      currentConversation,
-      setCurrentScreen,
-    });
+    navigateBack();
   }
 
   function openWriteSheet(kind: SelfNoteKind = 'insight') {

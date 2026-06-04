@@ -28,7 +28,7 @@ const points = [
 
 export function DisclaimerScreen() {
   const { user } = useAuth();
-  const { setCurrentScreen, legalReturnScreen } = useApp();
+  const { navigateBack, legalReturnScreen } = useApp();
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
 
@@ -37,7 +37,7 @@ export function DisclaimerScreen() {
       header={(
         <ScreenBackHeader
           pinned
-          onBack={() => setCurrentScreen(legalReturnScreen ?? (user ? 'profile' : 'welcome'))}
+          onBack={() => navigateBack()}
           title="Дисклеймер"
           subtitle="Важная информация об использовании"
           backLabel="Назад"

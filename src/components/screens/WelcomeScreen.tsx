@@ -4,7 +4,7 @@ import { ROOM_COPY } from '../../lib/roomCopy';
 import { AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
 export function WelcomeScreen() {
-  const { setCurrentScreen } = useApp();
+  const { navigateTo } = useApp();
   const { theme } = useTheme();
 
   return (
@@ -32,7 +32,7 @@ export function WelcomeScreen() {
 
           <button
             type="button"
-            onClick={() => setCurrentScreen('login')}
+            onClick={() => navigateTo('login')}
             className={`
               w-full py-4 rounded-xl border transition-all duration-300
               ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover}
@@ -45,7 +45,7 @@ export function WelcomeScreen() {
 
           <button
             type="button"
-            onClick={() => setCurrentScreen('register')}
+            onClick={() => navigateTo('register')}
             className={`mt-3 w-full py-3 ${theme.textMuted} text-sm font-light underline underline-offset-4 decoration-dotted hover:opacity-80`}
           >
             {ROOM_COPY.createRoom}

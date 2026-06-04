@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider, useApp } from './context/AppContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
 import {
   WelcomeScreen,
   LoginScreen,
@@ -20,9 +21,19 @@ import {
 
 const LOADING_RESET_MS = 5000;
 
+const PUBLIC_SCREENS = ['welcome', 'login', 'register', 'terms', 'privacy', 'disclaimer'] as const;
+const AUTH_ENTRY_SCREENS = ['welcome', 'login', 'register'] as const;
+
 function AppContent() {
   const { user, profile, loading, passwordRecoveryPending, emergencyResetAuth } = useAuth();
-  const { currentScreen, setCurrentScreen, currentConversation } = useApp();
+  const {
+    currentScreen,
+    currentConversation,
+    replaceNavigation,
+    applyHistoryState,
+    popNavigationRef,
+    seedHistory,
+  } = useApp();
   const { theme } = useTheme();
   const [showLoadingReset, setShowLoadingReset] = useState(false);
 
@@ -36,44 +47,78 @@ function AppContent() {
   }, [loading]);
 
   useEffect(() => {
-    if (passwordRecoveryPending) {
-      setCurrentScreen('reset-password');
-    }
-  }, [passwordRecoveryPending, setCurrentScreen]);
+    if (!loading) seedHistory();
+  }, [loading, seedHistory]);
 
   useEffect(() => {
-    if (loading) return;
+    const onPopState = (event: PopStateEvent) => {
+      popNavigationRef.current = true;
+      try {
+        let state = isAppHistoryState(event.state) ? event.state : null;
+        if (state && user && AUTH_ENTRY_SCREENS.includes(state.screen as (typeof AUTH_ENTRY_SCREENS)[number])) {
+          const mainState = { ...state, screen: 'main' as const, conversationId: null };
+          applyHistoryState(mainState);
+          if (canWriteAppHistory()) replaceAppHistory(mainState);
+          return;
+        }
+        if (state) {
+          applyHistoryState(state);
+        }
+      } finally {
+        window.requestAnimationFrame(() => {
+          popNavigationRef.current = false;
+        });
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [user, applyHistoryState, replaceNavigation, popNavigationRef]);
+
+  useEffect(() => {
+    if (passwordRecoveryPending) {
+      replaceNavigation('reset-password');
+    }
+  }, [passwordRecoveryPending, replaceNavigation]);
+
+  useEffect(() => {
+    if (loading || popNavigationRef.current) return;
 
     if (passwordRecoveryPending || currentScreen === 'reset-password') return;
 
     if (!user) {
-      const publicScreens = ['welcome', 'login', 'register', 'terms', 'privacy', 'disclaimer'];
-      if (publicScreens.includes(currentScreen)) return;
-      setCurrentScreen('welcome');
+      if (PUBLIC_SCREENS.includes(currentScreen as (typeof PUBLIC_SCREENS)[number])) return;
+      replaceNavigation('welcome');
       return;
     }
 
     if (profile && profile.onboarding_completed === false) {
-      if (['welcome', 'login', 'register'].includes(currentScreen)) {
-        setCurrentScreen('onboarding');
+      if (AUTH_ENTRY_SCREENS.includes(currentScreen as (typeof AUTH_ENTRY_SCREENS)[number])) {
+        replaceNavigation('onboarding');
         return;
       }
     }
 
-    // After successful login, email confirm, or session restore — land on conversations list.
-    if (['welcome', 'login', 'register'].includes(currentScreen)) {
-      setCurrentScreen('main');
+    if (AUTH_ENTRY_SCREENS.includes(currentScreen as (typeof AUTH_ENTRY_SCREENS)[number])) {
+      replaceNavigation('main');
     }
 
-    // If on chat without a loaded conversation, return to list (no auto-create).
     if (currentScreen === 'chat' && !currentConversation) {
-      setCurrentScreen('main');
+      replaceNavigation('main');
     }
-  }, [user, profile, loading, passwordRecoveryPending, currentScreen, currentConversation, setCurrentScreen]);
+  }, [
+    user,
+    profile,
+    loading,
+    passwordRecoveryPending,
+    currentScreen,
+    currentConversation,
+    replaceNavigation,
+    popNavigationRef,
+  ]);
 
   async function handleEmergencyReset() {
     await emergencyResetAuth();
-    setCurrentScreen('login');
+    replaceNavigation('login');
   }
 
   if (loading) {

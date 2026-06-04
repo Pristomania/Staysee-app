@@ -9,7 +9,7 @@ import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../lay
 
 export function RegisterScreen() {
   const { signUp } = useAuth();
-  const { setCurrentScreen, setLegalReturnScreen } = useApp();
+  const { navigateTo } = useApp();
   const { theme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,13 +25,11 @@ export function RegisterScreen() {
   const canSubmit = confirmedAge18 && acceptedTerms && !loading;
 
   const openTerms = () => {
-    setLegalReturnScreen('register');
-    setCurrentScreen('terms');
+    navigateTo('terms', { legalReturnScreen: 'register' });
   };
 
   const openPrivacy = () => {
-    setLegalReturnScreen('register');
-    setCurrentScreen('privacy');
+    navigateTo('privacy', { legalReturnScreen: 'register' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -78,7 +76,7 @@ export function RegisterScreen() {
       <AppContainer className="flex-1 flex flex-col py-8 sm:py-10">
         <button
           type="button"
-          onClick={() => setCurrentScreen('login')}
+          onClick={() => navigateTo('login')}
           className={`self-start mb-6 sm:mb-8 ${theme.textMuted} transition-opacity duration-300 opacity-70 hover:opacity-100 text-lg`}
         >
           ←
@@ -238,7 +236,7 @@ export function RegisterScreen() {
         <div className="text-center space-y-2">
           <p className={`${theme.textMuted} text-xs font-light`}>{ROOM_COPY.alreadyHaveRoom}</p>
           <button
-            onClick={() => setCurrentScreen('login')}
+            onClick={() => navigateTo('login')}
             className={`${theme.textSecondary} text-sm font-light underline underline-offset-4 decoration-dotted transition-opacity duration-200 hover:opacity-80`}
           >
             Войти

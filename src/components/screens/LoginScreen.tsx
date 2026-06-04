@@ -10,7 +10,7 @@ import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../lay
 
 export function LoginScreen() {
   const { signIn } = useAuth();
-  const { setCurrentScreen } = useApp();
+  const { navigateTo } = useApp();
   const { theme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,7 +44,7 @@ export function LoginScreen() {
       <AppContainer className="flex-1 flex flex-col py-10 sm:py-12">
         <button
           type="button"
-          onClick={() => setCurrentScreen('welcome')}
+          onClick={() => navigateTo('welcome')}
           className={`self-start mb-5 sm:mb-6 ${theme.textMuted} transition-opacity duration-300 opacity-70 hover:opacity-100 text-lg`}
           aria-label="Назад"
         >
@@ -156,7 +156,7 @@ export function LoginScreen() {
             <p className={`${theme.textMuted} text-xs font-light`}>Впервые здесь?</p>
             <button
               type="button"
-              onClick={() => setCurrentScreen('register')}
+              onClick={() => navigateTo('register')}
               className={`${theme.textSecondary} text-sm font-light underline underline-offset-4 decoration-dotted transition-opacity duration-200 hover:opacity-80`}
             >
               Создать своё пространство

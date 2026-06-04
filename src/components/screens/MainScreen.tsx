@@ -17,7 +17,7 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
-  const { setCurrentScreen, setCurrentConversation, setMessages, conversations, setConversations } = useApp();
+  const { navigateTo, setCurrentConversation, setMessages, conversations, setConversations } = useApp();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [limitReached, setLimitReached] = useState(false);
@@ -86,8 +86,7 @@ export function MainScreen() {
   }
 
   async function openRoom(conv: Conversation) {
-    setCurrentConversation(conv);
-    setCurrentScreen('chat');
+    navigateTo('chat', { conversation: conv });
   }
 
   async function createNewRoom() {
@@ -102,9 +101,8 @@ export function MainScreen() {
       .select()
       .maybeSingle();
     if (data) {
-      setCurrentConversation(data);
       setMessages([greetingFor(data.id)]);
-      setCurrentScreen('chat');
+      navigateTo('chat', { conversation: data });
     }
   }
 
@@ -160,7 +158,7 @@ export function MainScreen() {
             <p className={`${theme.textMuted} text-xs font-light mt-0.5`}>Ваши беседы</p>
           </div>
           <button
-            onClick={() => setCurrentScreen('profile')}
+            onClick={() => navigateTo('profile')}
             aria-label="Контекст"
             className={`p-2.5 rounded-lg ${theme.surface} ${theme.surfaceHover} transition-colors duration-200`}
           >

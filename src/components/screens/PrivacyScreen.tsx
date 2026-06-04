@@ -41,7 +41,7 @@ const sections = [
 type DeleteState = 'idle' | 'confirming' | 'loading' | 'done' | 'error';
 
 export function PrivacyScreen() {
-  const { setCurrentScreen, setConversations, setMessages, setCurrentConversation, legalReturnScreen } =
+  const { navigateBack, setConversations, setMessages, setCurrentConversation, legalReturnScreen } =
     useApp();
   const { user } = useAuth();
   const { theme } = useTheme();
@@ -97,7 +97,7 @@ export function PrivacyScreen() {
       header={(
         <ScreenBackHeader
           pinned
-          onBack={() => setCurrentScreen(legalReturnScreen ?? (user ? 'profile' : 'register'))}
+          onBack={() => navigateBack()}
           title="Конфиденциальность"
           subtitle="Как мы бережём ваши данные"
           backLabel={user ? 'Назад' : 'Назад к регистрации'}
