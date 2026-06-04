@@ -1,0 +1,21 @@
+name: Deploy StaySee
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          script: |
+            deploy-staysee
