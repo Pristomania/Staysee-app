@@ -1,3 +1,5 @@
+import { normalizeMessageRole } from "./messageRole.ts";
+
 /**
  * StaySee Memory MVP — structured JSON in conversation_summary (text column).
  * Merge, decay, compress, token-safe injection. Server-side only.
@@ -717,7 +719,7 @@ export async function fetchTranscriptForSummary(
 
   let query = supabase
     .from("messages")
-    .select("sender, content, created_at")
+    .select("sender, role, content, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
@@ -735,7 +737,7 @@ export async function fetchTranscriptForSummary(
   }
 
   return (data ?? []).map((m) => ({
-    role: m.sender === "user" ? "user" as const : "assistant" as const,
+    role: normalizeMessageRole(m),
     content: m.content ?? "",
   }));
 }

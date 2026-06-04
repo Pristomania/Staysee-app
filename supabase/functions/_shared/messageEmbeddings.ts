@@ -9,6 +9,13 @@ import {
   type EmbeddingApiConfig,
 } from "./embeddings.ts";
 import type { ArchiveExcerpt } from "./conversationRetrieval.ts";
+import {
+  isAssistantMessage,
+  isUserMessage,
+  normalizeMessageRole,
+  toDbSender,
+  type MessageRoleFields,
+} from "./messageRole.ts";
 
 const ENSURE_BATCH = 20;
 const MAX_ENSURE_PER_REQUEST = 40;
@@ -18,14 +25,15 @@ const SEMANTIC_THRESHOLD = 0.24;
 interface MessageRow {
   id: string;
   conversation_id: string;
-  sender: string;
+  sender?: string | null;
+  role?: string | null;
   content: string;
   created_at: string;
 }
 
-function embedTextForMessage(sender: string, content: string): string {
-  const role = sender === "user" ? "Пользователь" : "StaySee";
-  return `${role}: ${content.replace(/\s+/g, " ").trim()}`;
+function embedTextForMessage(row: MessageRoleFields, content: string): string {
+  const label = normalizeMessageRole(row) === "user" ? "Пользователь" : "StaySee";
+  return `${label}: ${content.replace(/\s+/g, " ").trim()}`;
 }
 
 /** Embed messages in this conversation that lack vectors (service role). */
@@ -42,7 +50,7 @@ export async function ensureConversationEmbeddings(
 
   const { data: messages, error } = await supabaseSvc
     .from("messages")
-    .select("id, conversation_id, sender, content, created_at")
+    .select("id, conversation_id, sender, role, content, created_at")
     .eq("conversation_id", params.conversationId)
     .order("created_at", { ascending: true })
     .limit(400);
@@ -69,7 +77,7 @@ export async function ensureConversationEmbeddings(
 
   for (let i = 0; i < missing.length; i += ENSURE_BATCH) {
     const batch = missing.slice(i, i + ENSURE_BATCH);
-    const texts = batch.map((m) => embedTextForMessage(m.sender, m.content));
+    const texts = batch.map((m) => embedTextForMessage(m, m.content));
 
     try {
       const vectors = await createEmbeddings(texts, params.embedConfig);
@@ -77,7 +85,7 @@ export async function ensureConversationEmbeddings(
         message_id: m.id,
         conversation_id: params.conversationId,
         user_id: params.userId,
-        sender: m.sender,
+        sender: toDbSender(m),
         embedding: vectors[idx],
       }));
 
@@ -108,7 +116,8 @@ export async function ensureConversationEmbeddings(
 function rowsToExcerpts(
   hits: Array<{
     message_id: string;
-    sender: string;
+    sender?: string | null;
+    role?: string | null;
     content: string;
     created_at: string;
     similarity: number;
@@ -123,7 +132,7 @@ function rowsToExcerpts(
   const seen = new Set<string>();
 
   for (const hit of hits) {
-    if (hit.sender !== "user") continue;
+    if (!isUserMessage(hit)) continue;
     const key = hit.message_id;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -132,7 +141,7 @@ function rowsToExcerpts(
     const idx = byTime.findIndex((m) => m.id === hit.message_id);
     if (idx >= 0) {
       const next = byTime[idx + 1];
-      if (next?.sender === "ai") {
+      if (next && isAssistantMessage(next)) {
         assistantText = next.content?.trim() ?? null;
       }
     }

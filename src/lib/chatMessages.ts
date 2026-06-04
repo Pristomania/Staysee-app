@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { toAppSender } from './messageRole';
 import type { Message } from '../types';
 
 type MessageRow = {
@@ -12,14 +13,7 @@ type MessageRow = {
 
 /** Map DB row (role/sender) → app Message. */
 export function normalizeMessageRow(row: MessageRow): Message {
-  let sender: Message['sender'] = 'ai';
-  if (row.sender === 'user' || row.sender === 'ai') {
-    sender = row.sender;
-  } else if (row.role === 'user') {
-    sender = 'user';
-  } else if (row.role === 'assistant' || row.role === 'ai') {
-    sender = 'ai';
-  }
+  const sender = toAppSender(row);
   return {
     id: row.id,
     conversation_id: row.conversation_id,
@@ -53,7 +47,7 @@ export async function insertChatMessage(
   const { data, error } = await supabase
     .from('messages')
     .insert(payload)
-    .select('id, conversation_id, sender, content, created_at')
+    .select('id, conversation_id, sender, role, content, created_at')
     .maybeSingle();
 
   if (error) {

@@ -28,6 +28,7 @@ import {
 } from "./conversationRetrieval.ts";
 import { fetchCrossMemoryEnabled } from "./profilePrefs.ts";
 import { formatCrossMemoryForPrompt } from "./userLifeMemory.ts";
+import { normalizeMessageRole } from "./messageRole.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ async function fetchRecentMessages(
   // Admin UI must not expose message content.
   const { data, error } = await supabase
     .from("messages")
-    .select("sender, content, created_at")
+    .select("sender, role, content, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
     .limit(MAX_RECENT_MESSAGES);
@@ -140,7 +141,7 @@ async function fetchRecentMessages(
   if (!data) return [];
   // Reverse so oldest-first for the model
   return data.reverse().map((m) => ({
-    role: m.sender === "user" ? "user" : "assistant",
+    role: normalizeMessageRole(m),
     content: m.content,
     created_at: m.created_at,
   }));

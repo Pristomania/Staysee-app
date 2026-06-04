@@ -10,6 +10,7 @@ import {
   ensureConversationEmbeddings,
   searchSemanticConversationArchive,
 } from "./messageEmbeddings.ts";
+import { normalizeMessageRole } from "./messageRole.ts";
 
 export const RETRIEVAL_MAX_FETCH = 400;
 export const RETRIEVAL_TOP_K = 8;
@@ -694,7 +695,7 @@ export async function fetchConversationMessagesForRetrieval(
 ): Promise<Array<{ role: "user" | "assistant"; content: string; created_at: string }>> {
   const { data, error } = await supabase
     .from("messages")
-    .select("sender, content, created_at")
+    .select("sender, role, content, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .limit(RETRIEVAL_MAX_FETCH);
@@ -705,7 +706,7 @@ export async function fetchConversationMessagesForRetrieval(
   }
 
   return (data ?? []).map((row) => ({
-    role: row.sender === "user" ? "user" as const : "assistant" as const,
+    role: normalizeMessageRole(row),
     content: row.content ?? "",
     created_at: row.created_at as string,
   }));
@@ -768,7 +769,7 @@ export async function searchConversationArchive(
 
       const rawRows = await params.supabaseService
         .from("messages")
-        .select("id, conversation_id, sender, content, created_at")
+        .select("id, conversation_id, sender, role, content, created_at")
         .eq("conversation_id", params.conversationId)
         .order("created_at", { ascending: true })
         .limit(RETRIEVAL_MAX_FETCH);
@@ -785,7 +786,8 @@ export async function searchConversationArchive(
         allMessages: (rawRows.data ?? []) as Array<{
           id: string;
           conversation_id: string;
-          sender: string;
+          sender?: string | null;
+          role?: string | null;
           content: string;
           created_at: string;
         }>,

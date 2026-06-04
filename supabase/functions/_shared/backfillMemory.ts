@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { normalizeMessageRole } from "./messageRole.ts";
 import {
   buildConversationSummary,
   finalizeMemoryUpdate,
@@ -133,7 +134,7 @@ export async function fetchMessageSlice(
 ): Promise<TranscriptMessage[]> {
   const { data, error } = await supabase
     .from("messages")
-    .select("sender, content")
+    .select("sender, role, content")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .range(offset, offset + limit - 1);
@@ -144,7 +145,7 @@ export async function fetchMessageSlice(
   }
 
   return data.map((m) => ({
-    role: m.sender === "user" ? "user" as const : "assistant" as const,
+    role: normalizeMessageRole(m),
     content: m.content ?? "",
   }));
 }

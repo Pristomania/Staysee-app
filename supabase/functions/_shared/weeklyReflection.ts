@@ -8,6 +8,7 @@ import {
   parseStoredMemory,
   type StructuredMemory,
 } from "./memory.ts";
+import { normalizeMessageRole } from "./messageRole.ts";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_TRANSCRIPT_LINES = 36;
@@ -63,7 +64,7 @@ export async function fetchWeekTranscript(
 ): Promise<WeekTranscriptLine[]> {
   const { data, error } = await supabase
     .from("messages")
-    .select("sender, content, created_at")
+    .select("sender, role, content, created_at")
     .eq("conversation_id", conversationId)
     .gte("created_at", sinceIsoWeek())
     .order("created_at", { ascending: true })
@@ -78,7 +79,7 @@ export async function fetchWeekTranscript(
   for (const m of data ?? []) {
     const content = (m.content ?? "").trim();
     if (content.length < 2) continue;
-    const role = m.sender === "user" ? "user" as const : "assistant" as const;
+    const role = normalizeMessageRole(m);
     lines.push({
       role,
       content: role === "user" ? trimExcerpt(content) : trimExcerpt(content, 200),
