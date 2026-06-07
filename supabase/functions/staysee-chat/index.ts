@@ -30,6 +30,10 @@ import { evaluateStance } from "../_shared/stance.ts";
 import { buildPresencePrompt } from "../_shared/presence.ts";
 import { buildGestaltPrompt } from "../_shared/gestalt.ts";
 import {
+  buildConstitutionPrompt,
+  CONSTITUTION_LAYER_ID,
+} from "../_shared/constitution.ts";
+import {
   TIER_CONFIG,
   FALLBACK_CHAIN,
   findFallbackProvider,
@@ -125,19 +129,31 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
 const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 // ── Static prompt layers (built once at cold start) ───────────────────────────
+// L1: Constitution             — _shared/constitution.ts
 // L2: Identity & Voice         — _shared/identity.ts
 // L3: Conversation Methodology — _shared/methodology.ts
-// L3b: Stance router — _shared/stance.ts
+// L3b: Stance router — _shared/stance.ts (per-turn)
 // L5: Safety & Boundaries      — _shared/safety.ts
 // L8: Emotional Presence       — _shared/presence.ts
+
+const CONSTITUTION_PROMPT = buildConstitutionPrompt({
+  includeMission: true,
+  includeConstitution: true,
+  includeAttention: true,
+});
 
 const BASE_PROMPT = [
   buildIdentityPrompt(),
   buildGestaltPrompt(),
   buildMethodologyPrompt(),
   buildSafetyPrompt(),
+  CONSTITUTION_PROMPT,
   buildPresencePrompt(),
 ].join("\n\n");
+
+console.log(
+  `[staysee-chat] ${CONSTITUTION_LAYER_ID} tokens≈${estimateTokens(CONSTITUTION_PROMPT)}`
+);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
