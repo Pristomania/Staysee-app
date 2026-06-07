@@ -14,7 +14,7 @@ import { withAuthTimeout } from '../lib/authErrors';
 import type { Profile } from '../types';
 import type { User } from '@supabase/supabase-js';
 
-const AUTH_LOADING_TIMEOUT_MS = 5000;
+const AUTH_LOADING_TIMEOUT_MS = 8000;
 
 export type SignUpStatus = 'session' | 'confirm_email' | 'already_registered' | 'error';
 

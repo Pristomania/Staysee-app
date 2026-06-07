@@ -19,7 +19,7 @@ import {
   TermsScreen,
 } from './components/screens';
 
-const LOADING_RESET_MS = 5000;
+const LOADING_RESET_MS = 8000;
 
 const PUBLIC_SCREENS = ['welcome', 'login', 'register', 'terms', 'privacy', 'disclaimer'] as const;
 const AUTH_ENTRY_SCREENS = ['welcome', 'login', 'register'] as const;
@@ -123,16 +123,30 @@ function AppContent() {
 
   if (loading) {
     return (
-      <div className={`min-h-screen ${theme.bg} flex flex-col items-center justify-center gap-6`}>
+      <div className={`min-h-screen ${theme.bg} flex flex-col items-center justify-center gap-4 px-6 text-center`}>
         <div className={`w-6 h-6 border-2 ${theme.spinnerBorder} ${theme.spinnerTop} rounded-full animate-spin`} />
         {showLoadingReset && (
-          <button
-            type="button"
-            onClick={() => void handleEmergencyReset()}
-            className={`${theme.textMuted} text-xs font-light underline underline-offset-4 decoration-dotted opacity-70 hover:opacity-100 transition-opacity duration-200`}
-          >
-            Сбросить вход
-          </button>
+          <div className="flex flex-col items-center gap-3 max-w-xs">
+            <p className={`${theme.textMuted} text-sm font-light`}>
+              Загрузка занимает слишком долго. Проверьте интернет или обновите страницу.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className={`${theme.textMuted} text-xs font-light underline underline-offset-4 decoration-dotted opacity-70 hover:opacity-100 transition-opacity duration-200`}
+              >
+                Обновить
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleEmergencyReset()}
+                className={`${theme.textMuted} text-xs font-light underline underline-offset-4 decoration-dotted opacity-70 hover:opacity-100 transition-opacity duration-200`}
+              >
+                Выйти
+              </button>
+            </div>
+          </div>
         )}
       </div>
     );
