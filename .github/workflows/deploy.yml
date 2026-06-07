@@ -19,3 +19,11 @@ jobs:
           port: ${{ secrets.STAYSEE_PORT }}
           script: |
             deploy-staysee
+            REPO_DIR="${STAYSEE_REPO_DIR:-$HOME/Staysee-app}"
+            if [ -f "$REPO_DIR/deploy/nginx/apply-on-vps.sh" ]; then
+              bash "$REPO_DIR/deploy/nginx/apply-on-vps.sh"
+            else
+              sudo cp "$REPO_DIR/deploy/nginx/staysee.ru.conf" /etc/nginx/sites-available/staysee
+              sudo ln -sf /etc/nginx/sites-available/staysee /etc/nginx/sites-enabled/staysee
+              sudo nginx -t && sudo systemctl reload nginx
+            fi
