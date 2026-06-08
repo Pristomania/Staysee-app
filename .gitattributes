@@ -1,0 +1,2 @@
+# Shell scripts must use LF on all platforms (VPS runs bash on Linux).
+*.sh text eol=lf

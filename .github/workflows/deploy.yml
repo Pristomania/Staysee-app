@@ -13,6 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Normalize nginx script line endings
+        run: |
+          sed -i 's/\r$//' deploy/nginx/*.sh
+          chmod +x deploy/nginx/*.sh
+
       - name: Copy nginx scripts to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -32,5 +37,8 @@ jobs:
           port: ${{ secrets.STAYSEE_PORT }}
           script: |
             deploy-staysee
-            STAYSEE_NGINX_SRC=/tmp/staysee-nginx/deploy/nginx/staysee.ru.conf \
-            bash /tmp/staysee-nginx/deploy/nginx/apply-on-vps.sh
+            NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
+            chmod +x "$NGINX_SCRIPTS"/*.sh
+            sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh
+            STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf" \
+            bash "$NGINX_SCRIPTS/apply-on-vps.sh"
