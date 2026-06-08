@@ -138,44 +138,49 @@ npm run build
 ```text
 sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
-sudo mkdir -p /var/www/staysee/dist
+sudo mkdir -p /var/www/Staysee-app/dist
 ```
 
 ### Шаг 8. Загрузить собранный сайт на VPS
 
-**Вариант А — через FileZilla / WinSCP**
+**Актуальный путь статики:** `/var/www/Staysee-app/dist` (тот же, что использует `deploy-staysee` при push в `main`).
 
-1. Подключитесь к VPS по SFTP (хост = IP сервера, логин/пароль от VPS).  
-2. На сервере откройте папку: `/var/www/staysee/dist/`  
-3. Загрузите **всё содержимое** папки `dist` с компьютера (файл `index.html` и папка `assets` должны лежать прямо в `dist`, не внутри лишней вложенной папки).
+**Вариант А — автоматически (рекомендуется):** push в ветку `main` → GitHub Actions вызывает `deploy-staysee`.
 
-**Вариант Б — командой с компьютера** (если установлен OpenSSH):
+**Вариант Б — вручную через FileZilla / WinSCP**
+
+1. Подключитесь к VPS по SFTP.  
+2. Откройте `/var/www/Staysee-app/dist/`  
+3. Загрузите **всё содержимое** локальной папки `dist` (`index.html` + `assets` в корне `dist`).
+
+**Вариант В — scp с компьютера**
 
 ```text
-scp -r dist/* USER@IP_ВАШЕГО_VPS:/var/www/staysee/dist/
+scp -r dist/* USER@IP_ВАШЕГО_VPS:/var/www/Staysee-app/dist/
 ```
-
-Замените `USER` и `IP_ВАШЕГО_VPS` на данные от хостинга.
 
 ### Шаг 9. Настроить Nginx под ваш домен
 
-1. На компьютере откройте файл:  
-   `Staisy-main/deploy/nginx/staysee.conf.example`  
-2. Замените **везде** в файле:
-   - `YOUR_DOMAIN` → **МОЙ-ДОМЕН** (например `staysee.ru`)
-   - `YOUR_PROJECT_REF` → **`jnxrildlwvtxhtiwucbt`** (уже ваш ref)
-3. Сохраните и загрузите этот файл на VPS как:  
-   `/etc/nginx/sites-available/staysee`  
-   (нужны права администратора; через `sudo` или SFTP в tmp + `sudo mv`).
+**Не копируйте conf с захардкоженным `root`** — путь должен совпадать с шагом 8.
 
-4. На VPS выполните:
+Для **staysee.ru** (уже настроен домен и cert):
 
 ```text
-sudo ln -sf /etc/nginx/sites-available/staysee /etc/nginx/sites-enabled/staysee
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl reload nginx
+cd ~/Staysee-app
+bash deploy/nginx/apply-on-vps.sh
 ```
+
+Скрипт проверит каталог, `index.html`, `assets/`, подставит `root` и выведет в лог:
+
+```text
+Resolved nginx root:
+/var/www/Staysee-app/dist
+
+Source:
+live-nginx-config
+```
+
+Для **нового домена:** отредактируйте `deploy/nginx/staysee.conf.example` (YOUR_DOMAIN / YOUR_PROJECT_REF), сохраните как `staysee.ru.conf` или свой conf, затем тот же `apply-on-vps.sh`.
 
 Сообщение `syntax is ok` / `test is successful` — хорошо.
 
@@ -214,7 +219,8 @@ sudo certbot --nginx -d МОЙ-ДОМЕН
 | Белый экран | Пересобрать шаг 5–6: в `.env.production` URL должен быть `https://МОЙ-ДОМЕН/supabase` |
 | Ошибка входа / redirect | Повторить шаг 1, домен в Redirect URLs точно как в браузере |
 | AI не отвечает | Шаг 3–4: секрет OpenRouter и deploy `staysee-chat` |
-| 502 на сайте | Шаг 9: `sudo nginx -t`, проверить что `dist` загружен |
+| 502 на сайте | Шаг 9: `sudo nginx -t`, проверить что `dist` в `/var/www/Staysee-app/dist` |
+| 500 / assets 404 | Неверный `root` в nginx — `bash deploy/nginx/apply-on-vps.sh`, сверить путь в логе |
 | Письмо не StaySee | Шаг 2: шаблон в Dashboard |
 
 ---
@@ -227,7 +233,10 @@ sudo certbot --nginx -d МОЙ-ДОМЕН
 | Прямой URL Supabase (только для справки) | `https://jnxrildlwvtxhtiwucbt.supabase.co` |
 | URL для **сайта** после деплоя | `https://МОЙ-ДОМЕН` |
 | URL в `.env.production` | `https://МОЙ-ДОМЕН/supabase` |
-| Папка на VPS | `/var/www/staysee/dist` |
+| Репозиторий на VPS | `$HOME/Staysee-app` |
+| Статика SPA (канон) | `/var/www/Staysee-app/dist` |
+| Деплой prod | push `main` → `deploy-staysee` |
+| Nginx | `bash deploy/nginx/apply-on-vps.sh` — root + gzip; смотреть `Source:` в логе |
 | AI в браузере | только через `https://МОЙ-ДОМЕН/supabase/functions/v1/...` |
 
 ---

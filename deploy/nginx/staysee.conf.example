@@ -1,6 +1,6 @@
 # StaySee — Nginx (SPA + reverse proxy к Supabase)
-# Скопировать: sudo cp deploy/nginx/staysee.conf.example /etc/nginx/sites-available/staysee
-# Заменить YOUR_DOMAIN и YOUR_PROJECT_REF, затем: sudo ln -s ... sites-enabled && sudo nginx -t && sudo systemctl reload nginx
+# Шаблон для нового домена. Prod staysee.ru: deploy/nginx/staysee.ru.conf + apply-on-vps.sh
+# root (@@STAYSEE_WEB_ROOT@@) подставляется при apply — канонический путь: /var/www/Staysee-app/dist
 
 # HTTP → HTTPS (после certbot можно оставить только 443)
 server {
@@ -26,7 +26,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
 
-    root /var/www/staysee/dist;
+    root @@STAYSEE_WEB_ROOT@@;
     index index.html;
 
     # Статика SPA

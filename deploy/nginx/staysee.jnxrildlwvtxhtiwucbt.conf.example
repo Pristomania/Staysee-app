@@ -1,5 +1,6 @@
-# StaySee — готовый шаблон Nginx для project ref jnxrildlwvtxhtiwucbt
-# Замените ТОЛЬКО staysee.example.ru на ваш МОЙ-ДОМЕН (в 4 местах ниже + certbot)
+# StaySee — шаблон Nginx для project ref jnxrildlwvtxhtiwucbt
+# Prod staysee.ru: deploy/nginx/staysee.ru.conf + bash deploy/nginx/apply-on-vps.sh
+# root подставляется при apply (канон: /var/www/Staysee-app/dist)
 
 server {
     listen 80;
@@ -23,7 +24,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/staysee.example.ru/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/staysee.example.ru/privkey.pem;
 
-    root /var/www/staysee/dist;
+    root @@STAYSEE_WEB_ROOT@@;
     index index.html;
 
     location / {

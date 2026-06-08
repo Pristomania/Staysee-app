@@ -10,6 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy nginx scripts to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh"
+          target: "/tmp/staysee-nginx/"
+
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -19,11 +32,5 @@ jobs:
           port: ${{ secrets.STAYSEE_PORT }}
           script: |
             deploy-staysee
-            REPO_DIR="${STAYSEE_REPO_DIR:-$HOME/Staysee-app}"
-            if [ -f "$REPO_DIR/deploy/nginx/apply-on-vps.sh" ]; then
-              bash "$REPO_DIR/deploy/nginx/apply-on-vps.sh"
-            else
-              sudo cp "$REPO_DIR/deploy/nginx/staysee.ru.conf" /etc/nginx/sites-available/staysee
-              sudo ln -sf /etc/nginx/sites-available/staysee /etc/nginx/sites-enabled/staysee
-              sudo nginx -t && sudo systemctl reload nginx
-            fi
+            STAYSEE_NGINX_SRC=/tmp/staysee-nginx/deploy/nginx/staysee.ru.conf \
+            bash /tmp/staysee-nginx/deploy/nginx/apply-on-vps.sh

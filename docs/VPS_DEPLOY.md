@@ -33,7 +33,7 @@ Frontend знает только `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`
 | OpenRouter во frontend | ✅ нет |
 | Service role во frontend | ✅ нет |
 | AI через Edge Functions | ✅ `staysee-chat`, `weekly-reflection` |
-| Nginx SPA + proxy config | ✅ `deploy/nginx/staysee.conf.example` |
+| Nginx SPA + proxy config | ✅ `deploy/nginx/staysee.ru.conf` + `apply-on-vps.sh` |
 | Env для сборки | ✅ `deploy/env.vps.build.example` |
 
 ---
@@ -49,7 +49,7 @@ Frontend знает только `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`
 
 Файл-шаблон: `deploy/env.vps.build.example` → скопировать в `.env.production` перед `npm run build`.
 
-**Не задавать в Vite / не класть в `/var/www/staysee/dist`:**
+**Не задавать в Vite / не класть в `dist/` на VPS (`/var/www/Staysee-app/dist`):**
 
 | Переменная | Где должна быть |
 |------------|-----------------|
@@ -112,22 +112,32 @@ npm run build
 - Ubuntu 22.04+ / Debian 12+
 - Nginx, Node 20+ (для сборки), certbot
 
-### Установка статики
+### Каноническая схема (prod staysee.ru)
+
+| Что | Путь / команда |
+|-----|----------------|
+| Репозиторий на VPS | `$HOME/Staysee-app` |
+| Статика SPA | `/var/www/Staysee-app/dist` |
+| Деплой | GitHub Actions → `deploy-staysee` (push в `main`) |
+| Nginx | `bash deploy/nginx/apply-on-vps.sh` — подставляет `root` после проверки `index.html` и `assets/` |
+
+> **Риск:** документация может отставать от реальной инфраструктуры. Перед сменой nginx сверяйте фактический `root` на VPS (`grep root /etc/nginx/sites-available/staysee`) с каталогом, куда кладёт `deploy-staysee`. Не копируйте conf с захардкоженным путём без preflight.
+
+### Установка статики (первый раз или вручную)
 
 ```bash
-sudo mkdir -p /var/www/staysee
-sudo rsync -av --delete dist/ /var/www/staysee/dist/
-sudo chown -R www-data:www-data /var/www/staysee
+sudo mkdir -p /var/www/Staysee-app/dist
+sudo rsync -av --delete dist/ /var/www/Staysee-app/dist/
+sudo chown -R www-data:www-data /var/www/Staysee-app
 ```
 
 ### Конфиг
 
 ```bash
-# В файле заменить YOUR_DOMAIN и YOUR_PROJECT_REF (из URL Supabase)
-sudo cp deploy/nginx/staysee.conf.example /etc/nginx/sites-available/staysee
-sudo ln -sf /etc/nginx/sites-available/staysee /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+# staysee.ru — готовый conf; root резолвится автоматически
+bash deploy/nginx/apply-on-vps.sh
+
+# Новый домен — шаблон staysee.conf.example (YOUR_DOMAIN / YOUR_PROJECT_REF), затем тот же apply
 ```
 
 ### HTTPS
@@ -204,6 +214,7 @@ node scripts/usage-report.mjs
 | Auth redirect error | Добавить `https://YOUR_DOMAIN` в Redirect URLs |
 | AI молчит / 502 на functions | Проверить Edge deploy + `OPENROUTER_API_KEY` в Secrets |
 | CORS / 404 на /supabase | Проверить `proxy_pass` и `Host` в nginx |
+| 500 / 404 на `/`, assets 404 | Неверный `root` в nginx — запустить `apply-on-vps.sh`, сверить с `/var/www/Staysee-app/dist` |
 | Письмо без бренда StaySee | Вставить HTML в Dashboard → Email Templates |
 
 ---
