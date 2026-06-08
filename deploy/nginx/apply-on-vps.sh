@@ -23,14 +23,26 @@ fi
 # shellcheck source=resolve-web-root.sh
 source "$SCRIPT_DIR/resolve-web-root.sh"
 
-WEB_ROOT="$(resolve_staysee_web_root)"
+resolve_staysee_web_root
+WEB_ROOT="$RESOLVED_WEB_ROOT"
 
 if ! grep -q '@@STAYSEE_WEB_ROOT@@' "$CONF_SRC"; then
   echo "[nginx-preflight] WARN: template has no @@STAYSEE_WEB_ROOT@@ placeholder" >&2
 fi
 
-sed "s|@@STAYSEE_WEB_ROOT@@|${WEB_ROOT}|g" "$CONF_SRC" > "$CONF_RENDERED"
-echo "[nginx-preflight] rendered config → $CONF_RENDERED (root=$WEB_ROOT)"
+export STAYSEE_WEB_ROOT_RESOLVED="$WEB_ROOT"
+perl -pe 's|\Q@@STAYSEE_WEB_ROOT@@\E|$ENV{STAYSEE_WEB_ROOT_RESOLVED}|g' "$CONF_SRC" > "$CONF_RENDERED"
+
+echo ""
+echo "Resolved nginx root:"
+echo "$WEB_ROOT"
+echo ""
+echo "Source:"
+echo "$RESOLVED_WEB_ROOT_SOURCE"
+echo ""
+echo "Generated config:"
+grep -E '^\s*root\s+' "$CONF_RENDERED" | grep -v certbot | head -1
+echo ""
 
 sudo cp "$CONF_RENDERED" "$CONF_DST"
 sudo ln -sf "$CONF_DST" /etc/nginx/sites-enabled/staysee

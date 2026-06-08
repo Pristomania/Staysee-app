@@ -50,53 +50,39 @@ report_web_root_check() {
   local root="$1"
   local label="$2"
   if verify_web_root "$root" 2>/dev/null; then
-    echo "[nginx-preflight] OK  $label → $root"
+    echo "[nginx-preflight] OK  $label → $root" >&2
     return 0
   fi
   local err
   err=$(verify_web_root "$root" 2>&1 || true)
-  echo "[nginx-preflight] FAIL $label → $root ($err)"
+  echo "[nginx-preflight] FAIL $label → $root ($err)" >&2
   return 1
-}
-
-log_resolved_web_root() {
-  echo ""
-  echo "Resolved nginx root:"
-  echo "$RESOLVED_WEB_ROOT"
-  echo ""
-  echo "Source:"
-  echo "$RESOLVED_WEB_ROOT_SOURCE"
-  echo ""
 }
 
 resolve_staysee_web_root() {
   local repo_dir="${STAYSEE_REPO_DIR:-$HOME/Staysee-app}"
   local current="" candidate="" chosen=""
 
-  echo "[nginx-preflight] resolving web root..."
+  echo "[nginx-preflight] resolving web root..." >&2
 
   if [[ -n "${STAYSEE_WEB_ROOT:-}" ]]; then
     report_web_root_check "$STAYSEE_WEB_ROOT" "STAYSEE_WEB_ROOT" || exit 1
     RESOLVED_WEB_ROOT="$STAYSEE_WEB_ROOT"
     RESOLVED_WEB_ROOT_SOURCE="STAYSEE_WEB_ROOT"
-    log_resolved_web_root
-    echo "$RESOLVED_WEB_ROOT"
     return 0
   fi
 
   current=$(read_live_nginx_root || true)
   if [[ -n "$current" ]]; then
-    echo "[nginx-preflight] live nginx root: $current"
+    echo "[nginx-preflight] live nginx root: $current" >&2
     if report_web_root_check "$current" "current nginx config"; then
       RESOLVED_WEB_ROOT="$current"
       RESOLVED_WEB_ROOT_SOURCE="live-nginx-config"
-      log_resolved_web_root
-      echo "$RESOLVED_WEB_ROOT"
       return 0
     fi
     echo "[nginx-preflight] live root invalid — trying candidates" >&2
   else
-    echo "[nginx-preflight] no live nginx root (fresh install?)"
+    echo "[nginx-preflight] no live nginx root (fresh install?)" >&2
   fi
 
   local candidates=(
@@ -119,6 +105,4 @@ resolve_staysee_web_root() {
 
   RESOLVED_WEB_ROOT="$chosen"
   RESOLVED_WEB_ROOT_SOURCE="candidate-list"
-  log_resolved_web_root
-  echo "$RESOLVED_WEB_ROOT"
 }

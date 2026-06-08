@@ -40,5 +40,7 @@ jobs:
             NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
             sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh
-            STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf" \
+            STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf"
+            test -f "$STAYSEE_NGINX_SRC"
+            export STAYSEE_NGINX_SRC
             bash "$NGINX_SCRIPTS/apply-on-vps.sh"
