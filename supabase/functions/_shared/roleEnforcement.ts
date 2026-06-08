@@ -45,12 +45,15 @@ const INSTRUMENTAL_LOOSE = [
   /перепиши/i,
   /сгенерируй/i,
   /придумай/i,
-  /погнали/i,
   /следующий\s+день/i,
   /допиши/i,
   /продолжи\s+(?:текст|историю|рассказ)/i,
   /дай\s+(?:мне\s+)?(?:список|план|текст|ответ|диагноз)/i,
-  /хочу\s+чтобы\s+ты/i,
+  /хочу\s+чтобы\s+ты\s+(?:написал|написала)/i,
+  /хочу\s+чтобы\s+ты\s+(?:составил|составила)/i,
+  /хочу\s+чтобы\s+ты\s+(?:сделал|сделала)/i,
+  /хочу\s+чтобы\s+ты\s+(?:был|была|стал|стала)/i,
+  /хочу\s+чтобы\s+ты\s+играл(?:а)?\s+роль/i,
   /поставь\s+диагноз/i,
   /какое\s+лекарств/i,
   /какую\s+таблетк/i,
@@ -109,6 +112,17 @@ function recentAssistantTexts(history: ChatTurn[], n = 3): string[] {
     .slice(-n);
 }
 
+/** Thread escalation — sliding window, aligned with roleGuard (10 turns). */
+const THREAD_ESCALATION_WINDOW = 10;
+const THREAD_ESCALATION_USER_LOOKBACK = 4;
+
+const BOUNDARY_CATEGORIES: SafetyCategory[] = [
+  "off_topic",
+  "boundary_pressure",
+  "medical_boundary",
+  "legal_financial_boundary",
+];
+
 export interface ThreadAnalysis {
   insistenceLoop: boolean;
   threadEscalated: boolean;
@@ -120,25 +134,37 @@ export function analyzeConversationThread(
   history: ChatTurn[],
   currentMessage: string
 ): ThreadAnalysis {
-  const userTexts = recentUserTexts(history, currentMessage, 8);
-  const assistantTexts = recentAssistantTexts(history, 3);
+  const recent = history.slice(-THREAD_ESCALATION_WINDOW);
+  const userTexts = [
+    ...recent.filter((m) => m.role === "user").map((m) => m.content.trim()),
+    currentMessage.trim(),
+  ].filter(Boolean);
+  const assistantTexts = recent
+    .filter((m) => m.role === "assistant")
+    .map((m) => m.content.trim());
 
-  const userCategories = userTexts.map((t) => classifyMessage(t));
-  const boundaryHits = userCategories.filter(
-    (c) =>
-      c === "off_topic" ||
-      c === "boundary_pressure" ||
-      c === "medical_boundary" ||
-      c === "legal_financial_boundary"
+  const recentUserCategories = userTexts
+    .slice(-THREAD_ESCALATION_USER_LOOKBACK)
+    .map((t) => classifyMessage(t));
+  const currentCategory = classifyMessage(currentMessage.trim());
+  const boundaryHits = recentUserCategories.filter((c) =>
+    BOUNDARY_CATEGORIES.includes(c)
   ).length;
+  const activeBoundaryNow = BOUNDARY_CATEGORIES.includes(currentCategory);
+  const recentBoundaryPressure = recentUserCategories
+    .slice(-2)
+    .some((c) => c === "boundary_pressure");
 
-  const oversizedAssistant = assistantTexts.some((t) => t.length >= 480);
-  const longAssistantStreak = assistantTexts.filter((t) => t.length >= 380).length >= 2;
+  const recentAssistant = assistantTexts.slice(-2);
+  const oversizedAssistant = recentAssistant.some((t) => t.length >= 480);
+  const longAssistantStreak =
+    recentAssistant.filter((t) => t.length >= 380).length >= 2;
+
   const threadEscalated =
-    boundaryHits >= 1 ||
-    oversizedAssistant ||
-    longAssistantStreak ||
-    userCategories.slice(-3).some((c) => c === "boundary_pressure");
+    activeBoundaryNow ||
+    recentBoundaryPressure ||
+    boundaryHits >= 2 ||
+    (boundaryHits >= 1 && (oversizedAssistant || longAssistantStreak));
 
   const lastAssistant = assistantTexts[assistantTexts.length - 1] ?? "";
   const assistantRefusedBoundary =
@@ -158,7 +184,7 @@ export function analyzeConversationThread(
 
   return {
     insistenceLoop,
-    threadEscalated: threadEscalated || roleContaminated,
+    threadEscalated,
     oversizedAssistant,
     roleContaminated,
   };
