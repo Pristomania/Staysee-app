@@ -1,2 +1,3 @@
-# Shell scripts must use LF on all platforms (VPS runs bash on Linux).
+# Shell scripts and nginx templates must use LF (VPS runs bash/nginx on Linux).
 *.sh text eol=lf
+deploy/nginx/*.conf text eol=lf

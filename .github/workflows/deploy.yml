@@ -15,7 +15,7 @@ jobs:
 
       - name: Normalize nginx script line endings
         run: |
-          sed -i 's/\r$//' deploy/nginx/*.sh
+          sed -i 's/\r$//' deploy/nginx/*.sh deploy/nginx/*.conf
           chmod +x deploy/nginx/*.sh
 
       - name: Copy nginx scripts to VPS
@@ -39,7 +39,7 @@ jobs:
             deploy-staysee
             NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
-            sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh
+            sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
             STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf"
             test -f "$STAYSEE_NGINX_SRC"
             export STAYSEE_NGINX_SRC
