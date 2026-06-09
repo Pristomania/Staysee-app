@@ -17,6 +17,7 @@ export type ConversationStance =
   | "redo"
   | "writing_repair"
   | "contain"
+  | "named_presence"
   | "ground"
   | "reflect"
   | "clarify"
@@ -56,6 +57,8 @@ const STANCE_GUIDANCE: Record<ConversationStance, string> = {
     "РЕЖИМ: человек просит исправить формулировку последнего твоего ответа (опечатки, склейки, обрыв), а не новый психологический разбор. Перепиши последнюю реплику ассистента из истории чистым русским: 2–4 предложения, без markdown. Сохрани смысл и тон. Если дословно не видно — попроси процитировать фрагмент одним коротким вопросом.",
   contain:
     "РЕЖИМ: контейнирование. Одна гипотеза чувства с «так?» или короткое присутствие. Без теории.",
+  named_presence:
+    "РЕЖИМ: короткая реплика с уже названным чувством или состоянием. Используй слово человека — не добавляй новый оттенок. ЗАПРЕЩЕНО без её слов: тяжело, пусто, болезненно, перегруз, волна, напряжение, «настоящая», метафоры. 1–2 предложения, макс. один вопрос. Вопрос уточняет качество её словами, не новую эмоцию: «Какая эта грусть сейчас?» · «Злость — про что она сейчас?» · «Тревога больше в теле или в мыслях?» · «Усталость физическая, эмоциональная или всё сразу?» · «Можно пока и не знать.» — по смыслу реплики. Если чувство уже названо — без гипотезы «похоже на X — так?».",
   ground:
     "РЕЖИМ: заземление. Здесь-и-сейчас: слова или одна телесная опора (дыхание, стопы, что в теле). Не весь ответ про тело. Без интерпретации.",
   reflect:
@@ -113,6 +116,17 @@ const OVERLOAD_PATTERNS = [
   /на пределе/i,
   /всё смешалось/i,
   /каша в голове/i,
+  /перегруз/i,
+];
+
+/** Явные маркеры перегруза/тела — ground уместен даже на короткой реплике. */
+const GROUND_EXPLICIT_PATTERNS = [
+  /тело/i,
+  /дыхан/i,
+  /паник/i,
+  /тряс/i,
+  /не\s+могу/i,
+  /на\s+пределе/i,
   /перегруз/i,
 ];
 
@@ -241,6 +255,30 @@ function matches(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text));
 }
 
+const NAMED_EMOTION_MARKERS = [
+  /грустн/i,
+  /грусть/i,
+  /злюс/i,
+  /злость/i,
+  /тревожн/i,
+  /тревог/i,
+  /устал/i,
+  /усталост/i,
+  /страшн/i,
+  /боюсь/i,
+  /хорошо/i,
+  /радостн/i,
+  /спокойн/i,
+  /(?:^|\s)плохо(?:\s|$|[.!?,])/i,
+  /(?:^|\s)не\s+знаю(?:\s|$|[.!?,])/i,
+];
+
+function isShortNamedEmotion(msg: string): boolean {
+  const t = msg.trim();
+  if (t.length >= 35) return false;
+  return NAMED_EMOTION_MARKERS.some((p) => p.test(t));
+}
+
 export function evaluateStance(input: StanceInput): StanceResult {
   const msg = input.message.trim();
   const userTexts = recentUserTexts(input.recentHistory, msg);
@@ -323,8 +361,12 @@ export function evaluateStance(input: StanceInput): StanceResult {
     return { stance: "direction", systemGuidance: STANCE_GUIDANCE.direction };
   }
 
-  if (matches(msg, OVERLOAD_PATTERNS) || (msg.length < 50 && /устал|устала|страшно|плохо/i.test(msg))) {
+  if (matches(msg, OVERLOAD_PATTERNS) || matches(msg, GROUND_EXPLICIT_PATTERNS)) {
     return { stance: "ground", systemGuidance: STANCE_GUIDANCE.ground };
+  }
+
+  if (isShortNamedEmotion(msg)) {
+    return { stance: "named_presence", systemGuidance: STANCE_GUIDANCE.named_presence };
   }
 
   if (matches(msg, MIRROR_PATTERNS)) {
