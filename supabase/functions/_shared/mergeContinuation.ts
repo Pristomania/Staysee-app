@@ -30,8 +30,20 @@ export function stripOrphanContinueMarkers(text: string): string {
     .trim();
 }
 
-function endsWithSentence(s: string): boolean {
-  return /[.!?…]["')\]]*\s*$/.test(s.trimEnd());
+/** True if text ends on a sentence boundary (RU/EN punctuation + optional closers). */
+function endsWithSentence(text: string): boolean {
+  const t = text.trimEnd();
+  if (!t) return false;
+  return /[.!?…](?:["')\]»]|\p{Extended_Pictographic})*\s*$/u.test(t);
+}
+
+/** partA ends mid-clause — comma, colon, or dash (continue with space). */
+function endsWithClauseConnector(text: string): boolean {
+  return /[—–:,]\s*$/u.test(text.trimEnd());
+}
+
+function startsWithLowercase(text: string): boolean {
+  return /^[а-яёa-z]/u.test(text.trimStart());
 }
 
 export type MergeStrategy =
@@ -78,7 +90,17 @@ function mergeAtFullWordBoundary(a: string, b: string): MergeContinuationResult 
 }
 
 function joinWithParagraphSeparator(a: string, b: string): MergeContinuationResult {
-  const text = stripOrphanContinueMarkers(`${a}\n\n${b}`.trim());
+  let joined: string;
+  if (endsWithSentence(a)) {
+    joined = `${a}\n\n${b}`;
+  } else if (endsWithClauseConnector(a)) {
+    joined = `${a} ${b}`;
+  } else if (startsWithLowercase(b)) {
+    joined = `${a} ${b}`;
+  } else {
+    joined = `${a}.\n\n${b}`;
+  }
+  const text = stripOrphanContinueMarkers(joined.trim());
   return { text, strategy: "paragraph_sep", overlapWords: 0 };
 }
 
