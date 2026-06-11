@@ -18,11 +18,10 @@ export interface ModelRouteResult {
   source: "request" | "crisis" | "brief" | "medium" | "deep" | "default";
 }
 
-const DEFAULT_BRIEF = "anthropic/claude-3.5-haiku";
-/** StaySee tone historically strongest on GPT 4.1 — default for reflective dialogue. */
-const DEFAULT_MEDIUM = "openai/gpt-4.1";
-const DEFAULT_DEEP = "openai/gpt-4.1";
-const DEFAULT_CRISIS = "openai/gpt-4.1";
+const DEFAULT_BRIEF = "openai/gpt-4o";
+const DEFAULT_MEDIUM = "openai/gpt-4o";
+const DEFAULT_DEEP = "anthropic/claude-sonnet-4-5";
+const DEFAULT_CRISIS = "openai/gpt-4o";
 const DEFAULT_FALLBACK = "anthropic/claude-sonnet-4-5";
 
 function envModel(key: string): string | undefined {
