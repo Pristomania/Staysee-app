@@ -1,7 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { buildIdentityPrompt } from "../_shared/identity.ts";
-import { buildMethodologyPrompt } from "../_shared/methodology.ts";
 import {
   hasRecallIntent,
   searchConversationArchive,
@@ -20,19 +18,15 @@ import {
   shouldUpdateConversationSummary,
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
-import { buildSafetyPrompt } from "../_shared/safety.ts";
 import {
   enforceRoleBoundedReply,
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
-import { evaluateStance } from "../_shared/stance.ts";
-import { buildPresencePrompt } from "../_shared/presence.ts";
-import { buildGestaltPrompt } from "../_shared/gestalt.ts";
 import {
-  buildConstitutionPrompt,
-  CONSTITUTION_LAYER_ID,
-} from "../_shared/constitution.ts";
+  buildSurgery1BasePrompt,
+  SURGERY1_LAYER_ID,
+} from "../_shared/surgery1Prompt.ts";
 import {
   TIER_CONFIG,
   FALLBACK_CHAIN,
@@ -129,30 +123,13 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
 const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 // ── Static prompt layers (built once at cold start) ───────────────────────────
-// L1: Constitution             — _shared/constitution.ts
-// L2: Identity & Voice         — _shared/identity.ts
-// L3: Conversation Methodology — _shared/methodology.ts
-// L3b: Stance router — _shared/stance.ts (per-turn)
-// L5: Safety & Boundaries      — _shared/safety.ts
-// L8: Emotional Presence       — _shared/presence.ts
+// SURGERY1: identity + voice + constitution v2.1 + constraints — surgery1Prompt.ts
+// Per-turn: evaluateTurnSafety (roleEnforcement) + memory context + time gap
 
-const CONSTITUTION_PROMPT = buildConstitutionPrompt({
-  includeMission: true,
-  includeConstitution: true,
-  includeAttention: true,
-});
-
-const BASE_PROMPT = [
-  buildIdentityPrompt(),
-  buildGestaltPrompt(),
-  buildMethodologyPrompt(),
-  buildSafetyPrompt(),
-  CONSTITUTION_PROMPT,
-  buildPresencePrompt(),
-].join("\n\n");
+const BASE_PROMPT = buildSurgery1BasePrompt();
 
 console.log(
-  `[staysee-chat] ${CONSTITUTION_LAYER_ID} tokens≈${estimateTokens(CONSTITUTION_PROMPT)}`
+  `[staysee-chat] ${SURGERY1_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
 );
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -546,19 +523,6 @@ Deno.serve(async (req: Request) => {
         : [...historyMessages, { role: "user", content: message }];
 
     const modelMessages = sanitizeHistoryForModel(messages);
-
-    // ── L3b: Conversation stance (one micro-approach this turn) ─────────────
-
-    const stance = evaluateStance({
-      message,
-      safetyCategory: safety.category,
-      recentHistory: modelMessages,
-      hasCorrections: (packetForSummary?.corrections.length ?? 0) > 0,
-      insistenceLoop: safety.insistenceLoop,
-      threadEscalated: safety.threadEscalated,
-    });
-    systemPrompt = [systemPrompt, stance.systemGuidance].join("\n\n");
-    console.log(`[staysee-chat] stance: ${stance.stance}`);
 
     // ── L7: Dynamic response budget + model call ─────────────────────────────
 
