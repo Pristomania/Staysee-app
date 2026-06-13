@@ -22,6 +22,7 @@ import {
   enforceRoleBoundedReply,
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
+import { logSafetyDiagnosis } from "../_shared/safetyDiagnose.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
 import {
   buildSurgery1BasePrompt,
@@ -494,8 +495,9 @@ Deno.serve(async (req: Request) => {
     // ── L5: Safety check ────────────────────────────────────────────────────
 
     const safety = evaluateTurnSafety(message, historyMessages);
+    const diagnosis = logSafetyDiagnosis(message, historyMessages);
     console.log(
-      `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated}`
+      `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated} rule=${diagnosis.matchedRule}`
     );
 
     if (safety.immediateResponse) {
@@ -679,6 +681,7 @@ Deno.serve(async (req: Request) => {
         insistenceLoop: safety.insistenceLoop,
         threadEscalated: safety.threadEscalated,
         userMessage: message,
+        relationalLifeTurn: diagnosis.relationalLifeTurn,
       });
       result = { ...result, content: safe };
 

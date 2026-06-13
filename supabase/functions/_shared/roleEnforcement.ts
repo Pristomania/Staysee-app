@@ -20,6 +20,7 @@ import {
   classifyMessage,
   evaluateSafety,
   guidanceForCategory,
+  isRelationalLifeTurn,
   type SafetyCategory,
   type SafetyResult,
 } from "./safety.ts";
@@ -143,14 +144,13 @@ export function analyzeConversationThread(
     .filter((m) => m.role === "assistant")
     .map((m) => m.content.trim());
 
+  const currentCategory = classifyMessage(currentMessage.trim());
+  const activeBoundaryNow = BOUNDARY_CATEGORIES.includes(currentCategory);
+  const relationalTurn = isRelationalLifeTurn(currentMessage);
+
   const recentUserCategories = userTexts
     .slice(-THREAD_ESCALATION_USER_LOOKBACK)
     .map((t) => classifyMessage(t));
-  const currentCategory = classifyMessage(currentMessage.trim());
-  const boundaryHits = recentUserCategories.filter((c) =>
-    BOUNDARY_CATEGORIES.includes(c)
-  ).length;
-  const activeBoundaryNow = BOUNDARY_CATEGORIES.includes(currentCategory);
   const recentBoundaryPressure = recentUserCategories
     .slice(-2)
     .some((c) => c === "boundary_pressure");
@@ -160,23 +160,28 @@ export function analyzeConversationThread(
   const longAssistantStreak =
     recentAssistant.filter((t) => t.length >= 380).length >= 2;
 
-  const threadEscalated =
-    activeBoundaryNow ||
-    recentBoundaryPressure ||
-    boundaryHits >= 2 ||
-    (boundaryHits >= 1 && (oversizedAssistant || longAssistantStreak));
+  const boundaryHits = recentUserCategories.filter((c) =>
+    BOUNDARY_CATEGORIES.includes(c)
+  ).length;
+
+  /** Decay escalation on everyday relational turns — prior instrumental chat ≠ this turn. */
+  const threadEscalated = relationalTurn
+    ? activeBoundaryNow
+    : activeBoundaryNow ||
+      recentBoundaryPressure ||
+      boundaryHits >= 2 ||
+      (boundaryHits >= 1 && (oversizedAssistant || longAssistantStreak));
 
   const lastAssistant = assistantTexts[assistantTexts.length - 1] ?? "";
   const assistantRefusedBoundary =
     lastAssistant.length > 80 && matches(lastAssistant, BOUNDARY_REFUSAL_IN_ASSISTANT);
 
-  const userInsistentNow = matches(currentMessage.trim(), INSTRUMENTAL_LOOSE);
-  const recentInstrumental = userTexts.slice(-4).filter((t) => matches(t, INSTRUMENTAL_LOOSE)).length;
+  const userInsistentNow =
+    !relationalTurn && matches(currentMessage.trim(), INSTRUMENTAL_LOOSE);
 
   const insistenceLoop =
     threadEscalated &&
     (userInsistentNow ||
-      recentInstrumental >= 2 ||
       (assistantRefusedBoundary && userInsistentNow));
 
   const role = analyzeRoleContamination(history, currentMessage);
@@ -200,6 +205,7 @@ export function evaluateTurnSafety(
   const base = evaluateSafety(message);
   const thread = analyzeConversationThread(history, message);
   const roleState = analyzeRoleContamination(history, message);
+  const relationalTurn = isRelationalLifeTurn(message);
 
   let category = base.category;
   const frustrationTurn = userFrustrationAtBot(message);
@@ -207,9 +213,12 @@ export function evaluateTurnSafety(
     category = strongerCategory(category, "boundary_pressure");
   }
   const userInsistentNow =
-    !frustrationTurn && matches(message.trim(), INSTRUMENTAL_LOOSE);
+    !frustrationTurn &&
+    !relationalTurn &&
+    matches(message.trim(), INSTRUMENTAL_LOOSE);
   if (
     !frustrationTurn &&
+    !relationalTurn &&
     thread.threadEscalated &&
     (thread.insistenceLoop || userInsistentNow)
   ) {
@@ -237,7 +246,9 @@ export function evaluateTurnSafety(
 УКАЗАНИЕ (не показывать): Она злится на бота. Признай раздражение. НЕ повторяй фразы «готовые куски», «своими словами», «рядом с тобой» из прошлых ответов. Новая формулировка, 2–3 предложения, без меню эмоций.
 `.trim());
   } else {
-    if (thread.threadEscalated) guidanceParts.push(THREAD_ESCALATION_GUIDANCE);
+    if (thread.threadEscalated && !relationalTurn) {
+      guidanceParts.push(THREAD_ESCALATION_GUIDANCE);
+    }
     if (thread.insistenceLoop) guidanceParts.push(INSISTENCE_GUIDANCE);
   }
   const roleReset = buildRoleResetGuidance(roleState);
@@ -294,10 +305,17 @@ export function enforceRoleBoundedReply(
     insistenceLoop?: boolean;
     threadEscalated?: boolean;
     userMessage?: string;
+    relationalLifeTurn?: boolean;
   }
 ): string {
   const trimmed = content.trim();
   if (!trimmed) return trimmed;
+
+  if (opts?.relationalLifeTurn) {
+    return trimmed.length > 720
+      ? truncateToMaxSentences(trimmed, 5).slice(0, 720).trim()
+      : trimmed;
+  }
 
   const frustrationTurn = userFrustrationAtBot(opts?.userMessage ?? "");
   if (frustrationTurn) {
@@ -326,6 +344,9 @@ export function enforceRoleBoundedReply(
     const fallback = pickBoundaryFallback(opts?.userMessage ?? "", {
       wrongRoleInReply: wrongRole,
     });
+    if (!fallback) {
+      return trimmed.length <= 520 ? trimmed : truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
+    }
     if (!isStaleBoundaryScript(trimmed, fallback)) return fallback;
     if (trimmed.length >= 40 && trimmed.length <= 520) return trimmed;
     return fallback;

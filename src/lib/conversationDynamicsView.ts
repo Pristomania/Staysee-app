@@ -20,6 +20,33 @@ export interface DynamicsChangingView {
 export interface DynamicsRepeatingItem {
   text: string;
   sublabel: string;
+  displayText: string;
+}
+
+const REPEATING_THEME_PHRASES: Record<string, string> = {
+  предательство: 'переживание предательства',
+  сепарация: 'сепарация с близкими',
+  здоровье: 'здоровье и тело',
+  страх: 'страхи и тревога',
+  'семейные отношения': 'семейные отношения',
+  истощение: 'чувство истощения',
+  'потеря контроля': 'страх потери контроля',
+};
+
+/** Display-only phrasing — source data unchanged. */
+export function humanizeRepeatingTheme(text: string): string {
+  const t = text.trim();
+  if (!t) return t;
+  const key = t.toLowerCase().replace(/\s+/g, ' ');
+  if (REPEATING_THEME_PHRASES[key]) return REPEATING_THEME_PHRASES[key];
+  if (key === 'сепарация сына' || (key.includes('сепарац') && key.includes('сын'))) {
+    return 'сепарация сына';
+  }
+  if (t.length > 40) return t;
+  if (/^[а-яё\s-]+$/i.test(t) && t === t.toLowerCase()) {
+    return t.charAt(0).toLowerCase() + t.slice(1);
+  }
+  return t;
 }
 
 export interface DynamicsAliveItem {
@@ -175,6 +202,7 @@ export function buildRepeatingView(data: ConversationDynamicsData): DynamicsRepe
     items.push({
       text: item.text,
       sublabel: inWeekly ? 'returnsHere' : 'inFocus',
+      displayText: humanizeRepeatingTheme(item.text),
     });
   }
 

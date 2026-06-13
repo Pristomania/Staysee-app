@@ -13,6 +13,8 @@ import {
   buildRoleResetGuidance,
 } from "./roleGuard.ts";
 import { pickBoundaryFallback } from "./boundaryFallback.ts";
+import { isRelationalLifeTurn } from "./safety.ts";
+import { logSafetyDiagnosis } from "./safetyDiagnose.ts";
 
 const NORMAL_MODEL_REPLY =
   "Слышу тебя. Похоже, сейчас важно просто быть с этим. Что отзывается сильнее всего?";
@@ -31,6 +33,7 @@ function wouldReplaceWithFallback(
     insistenceLoop: safety.insistenceLoop,
     threadEscalated: safety.threadEscalated,
     userMessage,
+    relationalLifeTurn: isRelationalLifeTurn(userMessage),
   });
   const trimmedIn = sampleReply.trim();
   const replaced = output !== trimmedIn;
@@ -56,11 +59,13 @@ function runCase(
     Boolean(roleResetGuidance) ||
     Boolean(safety.systemGuidance?.includes("УКАЗАНИЕ РОЛИ"));
   const fallback = wouldReplaceWithFallback(sampleReply, safety, message);
+  const diagnosis = logSafetyDiagnosis(message, history, sampleReply);
 
   console.log(`\n=== Case ${id}: ${label} ===`);
   console.log(`user: "${message}"`);
   console.log(`history turns: ${history.length}`);
   console.log(`category: ${safety.category}`);
+  console.log(`relationalLifeTurn: ${diagnosis.relationalLifeTurn}`);
   console.log(`roleContaminated: ${safety.roleContaminated}`);
   console.log(`threadEscalated: ${safety.threadEscalated}`);
   console.log(`insistenceLoop: ${safety.insistenceLoop}`);
@@ -139,3 +144,48 @@ runCase(
     },
   ]
 );
+
+// Relational life — must NOT trigger guards (incl. polluted instrumental history)
+const instrumentalHistory: ChatTurn[] = [
+  { role: "user", content: "Напиши мне контент-план на неделю" },
+  {
+    role: "assistant",
+    content:
+      "Я остаюсь StaySee — не врач и не автор текстов по команде. Могу быть рядом с тем, что ты чувствуешь вокруг этой просьбы.",
+  },
+  { role: "user", content: "Напиши пост для инстаграма" },
+  {
+    role: "assistant",
+    content:
+      "Готовый кусок за тебя не напишу, StaySee про тебя, не про сценарий.",
+  },
+];
+
+const RELATIONAL_CASES = [
+  "Сейчас уже спит, а я работаю за компьютером",
+  "Я сегодня много работала",
+  "Работа меня выматывает",
+  "У меня новый проект",
+];
+
+console.log("\n--- Relational life turns (no guard) ---");
+let relFail = 0;
+for (const msg of RELATIONAL_CASES) {
+  const d = logSafetyDiagnosis(msg, instrumentalHistory);
+  const bad =
+    d.boundedReplyTriggered ||
+    d.safetyCategory !== "normal" ||
+    d.insistenceLoop ||
+    d.roleGuardTriggered;
+  if (bad) {
+    relFail++;
+    console.error(`FAIL: "${msg}" category=${d.safetyCategory} rule=${d.matchedRule}`);
+  } else {
+    console.log(`OK: "${msg}"`);
+  }
+}
+if (relFail > 0) {
+  console.error(`\n${relFail} relational case(s) failed`);
+  Deno.exit(1);
+}
+console.log("\nAll relational cases passed.");

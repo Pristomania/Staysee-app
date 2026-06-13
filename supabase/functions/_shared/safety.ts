@@ -221,6 +221,35 @@ function matches(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text));
 }
 
+/** Everyday life sharing — not a content/instrumental request. */
+const RELATIONAL_LIFE_PATTERNS = [
+  /(?:я\s+)?работаю|работал[аи]?|на\s+работе|после\s+работы/i,
+  /за\s+комп(?:ьютером|ом)|сижу\s+за/i,
+  /(?:уже\s+)?спит|уснул[аи]?|проснул[аи]?|засыпа/i,
+  /работа\s+меня|выматывает/i,
+  /устал[аи]?|устаю/i,
+  /новый\s+проект/i,
+  /много\s+работал[аи]?/i,
+];
+
+const INSTRUMENTAL_ASK_RE = [
+  /напиши/i,
+  /составь/i,
+  /сделай\s+(?:за\s+меня|мне)/i,
+  /сценарий/i,
+  /хочу\s+чтобы\s+ты\s+(?:написал|написала|сделал|сделала)/i,
+  /готовый\s+текст/i,
+];
+
+/** Relational turn — work, fatigue, partner sleeping; not «напиши за меня». */
+export function isRelationalLifeTurn(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (matches(t, INSTRUMENTAL_ASK_RE)) return false;
+  if (classifyMessage(t) !== "normal") return false;
+  return matches(t, RELATIONAL_LIFE_PATTERNS);
+}
+
 /** Условная угроза/торг («скажи X, иначе убью себя») — не автокризис без модели. */
 export function isBoundaryPressureMessage(text: string): boolean {
   return matches(text, BOUNDARY_PRESSURE_PATTERNS);

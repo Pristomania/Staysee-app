@@ -1,15 +1,19 @@
 /** Копирайт экрана «Динамика беседы». */
 export const DYNAMICS_COPY = {
   title: 'Динамика',
-  subtitle: 'Что меняется во времени в этой беседе',
+  subtitle: 'Как меняется эта беседа от недели к неделе',
   intro:
     'Недельные снимки и изменения ритма — отдельно от памяти и ваших записок.',
   latestWeek: 'Последняя неделя',
   weekHistory: 'История недель',
   changing: 'Что изменилось',
   repeating: 'Что повторяется',
-  repeatingIntro: 'В этой беседе возвращается…',
-  alive: 'Что остаётся живым',
+  repeatingIntro: 'Возвращаются темы:',
+  alive: 'Что остаётся важным',
+  aliveIntro: 'То, что ещё не завершилось',
+  trendUp: 'Стало заметнее',
+  trendDown: 'Стало менее заметно',
+  trendRepeated: 'Повторяется',
   crossContext: 'Между беседами — как возможный контекст',
   emptyLatest: 'Пока нет недельной динамики. Создайте первый снимок.',
   emptyChanging: 'Пока мало данных для динамики.',
@@ -29,3 +33,6 @@ export const DYNAMICS_COPY = {
   hubDynamics: 'Динамика',
   hubNotes: 'Записки',
 } as const;
+
+/** Show ↑/↓ trend grouping when at least two weekly snapshots exist. */
+export const DYNAMICS_WEEKLY_TREND_MIN_WEEKLIES = 2;

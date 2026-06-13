@@ -17,7 +17,8 @@ import {
   fetchTensionsForConversation,
   type ConversationDynamicsData,
 } from '../../lib/conversationDynamicsView';
-import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
+import { DYNAMICS_COPY, DYNAMICS_WEEKLY_TREND_MIN_WEEKLIES } from '../../lib/dynamicsCopy';
+import { formatWeeklyPeriod } from '../../lib/dynamicsDates';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import {
   deleteProgressEntry,
@@ -61,6 +62,7 @@ function formatNextAvailable(iso: string) {
 
 function CollapsibleBlock({
   title,
+  meta,
   count,
   open,
   onToggle,
@@ -70,6 +72,7 @@ function CollapsibleBlock({
   intro,
 }: {
   title: string;
+  meta?: string;
   count?: number;
   open: boolean;
   onToggle: () => void;
@@ -86,16 +89,23 @@ function CollapsibleBlock({
         aria-expanded={open}
         className={`${cardClass} w-full px-4 py-3 flex items-center justify-between gap-3 text-left`}
       >
-        <span className={`${theme.textPrimary} text-sm font-light`}>
-          {title}
-          {count != null && count > 0 ? (
-            <span className={`${theme.textMuted} opacity-80`}> · {count}</span>
+        <span className={`min-w-0 flex-1 ${theme.textPrimary}`}>
+          <span className="block text-sm font-light truncate">{title}</span>
+          {meta ? (
+            <span className={`block text-[11px] font-light mt-0.5 ${theme.textMuted} opacity-85 truncate`}>
+              {meta}
+            </span>
           ) : null}
         </span>
-        <ChevronDown
-          className={`w-4 h-4 shrink-0 ${theme.textMuted} transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-          strokeWidth={1.5}
-        />
+        <span className="flex items-center gap-2 shrink-0">
+          {count != null && count > 0 && !meta ? (
+            <span className={`${theme.textMuted} text-xs font-light opacity-80`}>{count}</span>
+          ) : null}
+          <ChevronDown
+            className={`w-4 h-4 ${theme.textMuted} transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            strokeWidth={1.5}
+          />
+        </span>
       </button>
       {open && (
         <div className={`${cardClass} border-t-0 rounded-t-none px-4 pb-4 pt-2 -mt-px space-y-2`}>
@@ -105,6 +115,72 @@ function CollapsibleBlock({
           {children}
         </div>
       )}
+    </div>
+  );
+}
+
+function TrendGroup({
+  direction,
+  label,
+  items,
+  theme,
+}: {
+  direction: 'up' | 'down' | 'repeat';
+  label: string;
+  items: string[];
+  theme: ReturnType<typeof useTheme>['theme'];
+}) {
+  if (!items.length) return null;
+  const symbol = direction === 'up' ? '↑' : direction === 'down' ? '↓' : '↻';
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${theme.border} bg-black/[0.04]`}>
+      <p className={`${theme.textMuted} text-[11px] font-light mb-2 opacity-90`}>
+        {symbol} {label}
+      </p>
+      <ul className="space-y-1.5">
+        {items.map((text) => (
+          <li
+            key={text}
+            className={`${theme.textSecondary} text-[13px] font-light leading-[1.6] pl-0 flex gap-2`}
+          >
+            <span className={`${theme.textMuted} opacity-60 shrink-0`}>•</span>
+            <span className="min-w-0 break-words">{text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RepeatingThemesList({
+  items,
+  theme,
+}: {
+  items: Array<{ text: string; displayText: string; sublabel: string }>;
+  theme: ReturnType<typeof useTheme>['theme'];
+}) {
+  return (
+    <div className={`rounded-lg border px-3 py-3 ${theme.border} bg-black/[0.04]`}>
+      <p className={`${theme.textMuted} text-[11px] font-light mb-2.5 opacity-90`}>
+        {DYNAMICS_COPY.repeatingIntro}
+      </p>
+      <ul className="space-y-2">
+        {items.map((item) => (
+          <li key={item.text} className="flex gap-2 items-start min-w-0">
+            <span className={`${theme.textMuted} text-[13px] opacity-60 shrink-0 pt-0.5`}>•</span>
+            <div className="min-w-0 flex-1">
+              <p className={`${theme.textSecondary} text-[13px] font-light leading-[1.6] break-words`}>
+                {item.displayText}
+              </p>
+              {item.sublabel === 'returnsHere' ? (
+                <p className={`${theme.textMuted} text-[10px] font-light mt-0.5 opacity-75`}>
+                  {DYNAMICS_COPY.returnsHere}
+                </p>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -158,8 +234,8 @@ function WeeklyEntryCard({
         onClick={() => setOpen((v) => !v)}
         className="w-full px-4 py-3 flex items-center justify-between gap-2 text-left"
       >
-        <span className={`${theme.textPrimary} text-sm font-light`}>
-          {formatDateLong(entry.created_at)}
+        <span className={`${theme.textPrimary} text-sm font-light min-w-0 truncate`}>
+          {formatWeeklyPeriod(entry)}
         </span>
         <ChevronDown
           className={`w-4 h-4 ${theme.textMuted} transition-transform ${open ? 'rotate-180' : ''}`}
@@ -353,11 +429,13 @@ export function ConversationDynamicsScreen() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  function repeatingSublabel(key: string): string {
-    if (key === 'returnsHere') return DYNAMICS_COPY.returnsHere;
-    if (key === 'cross') return DYNAMICS_COPY.crossContext;
-    return DYNAMICS_COPY.inFocus;
-  }
+  const showWeeklyTrend =
+    weeklies.length >= DYNAMICS_WEEKLY_TREND_MIN_WEEKLIES &&
+    changing &&
+    !changing.empty &&
+    (changing.newItems.length > 0 ||
+      changing.fadedItems.length > 0 ||
+      changing.repeatedItems.length > 0);
 
   function aliveSublabel(source: string): string | undefined {
     if (source === 'open_loops') return DYNAMICS_COPY.fromMemory;
@@ -495,7 +573,7 @@ export function ConversationDynamicsScreen() {
 
           <CollapsibleBlock
             title={DYNAMICS_COPY.latestWeek}
-            count={latestWeekly ? 1 : 0}
+            meta={latestWeekly ? formatWeeklyPeriod(latestWeekly) : undefined}
             open={openSections.latest}
             onToggle={() => toggleSection('latest')}
             cardClass={cardBase}
@@ -542,6 +620,30 @@ export function ConversationDynamicsScreen() {
           >
             {changing?.empty ? (
               <p className={`${theme.textMuted} text-sm font-light`}>{DYNAMICS_COPY.emptyChanging}</p>
+            ) : showWeeklyTrend ? (
+              <div className="space-y-2">
+                <TrendGroup
+                  direction="up"
+                  label={DYNAMICS_COPY.trendUp}
+                  items={changing?.newItems ?? []}
+                  theme={theme}
+                />
+                <TrendGroup
+                  direction="down"
+                  label={DYNAMICS_COPY.trendDown}
+                  items={changing?.fadedItems ?? []}
+                  theme={theme}
+                />
+                <TrendGroup
+                  direction="repeat"
+                  label={DYNAMICS_COPY.trendRepeated}
+                  items={changing?.repeatedItems ?? []}
+                  theme={theme}
+                />
+                {changing?.activityText ? (
+                  <TextCard text={changing.activityText} sublabel={DYNAMICS_COPY.rhythm} theme={theme} />
+                ) : null}
+              </div>
             ) : (
               <>
                 {changing?.newItems.map((text) => (
@@ -562,34 +664,27 @@ export function ConversationDynamicsScreen() {
 
           <CollapsibleBlock
             title={DYNAMICS_COPY.repeating}
-            count={repeating.length}
+            count={repeating.length || undefined}
             open={openSections.repeating}
             onToggle={() => toggleSection('repeating')}
             cardClass={cardBase}
             theme={theme}
-            intro={repeating.length > 0 ? DYNAMICS_COPY.repeatingIntro : undefined}
           >
             {repeating.length === 0 ? (
               <p className={`${theme.textMuted} text-sm font-light`}>{DYNAMICS_COPY.emptyRepeating}</p>
             ) : (
-              repeating.map((item) => (
-                <TextCard
-                  key={item.text}
-                  text={item.text}
-                  sublabel={repeatingSublabel(item.sublabel)}
-                  theme={theme}
-                />
-              ))
+              <RepeatingThemesList items={repeating} theme={theme} />
             )}
           </CollapsibleBlock>
 
           <CollapsibleBlock
             title={DYNAMICS_COPY.alive}
-            count={alive.length}
+            count={alive.length || undefined}
             open={openSections.alive}
             onToggle={() => toggleSection('alive')}
             cardClass={cardBase}
             theme={theme}
+            intro={alive.length > 0 ? DYNAMICS_COPY.aliveIntro : undefined}
           >
             {alive.length === 0 ? (
               <p className={`${theme.textMuted} text-sm font-light`}>{DYNAMICS_COPY.emptyAlive}</p>

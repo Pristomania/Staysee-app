@@ -4,6 +4,7 @@
  */
 
 import { userImposedRoleOverride } from "./roleGuard.ts";
+import { isRelationalLifeTurn } from "./safety.ts";
 
 export type BoundaryFallbackTone =
   | "role_reset"
@@ -36,13 +37,16 @@ export function userDemandsCompliance(text: string): boolean {
 export function detectBoundaryTone(userMessage: string): BoundaryFallbackTone {
   const t = userMessage.trim();
   if (!t) return "instrumental";
+  if (isRelationalLifeTurn(t)) return "instrumental"; // unused when relational exempt
   if (userFrustrationAtBot(t)) return "frustration";
   if (userImposedRoleOverride(t)) return "role_reset";
   if (userDemandsCompliance(t)) return "compliance";
   if (/готовый\s+текст/i.test(t) || /^текст$/i.test(t)) return "instrumental";
 
   const wantsContinuation =
-    /(?:дальше|продолж|следующ|допиш|пиши|напиши|погнали|ещё\s+день|следующий\s+день)/i.test(t);
+    /(?:дальше|продолж|следующ|допиши?|(?<!\p{L})пиши(?!\p{L})|напиши|погнали|ещё\s+день|следующий\s+день)/iu.test(
+      t,
+    );
   const soundsLight =
     /(?:^ок\b|погнали|давай|круто|ура|отлично|класс|супер|здорово|радост|получилось|вперёд|вперед)/i.test(
       t,
@@ -78,6 +82,9 @@ export function pickBoundaryFallback(
   userMessage: string,
   opts?: { wrongRoleInReply?: boolean }
 ): string {
+  if (isRelationalLifeTurn(userMessage)) {
+    return "";
+  }
   if (opts?.wrongRoleInReply) {
     return COPY.role_reset;
   }
