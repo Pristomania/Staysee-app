@@ -11,7 +11,14 @@ const COPY = {
   aria: 'Сквозная память между беседами',
 } as const;
 
-export function CrossMemoryToggle({ cardClass }: { cardClass: string }) {
+export function CrossMemoryToggle({
+  cardClass,
+  embedded = false,
+}: {
+  cardClass: string;
+  /** Inline row without card chrome — for Memory screen header area */
+  embedded?: boolean;
+}) {
   const { user, profile, refreshProfile } = useAuth();
   const { theme } = useTheme();
   const [busy, setBusy] = useState(false);
@@ -27,19 +34,9 @@ export function CrossMemoryToggle({ cardClass }: { cardClass: string }) {
     setBusy(false);
   }
 
-  return (
-    <div className={`${cardClass} px-4 py-3.5`}>
-      <div className="flex items-start justify-between gap-4">
-        <Link2
-          className={`w-4 h-4 ${theme.textSecondary} shrink-0 mt-0.5 opacity-75`}
-          strokeWidth={1.5}
-        />
-        <div className="min-w-0 flex-1">
-          <p className={`${theme.textPrimary} text-sm font-light`}>{COPY.title}</p>
-          <p className={`${theme.textMuted} text-xs font-light mt-1 leading-relaxed opacity-90`}>
-            {enabled ? COPY.on : COPY.off}
-          </p>
-        </div>
+  const statusShort = enabled ? 'включена' : 'отключена';
+
+  const toggleButton = (
         <button
           type="button"
           role="switch"
@@ -61,6 +58,33 @@ export function CrossMemoryToggle({ cardClass }: { cardClass: string }) {
             `}
           />
         </button>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex items-center justify-between gap-3 py-1">
+        <p className={`${theme.textMuted} text-xs font-light`}>
+          Статус: <span className={theme.textSecondary}>{statusShort}</span>
+        </p>
+        {toggleButton}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${cardClass} px-4 py-3.5`}>
+      <div className="flex items-start justify-between gap-4">
+        <Link2
+          className={`w-4 h-4 ${theme.textSecondary} shrink-0 mt-0.5 opacity-75`}
+          strokeWidth={1.5}
+        />
+        <div className="min-w-0 flex-1">
+          <p className={`${theme.textPrimary} text-sm font-light`}>{COPY.title}</p>
+          <p className={`${theme.textMuted} text-xs font-light mt-1 leading-relaxed opacity-90`}>
+            {enabled ? COPY.on : COPY.off}
+          </p>
+        </div>
+        {toggleButton}
       </div>
     </div>
   );

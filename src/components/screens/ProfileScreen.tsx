@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import type { Theme } from '../../context/ThemeContext';
 import {
+  Activity,
   Brain,
   ChevronDown,
   Feather,
@@ -142,6 +143,15 @@ export function ProfileScreen() {
       <section className="mb-6">
         <p className={sectionLabel}>Беседы</p>
         <div className="space-y-1.5">
+          <CabinetRow
+            icon={Activity}
+            title="Динамика бесед"
+            theme={theme}
+            cardClass={card}
+            onClick={() => {
+              navigateTo('conversation-dynamics', { dynamicsReturnScreen: 'profile' });
+            }}
+          />
           <CabinetRow
             icon={Feather}
             title="Записки бесед"

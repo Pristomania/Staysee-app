@@ -13,8 +13,9 @@ import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, sendAiMessage } from '../../lib/ai/client';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity } from 'lucide-react';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
+import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
 import type { Message } from '../../types';
 import { dedupeMessages, mergeFetchedWithPending } from '../../lib/messages';
 import { deleteChatMessage, insertChatMessage, normalizeMessageRow } from '../../lib/chatMessages';
@@ -182,11 +183,12 @@ export function ChatScreen() {
   }, [applyMessages]);
 
   const leaveChatFor = useCallback(
-    (screen: 'conversation-notes' | 'memory') => {
+    (screen: 'conversation-notes' | 'memory' | 'conversation-dynamics') => {
       syncMessagesToApp();
       navigateTo(screen, {
         notesReturnScreen: 'chat',
         memoryReturnScreen: 'chat',
+        dynamicsReturnScreen: 'chat',
         conversation: currentConversation,
       });
     },
@@ -791,6 +793,30 @@ export function ChatScreen() {
           </span>
           <button
             type="button"
+            onClick={() => leaveChatFor('memory')}
+            className={`shrink-0 p-2 rounded-lg transition-opacity duration-300 opacity-70 hover:opacity-100 ${theme.surfaceHover}`}
+            aria-label="Память беседы"
+            title="Память беседы"
+          >
+            <Brain
+              className={`w-4 h-4 transition-colors duration-300 ${
+                captureNudge?.kind === 'memory_saved' ? 'text-[#c9a96e]/90' : theme.textSecondary
+              }`}
+              strokeWidth={1.5}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={() => leaveChatFor('conversation-dynamics')}
+            disabled={!currentConversation?.id}
+            className={`shrink-0 p-2 rounded-lg transition-opacity duration-300 opacity-70 hover:opacity-100 disabled:opacity-30 ${theme.surfaceHover}`}
+            aria-label={DYNAMICS_COPY.title}
+            title={DYNAMICS_COPY.title}
+          >
+            <Activity className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+          </button>
+          <button
+            type="button"
             onClick={() => {
               if (captureNudge?.kind === 'notes') {
                 openNotesFromNudge(captureNudge.snippet);
@@ -814,20 +840,6 @@ export function ChatScreen() {
             <Feather
               className={`w-4 h-4 transition-colors duration-300 ${
                 captureNudge?.kind === 'notes' ? 'text-[#c9a96e]' : theme.textSecondary
-              }`}
-              strokeWidth={1.5}
-            />
-          </button>
-          <button
-            type="button"
-            onClick={() => leaveChatFor('memory')}
-            className={`shrink-0 p-2 rounded-lg transition-opacity duration-300 opacity-70 hover:opacity-100 ${theme.surfaceHover}`}
-            aria-label="Память беседы"
-            title="Память беседы"
-          >
-            <Brain
-              className={`w-4 h-4 transition-colors duration-300 ${
-                captureNudge?.kind === 'memory_saved' ? 'text-[#c9a96e]/90' : theme.textSecondary
               }`}
               strokeWidth={1.5}
             />

@@ -9,6 +9,7 @@ export interface AppHistoryState {
   conversationId: string | null;
   memoryReturnScreen: 'chat' | 'profile';
   notesReturnScreen: 'chat' | 'profile';
+  dynamicsReturnScreen: 'chat' | 'profile';
   legalReturnScreen: Screen;
 }
 

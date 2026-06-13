@@ -13,6 +13,7 @@ import {
   ProfileScreen,
   OnboardingScreen,
   MemoryScreen,
+  ConversationDynamicsScreen,
   ConversationNotesScreen,
   PrivacyScreen,
   DisclaimerScreen,
@@ -163,6 +164,8 @@ function AppContent() {
       case 'chat':      return user ? <ChatScreen /> : <WelcomeScreen />;
       case 'profile':   return user ? <ProfileScreen /> : <WelcomeScreen />;
       case 'memory':    return user ? <MemoryScreen /> : <WelcomeScreen />;
+      case 'conversation-dynamics':
+        return user ? <ConversationDynamicsScreen /> : <WelcomeScreen />;
       case 'conversation-notes':
         return user ? <ConversationNotesScreen /> : <WelcomeScreen />;
       case 'privacy':     return <PrivacyScreen />;

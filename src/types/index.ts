@@ -54,6 +54,7 @@ export type Screen =
   | 'chat'
   | 'profile'
   | 'memory'
+  | 'conversation-dynamics'
   | 'conversation-notes'
   | 'privacy'
   | 'disclaimer'

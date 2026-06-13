@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Feather, Pencil, Plus, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
+import { ConversationHubNav } from '../ConversationHubNav';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -12,15 +13,11 @@ import {
   addSelfNote,
   deleteProgressEntry,
   fetchSelfNotes,
-  fetchWeeklyDynamics,
   filterInsightNotes,
   filterTensionNotes,
-  getWeeklyCooldownStatus,
   type NotesTab,
-  saveWeeklyDynamics,
   updateProgressEntry,
   type ProgressEntry,
-  type WeeklyCooldownStatus,
 } from '../../lib/progressDiary';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -33,19 +30,6 @@ function formatDateLong(iso: string) {
     });
   } catch {
     return iso;
-  }
-}
-
-function formatNextAvailable(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
   }
 }
 
@@ -129,49 +113,6 @@ function NoteEntryRow({
         </div>
       )}
     </div>
-  );
-}
-
-function WeeklyDynamicsCard({
-  cardClass,
-  sectionLabel,
-  theme,
-  weeklyDisabled,
-  weeklyBusy,
-  cooldown,
-  onCreate,
-}: {
-  cardClass: string;
-  sectionLabel: string;
-  theme: ReturnType<typeof useTheme>['theme'];
-  weeklyDisabled: boolean;
-  weeklyBusy: boolean;
-  cooldown: WeeklyCooldownStatus | null;
-  onCreate: () => void;
-}) {
-  return (
-    <section className={`${cardClass} px-4 py-4 mb-4`}>
-      <p className={sectionLabel}>{REFLECTION_COPY.weeklySection}</p>
-      <div className={`${theme.textMuted} text-xs font-light leading-relaxed mt-2 mb-3 space-y-1`}>
-        {REFLECTION_COPY.weeklyHintLines.map((line) => (
-          <p key={line}>{line}</p>
-        ))}
-      </div>
-      {cooldown && !cooldown.canCreate && cooldown.nextAvailableAt && (
-        <p className={`${theme.textMuted} text-[11px] font-light mb-3`}>
-          {REFLECTION_COPY.weeklyCooldown}{' '}
-          {formatNextAvailable(cooldown.nextAvailableAt)}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={weeklyDisabled}
-        onClick={onCreate}
-        className={`w-full py-2.5 rounded-xl border ${theme.btnBg} ${theme.btnBorder} ${theme.btnText} text-sm font-light tracking-wide disabled:opacity-40`}
-      >
-        {weeklyBusy ? REFLECTION_COPY.weeklyBusy : REFLECTION_COPY.weeklyButton}
-      </button>
-    </section>
   );
 }
 
@@ -387,13 +328,10 @@ export function ConversationNotesScreen() {
   const [convsLoading, setConvsLoading] = useState(fromProfile);
 
   const [notes, setNotes] = useState<ProgressEntry[]>([]);
-  const [weeklies, setWeeklies] = useState<ProgressEntry[]>([]);
-  const [cooldown, setCooldown] = useState<WeeklyCooldownStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [noteKind, setNoteKind] = useState<SelfNoteKind>('insight');
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
-  const [weeklyBusy, setWeeklyBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notesTab, setNotesTab] = useState<NotesTab>('insight');
@@ -455,19 +393,11 @@ export function ConversationNotesScreen() {
     if (!user || !convId) {
       setLoading(false);
       setNotes([]);
-      setWeeklies([]);
-      setCooldown(null);
       return;
     }
     setLoading(true);
-    const [noteRows, weeklyRows, cd] = await Promise.all([
-      fetchSelfNotes(user.id, convId),
-      fetchWeeklyDynamics(user.id, convId),
-      getWeeklyCooldownStatus(convId),
-    ]);
+    const noteRows = await fetchSelfNotes(user.id, convId);
     setNotes(noteRows);
-    setWeeklies(weeklyRows);
-    setCooldown(cd);
     setLoading(false);
   }, [user, convId]);
 
@@ -512,53 +442,23 @@ export function ConversationNotesScreen() {
     setSaving(false);
   }
 
-  async function handleWeekly() {
-    if (!user || !convId) return;
-    setWeeklyBusy(true);
-    setError(null);
-    const result = await saveWeeklyDynamics(user.id, convId, convTitle);
-    if (result.ok) {
-      setWeeklies((prev) => [result.entry, ...prev]);
-      setNotesTab('dynamics');
-      const cd = await getWeeklyCooldownStatus(convId);
-      setCooldown(cd);
-    } else if (result.reason === 'cooldown') {
-      setError(
-        `${REFLECTION_COPY.weeklyCooldown}: ${formatNextAvailable(result.nextAvailableAt ?? '')}`,
-      );
-      const cd = await getWeeklyCooldownStatus(convId);
-      setCooldown(cd);
-    } else {
-      setError('Не удалось создать динамику. Попробуйте чуть позже.');
-    }
-    setWeeklyBusy(false);
-  }
-
-  async function handleUpdate(id: string, content: string, isWeekly: boolean) {
+  async function handleUpdate(id: string, content: string) {
     setBusyId(id);
     setError(null);
     const updated = await updateProgressEntry(id, content);
     if (updated) {
-      const merge = (prev: ProgressEntry[]) =>
-        prev.map((e) => (e.id === id ? updated : e));
-      if (isWeekly) setWeeklies(merge);
-      else setNotes(merge);
+      setNotes((prev) => prev.map((e) => (e.id === id ? updated : e)));
     } else {
       setError('Не удалось сохранить изменения.');
     }
     setBusyId(null);
   }
 
-  async function handleDelete(id: string, isWeekly: boolean) {
+  async function handleDelete(id: string) {
     setBusyId(id);
     const ok = await deleteProgressEntry(id);
     if (ok) {
-      if (isWeekly) {
-        setWeeklies((prev) => prev.filter((e) => e.id !== id));
-        if (convId) setCooldown(await getWeeklyCooldownStatus(convId));
-      } else {
-        setNotes((prev) => prev.filter((e) => e.id !== id));
-      }
+      setNotes((prev) => prev.filter((e) => e.id !== id));
     }
     setBusyId(null);
   }
@@ -567,14 +467,12 @@ export function ConversationNotesScreen() {
     return null;
   }
 
-  const weeklyDisabled = weeklyBusy || (cooldown !== null && !cooldown.canCreate);
   const insightNotes = filterInsightNotes(notes);
   const tensionNotes = filterTensionNotes(notes);
 
   const tabs: { id: NotesTab; label: string; count: number }[] = [
     { id: 'insight', label: REFLECTION_COPY.tabInsight, count: insightNotes.length },
     { id: 'tension', label: REFLECTION_COPY.tabTension, count: tensionNotes.length },
-    { id: 'dynamics', label: REFLECTION_COPY.tabDynamics, count: weeklies.length },
   ];
 
   const openWrite = () => openWriteSheet(notesTab === 'tension' ? 'tension' : 'insight');
@@ -606,7 +504,7 @@ export function ConversationNotesScreen() {
           <section className="mb-6">
             <p className={sectionLabel}>Беседа</p>
             <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-              Инсайты, напряжения и динамика — отдельно в каждом чате.
+              Инсайты и напряжения — отдельно в каждом чате.
             </p>
             {convsLoading ? (
               <div className="flex justify-center py-6">
@@ -631,6 +529,7 @@ export function ConversationNotesScreen() {
           ) : null
         ) : (
           <>
+        <ConversationHubNav active="notes" show={!fromProfile && !!convId} />
         <p className={sectionLabel}>{REFLECTION_COPY.notesSection}</p>
 
         <div
@@ -658,18 +557,6 @@ export function ConversationNotesScreen() {
         </div>
 
         <div className="pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
-          {notesTab === 'dynamics' && !loading && (
-            <WeeklyDynamicsCard
-              cardClass={cardBase}
-              sectionLabel={sectionLabel}
-              theme={theme}
-              weeklyDisabled={weeklyDisabled}
-              weeklyBusy={weeklyBusy}
-              cooldown={cooldown}
-              onCreate={() => void handleWeekly()}
-            />
-          )}
-
           {loading ? (
             <p className={`${theme.textMuted} text-sm font-light`}>{REFLECTION_COPY.loading}</p>
           ) : notesTab === 'insight' ? (
@@ -696,8 +583,8 @@ export function ConversationNotesScreen() {
                     busy={busyId === e.id}
                     cardClass={cardBase}
                     theme={theme}
-                    onSave={(content) => void handleUpdate(e.id, content, false)}
-                    onDelete={() => void handleDelete(e.id, false)}
+                    onSave={(content) => void handleUpdate(e.id, content)}
+                    onDelete={() => void handleDelete(e.id)}
                   />
                 ))}
               </div>
@@ -726,32 +613,13 @@ export function ConversationNotesScreen() {
                     busy={busyId === e.id}
                     cardClass={cardBase}
                     theme={theme}
-                    onSave={(content) => void handleUpdate(e.id, content, false)}
-                    onDelete={() => void handleDelete(e.id, false)}
+                    onSave={(content) => void handleUpdate(e.id, content)}
+                    onDelete={() => void handleDelete(e.id)}
                   />
                 ))}
               </div>
             )
-          ) : weeklies.length === 0 ? (
-            <p className={`${theme.textMuted} text-sm font-light leading-relaxed`}>
-              {REFLECTION_COPY.emptyDynamics}
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {weeklies.map((e) => (
-                <NoteEntryRow
-                  key={e.id}
-                  entry={e}
-                  metaLabel={formatDateLong(e.created_at)}
-                  busy={busyId === e.id}
-                  cardClass={cardBase}
-                  theme={theme}
-                  onSave={(content) => void handleUpdate(e.id, content, true)}
-                  onDelete={() => void handleDelete(e.id, true)}
-                />
-              ))}
-            </div>
-          )}
+          ) : null}
         </div>
           </>
         )}

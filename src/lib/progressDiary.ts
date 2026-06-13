@@ -25,7 +25,7 @@ const WEEKLY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const NOTE_TYPES: ProgressEntryType[] = ['insight', 'tension', 'note', 'shift', 'step'];
 const LEGACY_INSIGHT_TYPES: ProgressEntryType[] = ['note', 'shift', 'step'];
 
-export type NotesTab = 'insight' | 'tension' | 'dynamics';
+export type NotesTab = 'insight' | 'tension';
 
 /** @deprecated use NotesTab */
 export type ArchiveTab = NotesTab;

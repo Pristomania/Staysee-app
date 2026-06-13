@@ -8,6 +8,7 @@ export { ChatScreen } from './ChatScreen';
 export { ProfileScreen } from './ProfileScreen';
 export { OnboardingScreen } from './OnboardingScreen';
 export { MemoryScreen } from './MemoryScreen';
+export { ConversationDynamicsScreen } from './ConversationDynamicsScreen';
 export { ConversationNotesScreen } from './ConversationNotesScreen';
 export { PrivacyScreen } from './PrivacyScreen';
 export { TermsScreen } from './TermsScreen';

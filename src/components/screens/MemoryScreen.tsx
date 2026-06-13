@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Brain, Pencil, Plus, Trash2, X, Check } from 'lucide-react';
+import { Brain, ChevronDown, Pencil, Plus, Trash2, X, Check } from 'lucide-react';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -31,6 +31,14 @@ import {
   isBlockedCrossMemoryContent,
   partitionCrossMemoryRows,
 } from '../../lib/crossMemoryPolicy';
+import {
+  ADD_FIELD_FOR_SECTION,
+  collectSectionItems,
+  initialSectionOpenState,
+  MEMORY_DISPLAY_SECTIONS,
+  type MemoryDisplaySectionId,
+  type MemoryListItemRef,
+} from '../../lib/memoryDisplay';
 import type { Conversation, UserMemory } from '../../types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -100,14 +108,14 @@ function ConversationMemoryActions({
     <div className="pt-1 space-y-2">
       <p className={`${theme.textMuted} text-[11px] font-light`}>Добавить в раздел:</p>
       <div className="flex flex-wrap gap-1.5">
-        {(Object.keys(MEMORY_FIELD_LABELS) as MemoryFieldKey[]).map((field) => (
+        {MEMORY_DISPLAY_SECTIONS.map((section) => (
           <button
-            key={field}
+            key={section.id}
             type="button"
-            onClick={() => setAddField(field)}
+            onClick={() => setAddField(ADD_FIELD_FOR_SECTION[section.id])}
             className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-light ${theme.border} ${theme.surfaceHover} ${theme.textSecondary}`}
           >
-            {MEMORY_FIELD_LABELS[field]}
+            {section.label}
           </button>
         ))}
       </div>
@@ -130,98 +138,125 @@ function ConversationMemoryActions({
   );
 }
 
-function MemoryFieldSection({
-  fieldKey,
+function CollapsibleMemoryDisplaySection({
+  label,
+  isOpen,
+  onToggle,
   items,
   onChange,
   onRemove,
   cardClass,
   theme,
 }: {
-  fieldKey: MemoryFieldKey;
-  items: string[];
-  onChange: (index: number, value: string) => void;
-  onRemove: (index: number) => void;
+  label: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  items: MemoryListItemRef[];
+  onChange: (fieldKey: MemoryFieldKey, index: number, value: string) => void;
+  onRemove: (fieldKey: MemoryFieldKey, index: number) => void;
   cardClass: string;
   theme: ReturnType<typeof useTheme>['theme'];
 }) {
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-
-  function startEdit(index: number) {
-    setEditingIndex(index);
-    setDraft(items[index] ?? '');
-  }
-
-  function commitEdit(index: number) {
-    const v = draft.trim();
-    if (v) onChange(index, v);
-    else onRemove(index);
-    setEditingIndex(null);
-    setDraft('');
-  }
 
   if (items.length === 0) return null;
 
+  function itemKey(item: MemoryListItemRef) {
+    return `${item.fieldKey}:${item.index}`;
+  }
+
+  function startEdit(item: MemoryListItemRef) {
+    setEditingKey(itemKey(item));
+    setDraft(item.text);
+  }
+
+  function commitEdit(item: MemoryListItemRef) {
+    const v = draft.trim();
+    if (v) onChange(item.fieldKey, item.index, v);
+    else onRemove(item.fieldKey, item.index);
+    setEditingKey(null);
+    setDraft('');
+  }
+
   return (
-    <div className={`${cardClass} px-4 py-3.5`}>
-      <p className={`${theme.textPrimary} text-sm font-light mb-2.5`}>
-        {MEMORY_FIELD_LABELS[fieldKey]}
-      </p>
-      <ul className="space-y-2">
-        {items.map((item, i) => (
-          <li key={`${fieldKey}-${i}`} className="flex gap-2 items-start">
-            {editingIndex === i ? (
-              <div className="flex-1 flex gap-2 min-w-0">
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  className={`flex-1 min-w-0 rounded-lg border px-3 py-2 text-sm font-light ${theme.border} ${theme.surface} ${theme.textPrimary} bg-transparent`}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitEdit(i);
-                    if (e.key === 'Escape') setEditingIndex(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => commitEdit(i)}
-                  className={`shrink-0 p-2 rounded-lg ${theme.surfaceHover}`}
-                  aria-label="Сохранить"
-                >
-                  <Check className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingIndex(null)}
-                  className={`shrink-0 p-2 rounded-lg ${theme.surfaceHover}`}
-                  aria-label="Отмена"
-                >
-                  <X className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
-                </button>
-              </div>
-            ) : (
-              <>
-                <p className={`flex-1 min-w-0 ${theme.textSecondary} text-[13px] font-light leading-[1.65]`}>
-                  {item}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => startEdit(i)}
-                  className={`shrink-0 p-1.5 rounded-lg opacity-60 hover:opacity-100 ${theme.surfaceHover}`}
-                  aria-label="Изменить"
-                >
-                  <Pencil className={`w-3.5 h-3.5 ${theme.textMuted}`} strokeWidth={1.5} />
-                </button>
-                <ConfirmDeleteButton
-                  theme={theme}
-                  onConfirm={() => onRemove(i)}
-                />
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
+    <div className="space-y-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        className={`${cardClass} w-full px-4 py-3 flex items-center justify-between gap-3 text-left`}
+      >
+        <span className={`${theme.textPrimary} text-sm font-light`}>
+          {label}
+          <span className={`${theme.textMuted} opacity-80`}> · {items.length}</span>
+        </span>
+        <ChevronDown
+          className={`w-4 h-4 shrink-0 ${theme.textMuted} transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          strokeWidth={1.5}
+        />
+      </button>
+      {isOpen && (
+        <div className={`${cardClass} border-t-0 rounded-t-none px-4 pb-4 pt-2 -mt-px`}>
+          <ul className="space-y-2">
+            {items.map((item) => {
+              const key = itemKey(item);
+              return (
+                <li key={key} className="flex gap-2 items-start">
+                  {editingKey === key ? (
+                    <div className="flex-1 flex gap-2 min-w-0">
+                      <input
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        className={`flex-1 min-w-0 rounded-lg border px-3 py-2 text-sm font-light ${theme.border} ${theme.surface} ${theme.textPrimary} bg-transparent`}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEdit(item);
+                          if (e.key === 'Escape') setEditingKey(null);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => commitEdit(item)}
+                        className={`shrink-0 p-2 rounded-lg ${theme.surfaceHover}`}
+                        aria-label="Сохранить"
+                      >
+                        <Check className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingKey(null)}
+                        className={`shrink-0 p-2 rounded-lg ${theme.surfaceHover}`}
+                        aria-label="Отмена"
+                      >
+                        <X className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className={`flex-1 min-w-0 ${theme.textSecondary} text-[13px] font-light leading-[1.65]`}>
+                        {item.text}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(item)}
+                        className={`shrink-0 p-1.5 rounded-lg opacity-60 hover:opacity-100 ${theme.surfaceHover}`}
+                        aria-label="Изменить"
+                      >
+                        <Pencil className={`w-3.5 h-3.5 ${theme.textMuted}`} strokeWidth={1.5} />
+                      </button>
+                      <ConfirmDeleteButton
+                        theme={theme}
+                        onConfirm={() => onRemove(item.fieldKey, item.index)}
+                      />
+                    </>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -254,6 +289,7 @@ export function MemoryScreen() {
   const [memoryWasReset, setMemoryWasReset] = useState(false);
   const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
+  const [sectionOpen, setSectionOpen] = useState(initialSectionOpenState);
 
   const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
     () => partitionCrossMemoryRows(globalRows),
@@ -265,6 +301,10 @@ export function MemoryScreen() {
     theme.surface,
     theme.border,
   ].join(' ');
+
+  function toggleSection(id: MemoryDisplaySectionId) {
+    setSectionOpen((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
 
   useEffect(() => {
     if (currentConversation?.id) setSelectedConvId(currentConversation.id);
@@ -519,22 +559,24 @@ export function MemoryScreen() {
 
                 {(convMemory ?? emptyMemory()) && (
                   <div className="space-y-2">
-                    {(Object.keys(MEMORY_FIELD_LABELS) as MemoryFieldKey[]).map((field) => (
-                      <MemoryFieldSection
-                        key={field}
-                        fieldKey={field}
-                        items={(convMemory ?? emptyMemory())[field]}
+                    {MEMORY_DISPLAY_SECTIONS.map((section) => (
+                      <CollapsibleMemoryDisplaySection
+                        key={section.id}
+                        label={section.label}
+                        isOpen={sectionOpen[section.id]}
+                        onToggle={() => toggleSection(section.id)}
+                        items={collectSectionItems(convMemory ?? emptyMemory(), section.fields)}
                         cardClass={cardBase}
                         theme={theme}
-                        onChange={(i, v) =>
-                          patchConvField(field, (arr) => {
+                        onChange={(fieldKey, i, v) =>
+                          patchConvField(fieldKey, (arr) => {
                             const copy = [...arr];
                             copy[i] = v;
                             return copy;
                           })
                         }
-                        onRemove={(i) =>
-                          patchConvField(field, (arr) => arr.filter((_, j) => j !== i))
+                        onRemove={(fieldKey, i) =>
+                          patchConvField(fieldKey, (arr) => arr.filter((_, j) => j !== i))
                         }
                       />
                     ))}

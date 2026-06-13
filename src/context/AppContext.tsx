@@ -27,6 +27,7 @@ export interface NavigateOptions {
   conversation?: Conversation | null;
   memoryReturnScreen?: 'chat' | 'profile';
   notesReturnScreen?: 'chat' | 'profile';
+  dynamicsReturnScreen?: 'chat' | 'profile';
   legalReturnScreen?: Screen;
   /** Use replaceState (auth redirects, fallback back). */
   replace?: boolean;
@@ -47,6 +48,8 @@ interface AppContextType {
   setMemoryReturnScreen: (screen: 'chat' | 'profile') => void;
   notesReturnScreen: 'chat' | 'profile';
   setNotesReturnScreen: (screen: 'chat' | 'profile') => void;
+  dynamicsReturnScreen: 'chat' | 'profile';
+  setDynamicsReturnScreen: (screen: 'chat' | 'profile') => void;
   legalReturnScreen: Screen;
   setLegalReturnScreen: (screen: Screen) => void;
   currentConversation: Conversation | null;
@@ -68,6 +71,7 @@ const AUTHENTICATED_SCREENS: Screen[] = [
   'chat',
   'profile',
   'memory',
+  'conversation-dynamics',
   'conversation-notes',
   'onboarding',
   'reset-password',
@@ -77,6 +81,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [currentScreen, setCurrentScreen] = useState<Screen>('welcome');
   const [memoryReturnScreen, setMemoryReturnScreen] = useState<'chat' | 'profile'>('profile');
   const [notesReturnScreen, setNotesReturnScreen] = useState<'chat' | 'profile'>('chat');
+  const [dynamicsReturnScreen, setDynamicsReturnScreen] = useState<'chat' | 'profile'>('chat');
   const [legalReturnScreen, setLegalReturnScreen] = useState<Screen>('profile');
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -87,6 +92,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const conversationsRef = useRef(conversations);
   const memoryReturnRef = useRef(memoryReturnScreen);
   const notesReturnRef = useRef(notesReturnScreen);
+  const dynamicsReturnRef = useRef(dynamicsReturnScreen);
   const legalReturnRef = useRef(legalReturnScreen);
   const currentConversationRef = useRef(currentConversation);
   const currentScreenRef = useRef(currentScreen);
@@ -95,6 +101,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   conversationsRef.current = conversations;
   memoryReturnRef.current = memoryReturnScreen;
   notesReturnRef.current = notesReturnScreen;
+  dynamicsReturnRef.current = dynamicsReturnScreen;
   legalReturnRef.current = legalReturnScreen;
   currentConversationRef.current = currentConversation;
   currentScreenRef.current = currentScreen;
@@ -123,6 +130,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         conversationId: conv?.id ?? opts?.conversationId ?? null,
         memoryReturnScreen: opts?.memoryReturnScreen ?? memoryReturnRef.current,
         notesReturnScreen: opts?.notesReturnScreen ?? notesReturnRef.current,
+        dynamicsReturnScreen: opts?.dynamicsReturnScreen ?? dynamicsReturnRef.current,
         legalReturnScreen: opts?.legalReturnScreen ?? legalReturnRef.current,
         ...overrides,
       };
@@ -134,6 +142,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCurrentScreen(state.screen);
     setMemoryReturnScreen(state.memoryReturnScreen);
     setNotesReturnScreen(state.notesReturnScreen);
+    setDynamicsReturnScreen(state.dynamicsReturnScreen ?? 'chat');
     setLegalReturnScreen(state.legalReturnScreen);
 
     if (state.conversationId) {
@@ -149,6 +158,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (screen: Screen, opts?: NavigateOptions) => {
       if (opts?.memoryReturnScreen) setMemoryReturnScreen(opts.memoryReturnScreen);
       if (opts?.notesReturnScreen) setNotesReturnScreen(opts.notesReturnScreen);
+      if (opts?.dynamicsReturnScreen) setDynamicsReturnScreen(opts.dynamicsReturnScreen);
       if (opts?.legalReturnScreen) setLegalReturnScreen(opts.legalReturnScreen);
 
       if (opts?.conversation !== undefined) {
@@ -199,6 +209,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const screen = currentScreenRef.current;
     const memReturn = memoryReturnRef.current;
     const notesReturn = notesReturnRef.current;
+    const dynamicsReturn = dynamicsReturnRef.current;
     const legalReturn = legalReturnRef.current;
     const conv = currentConversationRef.current;
 
@@ -225,6 +236,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           replaceNavigation('profile');
         } else if (conv) {
           navigateTo('chat', { conversation: conv, notesReturnScreen: 'chat', replace: true });
+        } else {
+          replaceNavigation('main');
+        }
+        break;
+      case 'conversation-dynamics':
+        if (dynamicsReturn === 'profile') {
+          replaceNavigation('profile');
+        } else if (conv) {
+          navigateTo('chat', { conversation: conv, dynamicsReturnScreen: 'chat', replace: true });
         } else {
           replaceNavigation('main');
         }
@@ -283,6 +303,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setMemoryReturnScreen,
         notesReturnScreen,
         setNotesReturnScreen,
+        dynamicsReturnScreen,
+        setDynamicsReturnScreen,
         legalReturnScreen,
         setLegalReturnScreen,
         currentConversation,
