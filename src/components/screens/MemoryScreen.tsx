@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Brain, Pencil, Plus, Trash2, X, Check } from 'lucide-react';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import { useAuth } from '../../context/AuthContext';
@@ -7,6 +7,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { ensureUserProfile } from '../../lib/ensureProfile';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
+import { ConversationHubNav } from '../ConversationHubNav';
 import { CrossMemoryToggle } from '../CrossMemoryToggle';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { isCrossMemoryEnabled } from '../../lib/profileSettings';
@@ -24,6 +25,12 @@ import {
   type MemoryFieldKey,
   type StructuredMemory,
 } from '../../lib/memoryUi';
+import {
+  CROSS_MEMORY_DEPRECATED_HINT,
+  CROSS_MEMORY_UI_GROUP_LABELS,
+  isBlockedCrossMemoryContent,
+  partitionCrossMemoryRows,
+} from '../../lib/crossMemoryPolicy';
 import type { Conversation, UserMemory } from '../../types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -245,7 +252,13 @@ export function MemoryScreen() {
   const [addingGlobal, setAddingGlobal] = useState(false);
   const [globalDraft, setGlobalDraft] = useState('');
   const [memoryWasReset, setMemoryWasReset] = useState(false);
+  const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
+
+  const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
+    () => partitionCrossMemoryRows(globalRows),
+    [globalRows],
+  );
 
   const cardBase = [
     'w-full rounded-xl border transition-all duration-300',
@@ -398,6 +411,13 @@ export function MemoryScreen() {
 
   async function addGlobalMemory() {
     if (!crossMemoryOn || !user || !globalDraft.trim()) return;
+    const trimmed = globalDraft.trim();
+    if (isBlockedCrossMemoryContent(trimmed)) {
+      setGlobalSaveError(
+        'Это похоже на динамику беседы, а не на стабильный факт. Оставьте такое в памяти конкретного чата.',
+      );
+      return;
+    }
     setGlobalBusy('new');
     setGlobalSaveError(null);
     try {
@@ -410,8 +430,8 @@ export function MemoryScreen() {
         .from('user_memory')
         .insert({
           user_id: user.id,
-          memory_type: 'insight',
-          content: globalDraft.trim(),
+          memory_type: 'life_context',
+          content: trimmed,
         })
         .select('id, user_id, memory_type, content, created_at')
         .single();
@@ -453,10 +473,12 @@ export function MemoryScreen() {
         />
       )}
     >
-        <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-6 opacity-90`}>
+        <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-4 opacity-90`}>
           Память помогает держать общую линию диалога. Вы можете просмотреть, исправить или удалить
           любую запись — AI будет опираться на то, что осталось.
         </p>
+
+        <ConversationHubNav active="memory" show={memoryReturnScreen === 'chat' && !!selectedConvId} />
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -623,29 +645,75 @@ export function MemoryScreen() {
                 </div>
               )}
 
-              {globalRows.length === 0 && crossMemoryOn ? (
+              {activeGlobalRows.length === 0 && crossMemoryOn && deprecatedGlobalRows.length === 0 ? (
                 <div className={`${cardBase} px-4 py-4 flex gap-3 items-start`}>
                   <Brain className={`w-4 h-4 ${theme.textMuted} shrink-0 mt-0.5`} strokeWidth={1.5} />
                   <p className={`${theme.textMuted} text-sm font-light`}>
-                    Пока пусто. После обновления памяти в беседах здесь появятся связные фразы о вас.
+                    Пока пусто. Здесь появятся устойчивые факты профиля и предпочтения общения.
                   </p>
                 </div>
-              ) : globalRows.length > 0 ? (
-                <div className={`space-y-2 ${!crossMemoryOn ? 'opacity-75' : ''}`}>
-                  {globalRows.map((row) => (
-                    <GlobalMemoryRow
-                      key={row.id}
-                      row={row}
-                      busy={globalBusy === row.id}
-                      cardClass={cardBase}
-                      theme={theme}
-                      readOnly={!crossMemoryOn}
-                      onSave={(content) => void updateGlobalRow(row.id, content)}
-                      onDelete={() => void deleteGlobalRow(row.id)}
-                    />
-                  ))}
+              ) : activeGlobalRows.length > 0 ? (
+                <div className={`space-y-4 ${!crossMemoryOn ? 'opacity-75' : ''}`}>
+                  {(['life_context', 'communication', 'preference'] as const).map((groupType) => {
+                    const rows = activeGlobalRows.filter((r) => r.memory_type === groupType);
+                    if (!rows.length) return null;
+                    return (
+                      <div key={groupType} className="space-y-1.5">
+                        <p className={`${theme.textMuted} text-[11px] font-light px-1 opacity-80`}>
+                          {CROSS_MEMORY_UI_GROUP_LABELS[groupType]}
+                        </p>
+                        {rows.map((row) => (
+                          <GlobalMemoryRow
+                            key={row.id}
+                            row={row}
+                            busy={globalBusy === row.id}
+                            cardClass={cardBase}
+                            theme={theme}
+                            readOnly={!crossMemoryOn}
+                            onSave={(content) => void updateGlobalRow(row.id, content)}
+                            onDelete={() => void deleteGlobalRow(row.id)}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
+
+              {deprecatedGlobalRows.length > 0 && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setDeprecatedOpen((v) => !v)}
+                    className={`${cardBase} w-full px-4 py-3 text-left flex items-center justify-between`}
+                  >
+                    <span className={`${theme.textMuted} text-sm font-light`}>
+                      Устаревшие записи · {deprecatedGlobalRows.length}
+                    </span>
+                    <span className={`${theme.textMuted} text-xs`}>{deprecatedOpen ? 'Свернуть' : 'Показать'}</span>
+                  </button>
+                  {deprecatedOpen && (
+                    <div className={`${cardBase} border-t-0 rounded-t-none px-4 pb-4 pt-2 -mt-px space-y-2 opacity-80`}>
+                      <p className={`${theme.textMuted} text-xs font-light leading-relaxed`}>
+                        {CROSS_MEMORY_DEPRECATED_HINT}
+                      </p>
+                      {deprecatedGlobalRows.map((row) => (
+                        <GlobalMemoryRow
+                          key={row.id}
+                          row={row}
+                          busy={globalBusy === row.id}
+                          cardClass={cardBase}
+                          theme={theme}
+                          readOnly={!crossMemoryOn}
+                          deprecated
+                          onSave={(content) => void updateGlobalRow(row.id, content)}
+                          onDelete={() => void deleteGlobalRow(row.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -659,6 +727,7 @@ function GlobalMemoryRow({
   cardClass,
   theme,
   readOnly,
+  deprecated,
   onSave,
   onDelete,
 }: {
@@ -667,6 +736,7 @@ function GlobalMemoryRow({
   cardClass: string;
   theme: ReturnType<typeof useTheme>['theme'];
   readOnly?: boolean;
+  deprecated?: boolean;
   onSave: (content: string) => void;
   onDelete: () => void;
 }) {
@@ -676,7 +746,11 @@ function GlobalMemoryRow({
   return (
     <div className={`${cardClass} px-4 py-3.5 ${busy ? 'opacity-60' : ''}`}>
       <p className={`${theme.textMuted} text-[10px] uppercase tracking-wider mb-1.5 opacity-75`}>
-        {GLOBAL_MEMORY_TYPE_LABELS[row.memory_type] ?? row.memory_type}
+        {deprecated
+          ? 'Не используется в чате'
+          : (CROSS_MEMORY_UI_GROUP_LABELS[row.memory_type]
+            ?? GLOBAL_MEMORY_TYPE_LABELS[row.memory_type]
+            ?? row.memory_type)}
       </p>
       {editing ? (
         <div className="flex gap-2">

@@ -3,6 +3,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { filterCrossMemoryCandidates } from "./crossMemoryPolicy.ts";
 import {
   CROSS_MEMORY_MAX_CHARS,
   CROSS_MEMORY_MIN_CHARS,
@@ -64,10 +65,11 @@ ${fragBlock}
 
 Верни ТОЛЬКО JSON-массив (1–${Math.min(6, fragments.length + 1)} элементов):
 [
-  { "memory_type": "communication|preference|life_context|theme|emotion|insight", "content": "цельное предложение 40–280 символов" }
+  { "memory_type": "communication|preference|life_context", "content": "цельное предложение 40–280 символов" }
 ]
 
 Правила:
+- Только стабильный профиль и стиль общения. Без theme/emotion/кризисов.
 - Объединяй фрагменты в осмысленные предложения о жизни, отношениях, стиле общения.
 - Не оставляй отдельные слова. Не выдумывай факты — только из фрагментов и хороших записей.
 - communication/preference — как лучше говорить с человеком, если есть намёк в данных.`.trim();
@@ -120,13 +122,6 @@ function ruleBasedMerge(rows: UserMemoryRow[]): Array<{
       ),
     });
   }
-  const themes = byType.get("theme") ?? [];
-  if (themes.length) {
-    out.push({
-      memory_type: "theme",
-      content: normalizeSentence(`Жизненные темы: ${themes.join("; ")}.`),
-    });
-  }
   const prefs = [
     ...(byType.get("preference") ?? []),
     ...(byType.get("communication") ?? []),
@@ -139,16 +134,9 @@ function ruleBasedMerge(rows: UserMemoryRow[]): Array<{
       ),
     });
   }
-  const emo = byType.get("emotion") ?? [];
-  if (emo.length) {
-    out.push({
-      memory_type: "emotion",
-      content: normalizeSentence(
-        `Эмоциональный фон: ${emo.join("; ")}.`
-      ),
-    });
-  }
-  return out.filter((x) => x.content.length >= CROSS_MEMORY_MIN_CHARS);
+  return filterCrossMemoryCandidates(out).filter(
+    (x) => x.content.length >= CROSS_MEMORY_MIN_CHARS
+  ) as Array<{ memory_type: CrossMemoryType; content: string }>;
 }
 
 function needsFullRebuild(rows: UserMemoryRow[]): boolean {
@@ -217,6 +205,8 @@ export async function consolidateUserLifeMemoryRows(
     if (isLifeMemoryFragment(c.content)) return false;
     return !known.some((k) => similarMemory(k, c.content));
   });
+
+  toInsert = filterCrossMemoryCandidates(toInsert) as typeof toInsert;
 
   if (!toInsert.length) {
     toInsert = ruleBasedMerge(sourceRows).filter(

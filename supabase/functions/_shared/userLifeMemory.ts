@@ -13,6 +13,13 @@ import {
 } from "./memory.ts";
 import { estimateTokens } from "./cost.ts";
 import type { OpenRouterUsagePayload } from "./usageAnalytics.ts";
+import {
+  filterCrossMemoryCandidates,
+  filterCrossMemoryRowsForInjection,
+  isBlockedCrossMemoryContent,
+  isStableLifeFact,
+  isStablePeopleFact,
+} from "./crossMemoryPolicy.ts";
 
 export const CROSS_MEMORY_MIN_CHARS = 40;
 export const CROSS_MEMORY_MAX_CHARS = 420;
@@ -64,23 +71,18 @@ export function isLifeMemoryFragment(s: string): boolean {
 }
 
 function mergePeopleToSentence(items: string[]): string | null {
-  const parts = items.map((s) => s.trim()).filter(Boolean);
+  const parts = items.map((s) => s.trim()).filter((s) => s && isStablePeopleFact(s));
   if (!parts.length) return null;
   const long = parts.find((p) => !isLifeMemoryFragment(p));
   if (long) return normalizeSentence(long);
   return normalizeSentence(
-    `В жизни пользователя значимы люди: ${parts.join(", ")} — их стоит помнить в разговорах.`
+    `В жизни пользователя значимы люди: ${parts.join(", ")}.`
   );
 }
 
-function mergeThemesToSentence(items: string[]): string | null {
-  const parts = items.map((s) => s.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  const long = parts.find((p) => !isLifeMemoryFragment(p));
-  if (long) return normalizeSentence(long);
-  return normalizeSentence(
-    `Повторяющиеся жизненные темы: ${parts.join("; ")}.`
-  );
+/** @deprecated themes no longer promoted to cross-memory */
+function mergeThemesToSentence(_items: string[]): string | null {
+  return null;
 }
 
 function mergePreferencesToSentence(items: string[]): string | null {
@@ -98,34 +100,24 @@ function mergePreferencesToSentence(items: string[]): string | null {
   );
 }
 
-function mergeEmotionalToSentence(items: string[]): string | null {
-  const parts = items.map((s) => s.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  const long = parts.find((p) => !isLifeMemoryFragment(p));
-  if (long) return normalizeSentence(long);
-  return normalizeSentence(
-    `Эмоциональный фон, который часто присутствует: ${parts.join("; ")}.`
-  );
+/** @deprecated emotional_state no longer promoted to cross-memory */
+function mergeEmotionalToSentence(_items: string[]): string | null {
+  return null;
 }
 
-/** Rule-based: turn chat summary bullets into cross-memory sentences. */
+/** Rule-based: stable profile + contact prefs only (no themes/emotions/crises). */
 export function buildCrossMemoryCandidates(
   memory: StructuredMemory
 ): CrossMemoryCandidate[] {
   const out: CrossMemoryCandidate[] = [];
 
   const people = mergePeopleToSentence(memory.people);
-  if (people) {
+  if (people && !isBlockedCrossMemoryContent(people)) {
     out.push({ memory_type: "life_context", content: people, importance: 4 });
   }
 
-  const themes = mergeThemesToSentence(memory.themes);
-  if (themes) {
-    out.push({ memory_type: "theme", content: themes, importance: 3 });
-  }
-
   const prefs = mergePreferencesToSentence(memory.preferences);
-  if (prefs) {
+  if (prefs && !isBlockedCrossMemoryContent(prefs)) {
     out.push({
       memory_type: "communication",
       content: prefs,
@@ -133,23 +125,17 @@ export function buildCrossMemoryCandidates(
     });
   }
 
-  const emotion = mergeEmotionalToSentence(memory.emotional_state);
-  if (emotion) {
-    out.push({ memory_type: "emotion", content: emotion, importance: 3 });
-  }
-
   for (const ev of memory.important_events.slice(0, 2)) {
     const t = ev.trim();
-    if (t.length >= CROSS_MEMORY_MIN_CHARS && !isLifeMemoryFragment(t)) {
-      out.push({
-        memory_type: "insight",
-        content: normalizeSentence(t),
-        importance: 4,
-      });
-    }
+    if (!isStableLifeFact(t)) continue;
+    out.push({
+      memory_type: "life_context",
+      content: normalizeSentence(t),
+      importance: 4,
+    });
   }
 
-  return out;
+  return filterCrossMemoryCandidates(out) as CrossMemoryCandidate[];
 }
 
 export function buildLifeMemorySynthesisPrompt(
@@ -157,11 +143,11 @@ export function buildLifeMemorySynthesisPrompt(
   existingContents: string[]
 ): string {
   const snapshot = {
-    people: memory.people,
-    themes: memory.themes,
+    people: memory.people.filter((p) => isStablePeopleFact(p)),
     preferences: memory.preferences,
-    emotional_state: memory.emotional_state,
-    important_events: memory.important_events.slice(0, 3),
+    important_events: memory.important_events
+      .filter((e) => isStableLifeFact(e))
+      .slice(0, 2),
   };
 
   const existingBlock =
@@ -171,29 +157,28 @@ export function buildLifeMemorySynthesisPrompt(
 
   return `Ты формируешь СКВОЗНУЮ ПАМЯТЬ о пользователе (между разными беседами).
 
-Это НЕ память одного чата. Нужны связные предложения о жизни человека, а не отдельные слова.
+Только СТАБИЛЬНЫЙ ПРОФИЛЬ и ПРЕДПОЧТЕНИЯ КОНТАКТА. Не переноси темы беседы, эмоции, кризисы, конфликты, страхи.
 
 Черновик из последней беседы (JSON):
 ${JSON.stringify(snapshot)}
 
 ${existingBlock}
 
-Верни ТОЛЬКО JSON-массив (0–3 элемента), без markdown:
+Верни ТОЛЬКО JSON-массив (0–2 элемента), без markdown:
 [
   {
-    "memory_type": "communication|preference|life_context|theme|emotion|insight",
+    "memory_type": "communication|preference|life_context",
     "content": "полное предложение 40–280 символов"
   }
 ]
 
 Правила:
-- content — цельное предложение: контекст жизни, стиль общения, что помогает/мешает, ценности, отношения.
-- Не перечисляй слова через запятую без связи.
-- communication/preference — как говорить с человеком (темп, тон, глубина, что беречь).
-- life_context/insight — устойчивые факты жизни.
-- theme/emotion — повторяющиеся сюжеты и эмоциональный фон.
+- life_context — устойчивые факты профиля (семья как факт, город, работа, проект), без сюжета беседы.
+- communication/preference — как говорить с человеком (тон, слова, что помогает).
+- НЕЛЬЗЯ: темы, эмоции, страхи, кризисы, «переживает», «сепарация», «предательство», текущие конфликты.
+- Пример можно: «У пользователя есть сын.» Нельзя: «Переживает сепарацию с сыном.»
 - Только подтверждённое из черновика. Не выдумывай.
-- Не дублируй уже записанное. Если факт уточнён (проживание, отношения) — одна актуальная формулировка.`.trim();
+- Не дублируй уже записанное.`.trim();
 }
 
 export function parseLifeMemoryFromModel(raw: string): CrossMemoryCandidate[] {
@@ -208,9 +193,6 @@ export function parseLifeMemoryFromModel(raw: string): CrossMemoryCandidate[] {
     }>;
     const allowed: CrossMemoryType[] = [
       "preference",
-      "insight",
-      "theme",
-      "emotion",
       "communication",
       "life_context",
     ];
@@ -218,17 +200,19 @@ export function parseLifeMemoryFromModel(raw: string): CrossMemoryCandidate[] {
     for (const row of arr) {
       const content = normalizeSentence(row.content ?? "");
       if (!content || isLifeMemoryFragment(content)) continue;
-      const rawType = String(row.memory_type ?? "insight").split("|")[0].trim();
+      if (isBlockedCrossMemoryContent(content)) continue;
+      const rawType = String(row.memory_type ?? "life_context").split("|")[0].trim();
       const memory_type = allowed.includes(rawType as CrossMemoryType)
         ? (rawType as CrossMemoryType)
-        : "insight";
+        : null;
+      if (!memory_type) continue;
       out.push({
         memory_type,
         content,
         importance: TYPE_IMPORTANCE[memory_type],
       });
     }
-    return out.slice(0, 6);
+    return filterCrossMemoryCandidates(out).slice(0, 3) as CrossMemoryCandidate[];
   } catch {
     return [];
   }
@@ -309,7 +293,7 @@ export async function refreshUserLifeMemory(
   const existing = (existingRows ?? []).map((r) => (r.content as string).trim());
   const known = new Set(existing.map((c) => c.toLowerCase()));
 
-  const candidates = buildCrossMemoryCandidates(memory);
+  const candidates = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
 
   if (model?.apiKey) {
     try {
@@ -341,7 +325,9 @@ export async function refreshUserLifeMemory(
           modelOutput: text,
           usage: data.usage as OpenRouterUsagePayload | undefined,
         });
-        candidates.push(...parseLifeMemoryFromModel(text));
+        candidates.push(
+          ...filterCrossMemoryCandidates(parseLifeMemoryFromModel(text))
+        );
       }
     } catch (e) {
       console.warn("[userLifeMemory] synthesis model failed:", e);
@@ -377,22 +363,20 @@ export async function refreshUserLifeMemory(
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  communication: "Как говорить с человеком",
-  preference: "Предпочтения",
-  life_context: "Контекст жизни",
-  insight: "Важное",
-  theme: "Жизненные темы",
-  emotion: "Эмоциональный фон",
+  communication: "Стиль общения",
+  preference: "Предпочтения контакта",
+  life_context: "Факты профиля",
 };
 
-/** Rich block for system prompt (cross-memory only). */
+/** Rich block for system prompt (cross-memory only — filtered types). */
 export function formatCrossMemoryForPrompt(
   items: Array<{ memory_type: string; content: string }>
 ): string {
-  if (!items.length) return "";
+  const filtered = filterCrossMemoryRowsForInjection(items);
+  if (!filtered.length) return "";
 
   const grouped = new Map<string, string[]>();
-  for (const i of items) {
+  for (const i of filtered) {
     const label = TYPE_LABELS[i.memory_type] ?? i.memory_type;
     const list = grouped.get(label) ?? [];
     list.push(i.content.trim());
@@ -400,8 +384,8 @@ export function formatCrossMemoryForPrompt(
   }
 
   const lines: string[] = [
-    "СКВОЗНАЯ ПАМЯТЬ (между беседами — связный контекст жизни пользователя):",
-    "Это не список слов. Цельные факты, стиль общения, темы жизни. Учитывай деликатно.",
+    "СКВОЗНАЯ ПАМЯТЬ (между беседами — стабильный профиль и стиль общения):",
+    "Только устойчивые факты и предпочтения контакта. Не подставляй сюжеты и эмоции других бесед.",
   ];
 
   for (const [label, sentences] of grouped) {

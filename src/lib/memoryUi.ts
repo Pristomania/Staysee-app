@@ -22,19 +22,19 @@ export const MEMORY_FIELD_LABELS: Record<MemoryFieldKey, string> = {
 };
 
 export const GLOBAL_MEMORY_TYPE_LABELS: Record<string, string> = {
-  communication: 'Как говорить с человеком',
-  preference: 'Предпочтения',
-  life_context: 'Контекст жизни',
-  insight: 'Важное',
-  theme: 'Жизненные темы',
-  emotion: 'Эмоциональный фон',
+  communication: 'Стиль общения',
+  preference: 'Что помогает в контакте',
+  life_context: 'Факты профиля',
+  insight: 'Устаревшее',
+  theme: 'Устаревшее',
+  emotion: 'Устаревшее',
 };
 
 export const GLOBAL_MEMORY_PLACEHOLDER =
-  'Цельное предложение: контекст жизни, стиль общения, что важно помнить между беседами';
+  'Устойчивый факт или предпочтение контакта: «предпочитает прямой тон», «есть сын», «живёт в…»';
 
 export const GLOBAL_MEMORY_HINT =
-  'Сквозная память — связные фразы о вас, а не отдельные слова. Память беседы остаётся короче и привязана к одному чату.';
+  'Сквозная память — только стабильный профиль и как с вами говорить. Темы и эмоции бесед остаются в каждом чате отдельно.';
 
 export function emptyMemory(): StructuredMemory {
   return {

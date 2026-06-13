@@ -28,6 +28,7 @@ import {
 } from "./conversationRetrieval.ts";
 import { fetchCrossMemoryEnabled } from "./profilePrefs.ts";
 import { formatCrossMemoryForPrompt } from "./userLifeMemory.ts";
+import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -227,7 +228,8 @@ export function buildContextPrompt(packet: ContextPacket): string {
   if (memoryBlock) parts.push(memoryBlock);
 
   if (packet.memoryItems.length > 0) {
-    const crossBlock = formatCrossMemoryForPrompt(packet.memoryItems);
+    const injectable = filterCrossMemoryRowsForInjection(packet.memoryItems);
+    const crossBlock = formatCrossMemoryForPrompt(injectable);
     if (crossBlock) parts.push(crossBlock);
   }
 
