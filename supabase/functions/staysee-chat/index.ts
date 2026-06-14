@@ -528,12 +528,13 @@ Deno.serve(async (req: Request) => {
 
     // ── L7: Dynamic response budget + model call ─────────────────────────────
 
-    let { depth: responseDepth, maxTokens: outputBudget } = computeResponseBudget(
+    const responseBudget = computeResponseBudget(
       message,
       safety.category,
       modelMessages,
       userTier
     );
+    let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
     const holdThreadRole =
       safety.threadEscalated ||
       safety.insistenceLoop ||
@@ -554,7 +555,13 @@ Deno.serve(async (req: Request) => {
     const turnModel = modelRoute.model;
 
     console.log(
-      `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget}`
+      `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} ` +
+        `depth_meta=${JSON.stringify({
+          depth: responseDepth,
+          depthReason: responseBudget.depthReason,
+          recentUserTurns: responseBudget.recentUserTurns,
+          emotionalMomentum: responseBudget.emotionalMomentum,
+        })}`
     );
 
     let result = await callModel(

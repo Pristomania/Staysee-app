@@ -6,11 +6,30 @@
 import type { UsageTier } from "./cost.ts";
 import { TIER_CONFIG } from "./cost.ts";
 import type { SafetyCategory } from "./safety.ts";
+import {
+  analyzeEmotionalTrajectory,
+  analyzeResponseDepth,
+  detectResponseDepth,
+  type DepthReason,
+  type EmotionalTrajectory,
+  type ResponseDepth,
+  type ResponseDepthAnalysis,
+} from "./responseDepthTrajectory.ts";
 
-export type ResponseDepth = "brief" | "medium" | "deep";
+export type {
+  DepthReason,
+  EmotionalTrajectory,
+  ResponseDepth,
+  ResponseDepthAnalysis,
+};
 
-export interface ResponseBudget {
-  depth: ResponseDepth;
+export {
+  analyzeEmotionalTrajectory,
+  analyzeResponseDepth,
+  detectResponseDepth,
+};
+
+export interface ResponseBudget extends ResponseDepthAnalysis {
   maxTokens: number;
 }
 
@@ -22,80 +41,18 @@ const DEPTH_TOKEN_TARGET: Record<ResponseDepth, number> = {
   deep: 1200,
 };
 
-const BRIEF_GREETING = /^(привет|здравствуй|здравствуйте|добрый|доброе|хай|hello|hi|hey)\b/i;
-const BRIEF_THANKS = /^(спасибо|благодарю|thanks|thank you)\b/i;
-const BRIEF_SHORT = /^(да|нет|ок|okay|ладно|понятно|ясно)\s*!?\s*$/i;
-const CONTINUE = /^(дальше|продолжай|продолжи|ещё|еще|continue)\b/i;
-
-const REDO_REQUEST =
-  /^(давай\s+(ещ[её]\s+)?раз|ещ[её]\s+раз|повтори|по-новому|заново|переформулируй|скажи иначе)/i;
-
-const DEEP_EMOTIONAL = [
-  /грустн|грусть|тоск|тревог|тревож|страх|боюсь|страшно/i,
-  /одинок|устал|устала|выгоран|больно|плачу|рыдаю/i,
-  /не могу|не знаю что делать|не выдерживаю|на пределе/i,
-  /отношен|развод|предал|предала|потерял|потеряла|умер|смерть/i,
-  /травм|депресс|паник|кризис|смысл жизни/i,
-  /выговориться|разобраться|что со мной/i,
-];
-
-export function detectResponseDepth(
-  message: string,
-  safetyCategory: SafetyCategory,
-  recentHistory: Array<{ role: string; content: string }>
-): ResponseDepth {
-  const trimmed = message.trim();
-  const len = trimmed.length;
-  const words = trimmed.split(/\s+/).filter(Boolean).length;
-
-  if (CONTINUE.test(trimmed)) return "brief";
-  if (REDO_REQUEST.test(trimmed)) return "brief";
-
-  if (safetyCategory === "off_topic") return "brief";
-  if (safetyCategory === "boundary_pressure") return "brief";
-  if (safetyCategory === "medical_boundary") return "brief";
-  if (safetyCategory === "legal_financial_boundary") return "brief";
-  if (safetyCategory === "crisis") return "deep";
-
-  if (
-    len < 40 ||
-    (words <= 8 && (BRIEF_GREETING.test(trimmed) || BRIEF_THANKS.test(trimmed) || BRIEF_SHORT.test(trimmed)))
-  ) {
-    return "brief";
-  }
-
-  const recentUserText = recentHistory
-    .filter((m) => m.role === "user")
-    .slice(-4)
-    .map((m) => m.content)
-    .join(" ");
-  const threadDepth =
-    recentHistory.length >= 6 &&
-    (recentUserText.length > 500 || recentHistory.filter((m) => m.role === "user").length >= 4);
-
-  const emotional = DEEP_EMOTIONAL.some((p) => p.test(trimmed) || p.test(recentUserText));
-  const isLong = len >= 260 || words >= 48;
-
-  if (threadDepth && emotional) return "deep";
-  if (emotional && (isLong || words >= 20)) return "deep";
-
-  if (len < 100 && words < 18) return "brief";
-
-  return "medium";
-}
-
 export function computeResponseBudget(
   message: string,
   safetyCategory: SafetyCategory,
   recentHistory: Array<{ role: string; content: string }>,
   tier: UsageTier
 ): ResponseBudget {
-  const depth = detectResponseDepth(message, safetyCategory, recentHistory);
+  const analysis = analyzeResponseDepth(message, safetyCategory, recentHistory);
   const tierCeiling = TIER_CONFIG[tier].maxTokensOutput;
-  const target = DEPTH_TOKEN_TARGET[depth];
+  const target = DEPTH_TOKEN_TARGET[analysis.depth];
   const maxTokens = Math.min(tierCeiling, target);
 
-  return { depth, maxTokens };
+  return { ...analysis, maxTokens };
 }
 
 /** Tokens for each automatic continuation segment — short, not another essay. */
