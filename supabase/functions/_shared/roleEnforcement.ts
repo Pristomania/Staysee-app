@@ -27,6 +27,12 @@ import {
 
 export type { ChatTurn };
 
+/**
+ * Boundary fallback replacement disabled temporarily.
+ * Role boundaries should be handled by prompt guidance, not deterministic overwrite.
+ */
+export const BOUNDARY_FALLBACK_REPLACEMENT_ENABLED = false;
+
 const CATEGORY_RANK: Record<SafetyCategory, number> = {
   crisis: 100,
   boundary_pressure: 90,
@@ -324,6 +330,14 @@ export function enforceRoleBoundedReply(
   }
 
   const strictThread = Boolean(opts?.threadEscalated);
+
+  if (!BOUNDARY_FALLBACK_REPLACEMENT_ENABLED) {
+    if (strictThread && trimmed.length > 520) {
+      return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
+    }
+    return trimmed;
+  }
+
   const bounded =
     BOUNDED_CATEGORIES.includes(category) || Boolean(opts?.insistenceLoop);
 
