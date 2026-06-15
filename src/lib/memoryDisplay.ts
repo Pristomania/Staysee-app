@@ -3,9 +3,9 @@ import type { MemoryFieldKey, StructuredMemory } from './memoryUi';
 /** UI-only section ids — backend field keys unchanged. */
 export type MemoryDisplaySectionId =
   | 'people'
-  | 'happening'
-  | 'important'
-  | 'touching'
+  | 'facts'
+  | 'preferences'
+  | 'themes'
   | 'open';
 
 export interface MemoryDisplaySection {
@@ -17,22 +17,22 @@ export interface MemoryDisplaySection {
 
 export const MEMORY_DISPLAY_SECTIONS: MemoryDisplaySection[] = [
   { id: 'people', label: 'Люди', fields: ['people'], defaultOpen: true },
+  { id: 'facts', label: 'Факты', fields: ['important_events'], defaultOpen: true },
   {
-    id: 'happening',
-    label: 'Что сейчас происходит',
-    fields: ['themes', 'important_events'],
-    defaultOpen: true,
-  },
-  { id: 'important', label: 'Что важно', fields: ['preferences'], defaultOpen: false },
-  {
-    id: 'touching',
-    label: 'Что задевает',
-    fields: ['emotional_state', 'risks'],
+    id: 'preferences',
+    label: 'Предпочтения общения',
+    fields: ['preferences'],
     defaultOpen: false,
   },
   {
+    id: 'themes',
+    label: 'Актуальные темы беседы',
+    fields: ['themes'],
+    defaultOpen: true,
+  },
+  {
     id: 'open',
-    label: 'Незавершённые темы',
+    label: 'Незавершённое',
     fields: ['open_loops'],
     defaultOpen: false,
   },
@@ -41,9 +41,9 @@ export const MEMORY_DISPLAY_SECTIONS: MemoryDisplaySection[] = [
 /** Target field when user adds via a display section. */
 export const ADD_FIELD_FOR_SECTION: Record<MemoryDisplaySectionId, MemoryFieldKey> = {
   people: 'people',
-  happening: 'themes',
-  important: 'preferences',
-  touching: 'emotional_state',
+  facts: 'important_events',
+  preferences: 'preferences',
+  themes: 'themes',
   open: 'open_loops',
 };
 

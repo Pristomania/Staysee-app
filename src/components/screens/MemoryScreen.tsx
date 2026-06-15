@@ -33,17 +33,28 @@ import {
 } from '../../lib/crossMemoryPolicy';
 import {
   ADD_FIELD_FOR_SECTION,
-  collectSectionItems,
   initialSectionOpenState,
   MEMORY_DISPLAY_SECTIONS,
   type MemoryDisplaySectionId,
   type MemoryListItemRef,
 } from '../../lib/memoryDisplay';
+import {
+  collectDisplaySectionItems,
+  displayMemoryHasContent,
+  legacyRawToDisplayMemory,
+  MEMORY_EMPTY_DISPLAY_MESSAGE,
+  normalizeMemoryForDisplay,
+} from '../../lib/normalizeMemoryForDisplay';
 import type { Conversation, UserMemory } from '../../types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 type ConvOption = Pick<Conversation, 'id' | 'title'>;
+
+function sectionLabelForField(field: MemoryFieldKey): string {
+  const section = MEMORY_DISPLAY_SECTIONS.find((s) => ADD_FIELD_FOR_SECTION[s.id] === field);
+  return section?.label ?? MEMORY_FIELD_LABELS[field];
+}
 
 function ConversationMemoryActions({
   convMemory,
@@ -72,7 +83,7 @@ function ConversationMemoryActions({
     return (
       <div className={`${cardBase} px-4 py-3.5`}>
         <p className={`${theme.textPrimary} text-sm font-light mb-2`}>
-          Добавить в «{MEMORY_FIELD_LABELS[addField]}»
+          Добавить в «{sectionLabelForField(addField)}»
         </p>
         <input
           value={addDraft}
@@ -185,7 +196,7 @@ function CollapsibleMemoryDisplaySection({
         type="button"
         onClick={onToggle}
         aria-expanded={isOpen}
-        className={`${cardClass} w-full px-4 py-3 flex items-center justify-between gap-3 text-left`}
+        className={`${cardClass} w-full px-4 py-2.5 flex items-center justify-between gap-3 text-left`}
       >
         <span className={`${theme.textPrimary} text-sm font-light`}>
           {label}
@@ -197,8 +208,8 @@ function CollapsibleMemoryDisplaySection({
         />
       </button>
       {isOpen && (
-        <div className={`${cardClass} border-t-0 rounded-t-none px-4 pb-4 pt-2 -mt-px`}>
-          <ul className="space-y-2">
+        <div className={`${cardClass} border-t-0 rounded-t-none px-4 pb-3 pt-1.5 -mt-px`}>
+          <ul className="space-y-1.5">
             {items.map((item) => {
               const key = itemKey(item);
               return (
@@ -295,6 +306,19 @@ export function MemoryScreen() {
     () => partitionCrossMemoryRows(globalRows),
     [globalRows],
   );
+
+  const editableSourceMemory = useMemo((): StructuredMemory => {
+    if (convMemory) return convMemory;
+    if (legacyRaw) return legacyRawToDisplayMemory(legacyRaw);
+    return emptyMemory();
+  }, [convMemory, legacyRaw]);
+
+  const displayMemory = useMemo(
+    () => normalizeMemoryForDisplay(editableSourceMemory),
+    [editableSourceMemory],
+  );
+
+  const hasDisplayContent = displayMemoryHasContent(displayMemory);
 
   const cardBase = [
     'w-full rounded-xl border transition-all duration-300',
@@ -414,9 +438,10 @@ export function MemoryScreen() {
   }
 
   function patchConvField(field: MemoryFieldKey, updater: (arr: string[]) => string[]) {
-    const base = convMemory ?? emptyMemory();
+    const base = editableSourceMemory;
     const next = { ...base, [field]: updater(base[field]) };
     setConvMemory(next);
+    setLegacyRaw(null);
     void saveConversationMemory(next);
   }
 
@@ -529,7 +554,7 @@ export function MemoryScreen() {
             <section className="mb-8">
               <p className={sectionLabel}>Память беседы</p>
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-                Краткие пункты по одному чату: люди, темы, события.
+                Устойчивые факты и ориентиры по этой беседе — без лишних деталей диалога.
               </p>
               <div className="mb-4">
                 <ConversationScopePicker
@@ -542,30 +567,17 @@ export function MemoryScreen() {
 
               {selectedConvId && (
                 <>
-                {legacyRaw && (
-                  <div className={`${cardBase} px-4 py-3.5 mb-2`}>
-                    <p className={`${theme.textSecondary} text-[13px] font-light leading-[1.7] whitespace-pre-wrap`}>
-                      {legacyRaw}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void clearConversationMemory()}
-                      className={`mt-3 ${theme.textMuted} text-xs underline underline-offset-2`}
-                    >
-                      Очистить память беседы
-                    </button>
-                  </div>
-                )}
-
-                {(convMemory ?? emptyMemory()) && (
-                  <div className="space-y-2">
+                <div className="space-y-1.5">
                     {MEMORY_DISPLAY_SECTIONS.map((section) => (
                       <CollapsibleMemoryDisplaySection
                         key={section.id}
                         label={section.label}
                         isOpen={sectionOpen[section.id]}
                         onToggle={() => toggleSection(section.id)}
-                        items={collectSectionItems(convMemory ?? emptyMemory(), section.fields)}
+                        items={collectDisplaySectionItems(
+                          editableSourceMemory,
+                          ADD_FIELD_FOR_SECTION[section.id],
+                        )}
                         cardClass={cardBase}
                         theme={theme}
                         onChange={(fieldKey, i, v) =>
@@ -581,18 +593,18 @@ export function MemoryScreen() {
                       />
                     ))}
 
-                    {convMemory && !memoryHasContent(convMemory) && !legacyRaw && (
-                      <div className={`${cardBase} px-4 py-4`}>
+                    {!hasDisplayContent && (
+                      <div className={`${cardBase} px-4 py-3.5`}>
                         <p className={`${theme.textMuted} text-sm font-light leading-relaxed`}>
                           {memoryWasReset
                             ? 'Память этой беседы была случайно сброшена при обновлении. Сейчас восстанавливаем её из истории сообщений — обновите страницу через минуту или напишите в чат ещё одно сообщение.'
-                            : 'Пока здесь пусто. Память появится после нескольких сообщений в беседе.'}
+                            : MEMORY_EMPTY_DISPLAY_MESSAGE}
                         </p>
                       </div>
                     )}
 
                     <ConversationMemoryActions
-                      convMemory={convMemory ?? emptyMemory()}
+                      convMemory={editableSourceMemory}
                       legacyRaw={legacyRaw}
                       addField={addField}
                       setAddField={setAddField}
@@ -614,7 +626,6 @@ export function MemoryScreen() {
                       <p className="text-red-400/80 text-xs mt-2">Не удалось сохранить</p>
                     )}
                   </div>
-                )}
                 </>
               )}
             </section>
