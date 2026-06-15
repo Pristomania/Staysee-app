@@ -27,6 +27,8 @@ ${escapeTemplateLiteral(raw)}
 
 mkdirSync(outDir, { recursive: true });
 
+const rollbackV21 = process.argv.includes("--rollback-v21");
+
 emitModule(
   "VOICE_BLOCK",
   "docs/VOICE_OF_STAYSEE.md",
@@ -34,12 +36,16 @@ emitModule(
   "/** StaySee Voice layer — bundled for Supabase Edge (no filesystem reads). */",
 );
 
-emitModule(
-  "CONSTITUTION_V21",
-  "docs/CONSTITUTION_FULL_V2_1.md",
-  "constitutionV21.ts",
-  "/** StaySee Constitution v2.1 — bundled for Supabase Edge (no filesystem reads). */",
-);
+if (rollbackV21) {
+  emitModule(
+    "CONSTITUTION_V21",
+    "docs/CONSTITUTION_FULL_V2_1.md",
+    "constitutionV21.ts",
+    "/** ROLLBACK ONLY — Constitution v2.1. Not used by surgery1-v3-cognitive-v1. */",
+  );
+} else {
+  console.log("skip constitutionV21.ts (rollback: node scripts/generate-prompt-blocks.mjs --rollback-v21)");
+}
 
 emitModule(
   "CONSTITUTION_V3_BETA",

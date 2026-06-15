@@ -132,7 +132,7 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
 const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 // ── Static prompt layers (built once at cold start) ───────────────────────────
-// SURGERY1: identity + voice + constitution v2.1 + constraints — surgery1Prompt.ts
+// SURGERY1 v3-cognitive: identity + voice v3 + constitution v3 + cognitive signature — surgery1Prompt.ts
 // Per-turn: evaluateTurnSafety (roleEnforcement) + memory context + time gap
 
 const BASE_PROMPT = buildSurgery1BasePrompt();
