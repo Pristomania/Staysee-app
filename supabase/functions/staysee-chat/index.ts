@@ -13,6 +13,7 @@ import {
   collectMemoryCorrectionHints,
   fetchTranscriptForSummary,
   getConversationSummary,
+  getParsedMemory,
   isSummaryStale,
   shouldEagerRefreshSummary,
   shouldUpdateConversationSummary,
@@ -55,6 +56,11 @@ import {
   buildExplicitClosureTurnGuidance,
   explicitClosureGuidanceInjected,
 } from "../_shared/explicitClosureTurnGuidance.ts";
+import { detectUserGrammaticalGender } from "../_shared/userGrammaticalGender.ts";
+import {
+  buildUserGenderTurnGuidance,
+  userGenderGuidanceInjected,
+} from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import {
   AUTO_CONTINUE_USER_PROMPT,
@@ -519,6 +525,39 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, safety.systemGuidance].join("\n\n");
     }
 
+    const genderMessages =
+      historyMessages[historyMessages.length - 1]?.content === message
+        ? historyMessages
+        : [...historyMessages, { role: "user" as const, content: message }];
+    const userTurnCount = genderMessages.filter((m) => m.role === "user").length;
+    const parsedMem = packetForSummary?.conversationMeta
+      ? getParsedMemory(packetForSummary.conversationMeta)
+      : null;
+    const genderResult = detectUserGrammaticalGender({
+      messages: genderMessages,
+      conversationPreferences: parsedMem?.preferences ?? [],
+      crossMemoryItems: (packetForSummary?.memoryItems ?? []).map((m) => ({
+        memory_type: m.memory_type,
+        content: m.content,
+      })),
+    });
+    const genderGuidanceOptions = {
+      safetyCategory: safety.category,
+      message,
+      userTurnCount,
+    };
+    const genderGuidance = buildUserGenderTurnGuidance(
+      genderResult,
+      genderGuidanceOptions
+    );
+    const genderGuidanceOn = userGenderGuidanceInjected(
+      genderResult,
+      genderGuidanceOptions
+    );
+    if (genderGuidance) {
+      systemPrompt = [systemPrompt, genderGuidance].join("\n\n");
+    }
+
     const timeGapPrompt = buildTimeGapPrompt(timeGap);
     if (timeGapPrompt) {
       systemPrompt = [systemPrompt, timeGapPrompt].join("\n\n");
@@ -595,6 +634,9 @@ Deno.serve(async (req: Request) => {
           emotionalMomentum: responseBudget.emotionalMomentum,
           uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
           explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
+          userGenderGuidanceInjected: genderGuidanceOn,
+          userGrammaticalGender: genderResult.gender,
+          userGenderSource: genderResult.source,
         })}`
     );
 
