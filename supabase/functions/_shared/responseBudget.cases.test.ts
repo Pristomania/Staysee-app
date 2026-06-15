@@ -141,12 +141,34 @@ const cases: Case[] = [
     oldDepth: "brief",
   },
   {
-    name: "9. isolated не знаю → brief",
+    name: "9. isolated не знаю → uncertainty_in_process",
     history: [],
     message: "Не знаю",
-    expectedDepth: "brief",
-    expectedReason: "short_neutral",
+    expectedDepth: "medium",
+    expectedReason: "uncertainty_in_process",
     oldDepth: "brief",
+  },
+  {
+    name: "11. пока не знаю with arc → uncertainty_in_process",
+    history: buildHistory([
+      [
+        "сегодня впервые попросила мужчину остаться на ночь, в другой комнате",
+        "...",
+      ],
+      ["и то и другое важно", "..."],
+    ]),
+    message: "пока не знаю",
+    expectedDepth: "medium",
+    expectedReason: "uncertainty_in_process",
+  },
+  {
+    name: "12. да вот я и не знаю with arc → uncertainty_in_process",
+    history: buildHistory([
+      ["Мужчина остался ночевать, мне непривычно.", "..."],
+    ]),
+    message: "да вот я и не знаю",
+    expectedDepth: "medium",
+    expectedReason: "uncertainty_in_process",
   },
   {
     name: "10. work arc → пока не понятно → uncertainty_in_process",

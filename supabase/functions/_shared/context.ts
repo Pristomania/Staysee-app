@@ -17,9 +17,15 @@ import {
   collectMemoryCorrectionHints,
   countMessagesSinceSummary,
   getConversationSummary,
+  getParsedMemory,
   injectSummaryIntoPrompt,
   type ConversationMemoryMeta,
 } from "./memory.ts";
+import {
+  buildNarrativeContext,
+  formatNarrativeForPrompt,
+  type WeeklyReflection,
+} from "./narrativeEngine.ts";
 import {
   formatArchiveExcerptsForPrompt,
   formatUserEvidenceForPrompt,
@@ -75,6 +81,8 @@ export interface ContextPacket {
   archiveExcerpts: ArchiveExcerpt[];
   /** Verbatim user lines for recall / topic questions (this chat only). */
   userEvidenceQuotes: UserEvidenceQuote[];
+  /** Saved weekly dynamics snapshots for this conversation. */
+  weeklyReflections: WeeklyReflection[];
 }
 
 // ── Max limits ────────────────────────────────────────────────────────────────
@@ -86,6 +94,7 @@ export interface ContextPacket {
 const MAX_RECENT_MESSAGES = 40;
 /** Cross-memory: fewer rows, each is a full sentence. */
 const MAX_MEMORY_ITEMS = 8;
+const MAX_WEEKLY_REFLECTIONS = 3;
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
@@ -196,6 +205,31 @@ async function fetchMemoryItems(
   return (basic.data ?? []).map((r) => normalizeMemoryRow(r as Record<string, unknown>));
 }
 
+async function fetchWeeklyReflections(
+  supabase: ReturnType<typeof createClient>,
+  conversationId: string
+): Promise<WeeklyReflection[]> {
+  const { data, error } = await supabase
+    .from("progress_entries")
+    .select("content, created_at, entry_date")
+    .eq("conversation_id", conversationId)
+    .eq("entry_type", "weekly")
+    .order("entry_date", { ascending: false })
+    .limit(MAX_WEEKLY_REFLECTIONS);
+
+  if (error) {
+    console.warn("[context] fetchWeeklyReflections:", error.message);
+    return [];
+  }
+
+  return (data ?? [])
+    .map((r) => ({
+      content: (r.content ?? "").trim(),
+      created_at: (r.created_at as string | undefined) ?? undefined,
+    }))
+    .filter((r) => r.content.length > 0);
+}
+
 // ── Stamp memory items as used ────────────────────────────────────────────────
 
 export async function stampMemoryUsed(
@@ -227,11 +261,25 @@ export function buildContextPrompt(packet: ContextPacket): string {
   const parts: string[] = [];
   if (memoryBlock) parts.push(memoryBlock);
 
-  if (packet.memoryItems.length > 0) {
-    const injectable = filterCrossMemoryRowsForInjection(packet.memoryItems);
-    const crossBlock = formatCrossMemoryForPrompt(injectable);
+  const injectableCrossMemory =
+    packet.memoryItems.length > 0
+      ? filterCrossMemoryRowsForInjection(packet.memoryItems)
+      : [];
+
+  if (injectableCrossMemory.length > 0) {
+    const crossBlock = formatCrossMemoryForPrompt(injectableCrossMemory);
     if (crossBlock) parts.push(crossBlock);
   }
+
+  const narrativeBlock = formatNarrativeForPrompt(
+    buildNarrativeContext({
+      summary: getParsedMemory(meta) ?? undefined,
+      weekly: packet.weeklyReflections,
+      crossMemory: injectableCrossMemory,
+      recentMessages: packet.recentMessages,
+    })
+  );
+  if (narrativeBlock) parts.push(narrativeBlock);
 
   const evidenceBlock = formatUserEvidenceForPrompt(
     packet.userEvidenceQuotes ?? []
@@ -262,11 +310,13 @@ export async function buildContextPacket(
     global: { headers: { Authorization: `Bearer ${input.authToken}` } },
   });
 
-  const [conversationMeta, recentMessages, crossMemoryOn] = await Promise.all([
-    fetchConversationMeta(supabase, input.conversationId),
-    fetchRecentMessages(supabase, input.conversationId),
-    fetchCrossMemoryEnabled(supabase, input.userId),
-  ]);
+  const [conversationMeta, recentMessages, crossMemoryOn, weeklyReflections] =
+    await Promise.all([
+      fetchConversationMeta(supabase, input.conversationId),
+      fetchRecentMessages(supabase, input.conversationId),
+      fetchCrossMemoryEnabled(supabase, input.userId),
+      fetchWeeklyReflections(supabase, input.conversationId),
+    ]);
 
   const memoryItems = crossMemoryOn
     ? await fetchMemoryItems(supabase, input.userId)
@@ -289,5 +339,6 @@ export async function buildContextPacket(
     messagesSinceSummary,
     archiveExcerpts: [],
     userEvidenceQuotes: [],
+    weeklyReflections,
   };
 }

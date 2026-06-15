@@ -41,4 +41,18 @@ emitModule(
   "/** StaySee Constitution v2.1 — bundled for Supabase Edge (no filesystem reads). */",
 );
 
+emitModule(
+  "CONSTITUTION_V3_BETA",
+  "docs/CONSTITUTION_V3_BETA.md",
+  "constitutionV3Beta.ts",
+  "/** StaySee Constitution V3 Beta — bundled for Supabase Edge (no filesystem reads). */",
+);
+
+emitModule(
+  "COGNITIVE_SIGNATURE_V1",
+  "docs/COGNITIVE_SIGNATURE_V1.md",
+  "cognitiveSignature.ts",
+  "/** StaySee Cognitive Signature v1 — bundled for Supabase Edge (no filesystem reads). */",
+);
+
 console.log("OK → supabase/functions/_shared/promptBlocks/");

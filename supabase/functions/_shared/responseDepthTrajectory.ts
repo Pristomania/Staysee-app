@@ -12,6 +12,7 @@ export type DepthReason =
   | "greeting_short"
   | "short_neutral"
   | "uncertainty_in_process"
+  | "explicit_closure"
   | "recent_emotional_trajectory"
   | "emotional_momentum_deep"
   | "long_emotional"
@@ -57,8 +58,88 @@ const CONTINUE =
 const REDO_REQUEST =
   /^(давай\s+(ещ[её]\s+)?раз|ещ[её]\s+раз|повтори|по-новому|заново|переформулируй|скажи иначе)/i;
 
-const UNCERTAINTY_IN_PROCESS_RE =
-  /^(?:я\s+)?(?:не\s*знаю|пока\s+не\s+понятно|непонятно|сложно\s+сказать|не\s+чувствую|не\s+могу\s+понять|запуталась|не\s+уверена)(?:\s*[.!?…]*)?$/iu;
+/** Farewell / explicit exit — whole message or trailing clause after comma. */
+const EXPLICIT_CLOSURE_PATTERNS: RegExp[] = [
+  /^пока$/iu,
+  /^на\s+сегодня\s+хватит$/iu,
+  /^на\s+сегодня\s+вс[её]$/iu,
+  /^не\s+хочу\s+сейчас\s+говорить$/iu,
+  /^оставим$/iu,
+  /^закроем\s+тему$/iu,
+  /^пора\s+бежать$/iu,
+  /^побежала$/iu,
+  /^я\s+побежала$/iu,
+  /^побежал$/iu,
+  /^я\s+побежал$/iu,
+  /^убегаю$/iu,
+  /^я\s+убегаю$/iu,
+  /^надо\s+идти$/iu,
+  /^мне\s+надо\s+идти$/iu,
+  /^пойду$/iu,
+  /^я\s+пойду$/iu,
+  /^пойду\s+спать$/iu,
+  /^я\s+пойду\s+спать$/iu,
+  /^пойду\s+работать$/iu,
+  /^я\s+пойду\s+работать$/iu,
+  /^пойду\s+поработаю$/iu,
+  /^я\s+пойду\s+поработаю$/iu,
+  /^пойду\s+чай\s+пить$/iu,
+  /^я\s+пойду\s+чай\s+пить$/iu,
+  /^ладно,?\s+пойду$/iu,
+  /^ладно,?\s+я\s+пойду$/iu,
+  /^ладно,?\s+пойду\s+чай\s+пить$/iu,
+  /^до\s+связи$/iu,
+  /^увидимся$/iu,
+  /^мне\s+достаточно$/iu,
+  /^достаточно$/iu,
+  /^вс[её],?\s+я\s+ушла$/iu,
+  /^вс[её],?\s+я\s+ушел$/iu,
+  /^вс[её],?\s+я\s+ушёл$/iu,
+  /^вс[её],?\s+я\s+пошла$/iu,
+  /^вс[её],?\s+я\s+пошел$/iu,
+  /^вс[её],?\s+я\s+пошёл$/iu,
+];
+
+/** Strong uncertainty — may trigger in-process even without prior arc. */
+const STRONG_UNCERTAINTY_PHRASE_PATTERNS: RegExp[] = [
+  /^(?:даже\s+)?(?:я\s+)?не\s*знаю$/iu,
+  /^(?:я\s+)?пока\s+не\s*знаю$/iu,
+  /^(?:да\s+)?(?:вот\s+)?(?:я\s+)?(?:и\s+)?не\s*знаю$/iu,
+  /^пока\s+не\s+понятно$/iu,
+  /^пока\s+непонятно$/iu,
+  /^непонятно$/iu,
+  /^сложно\s+сказать$/iu,
+  /^(?:я\s+)?не\s+могу\s+понять$/iu,
+  /^(?:я\s+)?не\s+понимаю\s+пока$/iu,
+  /^сложно\s+понять$/iu,
+  /^неясно$/iu,
+  /^(?:я\s+)?не\s+чувствую(?:\s+пока)?$/iu,
+  /^(?:я\s+)?не\s+могу\s+почувствовать$/iu,
+  /^(?:я\s+)?запуталась$/iu,
+  /^(?:я\s+)?запутался$/iu,
+  /^(?:я\s+)?не\s+уверена$/iu,
+  /^(?:я\s+)?не\s+уверен$/iu,
+];
+
+/** Soft uncertainty — needs substantive prior arc. */
+const SOFT_UNCERTAINTY_PHRASE_PATTERNS: RegExp[] = [
+  /^наверное$/iu,
+  /^может\s+быть$/iu,
+  /^посмотрим$/iu,
+  /^странно$/iu,
+];
+
+function normalizeUncertaintyCandidate(message: string): string {
+  return message.trim().replace(/\s+/g, " ").replace(/[.!?…]+$/u, "").trim();
+}
+
+function matchesAnyPattern(text: string, patterns: RegExp[]): boolean {
+  return patterns.some((p) => p.test(text));
+}
+
+function closureClauseMatches(text: string): boolean {
+  return matchesAnyPattern(text, EXPLICIT_CLOSURE_PATTERNS);
+}
 
 const DEEP_EMOTIONAL = [
   /грустн|грусть|тоск|тревог|тревож|страх|боюсь|страшно/i,
@@ -142,20 +223,65 @@ function momentumAcrossMultipleTurns(turns: string[]): boolean {
   return hits >= 2;
 }
 
+export function isExplicitConversationClosure(message: string): boolean {
+  const t = normalizeUncertaintyCandidate(message);
+  if (!t) return false;
+  if (closureClauseMatches(t)) return true;
+
+  const parts = t.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1];
+    if (closureClauseMatches(last)) return true;
+  }
+  return false;
+}
+
+export function isStrongUncertaintyPhrase(message: string): boolean {
+  const t = normalizeUncertaintyCandidate(message);
+  if (!t || isExplicitConversationClosure(t)) return false;
+  return matchesAnyPattern(t, STRONG_UNCERTAINTY_PHRASE_PATTERNS);
+}
+
+export function isSoftUncertaintyPhrase(message: string): boolean {
+  const t = normalizeUncertaintyCandidate(message);
+  if (!t || isExplicitConversationClosure(t)) return false;
+  return matchesAnyPattern(t, SOFT_UNCERTAINTY_PHRASE_PATTERNS);
+}
+
+export function isUncertaintyPhrase(message: string): boolean {
+  return isStrongUncertaintyPhrase(message) || isSoftUncertaintyPhrase(message);
+}
+
+/** @deprecated alias */
 export function isUncertaintyInProcessMessage(message: string): boolean {
-  return UNCERTAINTY_IN_PROCESS_RE.test(message.trim());
+  return isUncertaintyPhrase(message);
 }
 
 /** Prior user turns with emotional/substantive arc (not isolated uncertainty). */
 export function hasSubstantivePriorArc(priorUserTurns: string[]): boolean {
   if (priorUserTurns.length === 0) return false;
-  return priorUserTurns.some(
-    (t) =>
-      turnHasEmotionalSignal(t) ||
-      (t.length >= 20 &&
-        /мужчин|ночевал|отношен|тревог|чувств|работа|боюсь|грустн|злюсь|непривычн|жив/i.test(
-          t
-        ))
+  return priorUserTurns.some((t) => turnHasSubstantiveSignal(t));
+}
+
+function turnHasSubstantiveSignal(text: string): boolean {
+  if (turnHasEmotionalSignal(text)) return true;
+  const t = text.trim();
+  if (t.length < 12 || BRIEF_GREETING.test(t) || BRIEF_SHORT.test(t)) return false;
+  if (t.length >= 20) return true;
+  return /по-новому|новому|непривычн|странн|интересн|сильно|думаю|чувств|муж|отношен|работ|тревог|грустн|злюсь|устал|боюсь|наблюд|голос|звучан|ночует|комнат|пространств/i.test(
+    t
+  );
+}
+
+function checkUncertaintyInProcess(
+  message: string,
+  priorUserTurns: string[]
+): boolean {
+  const trimmed = message.trim();
+  if (isExplicitConversationClosure(trimmed)) return false;
+  if (isStrongUncertaintyPhrase(trimmed)) return true;
+  return (
+    isSoftUncertaintyPhrase(trimmed) && hasSubstantivePriorArc(priorUserTurns)
   );
 }
 
@@ -183,9 +309,7 @@ export function analyzeEmotionalTrajectory(
     priorTurns.length > 0 &&
     priorTurns.some((t) => turnHasEmotionalSignal(t));
 
-  const uncertaintyInProcess =
-    isUncertaintyInProcessMessage(trimmed) &&
-    hasSubstantivePriorArc(priorTurns);
+  const uncertaintyInProcess = checkUncertaintyInProcess(trimmed, priorTurns);
 
   return {
     recentUserTurns,
@@ -216,6 +340,15 @@ export function analyzeResponseDepth(
     return {
       depth: "brief",
       depthReason: "continue_redo",
+      recentUserTurns: recentUserTurnCount,
+      emotionalMomentum: trajectory.emotionalMomentum,
+    };
+  }
+
+  if (isExplicitConversationClosure(trimmed)) {
+    return {
+      depth: "brief",
+      depthReason: "explicit_closure",
       recentUserTurns: recentUserTurnCount,
       emotionalMomentum: trajectory.emotionalMomentum,
     };

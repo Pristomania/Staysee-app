@@ -4,13 +4,14 @@
  * Replaces: identity.ts, gestalt.ts, methodology.ts, presence.ts,
  *           constitution.ts (short), safety.ts (static buildSafetyPrompt).
  *
- * Order: IDENTITY → VOICE → CONSTITUTION v2.1 → CONSTRAINTS
+ * Order: IDENTITY → VOICE → CONSTITUTION V3 Beta → COGNITIVE SIGNATURE V1 → CONSTRAINTS
  */
 
-import { CONSTITUTION_V21 } from "./promptBlocks/constitutionV21.ts";
+import { COGNITIVE_SIGNATURE_V1 } from "./promptBlocks/cognitiveSignature.ts";
+import { CONSTITUTION_V3_BETA } from "./promptBlocks/constitutionV3Beta.ts";
 import { VOICE_BLOCK } from "./promptBlocks/voiceBlock.ts";
 
-export const SURGERY1_LAYER_ID = "surgery1-v1";
+export const SURGERY1_LAYER_ID = "surgery1-v3-cognitive-v1";
 
 const IDENTITY_BLOCK = `
 ИДЕНТИЧНОСТЬ (внутреннее):
@@ -32,12 +33,19 @@ const CONSTRAINTS_BLOCK = `
 `.trim();
 
 export function buildSurgery1BasePrompt(): string {
-  return [IDENTITY_BLOCK, VOICE_BLOCK, CONSTITUTION_V21, CONSTRAINTS_BLOCK].join("\n\n");
+  return [
+    IDENTITY_BLOCK,
+    VOICE_BLOCK,
+    CONSTITUTION_V3_BETA,
+    COGNITIVE_SIGNATURE_V1,
+    CONSTRAINTS_BLOCK,
+  ].join("\n\n");
 }
 
 export const SURGERY1_BLOCKS = {
   identity: IDENTITY_BLOCK,
   voice: VOICE_BLOCK,
-  constitution: CONSTITUTION_V21,
+  constitution: CONSTITUTION_V3_BETA,
+  cognitiveSignature: COGNITIVE_SIGNATURE_V1,
   constraints: CONSTRAINTS_BLOCK,
 } as const;

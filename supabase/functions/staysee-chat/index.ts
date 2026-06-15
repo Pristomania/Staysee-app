@@ -47,6 +47,14 @@ import {
   computeResponseBudget,
   continuationTokenBudget,
 } from "../_shared/responseBudget.ts";
+import {
+  buildUncertaintyTurnGuidance,
+  uncertaintyGuidanceInjected,
+} from "../_shared/uncertaintyTurnGuidance.ts";
+import {
+  buildExplicitClosureTurnGuidance,
+  explicitClosureGuidanceInjected,
+} from "../_shared/explicitClosureTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import {
   AUTO_CONTINUE_USER_PROMPT,
@@ -547,6 +555,30 @@ Deno.serve(async (req: Request) => {
       outputBudget = Math.min(outputBudget, 300);
     }
 
+    const uncertaintyGuidance = buildUncertaintyTurnGuidance({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+    const uncertaintyGuidanceOn = uncertaintyGuidanceInjected({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+    if (uncertaintyGuidance) {
+      systemPrompt = [systemPrompt, uncertaintyGuidance].join("\n\n");
+    }
+
+    const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+    const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+    if (explicitClosureGuidance) {
+      systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
+    }
+
     const modelRoute = resolveChatModel({
       depth: responseDepth,
       safetyCategory: safety.category,
@@ -561,6 +593,8 @@ Deno.serve(async (req: Request) => {
           depthReason: responseBudget.depthReason,
           recentUserTurns: responseBudget.recentUserTurns,
           emotionalMomentum: responseBudget.emotionalMomentum,
+          uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
+          explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
         })}`
     );
 
