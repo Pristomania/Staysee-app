@@ -582,17 +582,6 @@ Deno.serve(async (req: Request) => {
       userTier
     );
     let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
-    const holdThreadRole =
-      safety.threadEscalated ||
-      safety.insistenceLoop ||
-      safety.category === "off_topic" ||
-      safety.category === "boundary_pressure" ||
-      safety.category === "medical_boundary";
-
-    if (holdThreadRole) {
-      responseDepth = "brief";
-      outputBudget = Math.min(outputBudget, 300);
-    }
 
     const uncertaintyGuidance = buildUncertaintyTurnGuidance({
       depthReason: responseBudget.depthReason,
@@ -673,7 +662,6 @@ Deno.serve(async (req: Request) => {
     };
 
     while (
-      !holdThreadRole &&
       result.content?.trim() &&
       autoContinueSegments < MAX_AUTO_CONTINUE_SEGMENTS &&
       needsAutoContinue(result.content, result.finishReason)
@@ -707,7 +695,6 @@ Deno.serve(async (req: Request) => {
     }
 
     while (
-      !holdThreadRole &&
       result.content?.trim() &&
       finalizeAttempts < MAX_FINALIZE_ATTEMPTS &&
       !isPublishableReply(result.content) &&

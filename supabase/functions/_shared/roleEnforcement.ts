@@ -127,7 +127,6 @@ const BOUNDARY_CATEGORIES: SafetyCategory[] = [
   "off_topic",
   "boundary_pressure",
   "medical_boundary",
-  "legal_financial_boundary",
 ];
 
 export interface ThreadAnalysis {
@@ -163,8 +162,6 @@ export function analyzeConversationThread(
 
   const recentAssistant = assistantTexts.slice(-2);
   const oversizedAssistant = recentAssistant.some((t) => t.length >= 480);
-  const longAssistantStreak =
-    recentAssistant.filter((t) => t.length >= 380).length >= 2;
 
   const boundaryHits = recentUserCategories.filter((c) =>
     BOUNDARY_CATEGORIES.includes(c)
@@ -175,8 +172,7 @@ export function analyzeConversationThread(
     ? activeBoundaryNow
     : activeBoundaryNow ||
       recentBoundaryPressure ||
-      boundaryHits >= 2 ||
-      (boundaryHits >= 1 && (oversizedAssistant || longAssistantStreak));
+      boundaryHits >= 2;
 
   const lastAssistant = assistantTexts[assistantTexts.length - 1] ?? "";
   const assistantRefusedBoundary =
@@ -298,7 +294,6 @@ const BOUNDED_CATEGORIES: SafetyCategory[] = [
   "off_topic",
   "boundary_pressure",
   "medical_boundary",
-  "legal_financial_boundary",
 ];
 
 /**
@@ -329,12 +324,7 @@ export function enforceRoleBoundedReply(
     return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
   }
 
-  const strictThread = Boolean(opts?.threadEscalated);
-
   if (!BOUNDARY_FALLBACK_REPLACEMENT_ENABLED) {
-    if (strictThread && trimmed.length > 520) {
-      return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
-    }
     return trimmed;
   }
 
@@ -342,9 +332,6 @@ export function enforceRoleBoundedReply(
     BOUNDED_CATEGORIES.includes(category) || Boolean(opts?.insistenceLoop);
 
   if (!bounded) {
-    if (strictThread && trimmed.length > 520) {
-      return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
-    }
     return trimmed;
   }
 

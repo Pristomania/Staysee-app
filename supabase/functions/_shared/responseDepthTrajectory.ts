@@ -6,7 +6,6 @@
 export type ResponseDepth = "brief" | "medium" | "deep";
 
 export type DepthReason =
-  | "continue_redo"
   | "safety_brief"
   | "crisis"
   | "greeting_short"
@@ -52,11 +51,6 @@ const BRIEF_GREETING =
 const BRIEF_THANKS =
   /^(спасибо|благодарю|thanks|thank you)(?:[!.,?\s]|$)/i;
 const BRIEF_SHORT = /^(да|нет|ок|okay|ладно|понятно|ясно)\s*!?\s*$/i;
-const CONTINUE =
-  /^(дальше|продолжай|продолжи|ещё|еще|continue)(?:[!.,?\s]|$)/i;
-
-const REDO_REQUEST =
-  /^(давай\s+(ещ[её]\s+)?раз|ещ[её]\s+раз|повтори|по-новому|заново|переформулируй|скажи иначе)/i;
 
 /** Farewell / explicit exit — whole message or trailing clause after comma. */
 const EXPLICIT_CLOSURE_PATTERNS: RegExp[] = [
@@ -336,15 +330,6 @@ export function analyzeResponseDepth(
   const recentUserTurnCount = trajectory.recentUserTurns.length;
   const hasTrajectory = hasRecentEmotionalTrajectory(trajectory);
 
-  if (CONTINUE.test(trimmed) || REDO_REQUEST.test(trimmed)) {
-    return {
-      depth: "brief",
-      depthReason: "continue_redo",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
-  }
-
   if (isExplicitConversationClosure(trimmed)) {
     return {
       depth: "brief",
@@ -357,8 +342,7 @@ export function analyzeResponseDepth(
   if (
     safetyCategory === "off_topic" ||
     safetyCategory === "boundary_pressure" ||
-    safetyCategory === "medical_boundary" ||
-    safetyCategory === "legal_financial_boundary"
+    safetyCategory === "medical_boundary"
   ) {
     return {
       depth: "brief",

@@ -27,8 +27,7 @@ function detectResponseDepthOld(
   if (
     safetyCategory === "off_topic" ||
     safetyCategory === "boundary_pressure" ||
-    safetyCategory === "medical_boundary" ||
-    safetyCategory === "legal_financial_boundary"
+    safetyCategory === "medical_boundary"
   ) {
     return "brief";
   }
