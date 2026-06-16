@@ -6,7 +6,7 @@ import {
   endsAtSentenceBoundary,
   hasBrokenEnding,
   trimToLastCompleteSentence,
-} from "./responseBudget.ts";
+} from "./replyEnding.ts";
 
 const LEGACY_GRACEFUL_TAIL_RE =
   /\n*\(Мысль ещё не закончилась[^)]*\)\s*$/i;
@@ -40,6 +40,23 @@ export function needsAutoContinue(
   return !isPublishableReply(body);
 }
 
+/** Remove only a clearly broken trailing word fragment (autoContinue failure). */
+function stripBrokenTrailingFragment(text: string): string {
+  if (!hasBrokenEnding(text)) return text;
+  const withoutFragment = text.replace(/\s+[^\s.!?…]{1,8}$/u, "").trimEnd();
+  if (withoutFragment.length >= 8 && withoutFragment.length < text.length) {
+    return withoutFragment;
+  }
+  return text;
+}
+
+function firstCompleteSentence(text: string): string | null {
+  const m = text.match(/^([\s\S]*?[.!?…]["')\]]*)/u);
+  const head = m?.[1]?.trimEnd();
+  if (head && head.length >= 12 && isPublishableReply(head)) return head;
+  return null;
+}
+
 /**
  * Last resort: trim to last full sentence — never return mid-word or trailing em-dash.
  */
@@ -58,6 +75,19 @@ export function ensurePublishableReply(content: string): string {
     return lastPunct[1].trimEnd();
   }
 
+  const withoutDash = stripped.replace(/\s[—–-]\s*$/u, "").trimEnd();
+  if (withoutDash.length >= 12 && isPublishableReply(withoutDash)) {
+    return withoutDash;
+  }
+
+  const firstSentence = firstCompleteSentence(stripped);
+  if (firstSentence) return firstSentence;
+
+  const defragged = stripBrokenTrailingFragment(stripped);
+  if (defragged.length >= 12 && isPublishableReply(defragged)) {
+    return defragged;
+  }
+
   if (trimmed.length >= 12) return trimmed;
-  return stripped.replace(/\s+[^\s.!?…]{1,8}$/u, "").trimEnd() || stripped;
+  return defragged.length >= 12 ? defragged : stripped;
 }

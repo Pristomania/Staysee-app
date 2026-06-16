@@ -1,6 +1,6 @@
 /**
  * Merge continuation chunks without repeating overlapping text at the boundary.
- * Cyrillic-safe: only full-word overlap; on doubt use paragraph separator.
+ * Cyrillic-safe: full-word overlap, partial-word continuation, list dedupe.
  */
 
 import { sanitizeProfanityInReply } from "./languageGuard.ts";
@@ -46,12 +46,20 @@ function startsWithLowercase(text: string): boolean {
   return /^[а-яёa-z]/u.test(text.trimStart());
 }
 
+function capitalizeFirstLetter(text: string): string {
+  const t = text.trimStart();
+  if (!t) return text;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 export type MergeStrategy =
   | "only_b"
   | "full_prefix_b"
   | "norm_prefix_b"
   | "word_overlap"
   | "duplicate_word"
+  | "partial_word"
+  | "list_dedupe"
   | "paragraph_sep"
   | "contains_b";
 
@@ -59,6 +67,111 @@ export interface MergeContinuationResult {
   text: string;
   strategy: MergeStrategy;
   overlapWords: number;
+}
+
+/** Map normalized compare index → original string offset. */
+function normalizedIndexToCharOffset(original: string, normIdx: number): number {
+  let norm = "";
+  for (let i = 0; i < original.length; i++) {
+    if (norm.length >= normIdx) return i;
+    const ch = original[i];
+    if (/\s/u.test(ch)) {
+      if (!norm.endsWith(" ")) norm += " ";
+    } else {
+      norm += ch.toLowerCase();
+    }
+  }
+  return original.length;
+}
+
+interface WordRun {
+  head: string;
+  letters: string;
+  trailingPunct: string;
+}
+
+function parseLastWordRun(text: string): WordRun | null {
+  const t = text.trimEnd();
+  const m = t.match(/^(.*?)([а-яёa-z]+)([.!?…,;:]{0,3})$/iu);
+  if (!m?.[2]) return null;
+  return { head: m[1], letters: m[2], trailingPunct: m[3] ?? "" };
+}
+
+function parseFirstWordRun(text: string): { letters: string; punct: string; rest: string } | null {
+  const m = text.trimStart().match(/^([а-яёa-z]+)([,.!?…:;]{0,3})?(.*)$/isu);
+  if (!m?.[1]) return null;
+  return { letters: m[1], punct: m[2] ?? "", rest: m[3] ?? "" };
+}
+
+/** False sentence end: short fragment + period (e.g. «изб.»). */
+function isFalseSentenceEnd(run: WordRun): boolean {
+  return run.trailingPunct === "." && run.letters.length <= 5;
+}
+
+/**
+ * Mid-word join: «момен» + «т,» → «момент,»; «изб.» + «ранных» → «избранных».
+ */
+function mergeAtPartialWordBoundary(a: string, b: string): MergeContinuationResult | null {
+  const last = parseLastWordRun(a);
+  const first = parseFirstWordRun(b);
+  if (!last || !first) return null;
+
+  const { head, letters: partial, trailingPunct } = last;
+  const { letters: cont, punct: bPunct, rest: bRest } = first;
+
+  if (cont.length < 1 || cont.length > 8) return null;
+  if (!/^[а-яёa-z]/u.test(cont)) return null;
+
+  const midWord = trailingPunct === "" || isFalseSentenceEnd(last);
+  if (!midWord) return null;
+
+  if (trailingPunct === "" && endsWithSentence(a)) return null;
+  if (partial.length >= 8 && trailingPunct === ".") return null;
+
+  const mergedWord = partial + cont;
+  if (mergedWord.length > 40) return null;
+
+  const afterFirst = b.trimStart().slice(first.letters.length + bPunct.length);
+  const spacer =
+    head.length > 0 && !/\s$/u.test(head) && !afterFirst.startsWith(",") ? " " : "";
+  const text = `${head}${spacer}${mergedWord}${bPunct}${afterFirst}`.trim();
+
+  return { text, strategy: "partial_word", overlapWords: 0 };
+}
+
+/**
+ * B repeats A's tail with a fuller version — drop truncated tail, keep B.
+ */
+function mergeRepeatedContinuation(a: string, b: string): MergeContinuationResult | null {
+  const bClean = stripContinuationPrefix(b.trim());
+  const aNorm = normalizeForCompare(a);
+  const bNorm = normalizeForCompare(bClean);
+  if (bNorm.length < 24) return null;
+
+  for (let probe = Math.min(100, bNorm.length); probe >= 20; probe -= 1) {
+    const marker = bNorm.slice(0, probe);
+    const idx = aNorm.lastIndexOf(marker);
+    if (idx < 0) continue;
+
+    const aTail = aNorm.slice(idx);
+    if (!bNorm.startsWith(aTail) && aNorm.slice(idx + probe).length > 35) continue;
+
+    const aAfterMarker = aNorm.slice(idx + probe);
+    if (aAfterMarker.length > 40) continue;
+
+    const cutPos = normalizedIndexToCharOffset(a, idx);
+    let head = a.slice(0, cutPos).trimEnd();
+    head = head.replace(/[—–-]\s*$/u, "").trimEnd();
+
+    const joined = head ? `${head}\n\n${bClean}` : bClean;
+    return {
+      text: stripOrphanContinueMarkers(joined),
+      strategy: "list_dedupe",
+      overlapWords: 0,
+    };
+  }
+
+  return null;
 }
 
 /** Exact full-word suffix/prefix overlap only (no partial Cyrillic prefix). */
@@ -91,14 +204,18 @@ function mergeAtFullWordBoundary(a: string, b: string): MergeContinuationResult 
 
 function joinWithParagraphSeparator(a: string, b: string): MergeContinuationResult {
   let joined: string;
+  const bOut = startsWithLowercase(b) && endsWithSentence(a)
+    ? capitalizeFirstLetter(b)
+    : b;
+
   if (endsWithSentence(a)) {
-    joined = `${a}\n\n${b}`;
+    joined = `${a}\n\n${bOut}`;
   } else if (endsWithClauseConnector(a)) {
     joined = `${a} ${b}`;
   } else if (startsWithLowercase(b)) {
     joined = `${a} ${b}`;
   } else {
-    joined = `${a}.\n\n${b}`;
+    joined = `${a}.\n\n${bOut}`;
   }
   const text = stripOrphanContinueMarkers(joined.trim());
   return { text, strategy: "paragraph_sep", overlapWords: 0 };
@@ -141,6 +258,18 @@ export function mergeContinuationWithoutOverlap(
     };
   }
 
+  const listDedupe = mergeRepeatedContinuation(a, b);
+  if (listDedupe) return listDedupe;
+
+  const partialWord = mergeAtPartialWordBoundary(a, b);
+  if (partialWord) {
+    return {
+      text: stripOrphanContinueMarkers(partialWord.text),
+      strategy: partialWord.strategy,
+      overlapWords: 0,
+    };
+  }
+
   const wordMerged = mergeAtFullWordBoundary(a, b);
   if (wordMerged) {
     return {
@@ -169,9 +298,31 @@ function paragraphExtendsPrevious(prev: string, next: string): boolean {
   return false;
 }
 
-/** Normal path: profanity filter only — do not trim sentences (breaks good replies). */
+const LONG_REPLY_MIN_CHARS = 1200;
+const NUMBERED_BLOCK_RE = /(?<!\n\n)(\s)(?=\d+\.\s+(?:[А-ЯA-ZЁ«"(\[]|[A-Z"(\[]))/gu;
+const PRO_HEADER_RE = /(?<!\n\n)(\.\s+)(?=Про\s+[а-яёa-z])/giu;
+
+/**
+ * Insert paragraph breaks in long wall-of-text replies (no prompt change).
+ * Only when text is long and has almost no existing `\n\n`.
+ */
+export function normalizeLongReplyParagraphs(text: string): string {
+  const t = text.trim();
+  if (t.length < LONG_REPLY_MIN_CHARS) return t;
+
+  const paraBreaks = (t.match(/\n\n/g) ?? []).length;
+  if (paraBreaks >= 3) return t;
+  if (paraBreaks >= 1 && t.length < 2000) return t;
+
+  let out = t.replace(NUMBERED_BLOCK_RE, "\n\n");
+  out = out.replace(PRO_HEADER_RE, ".\n\n");
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Normal path: profanity filter + optional long-reply paragraph normalization. */
 export function polishAssistantOutput(text: string): string {
-  return sanitizeProfanityInReply(text.trim());
+  const cleaned = sanitizeProfanityInReply(text.trim());
+  return normalizeLongReplyParagraphs(cleaned);
 }
 
 /** Dedupe continuation paragraphs only when next clearly extends previous. */
