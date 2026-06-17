@@ -94,6 +94,7 @@ import {
   logOpenRouterUsage,
   parseOpenRouterUsage,
 } from "../_shared/usageAnalytics.ts";
+import { computeProcessState } from "../_shared/processState.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -640,6 +641,19 @@ Deno.serve(async (req: Request) => {
     });
     const turnModel = modelRoute.model;
 
+    const processState = computeProcessState({
+      openFigure: {
+        isOpen: responseBudget.openFigure.isOpen,
+        intensity: responseBudget.openFigure.intensity,
+        confidence: responseBudget.openFigure.confidence,
+      },
+      depth: responseDepth,
+      explicitClosure: explicitClosureGuidanceOn,
+      uncertainty: uncertaintyGuidanceOn,
+      recentUserTurns: responseBudget.recentUserTurns,
+      safetyCategory: safety.category,
+    });
+
     console.log(
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} ` +
         `depth_meta=${JSON.stringify({
@@ -655,6 +669,11 @@ Deno.serve(async (req: Request) => {
           openFigureGuidanceInjected: openFigureGuidanceOn,
           uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
           explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
+          process_contact: processState.contact,
+          process_movement: processState.movement,
+          process_closure: processState.closure,
+          process_certainty: processState.certainty,
+          process_state_source: processState.source,
           userGenderGuidanceInjected: genderGuidanceOn,
           userGrammaticalGender: genderResult.gender,
           userGenderSource: genderResult.source,
