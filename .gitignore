@@ -25,3 +25,18 @@ dist-ssr
 .env.production.local
 
 supabase/.temp/
+
+# Local audit artifacts
+audit-*.json
+
+# Temporary experiment artifacts
+scripts/tmp-*
+
+# Local experiment reports
+scripts/experiment-*-report.json
+
+# Local prod smoke scripts
+scripts/prod-*-smoke.mjs
+
+# Local audit scripts
+scripts/audit-*.mjs
