@@ -194,4 +194,42 @@ assert(!isUncertaintyPhrase("пока"), "пока is closure not uncertainty");
 assert(!isUncertaintyPhrase("на сегодня хватит"), "closure excluded");
 console.log("✓ closure phrases excluded");
 
+const guidanceBlock = buildUncertaintyTurnGuidance({
+  depthReason: "uncertainty_in_process",
+  message: "не знаю",
+})!;
+assert(!!guidanceBlock, "expected default uncertainty block");
+assert(
+  !/пока\s+оставить\s+без\s+ответа/i.test(guidanceBlock),
+  "must not offer closure-like leave-without-answer as equal option"
+);
+assert(
+  /право\s+не\s+знать\s+сохраняется/i.test(guidanceBlock),
+  "must preserve right not to know"
+);
+assert(
+  !/обязательно\s+задай\s+вопрос/i.test(guidanceBlock),
+  'must not contain "обязательно задай вопрос"'
+);
+assert(
+  /временную\s+опору\s+внутри\s+живого\s+процесса/i.test(guidanceBlock),
+  "must frame not-knowing as in-process support"
+);
+console.log("✓ guidance wording: no closure-like leave-without-answer");
+
+const openFigureBlock = buildUncertaintyTurnGuidance({
+  depthReason: "uncertainty_in_process",
+  message: "не знаю",
+  openFigure: { isOpen: true },
+})!;
+assert(
+  openFigureBlock.includes("один мягкий шаг контакта"),
+  "open figure variant must require one soft contact step"
+);
+assert(
+  !/пока\s+оставить\s+без\s+ответа/i.test(openFigureBlock),
+  "open figure variant must not contain closure-like wording"
+);
+console.log("✓ openFigure + uncertainty variant aligned");
+
 console.log("\nAll uncertaintyTurnGuidance cases passed.");

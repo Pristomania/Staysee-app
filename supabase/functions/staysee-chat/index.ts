@@ -56,6 +56,10 @@ import {
   buildExplicitClosureTurnGuidance,
   explicitClosureGuidanceInjected,
 } from "../_shared/explicitClosureTurnGuidance.ts";
+import {
+  buildOpenFigureTurnGuidance,
+  openFigureGuidanceInjected,
+} from "../_shared/openFigureTurnGuidance.ts";
 import { detectUserGrammaticalGender } from "../_shared/userGrammaticalGender.ts";
 import {
   buildUserGenderTurnGuidance,
@@ -589,13 +593,29 @@ Deno.serve(async (req: Request) => {
     );
     let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
 
+    const openFigureGuidance = buildOpenFigureTurnGuidance({
+      openFigure: responseBudget.openFigure,
+      depthReason: responseBudget.depthReason,
+      safetyCategory: safety.category,
+    });
+    const openFigureGuidanceOn = openFigureGuidanceInjected({
+      openFigure: responseBudget.openFigure,
+      depthReason: responseBudget.depthReason,
+      safetyCategory: safety.category,
+    });
+    if (openFigureGuidance) {
+      systemPrompt = [systemPrompt, openFigureGuidance].join("\n\n");
+    }
+
     const uncertaintyGuidance = buildUncertaintyTurnGuidance({
       depthReason: responseBudget.depthReason,
       message,
+      openFigure: { isOpen: responseBudget.openFigure.isOpen },
     });
     const uncertaintyGuidanceOn = uncertaintyGuidanceInjected({
       depthReason: responseBudget.depthReason,
       message,
+      openFigure: { isOpen: responseBudget.openFigure.isOpen },
     });
     if (uncertaintyGuidance) {
       systemPrompt = [systemPrompt, uncertaintyGuidance].join("\n\n");
@@ -632,6 +652,7 @@ Deno.serve(async (req: Request) => {
           open_figure_intensity: responseBudget.openFigure.intensity,
           open_figure_confidence: responseBudget.openFigure.confidence,
           open_figure_trigger: responseBudget.openFigure.trigger,
+          openFigureGuidanceInjected: openFigureGuidanceOn,
           uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
           explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
           userGenderGuidanceInjected: genderGuidanceOn,
