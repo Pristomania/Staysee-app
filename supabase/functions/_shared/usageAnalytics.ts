@@ -19,7 +19,24 @@ import {
 
 export type { OpenRouterUsagePayload };
 
-export interface UsageLogRow {
+/** Safe generation audit metadata — no user/assistant message text. */
+export interface UsageAuditFields {
+  requestId?: string | null;
+  finishReason?: string | null;
+  latencyMs?: number | null;
+  wasTruncated?: boolean;
+  autoContinueUsed?: boolean;
+  finalizeUsed?: boolean;
+  promptVersion?: string | null;
+  constitutionVersion?: string | null;
+  cognitiveSignatureVersion?: string | null;
+  memoryVersion?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  generationStatus?: string | null;
+}
+
+export interface UsageLogRow extends UsageAuditFields {
   userId: string;
   conversationId?: string | null;
   model: string;
@@ -72,6 +89,7 @@ export function buildUsageLogRow(input: {
   /** Override breakdown (e.g. summary-only background job) */
   memoryTokens?: number;
   summaryTokens?: number;
+  audit?: UsageAuditFields;
 }): UsageLogRow {
   const promptTokens = input.promptTokens;
   const completionTokens = input.completionTokens;
@@ -91,6 +109,8 @@ export function buildUsageLogRow(input: {
     completionTokens
   );
 
+  const audit = input.audit ?? {};
+
   return {
     userId: input.userId,
     conversationId: input.conversationId ?? null,
@@ -101,6 +121,19 @@ export function buildUsageLogRow(input: {
     memoryTokens: breakdown.memoryTokens,
     summaryTokens: breakdown.summaryTokens,
     cost,
+    requestId: audit.requestId ?? null,
+    finishReason: audit.finishReason ?? null,
+    latencyMs: audit.latencyMs ?? null,
+    wasTruncated: audit.wasTruncated ?? false,
+    autoContinueUsed: audit.autoContinueUsed ?? false,
+    finalizeUsed: audit.finalizeUsed ?? false,
+    promptVersion: audit.promptVersion ?? null,
+    constitutionVersion: audit.constitutionVersion ?? null,
+    cognitiveSignatureVersion: audit.cognitiveSignatureVersion ?? null,
+    memoryVersion: audit.memoryVersion ?? null,
+    errorCode: audit.errorCode ?? null,
+    errorMessage: audit.errorMessage ?? null,
+    generationStatus: audit.generationStatus ?? null,
   };
 }
 
@@ -119,6 +152,19 @@ export async function logOpenRouterUsage(
     memory_tokens: row.memoryTokens,
     summary_tokens: row.summaryTokens,
     cost: row.cost,
+    request_id: row.requestId ?? null,
+    finish_reason: row.finishReason ?? null,
+    latency_ms: row.latencyMs ?? null,
+    was_truncated: row.wasTruncated ?? false,
+    auto_continue_used: row.autoContinueUsed ?? false,
+    finalize_used: row.finalizeUsed ?? false,
+    prompt_version: row.promptVersion ?? null,
+    constitution_version: row.constitutionVersion ?? null,
+    cognitive_signature_version: row.cognitiveSignatureVersion ?? null,
+    memory_version: row.memoryVersion ?? null,
+    error_code: row.errorCode ?? null,
+    error_message: row.errorMessage ?? null,
+    generation_status: row.generationStatus ?? null,
   });
 
   if (error) {

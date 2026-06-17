@@ -80,6 +80,12 @@ import {
 import { logReplyCompletion } from "../_shared/replyCompletionLog.ts";
 import { buildTimeGapPrompt, classifyTimeGap, type TimeGapMeta } from "../_shared/timeGap.ts";
 import {
+  AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
+  AI_AUDIT_CONSTITUTION_VERSION,
+  AI_AUDIT_MEMORY_VERSION,
+  AI_AUDIT_PROMPT_VERSION,
+} from "../_shared/aiAuditVersions.ts";
+import {
   buildUsageLogRow,
   logOpenRouterUsage,
   parseOpenRouterUsage,
@@ -644,6 +650,8 @@ Deno.serve(async (req: Request) => {
     let finalizeAttempts = 0;
     let wasAutoContinued = false;
     let wasFinalizeUsed = false;
+    let wasTruncated = result.finishReason === "length";
+    let replyPublishable = false;
     let lengthBeforeMerge = 0;
     let lengthAfterMerge = result.content?.trim().length ?? 0;
     let lastMergeStrategy: MergeStrategy | undefined;
@@ -682,6 +690,7 @@ Deno.serve(async (req: Request) => {
       );
       autoContinueSegments++;
       wasAutoContinued = true;
+      if (retry.finishReason === "length") wasTruncated = true;
 
       if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
         break;
@@ -717,6 +726,7 @@ Deno.serve(async (req: Request) => {
       finalizeAttempts++;
       wasFinalizeUsed = true;
       autoContinueSegments++;
+      if (retry.finishReason === "length") wasTruncated = true;
 
       if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
         break;
@@ -755,13 +765,13 @@ Deno.serve(async (req: Request) => {
       });
       result = { ...result, content: safe };
 
-      const publishable = isPublishableReply(safe);
+      replyPublishable = isPublishableReply(safe);
       if (
         wasAutoContinued ||
         wasFinalizeUsed ||
         finalizeAttempts > 0 ||
         autoContinueSegments > 0 ||
-        !publishable
+        !replyPublishable
       ) {
         logReplyCompletion({
           finishReason: result.finishReason,
@@ -771,14 +781,14 @@ Deno.serve(async (req: Request) => {
           lengthAfterMerge,
           wasAutoContinued,
           wasFinalizeUsed,
-          publishable,
+          publishable: replyPublishable,
           lastMergeStrategy,
           overlapWords: lastOverlapWords,
           usedMergeFallback,
         });
       }
 
-      if (!publishable) {
+      if (!replyPublishable) {
         console.error("[staysee-chat] reply still not publishable after completion");
       } else if (autoContinueSegments > 0 || safe.length < before) {
         console.log(
@@ -789,6 +799,28 @@ Deno.serve(async (req: Request) => {
 
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
+    const modelUnavailable = result.content === CALM_ERRORS.unavailable;
+    const generationStatus = modelUnavailable
+      ? "error"
+      : result.content?.trim()
+        ? replyPublishable
+          ? "success"
+          : "incomplete"
+        : "error";
+    const errorCode = modelUnavailable
+      ? "model_unavailable"
+      : generationStatus === "incomplete"
+        ? "reply_not_publishable"
+        : generationStatus === "error"
+          ? "empty_reply"
+          : null;
+    const errorMessage = modelUnavailable
+      ? "All model providers failed"
+      : generationStatus === "incomplete"
+        ? "Reply failed publishability check"
+        : generationStatus === "error" && !result.content?.trim()
+          ? "Model returned empty content"
+          : null;
 
     // ── Background tasks (non-blocking) ─────────────────────────────────────
 
@@ -807,6 +839,21 @@ Deno.serve(async (req: Request) => {
               total_tokens: result.usage?.total_tokens ?? totalTokens,
             },
             packet: packetForSummary,
+            audit: {
+              requestId: requestId ?? null,
+              finishReason: result.finishReason ?? null,
+              latencyMs: responseMs,
+              wasTruncated,
+              autoContinueUsed: wasAutoContinued,
+              finalizeUsed: wasFinalizeUsed,
+              promptVersion: AI_AUDIT_PROMPT_VERSION,
+              constitutionVersion: AI_AUDIT_CONSTITUTION_VERSION,
+              cognitiveSignatureVersion: AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
+              memoryVersion: AI_AUDIT_MEMORY_VERSION,
+              errorCode,
+              errorMessage,
+              generationStatus,
+            },
           })
         : null;
 
