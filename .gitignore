@@ -40,3 +40,6 @@ scripts/prod-*-smoke.mjs
 
 # Local audit scripts
 scripts/audit-*.mjs
+
+# PR3 regression artifacts
+scripts/open-figure-regression-results*.json
