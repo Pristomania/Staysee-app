@@ -7,6 +7,7 @@ import { User, Plus } from 'lucide-react';
 import type { Conversation } from '../../types';
 import { formatRelativeTime, GREETING } from './ChatScreen';
 import { AppContainer } from '../layout';
+import { filterVisibleConversations } from '../../lib/conversationFilters';
 
 const MAX_ROOMS = 5;
 
@@ -71,7 +72,7 @@ export function MainScreen() {
       .eq('is_active', true)
       .order('last_message_at', { ascending: false })
       .limit(MAX_ROOMS + 1);
-    setConversations(data || []);
+    setConversations(filterVisibleConversations(data || []));
     setLoading(false);
   }
 
