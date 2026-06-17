@@ -4,7 +4,7 @@ import {
   useRef,
   useState,
   useCallback,
-  type KeyboardEvent,
+  useMemo,
   type ChangeEvent,
 } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -14,7 +14,9 @@ import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { formatMessageTime } from '../../lib/formatMessageTime';
+import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
 import type { Message } from '../../types';
@@ -161,6 +163,10 @@ export function ChatScreen() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationEpochRef = useRef(0);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingDraftRef = useRef('');
   /** Stable turn id for submit + retry until success or Stop. */
   const pendingTurnRef = useRef<PendingTurn | null>(null);
@@ -769,10 +775,6 @@ export function ChatScreen() {
     }
   }
 
-  function handleKeyPress(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  }
-
   function handleInputChange(e: ChangeEvent<HTMLTextAreaElement>) {
     setInputValue(e.target.value);
     if (inputRef.current) {
@@ -800,6 +802,48 @@ export function ChatScreen() {
   const visibleMessages = suppressAiMessageId
     ? roomMessages.filter((m) => m.id !== suppressAiMessageId)
     : roomMessages;
+
+  const trimmedSearch = searchQuery.trim();
+  const matchingMessageIds = useMemo(
+    () => findMatchingMessageIds(visibleMessages, trimmedSearch),
+    [visibleMessages, trimmedSearch],
+  );
+  const matchCount = matchingMessageIds.length;
+  const activeMatchId =
+    matchCount > 0 ? matchingMessageIds[activeMatchIndex] ?? null : null;
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setActiveMatchIndex(0);
+  }, []);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    setActiveMatchIndex(0);
+  }, [trimmedSearch]);
+
+  useEffect(() => {
+    if (!trimmedSearch || !activeMatchId) return;
+    const el = messagesScrollRef.current?.querySelector(
+      `[data-message-id="${activeMatchId}"]`,
+    );
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [trimmedSearch, activeMatchId, activeMatchIndex]);
+
+  const goToPrevMatch = useCallback(() => {
+    if (matchCount === 0) return;
+    setActiveMatchIndex((i) => (i - 1 + matchCount) % matchCount);
+  }, [matchCount]);
+
+  const goToNextMatch = useCallback(() => {
+    if (matchCount === 0) return;
+    setActiveMatchIndex((i) => (i + 1) % matchCount);
+  }, [matchCount]);
 
   if (loading && roomMessages.length === 0) {
     return (
@@ -831,6 +875,17 @@ export function ChatScreen() {
           <span className={`${theme.textSecondary} text-xs font-light tracking-[0.12em] truncate opacity-85 flex-1 min-w-0`}>
             {roomTitle}
           </span>
+          <button
+            type="button"
+            onClick={() => (searchOpen ? closeSearch() : openSearch())}
+            className={`shrink-0 p-2 rounded-lg transition-opacity duration-300 ${
+              searchOpen ? 'opacity-100 ring-1 ring-[#c9a96e]/35' : 'opacity-70 hover:opacity-100'
+            } ${theme.surfaceHover}`}
+            aria-label={searchOpen ? 'Закрыть поиск' : 'Поиск в диалоге'}
+            title={searchOpen ? 'Закрыть поиск' : 'Поиск в диалоге'}
+          >
+            <Search className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+          </button>
           <button
             type="button"
             onClick={() => leaveChatFor('memory')}
@@ -885,6 +940,62 @@ export function ChatScreen() {
             />
           </button>
         </div>
+        {searchOpen && (
+          <div className={`relative pb-3 ${LAYOUT_CONTAINER_CLASS}`}>
+            <div className={`flex items-center gap-2 rounded-xl px-3 py-2 border ${theme.inputBg} ${theme.inputBorder}`}>
+              <Search className={`w-3.5 h-3.5 shrink-0 ${theme.textMuted}`} strokeWidth={1.5} />
+              <input
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Поиск в этом диалоге…"
+                className={`flex-1 min-w-0 bg-transparent outline-none font-light text-sm ${theme.inputText} ${theme.inputPlaceholder}`}
+                aria-label="Поиск по сообщениям"
+              />
+              {trimmedSearch && (
+                <span className={`shrink-0 text-[11px] font-light tabular-nums ${theme.textMuted}`}>
+                  {matchCount > 0
+                    ? `${activeMatchIndex + 1}/${matchCount}`
+                    : '0'}
+                </span>
+              )}
+              {matchCount > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={goToPrevMatch}
+                    className={`shrink-0 p-1 rounded ${theme.surfaceHover}`}
+                    aria-label="Предыдущее совпадение"
+                  >
+                    <ChevronUp className={`w-3.5 h-3.5 ${theme.textSecondary}`} strokeWidth={1.5} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToNextMatch}
+                    className={`shrink-0 p-1 rounded ${theme.surfaceHover}`}
+                    aria-label="Следующее совпадение"
+                  >
+                    <ChevronDown className={`w-3.5 h-3.5 ${theme.textSecondary}`} strokeWidth={1.5} />
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={closeSearch}
+                className={`shrink-0 p-1 rounded ${theme.textMuted} opacity-70 hover:opacity-100`}
+                aria-label="Очистить поиск"
+              >
+                <X className="w-3.5 h-3.5" strokeWidth={1.5} />
+              </button>
+            </div>
+            {trimmedSearch && matchCount === 0 && (
+              <p className={`mt-2 text-[11px] font-light px-1 ${theme.textMuted}`}>
+                Ничего не найдено
+              </p>
+            )}
+          </div>
+        )}
         <div className={`relative h-px ${LAYOUT_CONTAINER_CLASS}`}>
           <div className={`h-px ${theme.divider} opacity-25`} />
         </div>
@@ -906,6 +1017,9 @@ export function ChatScreen() {
               theme={theme}
               index={index}
               animateEnter={index >= visibleMessages.length - 2}
+              searchQuery={trimmedSearch || undefined}
+              isSearchMatch={trimmedSearch ? matchingMessageIds.includes(msg.id) : false}
+              isActiveSearchMatch={msg.id === activeMatchId}
             />
           ))}
 
@@ -1022,9 +1136,9 @@ export function ChatScreen() {
                 ref={inputRef}
                 value={inputValue}
                 onChange={handleInputChange}
-                onKeyDown={handleKeyPress}
                 placeholder="Напишите как есть…"
                 rows={1}
+                enterKeyHint="enter"
                 className={`chat-compose-input flex-1 bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
                 style={{ maxHeight: '120px' }}
               />
@@ -1064,45 +1178,109 @@ export function ChatScreen() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function highlightSearchInText(text: string, query: string) {
+  const q = query.trim();
+  if (!q) return text;
+
+  const lower = text.toLowerCase();
+  const needle = q.toLowerCase();
+  const parts: Array<string | JSX.Element> = [];
+  let cursor = 0;
+  let key = 0;
+
+  while (cursor < text.length) {
+    const idx = lower.indexOf(needle, cursor);
+    if (idx === -1) {
+      parts.push(text.slice(cursor));
+      break;
+    }
+    if (idx > cursor) parts.push(text.slice(cursor, idx));
+    parts.push(
+      <mark
+        key={key++}
+        className="rounded-sm bg-[#c9a96e]/35 text-inherit px-0.5"
+      >
+        {text.slice(idx, idx + needle.length)}
+      </mark>,
+    );
+    cursor = idx + needle.length;
+  }
+
+  return parts;
+}
+
 function MessageRow({
   msg,
   theme,
   index,
   animateEnter = false,
+  searchQuery,
+  isSearchMatch = false,
+  isActiveSearchMatch = false,
 }: {
   msg: Message;
   theme: ReturnType<typeof useTheme>['theme'];
   index: number;
   animateEnter?: boolean;
+  searchQuery?: string;
+  isSearchMatch?: boolean;
+  isActiveSearchMatch?: boolean;
 }) {
   if (!msg.content) return null;
   const isUser = msg.sender === 'user';
   const delay = Math.min(index * 12, 100);
   const enterClass = animateEnter ? 'animate-msg-in' : '';
+  const timestamp = formatMessageTime(msg.created_at);
+  const highlightClass =
+    isActiveSearchMatch
+      ? 'ring-1 ring-[#c9a96e]/55 rounded-2xl'
+      : isSearchMatch
+        ? 'ring-1 ring-[#c9a96e]/25 rounded-2xl'
+        : '';
 
   if (isUser) {
     return (
       <div
-        className={`flex justify-end ${enterClass}`}
+        data-message-id={msg.id}
+        className={`flex flex-col items-end ${enterClass} ${highlightClass}`}
         style={animateEnter ? { animationDelay: `${delay}ms` } : undefined}
       >
         <div className={`max-w-[70%] px-5 py-3 rounded-2xl rounded-tr-sm ${theme.msgUserBg}`}>
           <p className={`${theme.msgUserText} font-light text-[15px] leading-[1.8] whitespace-pre-wrap break-words`}>
-            {msg.content}
+            {searchQuery && isSearchMatch
+              ? highlightSearchInText(msg.content, searchQuery)
+              : msg.content}
           </p>
         </div>
+        {timestamp && (
+          <p className={`mt-1 px-1 text-[10px] font-light tabular-nums opacity-45 ${theme.textMuted}`}>
+            {timestamp}
+          </p>
+        )}
       </div>
     );
   }
 
   return (
     <div
-      className={enterClass}
+      data-message-id={msg.id}
+      className={`${enterClass} ${highlightClass}`}
       style={animateEnter ? { animationDelay: `${delay}ms` } : undefined}
     >
       <div className="text-[15px] break-words">
-        {renderAiMessageBody(msg.content, aiMessageStyle(theme))}
+        {searchQuery && isSearchMatch ? (
+          <p className={`${contextBodyTextClass(theme)} font-light leading-[1.8] whitespace-pre-wrap break-words`}>
+            {highlightSearchInText(msg.content, searchQuery)}
+          </p>
+        ) : (
+          renderAiMessageBody(msg.content, aiMessageStyle(theme))
+        )}
       </div>
+      {timestamp && (
+        <p className={`mt-1 text-[10px] font-light tabular-nums opacity-45 ${theme.textMuted}`}>
+          {timestamp}
+        </p>
+      )}
     </div>
   );
 }
