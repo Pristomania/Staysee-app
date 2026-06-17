@@ -16,7 +16,48 @@ export type DepthReason =
   | "emotional_momentum_deep"
   | "long_emotional"
   | "thread_emotional"
-  | "default_medium";
+  | "default_medium"
+  | "open_figure"
+  | "open_figure_momentum"
+  | "open_figure_uncertainty";
+
+export type OpenFigureKind =
+  | "emotional"
+  | "relational"
+  | "body"
+  | "identity"
+  | "choice"
+  | "unknown";
+
+export type OpenFigureIntensity = "low" | "medium" | "high";
+
+export type OpenFigureConfidence = "low" | "medium" | "high";
+
+export type OpenFigureTrigger =
+  | "short_emotional"
+  | "strong_uncertainty"
+  | "arc_continuation"
+  | "emotional_momentum"
+  | "relational_charge"
+  | "none";
+
+export interface OpenFigureState {
+  isOpen: boolean;
+  kind: OpenFigureKind;
+  intensity: OpenFigureIntensity;
+  confidence: OpenFigureConfidence;
+  trigger: OpenFigureTrigger;
+  evidence: string[];
+}
+
+export const CLOSED_OPEN_FIGURE: OpenFigureState = {
+  isOpen: false,
+  kind: "unknown",
+  intensity: "low",
+  confidence: "low",
+  trigger: "none",
+  evidence: [],
+};
 
 export type SafetyCategory =
   | "normal"
@@ -28,11 +69,14 @@ export type SafetyCategory =
   | "prompt_attack"
   | "dependency_risk";
 
+export type ChatTurn = { role: string; content: string };
+
 export interface ResponseDepthAnalysis {
   depth: ResponseDepth;
   depthReason: DepthReason;
   recentUserTurns: number;
   emotionalMomentum: boolean;
+  openFigure: OpenFigureState;
 }
 
 /** Cyrillic-safe word boundary (JS \b is ASCII-only). */
@@ -86,6 +130,7 @@ const EXPLICIT_CLOSURE_PATTERNS: RegExp[] = [
   /^увидимся$/iu,
   /^мне\s+достаточно$/iu,
   /^достаточно$/iu,
+  /^до\s+завтра$/iu,
   /^вс[её],?\s+я\s+ушла$/iu,
   /^вс[её],?\s+я\s+ушел$/iu,
   /^вс[её],?\s+я\s+ушёл$/iu,
@@ -175,7 +220,267 @@ const MOMENTUM_PATTERNS = [
   /^молчу$/i,
 ];
 
-type ChatTurn = { role: string; content: string };
+/** Short emotional charge — whole message or prominent substring. */
+const SHORT_EMOTIONAL_MARKERS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /^(?:мне\s+)?устал[ао]?$/iu, label: "усталость" },
+  { pattern: /^(?:мне\s+)?страшно$/iu, label: "страх" },
+  { pattern: /^страшно$/iu, label: "страх" },
+  { pattern: /^больно$/iu, label: "боль" },
+  { pattern: /^тяжело$/iu, label: "тяжесть" },
+  { pattern: /^пусто$/iu, label: "пустота" },
+  { pattern: /^не\s+могу$/iu, label: "не_могу" },
+  { pattern: /мне\s+страшно/i, label: "страх" },
+  { pattern: /мне\s+больно/i, label: "боль" },
+  { pattern: /мне\s+тяжело/i, label: "тяжесть" },
+  { pattern: /мне\s+плохо/i, label: "плохо" },
+  { pattern: /не\s+выдерживаю/i, label: "перегруз" },
+  { pattern: /на\s+пределе/i, label: "перегруз" },
+  { pattern: /опять\s+сорвал/i, label: "срыв" },
+  { pattern: /я\s+злюсь/i, label: "злость" },
+  { pattern: /мне\s+грустно/i, label: "грусть" },
+];
+
+const STRONG_UNCERTAINTY_INFIX: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /не\s+знаю\s+что\s+делать/i, label: "не_знаю_что_делать" },
+  { pattern: /не\s+понимаю/i, label: "не_понимаю" },
+  { pattern: /запуталась/i, label: "запуталась" },
+  { pattern: /запутался/i, label: "запутался" },
+];
+
+const RELATIONAL_CHARGE_MARKERS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /молчит/i, label: "молчание" },
+  { pattern: /не\s+отвечает/i, label: "нет_ответа" },
+  { pattern: /поссорил/i, label: "ссора" },
+  { pattern: /поругал/i, label: "ссора" },
+  { pattern: /ушла/i, label: "уход" },
+  { pattern: /ушёл/i, label: "уход" },
+  { pattern: /ушел/i, label: "уход" },
+  { pattern: /бросил/i, label: "уход" },
+  { pattern: /игнорир/i, label: "игнор" },
+];
+
+const DEPTH_RANK: Record<ResponseDepth, number> = {
+  brief: 0,
+  medium: 1,
+  deep: 2,
+};
+
+function maxDepth(a: ResponseDepth, b: ResponseDepth): ResponseDepth {
+  return DEPTH_RANK[a] >= DEPTH_RANK[b] ? a : b;
+}
+
+function matchMarkers(
+  text: string,
+  markers: Array<{ pattern: RegExp; label: string }>
+): string[] {
+  return markers.filter((m) => m.pattern.test(text)).map((m) => m.label);
+}
+
+function detectShortEmotional(text: string): string[] {
+  const normalized = normalizeUncertaintyCandidate(text);
+  const hits = matchMarkers(normalized, SHORT_EMOTIONAL_MARKERS);
+  if (hits.length > 0) return hits;
+  if (normalized.length <= 40 && turnHasEmotionalSignal(normalized)) {
+    return ["emotional_signal"];
+  }
+  return [];
+}
+
+function detectStrongUncertaintyInfix(text: string): string[] {
+  const normalized = normalizeUncertaintyCandidate(text);
+  if (isStrongUncertaintyPhrase(normalized)) {
+    return ["strong_uncertainty_phrase"];
+  }
+  return matchMarkers(normalized, STRONG_UNCERTAINTY_INFIX);
+}
+
+function detectRelationalCharge(text: string): string[] {
+  return matchMarkers(text, RELATIONAL_CHARGE_MARKERS);
+}
+
+function inferOpenFigureKind(
+  emotional: string[],
+  relational: string[],
+  uncertainty: string[]
+): OpenFigureKind {
+  if (relational.length > 0) return "relational";
+  if (uncertainty.length > 0) return "choice";
+  if (emotional.some((e) => /перегруз|не_могу|плохо|усталость/i.test(e))) {
+    return "body";
+  }
+  if (emotional.some((e) => /срыв|грусть|злость|страх/i.test(e))) {
+    return "emotional";
+  }
+  if (emotional.length > 0) return "emotional";
+  return "unknown";
+}
+
+function inferOpenFigureIntensity(
+  trigger: OpenFigureTrigger,
+  trajectory: EmotionalTrajectory,
+  distressMarkers: number,
+  safetyCategory: SafetyCategory
+): OpenFigureIntensity {
+  if (safetyCategory === "crisis") return "high";
+  if (trigger === "relational_charge") return "high";
+  if (trigger === "emotional_momentum" && trajectory.recentUserTurns.length >= 3) {
+    return "high";
+  }
+  if (trigger === "strong_uncertainty" || trigger === "short_emotional") {
+    return distressMarkers >= 2 ? "high" : "medium";
+  }
+  if (trigger === "arc_continuation") return "medium";
+  return "low";
+}
+
+function inferOpenFigureConfidence(
+  evidenceCount: number,
+  text: string
+): OpenFigureConfidence {
+  if (evidenceCount >= 3 || text.length >= 48) return "high";
+  if (evidenceCount >= 2 || text.length >= 24) return "medium";
+  return "low";
+}
+
+export interface AnalyzeOpenFigureInput {
+  message: string;
+  recentHistory: ChatTurn[];
+  safetyCategory: SafetyCategory;
+  trajectory: EmotionalTrajectory;
+}
+
+export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureState {
+  const trimmed = input.message.trim();
+  if (!trimmed || isExplicitConversationClosure(trimmed)) {
+    return CLOSED_OPEN_FIGURE;
+  }
+
+  if (
+    input.safetyCategory === "off_topic" ||
+    input.safetyCategory === "boundary_pressure" ||
+    input.safetyCategory === "medical_boundary"
+  ) {
+    return CLOSED_OPEN_FIGURE;
+  }
+
+  const priorTurns = input.trajectory.recentUserTurns.slice(0, -1);
+  const emotionalHits = detectShortEmotional(trimmed);
+  const uncertaintyHits = detectStrongUncertaintyInfix(trimmed);
+  const relationalHits = detectRelationalCharge(trimmed);
+  const arcContinuation =
+    trimmed.length < 100 &&
+    priorTurns.length > 0 &&
+    hasSubstantivePriorArc(priorTurns) &&
+    (turnHasEmotionalSignal(trimmed) ||
+      input.trajectory.shortAfterEmotional ||
+      uncertaintyHits.length > 0);
+
+  const evidence = [
+    ...emotionalHits,
+    ...uncertaintyHits,
+    ...relationalHits,
+  ];
+  if (arcContinuation) evidence.push("arc_continuation");
+  if (input.trajectory.emotionalMomentum) evidence.push("emotional_momentum");
+
+  let trigger: OpenFigureTrigger = "none";
+  if (input.safetyCategory === "crisis") {
+    trigger = "short_emotional";
+    evidence.push("crisis");
+  } else if (uncertaintyHits.length > 0) {
+    trigger = "strong_uncertainty";
+  } else if (relationalHits.length > 0) {
+    trigger = "relational_charge";
+  } else if (input.trajectory.emotionalMomentum) {
+    trigger = "emotional_momentum";
+  } else if (arcContinuation) {
+    trigger = "arc_continuation";
+  } else if (emotionalHits.length > 0) {
+    trigger = "short_emotional";
+  }
+
+  if (trigger === "none") {
+    return CLOSED_OPEN_FIGURE;
+  }
+
+  const kind = inferOpenFigureKind(emotionalHits, relationalHits, uncertaintyHits);
+  const intensity = inferOpenFigureIntensity(
+    trigger,
+    input.trajectory,
+    evidence.length,
+    input.safetyCategory
+  );
+  const confidence = inferOpenFigureConfidence(evidence.length, trimmed);
+
+  if (input.safetyCategory === "crisis") {
+    return {
+      isOpen: true,
+      kind: kind === "unknown" ? "emotional" : kind,
+      intensity: "high",
+      confidence: "high",
+      trigger,
+      evidence,
+    };
+  }
+
+  return {
+    isOpen: true,
+    kind,
+    intensity,
+    confidence,
+    trigger,
+    evidence,
+  };
+}
+
+function openFigureDepthReason(
+  trigger: OpenFigureTrigger,
+  priorReason: DepthReason
+): DepthReason {
+  if (trigger === "strong_uncertainty") return "open_figure_uncertainty";
+  if (trigger === "emotional_momentum") return "open_figure_momentum";
+  if (priorReason === "uncertainty_in_process") return "uncertainty_in_process";
+  if (priorReason === "recent_emotional_trajectory") {
+    return "recent_emotional_trajectory";
+  }
+  return "open_figure";
+}
+
+function applyOpenFigureFloor(
+  depth: ResponseDepth,
+  depthReason: DepthReason,
+  openFigure: OpenFigureState
+): { depth: ResponseDepth; depthReason: DepthReason } {
+  if (!openFigure.isOpen) {
+    return { depth, depthReason };
+  }
+
+  const nextDepth = maxDepth(depth, "medium");
+  let nextReason = depthReason;
+
+  if (DEPTH_RANK[depth] < DEPTH_RANK.medium) {
+    nextReason = openFigureDepthReason(openFigure.trigger, depthReason);
+  }
+
+  return { depth: nextDepth, depthReason: nextReason };
+}
+
+function buildAnalysis(
+  depth: ResponseDepth,
+  depthReason: DepthReason,
+  trajectory: EmotionalTrajectory,
+  openFigure: OpenFigureState
+): ResponseDepthAnalysis {
+  const floored = applyOpenFigureFloor(depth, depthReason, openFigure);
+  return {
+    depth: floored.depth,
+    depthReason: floored.depthReason,
+    recentUserTurns: trajectory.recentUserTurns.length,
+    emotionalMomentum: trajectory.emotionalMomentum,
+    openFigure,
+  };
+}
+
 
 function collectRecentUserTurns(
   message: string,
@@ -327,16 +632,20 @@ export function analyzeResponseDepth(
   const len = trimmed.length;
   const words = trimmed.split(/\s+/).filter(Boolean).length;
   const trajectory = analyzeEmotionalTrajectory(message, recentHistory);
-  const recentUserTurnCount = trajectory.recentUserTurns.length;
-  const hasTrajectory = hasRecentEmotionalTrajectory(trajectory);
+  const openFigureInput = {
+    message,
+    recentHistory,
+    safetyCategory,
+    trajectory,
+  };
 
   if (isExplicitConversationClosure(trimmed)) {
-    return {
-      depth: "brief",
-      depthReason: "explicit_closure",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    return buildAnalysis(
+      "brief",
+      "explicit_closure",
+      trajectory,
+      CLOSED_OPEN_FIGURE
+    );
   }
 
   if (
@@ -344,22 +653,34 @@ export function analyzeResponseDepth(
     safetyCategory === "boundary_pressure" ||
     safetyCategory === "medical_boundary"
   ) {
-    return {
-      depth: "brief",
-      depthReason: "safety_brief",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    return buildAnalysis(
+      "brief",
+      "safety_brief",
+      trajectory,
+      CLOSED_OPEN_FIGURE
+    );
   }
 
   if (safetyCategory === "crisis") {
-    return {
-      depth: "deep",
-      depthReason: "crisis",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    const openFigure = analyzeOpenFigure(openFigureInput);
+    return buildAnalysis("deep", "crisis", trajectory, openFigure);
   }
+
+  if (
+    words <= 8 &&
+    (BRIEF_GREETING.test(trimmed) ||
+      BRIEF_THANKS.test(trimmed) ||
+      BRIEF_SHORT.test(trimmed))
+  ) {
+    return buildAnalysis(
+      "brief",
+      "greeting_short",
+      trajectory,
+      CLOSED_OPEN_FIGURE
+    );
+  }
+
+  const openFigure = analyzeOpenFigure(openFigureInput);
 
   const recentUserText = trajectory.recentUserTurns.join(" ");
   const threadDepth =
@@ -373,79 +694,40 @@ export function analyzeResponseDepth(
   const isLong = len >= 260 || words >= 48;
 
   if (emotional && (isLong || words >= 20)) {
-    return {
-      depth: "deep",
-      depthReason: "long_emotional",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    return buildAnalysis("deep", "long_emotional", trajectory, openFigure);
   }
 
   if (threadDepth && emotional && !trajectory.shortAfterEmotional) {
-    return {
-      depth: "deep",
-      depthReason: "thread_emotional",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    return buildAnalysis("deep", "thread_emotional", trajectory, openFigure);
   }
 
   if (trajectory.uncertaintyInProcess) {
-    return {
-      depth: "medium",
-      depthReason: "uncertainty_in_process",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
+    return buildAnalysis(
+      "medium",
+      "uncertainty_in_process",
+      trajectory,
+      openFigure
+    );
   }
 
-  if (hasTrajectory) {
-    return {
-      depth: "medium",
-      depthReason: "recent_emotional_trajectory",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: trajectory.emotionalMomentum,
-    };
-  }
-
-  if (
-    words <= 8 &&
-    (BRIEF_GREETING.test(trimmed) ||
-      BRIEF_THANKS.test(trimmed) ||
-      BRIEF_SHORT.test(trimmed))
-  ) {
-    return {
-      depth: "brief",
-      depthReason: "greeting_short",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: false,
-    };
+  if (hasRecentEmotionalTrajectory(trajectory)) {
+    return buildAnalysis(
+      "medium",
+      "recent_emotional_trajectory",
+      trajectory,
+      openFigure
+    );
   }
 
   if (len < 40) {
-    return {
-      depth: "brief",
-      depthReason: "short_neutral",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: false,
-    };
+    return buildAnalysis("brief", "short_neutral", trajectory, openFigure);
   }
 
   if (len < 100 && words < 18) {
-    return {
-      depth: "brief",
-      depthReason: "short_neutral",
-      recentUserTurns: recentUserTurnCount,
-      emotionalMomentum: false,
-    };
+    return buildAnalysis("brief", "short_neutral", trajectory, openFigure);
   }
 
-  return {
-    depth: "medium",
-    depthReason: "default_medium",
-    recentUserTurns: recentUserTurnCount,
-    emotionalMomentum: trajectory.emotionalMomentum,
-  };
+  return buildAnalysis("medium", "default_medium", trajectory, openFigure);
 }
 
 export function detectResponseDepth(

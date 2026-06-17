@@ -12,6 +12,11 @@ import {
   detectResponseDepth,
   type DepthReason,
   type EmotionalTrajectory,
+  type OpenFigureConfidence,
+  type OpenFigureIntensity,
+  type OpenFigureKind,
+  type OpenFigureState,
+  type OpenFigureTrigger,
   type ResponseDepth,
   type ResponseDepthAnalysis,
 } from "./responseDepthTrajectory.ts";
@@ -27,6 +32,11 @@ export {
 export type {
   DepthReason,
   EmotionalTrajectory,
+  OpenFigureConfidence,
+  OpenFigureIntensity,
+  OpenFigureKind,
+  OpenFigureState,
+  OpenFigureTrigger,
   ResponseDepth,
   ResponseDepthAnalysis,
 };

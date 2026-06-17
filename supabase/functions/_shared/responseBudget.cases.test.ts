@@ -72,6 +72,14 @@ const cases: Case[] = [
     oldDepth: "brief",
   },
   {
+    name: "2b. isolated emotional short → open_figure medium",
+    history: [],
+    message: "устала",
+    expectedDepth: "medium",
+    expectedReason: "open_figure",
+    oldDepth: "brief",
+  },
+  {
     name: "3. work arc → сон → medium",
     history: buildHistory([
       ["Пока не понятно", "..."],
@@ -204,7 +212,7 @@ for (const c of cases) {
       (c.expectedReason ? ` (expected ${c.expectedReason})` : "")
   );
   console.log(
-    `  meta: recentUserTurns=${analysis.recentUserTurns} emotionalMomentum=${analysis.emotionalMomentum}`
+    `  meta: recentUserTurns=${analysis.recentUserTurns} emotionalMomentum=${analysis.emotionalMomentum} openFigure=${analysis.openFigure.isOpen}`
   );
 
   if (!pass) {
