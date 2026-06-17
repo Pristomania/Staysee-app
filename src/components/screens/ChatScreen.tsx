@@ -11,14 +11,15 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { isAiRequestAborted, sendAiMessage } from '../../lib/ai/client';
+import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
+import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
 import { Send, Square, X, Brain, Feather, Activity } from 'lucide-react';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
 import type { Message } from '../../types';
 import { dedupeMessages, mergeFetchedWithPending } from '../../lib/messages';
-import { deleteChatMessage, insertChatMessage, normalizeMessageRow } from '../../lib/chatMessages';
+import { deleteChatMessage, fetchTurnMessages, insertChatMessage, normalizeMessageRow } from '../../lib/chatMessages';
 import { contextBodyTextClass, LAYOUT_CONTAINER_CLASS } from '../layout';
 import {
   buildRevealSteps,
@@ -159,7 +160,10 @@ export function ChatScreen() {
   const sendLockRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationEpochRef = useRef(0);
+  const [sendError, setSendError] = useState<string | null>(null);
   const pendingDraftRef = useRef('');
+  /** Stable turn id for submit + retry until success or Stop. */
+  const pendingTurnRef = useRef<PendingTurn | null>(null);
   /** DB ids for the in-flight turn — rolled back on Stop after persist. */
   const persistedTurnRef = useRef<{ userId?: string; aiId?: string } | null>(null);
   const activeConvIdRef = useRef<string | null>(null);
@@ -443,6 +447,8 @@ export function ChatScreen() {
     });
     if (draft) restoreDraftToInput(draft);
     pendingDraftRef.current = '';
+    pendingTurnRef.current = null;
+    setSendError(null);
     setSending(false);
     sendLockRef.current = false;
   }, [
@@ -545,11 +551,14 @@ export function ChatScreen() {
     }
     const convId = currentConversation.id;
     const content = inputValue.trim();
+    const turnId = resolveTurnId(pendingTurnRef.current, content);
+    pendingTurnRef.current = { turnId, content };
     const epoch = ++generationEpochRef.current;
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
     pendingDraftRef.current = content;
+    setSendError(null);
     setCaptureNudge(null);
     setInputValue('');
     setSending(true);
@@ -557,17 +566,25 @@ export function ChatScreen() {
     setGuidedOpen(false);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    const tempId = `temp-${Date.now()}`;
+    const tempId = `temp-${turnId}`;
     const tempMsg: Message = {
       id: tempId,
       conversation_id: convId,
       sender: 'user',
       content,
       created_at: new Date().toISOString(),
+      client_message_id: turnId,
     };
     scrollFollowRef.current = true;
     patchMessages((prev) => [...prev.filter((m) => m.id !== 'greeting'), tempMsg]);
     followTailAfterPaint();
+
+    const failSend = (userMessage: string) => {
+      if (epoch !== generationEpochRef.current) return;
+      setSendError(userMessage);
+      patchMessages((prev) => prev.filter((m) => m.id !== tempId));
+      restoreDraftToInput(content);
+    };
 
     const userCapture = detectUserCaptureIntent(content);
     let notesNudgeFromUser = false;
@@ -606,22 +623,36 @@ export function ChatScreen() {
     }
 
     try {
-      const timeGap = buildClientTimeGap(roomMessages);
-
-      let aiText = await sendAiMessage({
-        message: content,
-        conversationId: convId,
-        userId: user.id,
-        timeGap,
-        signal: abortController.signal,
-      });
-
+      const persistedTurn = await fetchTurnMessages(convId, turnId);
       if (epoch !== generationEpochRef.current) return;
 
-      if (!aiText.trim()) {
-        aiText = 'Сейчас не могу ответить. Попробуй немного позже.';
+      let aiText: string;
+
+      if (persistedTurn.ai?.content?.trim()) {
+        aiText = prepareAiDisplayText(persistedTurn.ai.content);
       } else {
-        aiText = prepareAiDisplayText(aiText);
+        const timeGap = buildClientTimeGap(roomMessages);
+
+        const aiResult = await sendAiMessage({
+          message: content,
+          conversationId: convId,
+          userId: user.id,
+          requestId: turnId,
+          timeGap,
+          signal: abortController.signal,
+        });
+
+        if (epoch !== generationEpochRef.current) return;
+
+        if (!isAiSendSuccess(aiResult)) {
+          failSend(
+            aiResult.userMessage ??
+              'Сейчас не могу ответить. Попробуй ещё раз.',
+          );
+          return;
+        }
+
+        aiText = prepareAiDisplayText(aiResult.content);
       }
 
       if (!notesNudgeFromUser && detectAiNotesNudge(aiText)) {
@@ -641,12 +672,13 @@ export function ChatScreen() {
       }
 
       const now = new Date().toISOString();
+      const turnOpts = { userId: user.id, clientMessageId: turnId };
 
       const { message: savedUserRow, error: userSaveErr } = await insertChatMessage(
         convId,
         'user',
         content,
-        user.id,
+        turnOpts,
       );
       if (userSaveErr) {
         console.error('[chat] user message not saved:', userSaveErr);
@@ -656,7 +688,7 @@ export function ChatScreen() {
         convId,
         'ai',
         aiText,
-        user.id,
+        turnOpts,
       );
       if (aiSaveErr) {
         console.error('[chat] ai message not saved:', aiSaveErr);
@@ -678,18 +710,28 @@ export function ChatScreen() {
         .eq('id', convId);
 
       pendingDraftRef.current = '';
+      pendingTurnRef.current = null;
+      setSendError(null);
       abortControllerRef.current = null;
 
-      const savedUser: Message = savedUserRow ?? { ...tempMsg, id: `user-${Date.now()}` };
+      const savedUser: Message =
+        savedUserRow ??
+        persistedTurn.user ?? {
+          ...tempMsg,
+          id: `user-${Date.now()}`,
+        };
       const userTs = new Date(savedUser.created_at).getTime();
       const streamCreatedAt = new Date(Math.max(userTs + 1, Date.now())).toISOString();
-      const finalAiMsg: Message = aiSavedRow ?? {
-        id: `ai-${Date.now()}`,
-        conversation_id: convId,
-        sender: 'ai',
-        content: aiText,
-        created_at: streamCreatedAt,
-      };
+      const finalAiMsg: Message =
+        aiSavedRow ??
+        persistedTurn.ai ?? {
+          id: `ai-${Date.now()}`,
+          conversation_id: convId,
+          sender: 'ai',
+          content: aiText,
+          created_at: streamCreatedAt,
+          client_message_id: turnId,
+        };
 
       scrollFollowRef.current = true;
 
@@ -717,9 +759,7 @@ export function ChatScreen() {
         return;
       }
       console.error('[chat] send failed:', err);
-      patchMessages((prev) => prev.filter((m) => m.id !== tempId));
-      restoreDraftToInput(content);
-      pendingDraftRef.current = '';
+      failSend('Сейчас не могу ответить. Попробуй ещё раз.');
     } finally {
       if (epoch === generationEpochRef.current) {
         setSending(false);
@@ -968,6 +1008,12 @@ export function ChatScreen() {
                   Не знаю, с чего начать
                 </button>
               </div>
+            )}
+
+            {sendError && (
+              <p className={`text-xs font-light mb-2 px-1 ${theme.textMuted}`} role="status">
+                {sendError}
+              </p>
             )}
 
             {/* Input field */}

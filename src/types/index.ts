@@ -27,6 +27,8 @@ export interface Message {
   sender: 'user' | 'ai';
   content: string;
   created_at: string;
+  /** Client turn UUID — shared by user/ai pair for one submit. */
+  client_message_id?: string;
 }
 
 export interface UserMemory {
