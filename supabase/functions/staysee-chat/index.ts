@@ -95,6 +95,8 @@ import {
   parseOpenRouterUsage,
 } from "../_shared/usageAnalytics.ts";
 import { computeProcessState } from "../_shared/processState.ts";
+import { getStructuredTurnMode } from "../_shared/structuredTurnMode.ts";
+import { resolveStructuredTurnRuntime } from "../_shared/structuredTurnRuntime.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -654,6 +656,9 @@ Deno.serve(async (req: Request) => {
       safetyCategory: safety.category,
     });
 
+    const structuredTurnMode = getStructuredTurnMode();
+    const structuredTurnRuntime = resolveStructuredTurnRuntime(structuredTurnMode);
+
     console.log(
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} ` +
         `depth_meta=${JSON.stringify({
@@ -674,6 +679,10 @@ Deno.serve(async (req: Request) => {
           process_closure: processState.closure,
           process_certainty: processState.certainty,
           process_state_source: processState.source,
+          structured_turn_mode: structuredTurnRuntime.audit.structured_turn_mode,
+          structured_turn_enabled: structuredTurnRuntime.audit.structured_turn_enabled,
+          structured_parse_ok: structuredTurnRuntime.audit.structured_parse_ok,
+          structured_fallback_reason: structuredTurnRuntime.audit.structured_fallback_reason,
           userGenderGuidanceInjected: genderGuidanceOn,
           userGrammaticalGender: genderResult.gender,
           userGenderSource: genderResult.source,
