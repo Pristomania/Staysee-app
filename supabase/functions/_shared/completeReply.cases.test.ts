@@ -3,7 +3,7 @@
  * Run: npx tsx supabase/functions/_shared/completeReply.cases.test.ts
  */
 
-import { ensurePublishableReply, isPublishableReply } from "./completeReply.ts";
+import { ensurePublishableReply, isPublishableReply, shouldRunFinalize } from "./completeReply.ts";
 
 type Case = {
   name: string;
@@ -51,6 +51,15 @@ const cases: Case[] = [
     assert: (out) => {
       if (out.includes("—")) throw new Error(`left dash: ${JSON.stringify(out)}`);
       if (!out.includes("Первое предложение.")) throw new Error(`lost sentence: ${JSON.stringify(out)}`);
+    },
+  },
+  {
+    name: "shouldRunFinalize skips publishable period after auto-continue",
+    input: "Ты устала, и это важно.",
+    assert: (out) => {
+      if (shouldRunFinalize(out, true)) {
+        throw new Error("expected finalize skip after auto-continue with period");
+      }
     },
   },
 ];

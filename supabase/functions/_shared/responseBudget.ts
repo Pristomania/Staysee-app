@@ -56,7 +56,7 @@ export interface ResponseBudget extends ResponseDepthAnalysis {
 const DEPTH_TOKEN_TARGET: Record<ResponseDepth, number> = {
   brief: 380,
   medium: 900,
-  deep: 1200,
+  deep: 1600,
 };
 
 export function computeResponseBudget(

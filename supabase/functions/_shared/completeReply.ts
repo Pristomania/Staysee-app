@@ -12,7 +12,7 @@ const LEGACY_GRACEFUL_TAIL_RE =
   /\n*\(Мысль ещё не закончилась[^)]*\)\s*$/i;
 
 /** Max silent continue segments when the model hits output limits. */
-export const MAX_AUTO_CONTINUE_SEGMENTS = 2;
+export const MAX_AUTO_CONTINUE_SEGMENTS = 1;
 
 /** Extra short calls to close the last 1–2 sentences. */
 export const MAX_FINALIZE_ATTEMPTS = 2;
@@ -38,6 +38,53 @@ export function needsAutoContinue(
   if (!body) return false;
   if (finishReason === "length") return true;
   return !isPublishableReply(body);
+}
+
+/** Sentence-ending punctuation — finalize not needed after auto-continue. */
+export function endsWithSentencePunctuation(text: string): boolean {
+  const t = text.trimEnd();
+  return /[.!?…]["')\]]*\s*$/.test(t);
+}
+
+/**
+ * True when text is clearly cut off and may benefit from a finalize segment.
+ */
+export function isClearlyTruncatedForFinalize(text: string): boolean {
+  const body = text.replace(LEGACY_GRACEFUL_TAIL_RE, "").trimEnd();
+  if (!body) return false;
+  if (endsWithSentencePunctuation(body)) return false;
+
+  const dq = (body.match(/"/g) ?? []).length;
+  if (dq % 2 === 1) return true;
+
+  const openGuillemets = (body.match(/«/g) ?? []).length;
+  const closeGuillemets = (body.match(/»/g) ?? []).length;
+  if (openGuillemets !== closeGuillemets) return true;
+
+  if (/\([^)]*$/.test(body) || /\[[^\]]*$/.test(body)) return true;
+  if (/[—–:,]\s*$/u.test(body)) return true;
+  if (
+    /\s(и|а|но|что|как|если|когда|чтобы|для|при|про|на|в|к|с|у|о|от|до|по|за|из|со|об)\s*$/iu.test(
+      body
+    )
+  ) {
+    return true;
+  }
+  if (hasBrokenEnding(body)) return true;
+
+  return false;
+}
+
+/** Whether finalize loop should run for the accumulated reply. */
+export function shouldRunFinalize(
+  accumulated: string,
+  wasAutoContinued: boolean
+): boolean {
+  if (isPublishableReply(accumulated)) return false;
+  if (wasAutoContinued) {
+    return isClearlyTruncatedForFinalize(accumulated);
+  }
+  return true;
 }
 
 /** Remove only a clearly broken trailing word fragment (autoContinue failure). */

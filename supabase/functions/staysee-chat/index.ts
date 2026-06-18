@@ -74,14 +74,19 @@ import {
   MAX_AUTO_CONTINUE_SEGMENTS,
   MAX_FINALIZE_ATTEMPTS,
   needsAutoContinue,
+  shouldRunFinalize,
 } from "../_shared/completeReply.ts";
+import { isDuplicateContinuation } from "../_shared/continuationGuards.ts";
 import {
   mergeContinuationWithoutOverlap,
   polishAssistantOutput,
   polishMergedReply,
   type MergeStrategy,
 } from "../_shared/mergeContinuation.ts";
-import { logReplyCompletion } from "../_shared/replyCompletionLog.ts";
+import {
+  logReplyCompletion,
+  logSegmentMerge,
+} from "../_shared/replyCompletionLog.ts";
 import { buildTimeGapPrompt, classifyTimeGap, type TimeGapMeta } from "../_shared/timeGap.ts";
 import {
   AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
@@ -685,8 +690,8 @@ Deno.serve(async (req: Request) => {
     );
 
     // Auto-complete until publishable (full sentence, no em-dash / half-word cut).
-    let autoContinueSegments = 0;
-    let finalizeAttempts = 0;
+    let autoContinueCount = 0;
+    let finalizeCount = 0;
     let wasAutoContinued = false;
     let wasFinalizeUsed = false;
     let wasTruncated = result.finishReason === "length";
@@ -696,6 +701,9 @@ Deno.serve(async (req: Request) => {
     let lastMergeStrategy: MergeStrategy | undefined;
     let lastOverlapWords = 0;
     let usedMergeFallback = false;
+    let discardedDuplicateCount = 0;
+    const mergeStrategies: string[] = [];
+    let segmentIndex = 0;
     const firstSegmentContent = result.content?.trim() ?? "";
     const segmentBudget = continuationTokenBudget(userTier, responseDepth);
 
@@ -705,12 +713,13 @@ Deno.serve(async (req: Request) => {
       lengthAfterMerge = merged.text.length;
       lastMergeStrategy = merged.strategy;
       lastOverlapWords = merged.overlapWords;
+      mergeStrategies.push(merged.strategy);
       return polishMergedReply(merged.text);
     };
 
     while (
       result.content?.trim() &&
-      autoContinueSegments < MAX_AUTO_CONTINUE_SEGMENTS &&
+      autoContinueCount < MAX_AUTO_CONTINUE_SEGMENTS &&
       needsAutoContinue(result.content, result.finishReason)
     ) {
       const accumulated = result.content.trim();
@@ -727,26 +736,53 @@ Deno.serve(async (req: Request) => {
         tierCfg.temperature,
         turnModel
       );
-      autoContinueSegments++;
+      segmentIndex++;
+      autoContinueCount++;
       wasAutoContinued = true;
       if (retry.finishReason === "length") wasTruncated = true;
 
-      if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
+      const continuation = retry.content?.trim() ?? "";
+      if (!continuation || continuation === CALM_ERRORS.unavailable) {
         break;
       }
 
+      if (isDuplicateContinuation(accumulated, continuation)) {
+        discardedDuplicateCount++;
+        logSegmentMerge({
+          segmentIndex,
+          segmentKind: "auto_continue",
+          finishReason: retry.finishReason,
+          beforeLen: accumulated.length,
+          continuationLen: continuation.length,
+          afterLen: accumulated.length,
+          discardedDuplicate: true,
+        });
+        break;
+      }
+
+      const mergedContent = applyContinuationMerge(accumulated, continuation);
+      logSegmentMerge({
+        segmentIndex,
+        segmentKind: "auto_continue",
+        finishReason: retry.finishReason,
+        mergeStrategy: lastMergeStrategy,
+        beforeLen: lengthBeforeMerge,
+        continuationLen: continuation.length,
+        afterLen: lengthAfterMerge,
+        discardedDuplicate: false,
+      });
+
       result = {
         ...retry,
-        content: applyContinuationMerge(accumulated, retry.content.trim()),
+        content: mergedContent,
         finishReason: retry.finishReason,
       };
     }
 
     while (
       result.content?.trim() &&
-      finalizeAttempts < MAX_FINALIZE_ATTEMPTS &&
-      !isPublishableReply(result.content) &&
-      autoContinueSegments < MAX_AUTO_CONTINUE_SEGMENTS + MAX_FINALIZE_ATTEMPTS
+      finalizeCount < MAX_FINALIZE_ATTEMPTS &&
+      shouldRunFinalize(result.content, wasAutoContinued)
     ) {
       const accumulated = result.content.trim();
       const retry = await callModel(
@@ -762,18 +798,45 @@ Deno.serve(async (req: Request) => {
         tierCfg.temperature,
         turnModel
       );
-      finalizeAttempts++;
+      segmentIndex++;
+      finalizeCount++;
       wasFinalizeUsed = true;
-      autoContinueSegments++;
       if (retry.finishReason === "length") wasTruncated = true;
 
-      if (!retry.content?.trim() || retry.content === CALM_ERRORS.unavailable) {
+      const continuation = retry.content?.trim() ?? "";
+      if (!continuation || continuation === CALM_ERRORS.unavailable) {
         break;
       }
 
+      if (isDuplicateContinuation(accumulated, continuation)) {
+        discardedDuplicateCount++;
+        logSegmentMerge({
+          segmentIndex,
+          segmentKind: "finalize",
+          finishReason: retry.finishReason,
+          beforeLen: accumulated.length,
+          continuationLen: continuation.length,
+          afterLen: accumulated.length,
+          discardedDuplicate: true,
+        });
+        break;
+      }
+
+      const mergedContent = applyContinuationMerge(accumulated, continuation);
+      logSegmentMerge({
+        segmentIndex,
+        segmentKind: "finalize",
+        finishReason: retry.finishReason,
+        mergeStrategy: lastMergeStrategy,
+        beforeLen: lengthBeforeMerge,
+        continuationLen: continuation.length,
+        afterLen: lengthAfterMerge,
+        discardedDuplicate: false,
+      });
+
       result = {
         ...retry,
-        content: applyContinuationMerge(accumulated, retry.content.trim()),
+        content: mergedContent,
         finishReason: retry.finishReason,
       };
     }
@@ -808,14 +871,18 @@ Deno.serve(async (req: Request) => {
       if (
         wasAutoContinued ||
         wasFinalizeUsed ||
-        finalizeAttempts > 0 ||
-        autoContinueSegments > 0 ||
+        finalizeCount > 0 ||
+        autoContinueCount > 0 ||
         !replyPublishable
       ) {
         logReplyCompletion({
           finishReason: result.finishReason,
-          autoContinueSegments,
-          finalizeAttempts,
+          autoContinueSegments: autoContinueCount + finalizeCount,
+          finalizeAttempts: finalizeCount,
+          autoContinueCount,
+          finalizeCount,
+          discardedDuplicateCount,
+          mergeStrategies,
           lengthBeforeMerge,
           lengthAfterMerge,
           wasAutoContinued,
@@ -829,9 +896,9 @@ Deno.serve(async (req: Request) => {
 
       if (!replyPublishable) {
         console.error("[staysee-chat] reply still not publishable after completion");
-      } else if (autoContinueSegments > 0 || safe.length < before) {
+      } else if (autoContinueCount > 0 || finalizeCount > 0 || safe.length < before) {
         console.log(
-          `[staysee-chat] completion segments=${autoContinueSegments} len=${before}->${safe.length}`
+          `[staysee-chat] completion auto_continue=${autoContinueCount} finalize=${finalizeCount} len=${before}->${safe.length}`
         );
       }
     }
