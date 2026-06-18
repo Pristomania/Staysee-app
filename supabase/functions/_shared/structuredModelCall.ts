@@ -1,10 +1,7 @@
 /**
- * Structured model call abstraction — PR3b-2 foundation only.
- * Not invoked from staysee-chat until PR3b-3+.
- * Mirrors plain callModel with response_format json_schema.
+ * Structured model call abstraction — json_schema completion for shadow audit.
  */
 
-import { estimateTokens } from "./cost.ts";
 import { parseOpenRouterUsage } from "./usageAnalytics.ts";
 import { buildStructuredTurnJsonSchema } from "./structuredTurnSchema.ts";
 
@@ -23,6 +20,7 @@ export interface StructuredModelCallInput {
   maxTokens: number;
   temperature: number;
   modelOverride?: string;
+  readApiKey?: (envKey: string) => string | undefined;
 }
 
 export interface StructuredModelCallResult {
@@ -35,14 +33,26 @@ export interface StructuredModelCallResult {
   usage?: { cost?: number; total_tokens?: number };
 }
 
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function defaultReadApiKey(envKey: string): string | undefined {
+  if (typeof Deno !== "undefined") {
+    return Deno.env.get(envKey);
+  }
+  return undefined;
+}
+
 /**
  * OpenRouter chat completion with strict structured turn JSON schema.
- * Caller must parse via parseStructuredTurn() and handle fallback to plain pipeline.
+ * Audit-only — caller must not expose raw JSON to the user.
  */
 export async function callModelStructured(
   input: StructuredModelCallInput
 ): Promise<StructuredModelCallResult | null> {
-  const apiKey = Deno.env.get(input.primaryConfig.envKey);
+  const readApiKey = input.readApiKey ?? defaultReadApiKey;
+  const apiKey = readApiKey(input.primaryConfig.envKey);
   if (!apiKey) {
     console.warn(
       `[structured-model] no key for ${input.primaryProvider} (env: ${input.primaryConfig.envKey})`

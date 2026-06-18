@@ -96,8 +96,13 @@ import {
 } from "../_shared/usageAnalytics.ts";
 import { computeProcessState } from "../_shared/processState.ts";
 import { getStructuredTurnMode } from "../_shared/structuredTurnMode.ts";
-import { resolveStructuredTurnRuntime } from "../_shared/structuredTurnRuntime.ts";
-import { supportsStructuredTurn } from "../_shared/structuredTurnModelSupport.ts";
+import {
+  applyStructuredShadowCallError,
+  finalizeStructuredShadowAudit,
+  planStructuredTurnAudit,
+  type StructuredTurnDepthMeta,
+} from "../_shared/structuredTurnRuntime.ts";
+import { callModelStructured } from "../_shared/structuredModelCall.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -658,45 +663,10 @@ Deno.serve(async (req: Request) => {
     });
 
     const structuredTurnMode = getStructuredTurnMode();
-    const structuredTurnRuntime = resolveStructuredTurnRuntime(structuredTurnMode);
-    const structuredModelSupported =
-      structuredTurnMode !== "off" && supportsStructuredTurn(turnModel);
-    const structuredFallbackReason =
-      structuredTurnMode === "off"
-        ? null
-        : structuredModelSupported
-          ? "structured_call_not_wired"
-          : "model_not_supported";
+    const structuredAuditPlan = planStructuredTurnAudit(structuredTurnMode, turnModel);
 
     console.log(
-      `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} ` +
-        `depth_meta=${JSON.stringify({
-          depth: responseDepth,
-          depthReason: responseBudget.depthReason,
-          recentUserTurns: responseBudget.recentUserTurns,
-          emotionalMomentum: responseBudget.emotionalMomentum,
-          open_figure: responseBudget.openFigure.isOpen,
-          open_figure_kind: responseBudget.openFigure.kind,
-          open_figure_intensity: responseBudget.openFigure.intensity,
-          open_figure_confidence: responseBudget.openFigure.confidence,
-          open_figure_trigger: responseBudget.openFigure.trigger,
-          openFigureGuidanceInjected: openFigureGuidanceOn,
-          uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
-          explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
-          process_contact: processState.contact,
-          process_movement: processState.movement,
-          process_closure: processState.closure,
-          process_certainty: processState.certainty,
-          process_state_source: processState.source,
-          structured_turn_mode: structuredTurnRuntime.audit.structured_turn_mode,
-          structured_turn_enabled: structuredTurnRuntime.audit.structured_turn_enabled,
-          structured_parse_ok: structuredTurnRuntime.audit.structured_parse_ok,
-          structured_model_supported: structuredModelSupported,
-          structured_fallback_reason: structuredFallbackReason,
-          userGenderGuidanceInjected: genderGuidanceOn,
-          userGrammaticalGender: genderResult.gender,
-          userGenderSource: genderResult.source,
-        })}`
+      `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
     );
 
     let result = await callModel(
@@ -860,6 +830,78 @@ Deno.serve(async (req: Request) => {
         );
       }
     }
+
+    let structuredDepthMeta: StructuredTurnDepthMeta = structuredAuditPlan.meta;
+
+    if (structuredAuditPlan.shouldAttemptStructuredCall) {
+      try {
+        const shadowResult = await callModelStructured({
+          primaryProvider: providerKey,
+          primaryConfig: {
+            baseUrl: config.baseUrl,
+            model: config.model,
+            envKey: config.envKey,
+            extraHeaders: config.extraHeaders,
+          },
+          messages: modelMessages,
+          systemPrompt,
+          maxTokens: outputBudget,
+          temperature: tierCfg.temperature,
+          modelOverride: turnModel,
+        });
+
+        if (!shadowResult) {
+          structuredDepthMeta = applyStructuredShadowCallError(structuredDepthMeta);
+        } else {
+          structuredDepthMeta = finalizeStructuredShadowAudit(
+            structuredDepthMeta,
+            shadowResult.model,
+            shadowResult.rawContent
+          );
+        }
+      } catch (shadowErr) {
+        console.error("[staysee-chat] structured shadow call error:", shadowErr);
+        structuredDepthMeta = applyStructuredShadowCallError(structuredDepthMeta);
+      }
+    }
+
+    console.log(
+      `[staysee-chat] depth_meta=${JSON.stringify({
+        depth: responseDepth,
+        depthReason: responseBudget.depthReason,
+        recentUserTurns: responseBudget.recentUserTurns,
+        emotionalMomentum: responseBudget.emotionalMomentum,
+        open_figure: responseBudget.openFigure.isOpen,
+        open_figure_kind: responseBudget.openFigure.kind,
+        open_figure_intensity: responseBudget.openFigure.intensity,
+        open_figure_confidence: responseBudget.openFigure.confidence,
+        open_figure_trigger: responseBudget.openFigure.trigger,
+        openFigureGuidanceInjected: openFigureGuidanceOn,
+        uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
+        explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
+        process_contact: processState.contact,
+        process_movement: processState.movement,
+        process_closure: processState.closure,
+        process_certainty: processState.certainty,
+        process_state_source: processState.source,
+        structured_turn_mode: structuredDepthMeta.structured_turn_mode,
+        structured_turn_enabled: structuredDepthMeta.structured_turn_enabled,
+        structured_model_supported: structuredDepthMeta.structured_model_supported,
+        structured_attempted: structuredDepthMeta.structured_attempted,
+        structured_parse_ok: structuredDepthMeta.structured_parse_ok,
+        structured_fallback_reason: structuredDepthMeta.structured_fallback_reason,
+        structured_process_contact: structuredDepthMeta.structured_process_contact,
+        structured_process_movement: structuredDepthMeta.structured_process_movement,
+        structured_process_closure: structuredDepthMeta.structured_process_closure,
+        structured_process_certainty: structuredDepthMeta.structured_process_certainty,
+        structured_open_figure: structuredDepthMeta.structured_open_figure,
+        structured_open_figure_kind: structuredDepthMeta.structured_open_figure_kind,
+        structured_model: structuredDepthMeta.structured_model,
+        userGenderGuidanceInjected: genderGuidanceOn,
+        userGrammaticalGender: genderResult.gender,
+        userGenderSource: genderResult.source,
+      })}`
+    );
 
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
