@@ -48,6 +48,8 @@ export interface RecentMessage {
 export interface ConversationMeta extends ConversationMemoryMeta {
   created_at: string;
   last_message_at: string | null;
+  /** Session-only server metadata (processState). Not injected into prompt. */
+  metadata: Record<string, unknown> | null;
 }
 
 export interface MemoryItem {
@@ -103,7 +105,7 @@ async function fetchConversationMeta(
   conversationId: string
 ): Promise<ConversationMeta | null> {
   const fullSelect =
-    "id, title, conversation_summary, summary, summary_updated_at, emotional_tone, created_at, last_message_at";
+    "id, title, conversation_summary, summary, summary_updated_at, emotional_tone, created_at, last_message_at, metadata";
 
   let { data, error } = await supabase
     .from("conversations")
@@ -115,7 +117,7 @@ async function fetchConversationMeta(
     console.warn("[context] fetchConversationMeta fallback:", error.message);
     const res = await supabase
       .from("conversations")
-      .select("id, title, conversation_summary, summary, created_at, last_message_at")
+      .select("id, title, conversation_summary, summary, created_at, last_message_at, metadata")
       .eq("id", conversationId)
       .maybeSingle();
     data = res.data;
@@ -132,6 +134,12 @@ async function fetchConversationMeta(
     ...data,
     summary_updated_at: (data as ConversationMeta).summary_updated_at ?? null,
     emotional_tone: (data as ConversationMeta).emotional_tone ?? null,
+    metadata:
+      (data as ConversationMeta).metadata &&
+      typeof (data as ConversationMeta).metadata === "object" &&
+      !Array.isArray((data as ConversationMeta).metadata)
+        ? ((data as ConversationMeta).metadata as Record<string, unknown>)
+        : null,
   };
 }
 
