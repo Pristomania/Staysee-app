@@ -97,6 +97,7 @@ import {
 import { computeProcessState } from "../_shared/processState.ts";
 import { getStructuredTurnMode } from "../_shared/structuredTurnMode.ts";
 import { resolveStructuredTurnRuntime } from "../_shared/structuredTurnRuntime.ts";
+import { supportsStructuredTurn } from "../_shared/structuredTurnModelSupport.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -658,6 +659,14 @@ Deno.serve(async (req: Request) => {
 
     const structuredTurnMode = getStructuredTurnMode();
     const structuredTurnRuntime = resolveStructuredTurnRuntime(structuredTurnMode);
+    const structuredModelSupported =
+      structuredTurnMode !== "off" && supportsStructuredTurn(turnModel);
+    const structuredFallbackReason =
+      structuredTurnMode === "off"
+        ? null
+        : structuredModelSupported
+          ? "structured_call_not_wired"
+          : "model_not_supported";
 
     console.log(
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} ` +
@@ -682,7 +691,8 @@ Deno.serve(async (req: Request) => {
           structured_turn_mode: structuredTurnRuntime.audit.structured_turn_mode,
           structured_turn_enabled: structuredTurnRuntime.audit.structured_turn_enabled,
           structured_parse_ok: structuredTurnRuntime.audit.structured_parse_ok,
-          structured_fallback_reason: structuredTurnRuntime.audit.structured_fallback_reason,
+          structured_model_supported: structuredModelSupported,
+          structured_fallback_reason: structuredFallbackReason,
           userGenderGuidanceInjected: genderGuidanceOn,
           userGrammaticalGender: genderResult.gender,
           userGenderSource: genderResult.source,
