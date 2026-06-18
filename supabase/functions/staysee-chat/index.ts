@@ -663,7 +663,12 @@ Deno.serve(async (req: Request) => {
     });
 
     const structuredTurnMode = getStructuredTurnMode();
-    const structuredAuditPlan = planStructuredTurnAudit(structuredTurnMode, turnModel);
+    const structuredShadowPct = Deno.env.get("STAYSEE_STRUCTURED_TURN_SHADOW_PCT");
+    const structuredAuditPlan = planStructuredTurnAudit(
+      structuredTurnMode,
+      turnModel,
+      structuredShadowPct
+    );
 
     console.log(
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
@@ -886,6 +891,8 @@ Deno.serve(async (req: Request) => {
         process_state_source: processState.source,
         structured_turn_mode: structuredDepthMeta.structured_turn_mode,
         structured_turn_enabled: structuredDepthMeta.structured_turn_enabled,
+        structured_shadow_pct: structuredDepthMeta.structured_shadow_pct,
+        structured_shadow_pct_passed: structuredDepthMeta.structured_shadow_pct_passed,
         structured_model_supported: structuredDepthMeta.structured_model_supported,
         structured_attempted: structuredDepthMeta.structured_attempted,
         structured_parse_ok: structuredDepthMeta.structured_parse_ok,

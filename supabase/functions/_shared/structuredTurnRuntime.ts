@@ -18,16 +18,23 @@ import { supportsStructuredTurn } from "./structuredTurnModelSupport.ts";
 import {
   type StructuredTurnMode,
 } from "./structuredTurnMode.ts";
+import {
+  parseStructuredShadowPct,
+  shouldAttemptShadowByPct,
+} from "./structuredTurnShadowPct.ts";
 
 export type StructuredShadowFallbackReason =
   | import("./structuredTurnParser.ts").StructuredFallbackReason
   | "model_not_supported"
   | "structured_call_error"
-  | "response_mode_not_wired";
+  | "response_mode_not_wired"
+  | "shadow_pct_skip";
 
 export interface StructuredTurnDepthMeta {
   structured_turn_mode: StructuredTurnMode;
   structured_turn_enabled: boolean;
+  structured_shadow_pct: number | null;
+  structured_shadow_pct_passed: boolean | null;
   structured_model_supported: boolean;
   structured_attempted: boolean;
   structured_parse_ok: boolean | null;
@@ -55,23 +62,50 @@ const EMPTY_PROCESS_FIELDS = {
   structured_open_figure_kind: null,
 } as const;
 
+function baseOffMeta(): StructuredTurnDepthMeta {
+  return {
+    structured_turn_mode: "off",
+    structured_turn_enabled: false,
+    structured_shadow_pct: null,
+    structured_shadow_pct_passed: null,
+    structured_model_supported: false,
+    structured_attempted: false,
+    structured_parse_ok: null,
+    structured_fallback_reason: null,
+    structured_model: null,
+    ...EMPTY_PROCESS_FIELDS,
+  };
+}
+
+function shadowPctSkipMeta(
+  turnModel: string,
+  shadowPctEnv: string | undefined
+): StructuredTurnDepthMeta {
+  const modelSupported = supportsStructuredTurn(turnModel);
+  return {
+    structured_turn_mode: "shadow",
+    structured_turn_enabled: true,
+    structured_shadow_pct: parseStructuredShadowPct(shadowPctEnv),
+    structured_shadow_pct_passed: false,
+    structured_model_supported: modelSupported,
+    structured_attempted: false,
+    structured_parse_ok: false,
+    structured_fallback_reason: "shadow_pct_skip",
+    structured_model: null,
+    ...EMPTY_PROCESS_FIELDS,
+  };
+}
+
 export function planStructuredTurnAudit(
   mode: StructuredTurnMode,
-  turnModel: string
+  turnModel: string,
+  shadowPctEnv?: string | undefined,
+  random?: () => number
 ): StructuredTurnAuditPlan {
   if (mode === "off") {
     return {
       shouldAttemptStructuredCall: false,
-      meta: {
-        structured_turn_mode: "off",
-        structured_turn_enabled: false,
-        structured_model_supported: false,
-        structured_attempted: false,
-        structured_parse_ok: null,
-        structured_fallback_reason: null,
-        structured_model: null,
-        ...EMPTY_PROCESS_FIELDS,
-      },
+      meta: baseOffMeta(),
     };
   }
 
@@ -81,6 +115,8 @@ export function planStructuredTurnAudit(
       meta: {
         structured_turn_mode: "response",
         structured_turn_enabled: true,
+        structured_shadow_pct: null,
+        structured_shadow_pct_passed: null,
         structured_model_supported: supportsStructuredTurn(turnModel),
         structured_attempted: false,
         structured_parse_ok: false,
@@ -91,6 +127,16 @@ export function planStructuredTurnAudit(
     };
   }
 
+  const shadowPct = parseStructuredShadowPct(shadowPctEnv);
+  const pctPassed = shouldAttemptShadowByPct(shadowPctEnv, random);
+
+  if (!pctPassed) {
+    return {
+      shouldAttemptStructuredCall: false,
+      meta: shadowPctSkipMeta(turnModel, shadowPctEnv),
+    };
+  }
+
   const modelSupported = supportsStructuredTurn(turnModel);
   if (!modelSupported) {
     return {
@@ -98,6 +144,8 @@ export function planStructuredTurnAudit(
       meta: {
         structured_turn_mode: "shadow",
         structured_turn_enabled: true,
+        structured_shadow_pct: shadowPct,
+        structured_shadow_pct_passed: true,
         structured_model_supported: false,
         structured_attempted: false,
         structured_parse_ok: false,
@@ -113,6 +161,8 @@ export function planStructuredTurnAudit(
     meta: {
       structured_turn_mode: "shadow",
       structured_turn_enabled: true,
+      structured_shadow_pct: shadowPct,
+      structured_shadow_pct_passed: true,
       structured_model_supported: true,
       structured_attempted: false,
       structured_parse_ok: null,
