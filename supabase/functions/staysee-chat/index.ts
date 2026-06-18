@@ -20,6 +20,13 @@ import {
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
 import {
+  buildLegacySessionProcessState,
+  buildStructuredSessionProcessState,
+  extractSessionProcessStateFromMetadata,
+  logSessionProcessStateRead,
+  persistSessionProcessState,
+} from "../_shared/sessionProcessState.ts";
+import {
   enforceRoleBoundedReply,
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
@@ -405,6 +412,14 @@ Deno.serve(async (req: Request) => {
           supabaseAnonKey,
         });
 
+        // PR3c-1 N-1: Turn N reads processState_{N-1} from metadata (audit only).
+        // Same-turn processState_N is computed later and must not affect this response.
+        logSessionProcessStateRead(
+          extractSessionProcessStateFromMetadata(
+            packet.conversationMeta?.metadata ?? null
+          )
+        );
+
         const summaryUpdatedAt =
           packet.conversationMeta?.summary_updated_at ?? null;
         const preTranscript = await fetchTranscriptForSummary(
@@ -654,6 +669,7 @@ Deno.serve(async (req: Request) => {
     });
     const turnModel = modelRoute.model;
 
+    // PR3a shadow — current-turn audit only; persisted as processState_N after response.
     const processState = computeProcessState({
       openFigure: {
         isOpen: responseBudget.openFigure.isOpen,
@@ -977,6 +993,26 @@ Deno.serve(async (req: Request) => {
       })}`
     );
 
+    // PR3c-1: persist processState_N after response (Turn N+1 will read it).
+    const sessionProcessStateWrite = {
+      processState: buildLegacySessionProcessState(processState),
+      ...(structuredDepthMeta.structured_attempted === true &&
+      structuredDepthMeta.structured_parse_ok === true &&
+      structuredDepthMeta.structured_process_contact &&
+      structuredDepthMeta.structured_process_movement &&
+      structuredDepthMeta.structured_process_closure &&
+      structuredDepthMeta.structured_process_certainty
+        ? {
+            processStateStructured: buildStructuredSessionProcessState({
+              contact: structuredDepthMeta.structured_process_contact,
+              movement: structuredDepthMeta.structured_process_movement,
+              closure: structuredDepthMeta.structured_process_closure,
+              certainty: structuredDepthMeta.structured_process_certainty,
+            }),
+          }
+        : {}),
+    };
+
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
     const modelUnavailable = result.content === CALM_ERRORS.unavailable;
@@ -1133,6 +1169,19 @@ Deno.serve(async (req: Request) => {
                   console.error("[staysee-chat] summary update failed:", sumErr);
                 }
               })()
+            : Promise.resolve(),
+
+          // PR3c-1 — session processState_N (metadata column only; summary untouched)
+          conversationId &&
+          result.content &&
+          result.content !== CALM_ERRORS.unavailable
+            ? persistSessionProcessState(
+                svc,
+                conversationId,
+                sessionProcessStateWrite
+              ).catch((err) =>
+                console.error("[staysee-chat] session_process_state_write:", err)
+              )
             : Promise.resolve(),
 
           // Increment usage counters
