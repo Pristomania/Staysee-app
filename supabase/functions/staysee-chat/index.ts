@@ -25,7 +25,12 @@ import {
   extractSessionProcessStateFromMetadata,
   logSessionProcessStateRead,
   persistSessionProcessState,
+  type SessionProcessState,
 } from "../_shared/sessionProcessState.ts";
+import {
+  buildSessionProcessGuidance,
+  sessionProcessGuidanceInjected,
+} from "../_shared/sessionProcessGuidance.ts";
 import {
   enforceRoleBoundedReply,
   evaluateTurnSafety,
@@ -393,6 +398,8 @@ Deno.serve(async (req: Request) => {
     let systemPrompt = BASE_PROMPT;
     let historyMessages: ChatMessage[] = [];
     let memoryItemIds: string[] = [];
+    // PR3c-2 N-1: prior-turn processState for session guidance (legacy only).
+    let priorSessionProcessState: SessionProcessState | null = null;
     // Carry packet out of block for background summary task
     let packetForSummary: Awaited<ReturnType<typeof buildContextPacket>> | null = null;
 
@@ -412,13 +419,13 @@ Deno.serve(async (req: Request) => {
           supabaseAnonKey,
         });
 
-        // PR3c-1 N-1: Turn N reads processState_{N-1} from metadata (audit only).
+        // PR3c-1/2 N-1: Turn N reads processState_{N-1} from metadata.
         // Same-turn processState_N is computed later and must not affect this response.
-        logSessionProcessStateRead(
-          extractSessionProcessStateFromMetadata(
-            packet.conversationMeta?.metadata ?? null
-          )
+        const extractedSessionProcessState = extractSessionProcessStateFromMetadata(
+          packet.conversationMeta?.metadata ?? null
         );
+        logSessionProcessStateRead(extractedSessionProcessState);
+        priorSessionProcessState = extractedSessionProcessState.legacy;
 
         const summaryUpdatedAt =
           packet.conversationMeta?.summary_updated_at ?? null;
@@ -622,6 +629,29 @@ Deno.serve(async (req: Request) => {
     );
     let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
 
+    const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+    const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
+      depthReason: responseBudget.depthReason,
+      message,
+    });
+
+    const sessionProcessGuidance = buildSessionProcessGuidance({
+      priorState: priorSessionProcessState,
+      explicitClosureActive: explicitClosureGuidanceOn,
+      safetyCategory: safety.category,
+    });
+    const sessionProcessGuidanceOn = sessionProcessGuidanceInjected({
+      priorState: priorSessionProcessState,
+      explicitClosureActive: explicitClosureGuidanceOn,
+      safetyCategory: safety.category,
+    });
+    if (sessionProcessGuidance) {
+      systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
+    }
+
     const openFigureGuidance = buildOpenFigureTurnGuidance({
       openFigure: responseBudget.openFigure,
       depthReason: responseBudget.depthReason,
@@ -650,14 +680,6 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, uncertaintyGuidance].join("\n\n");
     }
 
-    const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
-      depthReason: responseBudget.depthReason,
-      message,
-    });
-    const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
-      depthReason: responseBudget.depthReason,
-      message,
-    });
     if (explicitClosureGuidance) {
       systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
     }
@@ -964,6 +986,7 @@ Deno.serve(async (req: Request) => {
         open_figure_intensity: responseBudget.openFigure.intensity,
         open_figure_confidence: responseBudget.openFigure.confidence,
         open_figure_trigger: responseBudget.openFigure.trigger,
+        sessionProcessGuidanceInjected: sessionProcessGuidanceOn,
         openFigureGuidanceInjected: openFigureGuidanceOn,
         uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
         explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
