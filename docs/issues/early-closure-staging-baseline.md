@@ -1,10 +1,9 @@
 # Early closure — accepted staging baseline (Step 2 + Step 3)
 
-**Status:** accepted on staging for T1  
-**Date:** 2026-06-17  
+**Status:** accepted on staging for T1; **deployed to prod**  
+**Date:** 2026-06-17 (staging); prod rollout 2026-06-22  
 **Staging:** `hdmoetcvlszrdukqpiia`  
-**Production:** untouched (`jnxrildlwvtxhtiwucbt`)  
-**Prod rollout:** not done in this step
+**Production:** `jnxrildlwvtxhtiwucbt` — Step 2 + Step 3 deployed (`0a929e6`)
 
 ---
 
@@ -12,10 +11,10 @@
 
 | Area | Status |
 | --- | --- |
-| Early closure / premature process closure | **Resolved on staging for T1** |
-| Accepted staging baseline | **Step 2** Constitution Process-First + **Step 3** CS Activation Gate |
-| Step 6 Language Attunement | **Not accepted** — flag **OFF** |
-| Production | **Untouched** |
+| Early closure / premature process closure | **Resolved on staging and prod for T1** |
+| Accepted baseline | **Step 2** Constitution Process-First + **Step 3** CS Activation Gate |
+| Step 6 Language Attunement | **Not accepted** — flag **OFF** / absent on prod |
+| Production | **Deployed** (`0a929e6`, prod smoke **PASS**) |
 
 ---
 
@@ -29,8 +28,8 @@
 | Step 4 | отсутствует |
 | Step 5 | откатан |
 | Step 6 code | может быть в коде как эксперимент |
-| Step 6 flag `STAYSEE_LANGUAGE_ATTUNEMENT_TURN_GUIDANCE` | **OFF** |
-| Prod | untouched |
+| Step 6 flag `STAYSEE_LANGUAGE_ATTUNEMENT_TURN_GUIDANCE` | **OFF** (staging) / **absent** (prod) |
+| Prod | **deployed** (`0a929e6`) |
 
 **Prompt sources (accepted baseline):**
 
@@ -41,9 +40,9 @@
 
 **Step 6 (experimental, not accepted):**
 
-- `supabase/functions/_shared/languageAttunementTurnGuidance.ts`
-- Wired in `supabase/functions/staysee-chat/index.ts`
-- Env: `STAYSEE_LANGUAGE_ATTUNEMENT_TURN_GUIDANCE=off` on staging
+- Not in prod deploy (`0a929e6`); `staysee-chat/index.ts` has no Step 6 wiring
+- Staging: `STAYSEE_LANGUAGE_ATTUNEMENT_TURN_GUIDANCE=off`
+- Prod: secret **absent**
 
 ---
 
@@ -155,28 +154,84 @@ Step 6 Language Attunement был протестирован отдельно и
 
 ---
 
+## Production rollout
+
+Status: **deployed to prod**
+
+Production project:
+
+| Item | Value |
+| ---- | ----- |
+| Project ref | `jnxrildlwvtxhtiwucbt` |
+| Function | `staysee-chat` |
+| Deployed commit | `0a929e6 feat(prompt): add process-first and CS activation gate` |
+| Prod smoke | **PASS** |
+| Runtime errors | none |
+| Step 6 flag | absent |
+| Short continuation flag | absent |
+
+**Commits in rollout:**
+
+- `c292d2f` — docs: record early closure staging baseline
+- `0a929e6` — feat(prompt): add process-first and CS activation gate
+
+**Guidance injection (prod smoke):**
+
+- `languageAttunementTurnGuidanceInjected`: **null** in all cases
+- `shortContinuationWordingGuidanceInjected`: **null** in all cases
+
+### Prod smoke
+
+| Case | Closure Risk | Hypothesis Finalized | Process Still Open | Early Exit Language | Direct-request preserved |
+| ---- | ------------ | -------------------- | ------------------ | ------------------- | ------------------------ |
+| `пусто внутри` | PASS | PASS | PASS | PASS | N/A |
+| `камень в груди` | PASS | PASS | PASS | PASS | N/A |
+| `всё навалилось` | PASS | PASS | PASS | PASS | N/A |
+| `пусто внутри, что это может означать?` | PASS | PASS | PASS | PASS | PASS |
+| `камень в груди, что это может означать в психосоматике?` | PASS | PASS | PASS | PASS | PASS |
+
+### Production conclusion
+
+Step 2 + Step 3 are now production-deployed.
+
+The early closure fix is considered complete for the original T1 premature process closure task:
+
+- no closure-risk FAIL in prod smoke;
+- no hypothesis-finalized FAIL;
+- no early-exit-language FAIL;
+- direct-request explanations preserved;
+- Step 6 / language attunement remains not accepted and is not active in prod;
+- short continuation guidance remains not active in prod.
+
+Remaining follow-ups stay separate:
+
+- short `да` greeting reset;
+- human voice / language attunement;
+- prod smoke test user env hygiene.
+
+---
+
 ## Decision
 
 ```text
 Early closure task:
   accepted on staging for T1
+  deployed to prod (0a929e6, prod smoke PASS)
 
 Accepted baseline:
   Step 2 + Step 3
-
-Prod rollout:
-  not done in this step
 
 Remaining gaps:
   1. short «да» greeting reset — separate issue
   2. human voice / language attunement — separate frozen track
   3. soak infra daily rate limit — test infra issue
+  4. prod smoke test user env hygiene — optional follow-up
 ```
 
 ---
 
-## Next steps (explicitly not in this step)
+## Next steps
 
-- [ ] Prod rollout of Step 2 + Step 3 (when approved separately)
+- [x] Prod rollout of Step 2 + Step 3 (`0a929e6`)
 - [ ] Do **not** enable Step 6 flag without re-opening language attunement track
 - [ ] Do **not** conflate greeting-reset fix with early closure acceptance
