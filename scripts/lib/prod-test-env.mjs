@@ -1,16 +1,19 @@
 /**
  * Shared guard + helpers for prod smoke / audit scripts.
  * Never create conversations on real user profiles without STAYSEE_TEST_USER_ID.
+ * Never use profiles?limit=1 (or similar) as implicit user source on production.
  */
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  TEST_CONVERSATION_TITLE_RE,
+  isTestConversationTitle,
+} from "./test-conversation-title.mjs";
+
+export { TEST_CONVERSATION_TITLE_RE, isTestConversationTitle };
 
 export const TEST_TITLE_PREFIX = "__TEST__";
-
-/** Titles matching these patterns are eligible for automated cleanup. */
-export const TEST_CONVERSATION_TITLE_RE =
-  /^(?:__TEST__|post-fix smoke|audit(?:\s|[-_])|prod smoke|exact-test|depth-arc-smoke|audit-uncertainty)/i;
 
 export function loadEnvFile(cwd = process.cwd()) {
   const vars = {};
@@ -50,8 +53,52 @@ export function getServiceKey(env = loadEnvFile()) {
   return process.env.SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 }
 
+const PRODUCTION_PROJECT_HOST = "jnxrildlwvtxhtiwucbt.supabase.co";
+
 export function isProdSupabaseUrl(url) {
   return /supabase\.co/i.test(url) && !/localhost|127\.0\.0\.1/i.test(url);
+}
+
+/** Production project only — not staging. */
+export function isProductionProjectUrl(url) {
+  return (url ?? "").replace(/\/$/, "").includes(PRODUCTION_PROJECT_HOST);
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Prod writes must target an explicit dedicated test user — never a profile picked from limit=1.
+ */
+export function assertExplicitTestUserId(testUserId) {
+  const id = (testUserId ?? "").trim();
+  if (!id) {
+    throw new Error(
+      "STAYSEE_TEST_USER_ID is required for prod smoke/audit scripts. " +
+        "Create a dedicated technical test user — never use a real user profile."
+    );
+  }
+  if (!UUID_RE.test(id)) {
+    throw new Error(`STAYSEE_TEST_USER_ID must be a UUID, got: ${id}`);
+  }
+  return id;
+}
+
+/**
+ * Blocks the ad-hoc anti-pattern: profiles?select=id&limit=1 → first real user.
+ */
+export function guardProdRestPath(baseUrl, path) {
+  if (!isProductionProjectUrl(baseUrl)) return;
+  const isProfileList =
+    /^profiles\?/i.test(path) &&
+    /(?:^|[&?])limit=1(?:&|$)/i.test(path) &&
+    !/(?:^|[&?])id=eq\./i.test(path);
+  if (isProfileList) {
+    throw new Error(
+      "Prod guard: never use profiles?limit=1 as implicit user source. " +
+        "Set STAYSEE_TEST_USER_ID explicitly for test/audit writes."
+    );
+  }
 }
 
 /**
@@ -72,14 +119,9 @@ export function assertProdTestAllowed(env = loadEnvFile()) {
     );
   }
 
-  const testUserId =
-    process.env.STAYSEE_TEST_USER_ID ?? env.STAYSEE_TEST_USER_ID ?? "";
-  if (!testUserId) {
-    throw new Error(
-      "STAYSEE_TEST_USER_ID is required for prod smoke/audit scripts. " +
-        "Create a dedicated technical test user and set it in .env — never use a real user profile."
-    );
-  }
+  const testUserId = assertExplicitTestUserId(
+    process.env.STAYSEE_TEST_USER_ID ?? env.STAYSEE_TEST_USER_ID ?? ""
+  );
 
   return { url, serviceKey, testUserId };
 }
@@ -107,6 +149,7 @@ export function makeServiceHeaders(serviceKey) {
 }
 
 export async function restJson(baseUrl, headers, path, opts = {}) {
+  guardProdRestPath(baseUrl, path);
   const res = await fetch(`${baseUrl}/rest/v1/${path}`, {
     headers: { ...headers, ...(opts.prefer ? { Prefer: opts.prefer } : {}) },
     ...opts,
@@ -156,6 +199,12 @@ export async function deleteTestConversation(baseUrl, headers, conversationId) {
 }
 
 export async function createTestConversation(baseUrl, headers, testUserId, titleSuffix) {
+  assertExplicitTestUserId(testUserId);
+  if (isProdSupabaseUrl(baseUrl) && process.env.STAYSEE_ALLOW_PROD_TESTS !== "1") {
+    throw new Error(
+      "Prod conversation create blocked unless STAYSEE_ALLOW_PROD_TESTS=1 is set"
+    );
+  }
   const title = buildTestConversationTitle(titleSuffix);
   const rows = await restJson(baseUrl, headers, "conversations", {
     method: "POST",
@@ -189,6 +238,7 @@ export async function withTestConversation(
   titleSuffix,
   fn
 ) {
+  assertExplicitTestUserId(testUserId);
   const headers = makeServiceHeaders(serviceKey);
   let conversationId = null;
   try {
