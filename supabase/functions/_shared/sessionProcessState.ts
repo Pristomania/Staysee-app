@@ -1,5 +1,6 @@
 /**
- * PR3c-1 — session processState read/write (audit-only; no prompt injection).
+ * PR3c-1 — session processState read/write.
+ * PR3c-2 consumes legacy processState_{N-1} via sessionProcessGuidance.
  * Stores enum-only state in conversations.metadata — never reasoning or raw text.
  */
 
