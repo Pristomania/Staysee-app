@@ -313,9 +313,7 @@ export function enforceRoleBoundedReply(
   if (!trimmed) return trimmed;
 
   if (opts?.relationalLifeTurn) {
-    return trimmed.length > 720
-      ? truncateToMaxSentences(trimmed, 5).slice(0, 720).trim()
-      : trimmed;
+    return trimmed;
   }
 
   const frustrationTurn = userFrustrationAtBot(opts?.userMessage ?? "");
