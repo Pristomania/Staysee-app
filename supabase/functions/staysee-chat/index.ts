@@ -59,6 +59,7 @@ import {
 import {
   computeResponseBudget,
   continuationTokenBudget,
+  OUTPUT_TOKEN_CEILING_GUIDANCE,
 } from "../_shared/responseBudget.ts";
 import {
   buildUncertaintyTurnGuidance,
@@ -120,6 +121,17 @@ import {
   type StructuredTurnDepthMeta,
 } from "../_shared/structuredTurnRuntime.ts";
 import { callModelStructured } from "../_shared/structuredModelCall.ts";
+import {
+  inspectOpenRouterMessageContent,
+  legacyOpenRouterContent,
+} from "../_shared/openRouterContent.ts";
+import {
+  beginReplyPipelineTrace,
+  getReplyPipelineTraceReport,
+  isContactSuspicious,
+  isReplyPipelineTraceEnabled,
+  recordReplyPipelineStage,
+} from "../_shared/replyPipelineTrace.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -274,11 +286,30 @@ async function callModel(
     }
 
     const data = await res.json();
-    const content: string = data.choices?.[0]?.message?.content ?? "";
+    const rawMessageContent = data.choices?.[0]?.message?.content;
+    const contentInspect = inspectOpenRouterMessageContent(rawMessageContent);
+    const content: string = legacyOpenRouterContent(rawMessageContent);
     const finishReason: string | undefined = data.choices?.[0]?.finish_reason;
     if (!content) {
       console.error(`[staysee-chat] ${provider} empty content, raw:`, JSON.stringify(data).slice(0, 200));
       return null;
+    }
+    if (isReplyPipelineTraceEnabled()) {
+      recordReplyPipelineStage("provider_raw_text", contentInspect.joinedText, {
+        finishReason,
+        model,
+        meta: {
+          rawKind: contentInspect.rawKind,
+          blockCount: contentInspect.blockCount ?? null,
+          legacyDiffersFromJoined:
+            contentInspect.legacyText !== contentInspect.joinedText,
+        },
+      });
+      recordReplyPipelineStage("adapter_extracted_content", content, {
+        finishReason,
+        model,
+        meta: { rawKind: contentInspect.rawKind },
+      });
     }
     const usage = data.usage ?? {};
     const parsed = parseOpenRouterUsage(data);
@@ -329,6 +360,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const startMs = Date.now();
+  beginReplyPipelineTrace();
 
   try {
     const body: RequestBody = await req.json();
@@ -684,6 +716,8 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
     }
 
+    systemPrompt = [systemPrompt, OUTPUT_TOKEN_CEILING_GUIDANCE].join("\n\n");
+
     const modelRoute = resolveChatModel({
       depth: responseDepth,
       safetyCategory: safety.category,
@@ -879,11 +913,29 @@ Deno.serve(async (req: Request) => {
       };
     }
 
-    if (result.content?.trim()) {
-      const before = result.content.length;
-      let safe = ensurePublishableReply(
-        polishMergedReply(result.content.trim())
-      );
+  if (isReplyPipelineTraceEnabled()) {
+    recordReplyPipelineStage("after_auto_continue_merge", result.content, {
+      finishReason: result.finishReason,
+      model: result.model,
+      autoContinueUsed: wasAutoContinued,
+      finalizeUsed: wasFinalizeUsed,
+    });
+  }
+
+  let polishedBeforeEnsure = "";
+
+  if (result.content?.trim()) {
+    const before = result.content.length;
+    polishedBeforeEnsure = polishMergedReply(result.content.trim());
+    if (isReplyPipelineTraceEnabled()) {
+      recordReplyPipelineStage("after_polish_merged", polishedBeforeEnsure, {
+        finishReason: result.finishReason,
+        model: result.model,
+        autoContinueUsed: wasAutoContinued,
+        finalizeUsed: wasFinalizeUsed,
+      });
+    }
+    let safe = ensurePublishableReply(polishedBeforeEnsure);
 
       if (
         !isPublishableReply(safe) &&
@@ -897,6 +949,17 @@ Deno.serve(async (req: Request) => {
         lengthAfterMerge = safe.length;
       }
 
+      if (isReplyPipelineTraceEnabled()) {
+        recordReplyPipelineStage("after_ensure_publishable", safe, {
+          finishReason: result.finishReason,
+          model: result.model,
+          autoContinueUsed: wasAutoContinued,
+          finalizeUsed: wasFinalizeUsed,
+          publishable: isPublishableReply(safe),
+          contactComplete: !isContactSuspicious(safe),
+        });
+      }
+
       safe = enforceRoleBoundedReply(safe, safety.category, {
         insistenceLoop: safety.insistenceLoop,
         threadEscalated: safety.threadEscalated,
@@ -904,6 +967,17 @@ Deno.serve(async (req: Request) => {
         relationalLifeTurn: diagnosis.relationalLifeTurn,
       });
       result = { ...result, content: safe };
+
+      if (isReplyPipelineTraceEnabled()) {
+        recordReplyPipelineStage("after_role_bounded_reply", safe, {
+          finishReason: result.finishReason,
+          model: result.model,
+          autoContinueUsed: wasAutoContinued,
+          finalizeUsed: wasFinalizeUsed,
+          publishable: isPublishableReply(safe),
+          contactComplete: !isContactSuspicious(safe),
+        });
+      }
 
       replyPublishable = isPublishableReply(safe);
       if (
@@ -1098,6 +1172,20 @@ Deno.serve(async (req: Request) => {
 
     const clientConnected = !req.signal.aborted;
 
+    if (isReplyPipelineTraceEnabled() && result.content?.trim()) {
+      recordReplyPipelineStage("before_http_response", result.content, {
+        finishReason: result.finishReason,
+        model: result.model,
+        generationStatus,
+        autoContinueUsed: wasAutoContinued,
+        finalizeUsed: wasFinalizeUsed,
+        publishable: replyPublishable,
+        contactComplete: !isContactSuspicious(result.content),
+      });
+    }
+
+    const pipelineTrace = getReplyPipelineTraceReport();
+
     if (userId && clientConnected) {
       const svc = makeServiceClient();
 
@@ -1236,6 +1324,7 @@ Deno.serve(async (req: Request) => {
         content: result.content,
         provider: result.provider,
         model: result.model,
+        ...(pipelineTrace.length > 0 ? { _replyPipelineTrace: pipelineTrace } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

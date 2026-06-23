@@ -1,18 +1,13 @@
 /**
- * Thread-level role enforcement + post-response guard.
- * Fixes "broken" chats where history keeps the model in assistant/content mode.
+ * Thread-level role enforcement (pre-generation guidance).
+ * Post-response output is not truncated here — see docs/issues/reply-pipeline-cleanup.md.
  */
 
 import { userSignalsLanguageBoundary, LANGUAGE_BOUNDARY_GUIDANCE } from "./languageGuard.ts";
-import {
-  isStaleBoundaryScript,
-  pickBoundaryFallback,
-  userFrustrationAtBot,
-} from "./boundaryFallback.ts";
+import { userFrustrationAtBot } from "./boundaryFallback.ts";
 import {
   analyzeRoleContamination,
   buildRoleResetGuidance,
-  replyUsesWrongRole,
   userImposedRoleOverride,
   type ChatTurn,
 } from "./roleGuard.ts";
@@ -26,12 +21,6 @@ import {
 } from "./safety.ts";
 
 export type { ChatTurn };
-
-/**
- * Boundary fallback replacement disabled temporarily.
- * Role boundaries should be handled by prompt guidance, not deterministic overwrite.
- */
-export const BOUNDARY_FALLBACK_REPLACEMENT_ENABLED = false;
 
 const CATEGORY_RANK: Record<SafetyCategory, number> = {
   crisis: 100,
@@ -75,13 +64,6 @@ const BOUNDARY_REFUSAL_IN_ASSISTANT = [
   /не\s+назначаю/i,
   /границ/i,
   /не\s+ассистент/i,
-];
-
-const DIAGNOSIS_IN_REPLY = [
-  /у\s+тебя\s+(?:скорее\s+всего\s+)?(?:биполяр|депресс|тревожн|птср|шизофрен|окр|расстройств)/i,
-  /(?:диагноз|заболевани[ея])\s*[—:-]/i,
-  /(?:прими|принимай|назначу|рекомендую)\s+(?:\w+\s+){0,2}(?:таблетк|препарат|лекарств|антидепресс|сертралин|флуоксетин)/i,
-  /(?:биполярн|депрессивн|тревожн)\s+(?:расстройств|состояни)/i,
 ];
 
 const THREAD_ESCALATION_GUIDANCE = `
@@ -268,103 +250,19 @@ export function evaluateTurnSafety(
   };
 }
 
-function countSentences(text: string): number {
-  return (text.match(/[.!?…]+/g) ?? []).length;
-}
-
-function truncateToMaxSentences(text: string, max: number): string {
-  const parts = text.split(/(?<=[.!?…]["')\]]*)\s+/u);
-  if (parts.length <= max) return text.trim();
-  return parts.slice(0, max).join(" ").trim();
-}
-
-function looksLikeContentDelivery(text: string, strict = false): boolean {
-  const t = text.trim();
-  const lenCap = strict ? 420 : 720;
-  if (t.length >= lenCap) return true;
-  if ((t.match(/\n\n/g) ?? []).length >= (strict ? 1 : 2)) return true;
-  if (/^\s*[\d]+[.)]\s/m.test(t)) return true;
-  if ((t.match(/^\s*[-•*]\s/gm) ?? []).length >= (strict ? 2 : 3)) return true;
-  if (/(?:во-первых|во-вторых|итак,|шаг\s+\d|следующий шаг:|план действий)/i.test(t)) return true;
-  if (matches(t, DIAGNOSIS_IN_REPLY)) return true;
-  return false;
-}
-
-const BOUNDED_CATEGORIES: SafetyCategory[] = [
-  "off_topic",
-  "boundary_pressure",
-  "medical_boundary",
-];
-
 /**
- * Hard cap / replace assistant output that slipped past the prompt.
+ * Post-response pass-through. Role/boundary protection is pre-generation (prompt guidance).
+ * Post-generation truncation and fallback replacement removed — docs/issues/reply-pipeline-cleanup.md.
  */
 export function enforceRoleBoundedReply(
   content: string,
-  category: SafetyCategory,
-  opts?: {
+  _category: SafetyCategory,
+  _opts?: {
     insistenceLoop?: boolean;
     threadEscalated?: boolean;
     userMessage?: string;
     relationalLifeTurn?: boolean;
   }
 ): string {
-  const trimmed = content.trim();
-  if (!trimmed) return trimmed;
-
-  if (opts?.relationalLifeTurn) {
-    return trimmed.length > 720
-      ? truncateToMaxSentences(trimmed, 5).slice(0, 720).trim()
-      : trimmed;
-  }
-
-  const frustrationTurn = userFrustrationAtBot(opts?.userMessage ?? "");
-  if (frustrationTurn) {
-    if (trimmed.length <= 520) return trimmed;
-    return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
-  }
-
-  if (!BOUNDARY_FALLBACK_REPLACEMENT_ENABLED) {
-    return trimmed;
-  }
-
-  const bounded =
-    BOUNDED_CATEGORIES.includes(category) || Boolean(opts?.insistenceLoop);
-
-  if (!bounded) {
-    return trimmed;
-  }
-
-  const wrongRole = replyUsesWrongRole(trimmed);
-  const mustPivot =
-    wrongRole ||
-    looksLikeContentDelivery(trimmed, true) ||
-    (category === "medical_boundary" && matches(trimmed, DIAGNOSIS_IN_REPLY));
-
-  if (mustPivot) {
-    const fallback = pickBoundaryFallback(opts?.userMessage ?? "", {
-      wrongRoleInReply: wrongRole,
-    });
-    if (!fallback) {
-      return trimmed.length <= 520 ? trimmed : truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
-    }
-    if (!isStaleBoundaryScript(trimmed, fallback)) return fallback;
-    if (trimmed.length >= 40 && trimmed.length <= 520) return trimmed;
-    return fallback;
-  }
-
-  const maxChars =
-    category === "boundary_pressure" || opts?.insistenceLoop ? 400 : 480;
-  let out =
-    trimmed.length > maxChars ? truncateToMaxSentences(trimmed, 4).slice(0, maxChars) : trimmed;
-
-  if (countSentences(out) > 4) {
-    out = truncateToMaxSentences(out, 4);
-  }
-
-  if (out.length > maxChars) {
-    out = truncateToMaxSentences(out.slice(0, maxChars), 3);
-  }
-
-  return out.trim() || pickBoundaryFallback(opts?.userMessage ?? "");
+  return content.trim();
 }
