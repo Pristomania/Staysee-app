@@ -81,6 +81,13 @@ const CRISIS_PATTERNS = [
   /self.harm/i,
 ];
 
+/**
+ * Temporary medical word triggers — legacy safety net only.
+ * Do not expand with symptom keyword lists (same architectural trap as legal/financial).
+ * Future: rebuild medical/crisis boundary protocol semantically after PROCESS CORE,
+ * distinguishing current immediate danger, past medical event, diagnosis/treatment
+ * request, and health-related emotional material.
+ */
 const MEDICAL_PATTERNS = [
   /какое лекарство принять/i,
   /какую таблетку/i,
@@ -96,24 +103,12 @@ const MEDICAL_PATTERNS = [
   /медицинский совет/i,
 ];
 
-const LEGAL_FINANCIAL_PATTERNS = [
-  /юридическ/i,
-  /юрист/i,
-  /адвокат/i,
-  /закон/i,
-  /статья \d+/i,
-  /права по закону/i,
-  /иск/i,
-  /судебн/i,
-  /инвестировать/i,
-  /акции/i,
-  /криптовалют/i,
-  /финансовый совет/i,
-  /куда вложить деньги/i,
-  /налог/i,
-  /долг/i,
-  /банкрот/i,
-];
+/**
+ * Legacy legal/financial word-trigger boundary — intentionally disabled.
+ * Prior LEGAL_FINANCIAL_PATTERNS matched substrings inside ordinary words
+ * (e.g. «закон» in «закончим», «иск» in «искренне»).
+ * Rebuild as semantic role-boundary protocol after PROCESS CORE — not word triggers.
+ */
 
 const OFF_TOPIC_PATTERNS = [
   /как починить/i,
@@ -261,7 +256,6 @@ export function classifyMessage(text: string): SafetyCategory {
   if (matches(text, CRISIS_PATTERNS)) return "crisis";
   if (matches(text, DEPENDENCY_PATTERNS)) return "dependency_risk";
   if (matches(text, MEDICAL_PATTERNS)) return "medical_boundary";
-  if (matches(text, LEGAL_FINANCIAL_PATTERNS)) return "legal_financial_boundary";
   if (matches(text, OFF_TOPIC_PATTERNS)) return "off_topic";
   return "normal";
 }

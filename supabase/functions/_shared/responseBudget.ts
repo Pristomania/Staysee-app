@@ -51,6 +51,10 @@ export interface ResponseBudget extends ResponseDepthAnalysis {
   maxTokens: number;
 }
 
+/** Minimal technical note — ceiling is a boundary, not a target length. */
+export const OUTPUT_TOKEN_CEILING_GUIDANCE =
+  "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
+
 /** Per-depth targets (capped by tier ceiling). */
 /** Balanced: 2–4 sentences in identity, enough room to finish a thought. */
 const DEPTH_TOKEN_TARGET: Record<ResponseDepth, number> = {

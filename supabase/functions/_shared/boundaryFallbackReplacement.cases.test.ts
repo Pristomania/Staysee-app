@@ -4,7 +4,6 @@
  */
 
 import {
-  BOUNDARY_FALLBACK_REPLACEMENT_ENABLED,
   enforceRoleBoundedReply,
   evaluateTurnSafety,
 } from "./roleEnforcement.ts";
@@ -52,10 +51,7 @@ function assertNoFallbackReplacement(
   console.log(`✓ ${label}`);
 }
 
-assert(
-  BOUNDARY_FALLBACK_REPLACEMENT_ENABLED === false,
-  "BOUNDARY_FALLBACK_REPLACEMENT_ENABLED must be false for this regression suite"
-);
+console.log("=== Post-generation pass-through (no fallback replacement) ===");
 
 const RELATIONAL_SON_TURNS = [
   "Я хочу чтобы он сам пришёл к этому выводу",

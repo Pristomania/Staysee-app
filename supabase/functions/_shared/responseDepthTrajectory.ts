@@ -94,7 +94,56 @@ const BRIEF_GREETING =
   /^(привет|здравствуй|здравствуйте|добрый|доброе|хай|hello|hi|hey)(?:[!.,?\s]|$)/i;
 const BRIEF_THANKS =
   /^(спасибо|благодарю|thanks|thank you)(?:[!.,?\s]|$)/i;
-const BRIEF_SHORT = /^(да|нет|ок|okay|ладно|понятно|ясно)\s*!?\s*$/i;
+const BRIEF_SHORT = /^(да|нет|ок|okay|ладно|понятно|ясно|угу|ага)\s*!?\s*$/i;
+
+function lastAssistantContent(recentHistory: ChatTurn[]): string | null {
+  for (let i = recentHistory.length - 1; i >= 0; i--) {
+    const turn = recentHistory[i];
+    if (turn.role === "assistant") {
+      const text = turn.content.trim();
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
+function isPureGreetingOnlyAssistant(text: string): boolean {
+  return /^(?:привет|здравствуй(?:те)?|добрый(?:\s+день|\s+вечер|\s+утро)?|доброе(?:\s+утро|\s+вечер)?|хай|hello|hi|hey)(?:[!.,?\s]|$)/iu.test(
+    text.trim()
+  );
+}
+
+function isShortAcknowledgement(text: string): boolean {
+  return BRIEF_SHORT.test(text.trim());
+}
+
+/** Short ack after a real assistant turn — continue arc, not greeting reset. */
+function isShortAckInActiveConversation(
+  message: string,
+  recentHistory: ChatTurn[]
+): boolean {
+  const trimmed = message.trim();
+  if (!isShortAcknowledgement(trimmed)) return false;
+  const lastAssistant = lastAssistantContent(recentHistory);
+  if (!lastAssistant) return false;
+  if (isPureGreetingOnlyAssistant(lastAssistant)) return false;
+  return true;
+}
+
+function shouldClassifyGreetingShort(
+  trimmed: string,
+  words: number,
+  recentHistory: ChatTurn[]
+): boolean {
+  if (words > 8) return false;
+  if (BRIEF_GREETING.test(trimmed) || BRIEF_THANKS.test(trimmed)) {
+    return true;
+  }
+  if (isShortAcknowledgement(trimmed)) {
+    return !isShortAckInActiveConversation(trimmed, recentHistory);
+  }
+  return false;
+}
 
 /** Farewell / explicit exit — whole message or trailing clause after comma. */
 const EXPLICIT_CLOSURE_PATTERNS: RegExp[] = [
@@ -364,16 +413,23 @@ export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureStat
   }
 
   const priorTurns = input.trajectory.recentUserTurns.slice(0, -1);
+  const lastAssistant = lastAssistantContent(input.recentHistory);
+  const shortAckContinuation =
+    isShortAcknowledgement(trimmed) &&
+    !!lastAssistant &&
+    !isPureGreetingOnlyAssistant(lastAssistant) &&
+    priorTurns.length > 0;
   const emotionalHits = detectShortEmotional(trimmed);
   const uncertaintyHits = detectStrongUncertaintyInfix(trimmed);
   const relationalHits = detectRelationalCharge(trimmed);
   const arcContinuation =
     trimmed.length < 100 &&
     priorTurns.length > 0 &&
-    hasSubstantivePriorArc(priorTurns) &&
-    (turnHasEmotionalSignal(trimmed) ||
-      input.trajectory.shortAfterEmotional ||
-      uncertaintyHits.length > 0);
+    (shortAckContinuation ||
+      (hasSubstantivePriorArc(priorTurns) &&
+        (turnHasEmotionalSignal(trimmed) ||
+          input.trajectory.shortAfterEmotional ||
+          uncertaintyHits.length > 0)));
 
   const evidence = [
     ...emotionalHits,
@@ -666,12 +722,7 @@ export function analyzeResponseDepth(
     return buildAnalysis("deep", "crisis", trajectory, openFigure);
   }
 
-  if (
-    words <= 8 &&
-    (BRIEF_GREETING.test(trimmed) ||
-      BRIEF_THANKS.test(trimmed) ||
-      BRIEF_SHORT.test(trimmed))
-  ) {
+  if (shouldClassifyGreetingShort(trimmed, words, recentHistory)) {
     return buildAnalysis(
       "brief",
       "greeting_short",
