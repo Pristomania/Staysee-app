@@ -318,8 +318,7 @@ export function enforceRoleBoundedReply(
 
   const frustrationTurn = userFrustrationAtBot(opts?.userMessage ?? "");
   if (frustrationTurn) {
-    if (trimmed.length <= 520) return trimmed;
-    return truncateToMaxSentences(trimmed, 4).slice(0, 520).trim();
+    return trimmed;
   }
 
   if (!BOUNDARY_FALLBACK_REPLACEMENT_ENABLED) {

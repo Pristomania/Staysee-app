@@ -45,4 +45,29 @@ const LONG_RELATIONAL_REPLY =
   console.log("PASS: normal category passes through long publishable reply");
 }
 
+const FRUSTRATION_USER_MESSAGE = "ты меня бесишь, одно и то же повторяешь";
+
+const LONG_FRUSTRATION_REPLY =
+  `Слышу твоё раздражение — и оно имеет смысл. Ты злишься не просто так, и мне важно быть с этим честно, а не отмахиваться.\n\n` +
+  `Похоже, тебе не хватает живого контакта, а не ещё одной формулировки. "Да, я понимаю." "Я рядом." — это может звучать как шаблон, когда внутри копится злость.\n\n` +
+  `Ты можешь злиться на повтор, на тон, на ощущение, что тебя не слышат — и это не значит, что ты "неправильная". Это значит, что контакт сейчас не попадает туда, куда тебе нужно.\n\n` +
+  `Если хочешь, можем остановиться на том, что сейчас больше всего бесит: сам тон, повтор, ощущение, что тебя не слышат — или что-то другое?\n\n` +
+  `Что из этого ближе к тому, что ты чувствуешь прямо сейчас?`;
+
+// userFrustrationAtBot must not truncate long publishable reply
+{
+  assert(LONG_FRUSTRATION_REPLY.length > 520, "fixture must exceed old 520 char cap");
+  assert(isPublishableReply(LONG_FRUSTRATION_REPLY), "fixture must be publishable");
+
+  const out = enforceRoleBoundedReply(LONG_FRUSTRATION_REPLY, "normal", {
+    relationalLifeTurn: false,
+    userMessage: FRUSTRATION_USER_MESSAGE,
+  });
+
+  assert(out === LONG_FRUSTRATION_REPLY.trim(), "userFrustrationAtBot must not truncate publishable reply");
+  assert(out.length === LONG_FRUSTRATION_REPLY.trim().length, "length must be unchanged");
+  assert(out.endsWith("прямо сейчас?"), "contact tail must be preserved");
+  console.log("PASS: userFrustrationAtBot does not truncate long publishable reply");
+}
+
 console.log("\nAll roleEnforcement cases passed.");
