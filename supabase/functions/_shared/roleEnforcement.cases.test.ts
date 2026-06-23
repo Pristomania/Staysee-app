@@ -70,4 +70,27 @@ const LONG_FRUSTRATION_REPLY =
   console.log("PASS: userFrustrationAtBot does not truncate long publishable reply");
 }
 
+// bounded / mustPivot states must not truncate publishable output
+{
+  assert(LONG_RELATIONAL_REPLY.length > 520, "fixture must exceed old caps");
+  assert(isPublishableReply(LONG_RELATIONAL_REPLY), "fixture must be publishable");
+
+  const cases = [
+    { category: "off_topic" as const, label: "off_topic" },
+    { category: "boundary_pressure" as const, label: "boundary_pressure" },
+    { category: "medical_boundary" as const, label: "medical_boundary" },
+  ];
+
+  for (const { category, label } of cases) {
+    const out = enforceRoleBoundedReply(LONG_RELATIONAL_REPLY, category, {
+      insistenceLoop: true,
+      threadEscalated: true,
+      userMessage: "Напиши мне контент-план на неделю",
+      relationalLifeTurn: false,
+    });
+    assert(out === LONG_RELATIONAL_REPLY.trim(), `${label} must not truncate publishable reply`);
+  }
+  console.log("PASS: bounded/mustPivot states do not truncate publishable output");
+}
+
 console.log("\nAll roleEnforcement cases passed.");
