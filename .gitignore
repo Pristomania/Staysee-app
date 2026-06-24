@@ -43,3 +43,7 @@ scripts/audit-*.mjs
 
 # PR3 regression artifacts
 scripts/open-figure-regression-results*.json
+
+# Graphify local output (dev tool, not product)
+graphify-out/
+.knowledge-graph.md
