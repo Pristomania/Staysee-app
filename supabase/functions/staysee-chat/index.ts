@@ -80,22 +80,18 @@ import {
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import {
-  AUTO_CONTINUE_USER_PROMPT,
   ensurePublishableReply,
-  FINALIZE_USER_PROMPT,
   isPublishableReply,
-  MAX_AUTO_CONTINUE_SEGMENTS,
-  MAX_FINALIZE_ATTEMPTS,
-  needsAutoContinue,
-  shouldRunFinalize,
 } from "../_shared/completeReply.ts";
-import { isDuplicateContinuation } from "../_shared/continuationGuards.ts";
 import {
-  mergeContinuationWithoutOverlap,
   polishAssistantOutput,
   polishMergedReply,
-  type MergeStrategy,
 } from "../_shared/mergeContinuation.ts";
+import {
+  runReplyRecoveryRoutes,
+  type ReplyRecoveryDiagnostics,
+} from "../_shared/replyRecovery.ts";
+import { logReplyRecoveryEvent } from "../_shared/replyRecoveryDiagnostics.ts";
 import {
   logReplyCompletion,
   logSegmentMerge,
@@ -761,157 +757,62 @@ Deno.serve(async (req: Request) => {
       turnModel
     );
 
-    // Auto-complete until publishable (full sentence, no em-dash / half-word cut).
-    let autoContinueCount = 0;
-    let finalizeCount = 0;
-    let wasAutoContinued = false;
-    let wasFinalizeUsed = false;
-    let wasTruncated = result.finishReason === "length";
-    let replyPublishable = false;
-    let lengthBeforeMerge = 0;
-    let lengthAfterMerge = result.content?.trim().length ?? 0;
-    let lastMergeStrategy: MergeStrategy | undefined;
-    let lastOverlapWords = 0;
-    let usedMergeFallback = false;
-    let discardedDuplicateCount = 0;
-    const mergeStrategies: string[] = [];
-    let segmentIndex = 0;
+    // ── Reply completion routes ─────────────────────────────────────────────
     const firstSegmentContent = result.content?.trim() ?? "";
     const segmentBudget = continuationTokenBudget(userTier, responseDepth);
 
-    const applyContinuationMerge = (accumulated: string, continuation: string) => {
-      lengthBeforeMerge = accumulated.length;
-      const merged = mergeContinuationWithoutOverlap(accumulated, continuation);
-      lengthAfterMerge = merged.text.length;
-      lastMergeStrategy = merged.strategy;
-      lastOverlapWords = merged.overlapWords;
-      mergeStrategies.push(merged.strategy);
-      return polishMergedReply(merged.text);
+    const recovery = await runReplyRecoveryRoutes({
+      firstSegment: {
+        content: firstSegmentContent,
+        finishReason: result.finishReason,
+      },
+      baseModelMessages: modelMessages,
+      unavailableMessage: CALM_ERRORS.unavailable,
+      replyNotRecoveredMessage: CALM_ERRORS.replyNotRecovered,
+      callModel: async (messages, kind) => {
+        const tokenBudget =
+          kind === "auto_continue"
+            ? segmentBudget
+            : kind === "finalize"
+              ? Math.min(320, segmentBudget)
+              : outputBudget;
+        const retry = await callModel(
+          providerKey,
+          config,
+          messages,
+          systemPrompt,
+          tokenBudget,
+          tierCfg.temperature,
+          turnModel
+        );
+        return {
+          content: retry.content ?? "",
+          finishReason: retry.finishReason,
+        };
+      },
+      onSegmentMerge: (meta) => logSegmentMerge(meta),
+    });
+
+    result = {
+      ...result,
+      content: recovery.content,
+      finishReason: recovery.finishReason ?? result.finishReason,
     };
 
-    while (
-      result.content?.trim() &&
-      autoContinueCount < MAX_AUTO_CONTINUE_SEGMENTS &&
-      needsAutoContinue(result.content, result.finishReason)
-    ) {
-      const accumulated = result.content.trim();
-      const retry = await callModel(
-        providerKey,
-        config,
-        [
-          ...modelMessages,
-          { role: "assistant", content: accumulated },
-          { role: "user", content: AUTO_CONTINUE_USER_PROMPT },
-        ],
-        systemPrompt,
-        segmentBudget,
-        tierCfg.temperature,
-        turnModel
-      );
-      segmentIndex++;
-      autoContinueCount++;
-      wasAutoContinued = true;
-      if (retry.finishReason === "length") wasTruncated = true;
-
-      const continuation = retry.content?.trim() ?? "";
-      if (!continuation || continuation === CALM_ERRORS.unavailable) {
-        break;
-      }
-
-      if (isDuplicateContinuation(accumulated, continuation)) {
-        discardedDuplicateCount++;
-        logSegmentMerge({
-          segmentIndex,
-          segmentKind: "auto_continue",
-          finishReason: retry.finishReason,
-          beforeLen: accumulated.length,
-          continuationLen: continuation.length,
-          afterLen: accumulated.length,
-          discardedDuplicate: true,
-        });
-        break;
-      }
-
-      const mergedContent = applyContinuationMerge(accumulated, continuation);
-      logSegmentMerge({
-        segmentIndex,
-        segmentKind: "auto_continue",
-        finishReason: retry.finishReason,
-        mergeStrategy: lastMergeStrategy,
-        beforeLen: lengthBeforeMerge,
-        continuationLen: continuation.length,
-        afterLen: lengthAfterMerge,
-        discardedDuplicate: false,
-      });
-
-      result = {
-        ...retry,
-        content: mergedContent,
-        finishReason: retry.finishReason,
-      };
-    }
-
-    while (
-      result.content?.trim() &&
-      finalizeCount < MAX_FINALIZE_ATTEMPTS &&
-      shouldRunFinalize(result.content, wasAutoContinued)
-    ) {
-      const accumulated = result.content.trim();
-      const retry = await callModel(
-        providerKey,
-        config,
-        [
-          ...modelMessages,
-          { role: "assistant", content: accumulated },
-          { role: "user", content: FINALIZE_USER_PROMPT },
-        ],
-        systemPrompt,
-        Math.min(320, segmentBudget),
-        tierCfg.temperature,
-        turnModel
-      );
-      segmentIndex++;
-      finalizeCount++;
-      wasFinalizeUsed = true;
-      if (retry.finishReason === "length") wasTruncated = true;
-
-      const continuation = retry.content?.trim() ?? "";
-      if (!continuation || continuation === CALM_ERRORS.unavailable) {
-        break;
-      }
-
-      if (isDuplicateContinuation(accumulated, continuation)) {
-        discardedDuplicateCount++;
-        logSegmentMerge({
-          segmentIndex,
-          segmentKind: "finalize",
-          finishReason: retry.finishReason,
-          beforeLen: accumulated.length,
-          continuationLen: continuation.length,
-          afterLen: accumulated.length,
-          discardedDuplicate: true,
-        });
-        break;
-      }
-
-      const mergedContent = applyContinuationMerge(accumulated, continuation);
-      logSegmentMerge({
-        segmentIndex,
-        segmentKind: "finalize",
-        finishReason: retry.finishReason,
-        mergeStrategy: lastMergeStrategy,
-        beforeLen: lengthBeforeMerge,
-        continuationLen: continuation.length,
-        afterLen: lengthAfterMerge,
-        discardedDuplicate: false,
-      });
-
-      result = {
-        ...retry,
-        content: mergedContent,
-        finishReason: retry.finishReason,
-      };
-    }
+    let autoContinueCount = recovery.autoContinueCount;
+    let finalizeCount = recovery.finalizeCount;
+    let wasAutoContinued = recovery.wasAutoContinued;
+    let wasFinalizeUsed = recovery.wasFinalizeUsed;
+    let wasTruncated = recovery.wasTruncated;
+    let replyPublishable = false;
+    let lengthBeforeMerge = recovery.lengthBeforeMerge;
+    let lengthAfterMerge = recovery.lengthAfterMerge;
+    let lastMergeStrategy = recovery.lastMergeStrategy;
+    let lastOverlapWords = recovery.lastOverlapWords;
+    let usedMergeFallback = false;
+    let discardedDuplicateCount = recovery.discardedDuplicateCount;
+    const mergeStrategies = recovery.mergeStrategies;
+    const recoveryDiagnostics: ReplyRecoveryDiagnostics = recovery.diagnostics;
 
   if (isReplyPipelineTraceEnabled()) {
     recordReplyPipelineStage("after_auto_continue_merge", result.content, {
@@ -1113,7 +1014,10 @@ Deno.serve(async (req: Request) => {
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
     const modelUnavailable = result.content === CALM_ERRORS.unavailable;
-    const generationStatus = modelUnavailable
+    const replyRecoveryFailed =
+      recoveryDiagnostics.failClosedUsed ||
+      result.content === CALM_ERRORS.replyNotRecovered;
+    const generationStatus = modelUnavailable || replyRecoveryFailed
       ? "error"
       : result.content?.trim()
         ? replyPublishable
@@ -1122,6 +1026,8 @@ Deno.serve(async (req: Request) => {
         : "error";
     const errorCode = modelUnavailable
       ? "model_unavailable"
+      : replyRecoveryFailed
+        ? "reply_not_recovered"
       : generationStatus === "incomplete"
         ? "reply_not_publishable"
         : generationStatus === "error"
@@ -1129,11 +1035,17 @@ Deno.serve(async (req: Request) => {
           : null;
     const errorMessage = modelUnavailable
       ? "All model providers failed"
+      : replyRecoveryFailed
+        ? "Reply recovery failed after stop+not_publishable"
       : generationStatus === "incomplete"
         ? "Reply failed publishability check"
         : generationStatus === "error" && !result.content?.trim()
           ? "Model returned empty content"
           : null;
+
+    const isCalmFallbackContent =
+      result.content === CALM_ERRORS.unavailable ||
+      result.content === CALM_ERRORS.replyNotRecovered;
 
     // ── Background tasks (non-blocking) ─────────────────────────────────────
 
@@ -1205,7 +1117,7 @@ Deno.serve(async (req: Request) => {
           conversationId &&
           packetForSummary &&
           result.content &&
-          result.content !== CALM_ERRORS.unavailable
+          !isCalmFallbackContent
             ? (async () => {
                 try {
                   const baseTranscript =
@@ -1285,7 +1197,7 @@ Deno.serve(async (req: Request) => {
           // PR3c-1 — session processState_N (metadata column only; summary untouched)
           conversationId &&
           result.content &&
-          result.content !== CALM_ERRORS.unavailable
+          !isCalmFallbackContent
             ? persistSessionProcessState(
                 svc,
                 conversationId,
@@ -1300,6 +1212,17 @@ Deno.serve(async (req: Request) => {
 
           // OpenRouter usage analytics (ai_usage_logs)
           usageLogRow ? logOpenRouterUsage(svc, usageLogRow) : Promise.resolve(),
+
+          // Reply recovery route diagnostics (PII-free)
+          logReplyRecoveryEvent(svc, {
+            requestId: requestId ?? null,
+            conversationId: conversationId ?? null,
+            userId,
+            model: result.model,
+            promptVersion: AI_AUDIT_PROMPT_VERSION,
+            constitutionVersion: AI_AUDIT_CONSTITUTION_VERSION,
+            diagnostics: recoveryDiagnostics,
+          }),
 
           // Embed new messages for semantic archive (this chat only)
           conversationId && embedApiKey

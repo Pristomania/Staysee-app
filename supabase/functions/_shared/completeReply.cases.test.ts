@@ -3,7 +3,13 @@
  * Run: npx tsx supabase/functions/_shared/completeReply.cases.test.ts
  */
 
-import { ensurePublishableReply, isPublishableReply, shouldRunFinalize } from "./completeReply.ts";
+import {
+  ensurePublishableReply,
+  isPublishableReply,
+  needsAutoContinue,
+  needsStopNotPublishableRepair,
+  shouldRunFinalize,
+} from "./completeReply.ts";
 
 type Case = {
   name: string;
@@ -64,6 +70,49 @@ const cases: Case[] = [
   },
 ];
 
+const routeCases: { name: string; fn: () => void }[] = [
+  {
+    name: "needsAutoContinue publishable length",
+    fn: () => {
+      if (!needsAutoContinue("Я здесь.", "length")) throw new Error("expected true");
+    },
+  },
+  {
+    name: "needsAutoContinue notPublishable length",
+    fn: () => {
+      if (!needsAutoContinue("обрыв", "length")) throw new Error("expected true");
+    },
+  },
+  {
+    name: "needsAutoContinue publishable stop",
+    fn: () => {
+      if (needsAutoContinue("Я здесь.", "stop")) throw new Error("expected false");
+    },
+  },
+  {
+    name: "needsAutoContinue notPublishable stop",
+    fn: () => {
+      if (needsAutoContinue("важный момен", "stop")) throw new Error("expected false");
+    },
+  },
+  {
+    name: "needsStopNotPublishableRepair notPublishable stop",
+    fn: () => {
+      if (!needsStopNotPublishableRepair("важный момен", "stop")) {
+        throw new Error("expected true");
+      }
+    },
+  },
+  {
+    name: "needsStopNotPublishableRepair publishable stop",
+    fn: () => {
+      if (needsStopNotPublishableRepair("Я здесь.", "stop")) {
+        throw new Error("expected false");
+      }
+    },
+  },
+];
+
 let failed = 0;
 
 for (const c of cases) {
@@ -79,9 +128,20 @@ for (const c of cases) {
   }
 }
 
+for (const c of routeCases) {
+  try {
+    c.fn();
+    console.log(`PASS: ${c.name}`);
+  } catch (err) {
+    failed++;
+    console.log(`FAIL: ${c.name}`);
+    console.log(`  ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 if (failed > 0) {
   console.error(`\n${failed} case(s) failed`);
   process.exit(1);
 }
 
-console.log(`\nAll ${cases.length} cases passed.`);
+console.log(`\nAll ${cases.length + routeCases.length} cases passed.`);

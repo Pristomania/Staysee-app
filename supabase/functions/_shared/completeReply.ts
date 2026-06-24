@@ -18,7 +18,7 @@ export const MAX_AUTO_CONTINUE_SEGMENTS = 1;
 export const MAX_FINALIZE_ATTEMPTS = 2;
 
 export const AUTO_CONTINUE_USER_PROMPT =
-  "Продолжи свой предыдущий ответ с места обрыва. Не повторяй уже сказанное. Допиши мысль до естественного конца — цельным текстом.";
+  "Продолжи свой предыдущий ответ с места обрыва. Не повторяй уже сказанное. Не начинай ответ заново. Не добавляй новый финальный блок или пересказ. Допиши мысль до естественного конца — цельным текстом.";
 
 export const FINALIZE_USER_PROMPT =
   "Закончи предыдущий текст ТОЛЬКО последними одним-двумя предложениями. Не повторяй начало. Обязательно закончи точкой.";
@@ -29,14 +29,27 @@ export function isPublishableReply(text: string): boolean {
   return endsAtSentenceBoundary(body) && !hasBrokenEnding(body);
 }
 
-/** Whether another model segment should run before showing the user. */
+/**
+ * Whether provider output was physically truncated and may be continued.
+ * Only finish_reason=length — never !isPublishableReply on stop.
+ */
 export function needsAutoContinue(
   content: string,
   finishReason?: string
 ): boolean {
   const body = content.trim();
   if (!body) return false;
-  if (finishReason === "length") return true;
+  return finishReason === "length";
+}
+
+/** Stop ended normally but output failed publishability — repair/retry route, not merge. */
+export function needsStopNotPublishableRepair(
+  content: string,
+  finishReason?: string
+): boolean {
+  const body = content.trim();
+  if (!body) return false;
+  if (finishReason === "length") return false;
   return !isPublishableReply(body);
 }
 

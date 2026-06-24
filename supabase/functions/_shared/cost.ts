@@ -283,6 +283,9 @@ export function makeServiceClient(): SupabaseClient {
 
 export const CALM_ERRORS = {
   unavailable: "Сейчас не могу ответить. Попробуй немного позже.",
+  /** stop+not_publishable when repair and retry whole both fail — not a provider outage */
+  replyNotRecovered:
+    "Сейчас ответ не собрался достаточно надёжно. Давай попробуем ещё раз с этого места.",
   rateLimit: "Ты уже много работаешь со мной сегодня. Дай себе немного пространства — завтра я снова здесь.",
   suspended: "Доступ временно ограничен. Если это ошибка, напиши нам.",
   duplicate: "Похоже, запрос уже отправляется. Подожди секунду.",
