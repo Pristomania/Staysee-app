@@ -1,0 +1,42 @@
+---
+description: Use local Graphify repo map for architecture/navigation tasks
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+# Graphify repo map usage
+
+This project may have a local Graphify repo map at:
+
+```text
+graphify-out/GRAPH_REPORT.md
+```
+
+Use it as a navigation aid when the task involves:
+
+* understanding repository structure
+* locating the right architectural layer
+* changing Supabase edge functions
+* changing prompt blocks
+* changing routing/safety/response pipeline logic
+* tracing backend → frontend message flow
+* onboarding a new tool or developer
+* auditing where a behavior is implemented
+
+Do not use the Graphify report for every small edit.
+
+Do not treat the Graphify report as the source of truth. Current code is authoritative.
+
+If `graphify-out/GRAPH_REPORT.md` is missing, stale, or ignored locally, continue with normal code search.
+
+Before architecture changes, prefer this order:
+
+1. Check `graphify-out/GRAPH_REPORT.md` if present.
+2. Use `rg` / code search to verify actual files.
+3. Inspect the concrete files before editing.
+4. Keep changes minimal and layer-appropriate.
+
+Never commit `graphify-out/`.
+
+Never rely on generated graph output to override current code, tests, or production behavior.
