@@ -5,6 +5,86 @@
 const LEGACY_GRACEFUL_TAIL_RE =
   /\n*\(Мысль ещё не закончилась[^)]*\)\s*$/i;
 
+/** Max length for a complete short closure/acknowledgement without terminal punctuation. */
+const MAX_SHORT_COMPLETE_UTTERANCE_CHARS = 140;
+
+/** Obvious unfinished analytical / connector tails — not warm closure. */
+const UNFINISHED_TRAILING_PHRASE_RE =
+  /(?:^|[\s,—–-])(?:и|а|но|что|как|если|когда|где|чтобы|тогда|потому(?:\s+что)?|как\s+будто|о\s+том,?\s+что|про\s+то,?\s+что|это|то|про|о|который|которая|которые|которое|похоже,?)\s*$/iu;
+
+/** Incomplete substantive fragments (not closure-shaped). */
+const INCOMPLETE_SUBSTANTIVE_FRAGMENT_RES: RegExp[] = [
+  /^ты\s+(?:сегодня\s+)?(?:смогла|смог|могла|мог)\s*$/iu,
+  /^ты\s+говоришь\s+о\s+том,\s+что\s*$/iu,
+];
+
+/** Warm closure / acknowledgement shapes valid without a final period. */
+const CLOSURE_COMPLETE_UTTERANCE_RES: RegExp[] = [
+  /^спокойной\s+ночи$/iu,
+  /^приятных\s+снов$/iu,
+  /^доброй\s+ночи$/iu,
+  /^хорошо[.!]?\s+спокойной\s+ночи$/iu,
+  /^хорошо[.!]?\s+спи\b[\s\S]{0,100}$/iu,
+  /^хорошо[.!]?\s+спи\s+[—–-]\s+это\s+сейчас\s+правильно\.?$/iu,
+  /^спасибо,?\s+что\s+[а-яё]{3,}$/iu,
+  /^спасибо\b[\s\S]{0,80}$/iu,
+  /^хорошо,?\s+что\s+полегче\.?$/iu,
+];
+
+function stripTrailingEmoji(text: string): { core: string; hadEmoji: boolean } {
+  const m = text.match(
+    /^([\s\S]*?)(?:\s*[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F])+$/u
+  );
+  if (!m?.[1]) return { core: text, hadEmoji: false };
+  return { core: m[1].trimEnd(), hadEmoji: true };
+}
+
+function hasObviousUnfinishedTail(text: string): boolean {
+  if (UNFINISHED_TRAILING_PHRASE_RE.test(text)) return true;
+  return INCOMPLETE_SUBSTANTIVE_FRAGMENT_RES.some((re) => re.test(text));
+}
+
+function matchesClosureOrAcknowledgementShape(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (CLOSURE_COMPLETE_UTTERANCE_RES.some((re) => re.test(t))) return true;
+
+  const parts = t.split(/(?<=[.!?…])\s+/u).filter(Boolean);
+  if (parts.length >= 2 && parts.length <= 3) {
+    const last = parts[parts.length - 1]!.trim();
+    if (last.length <= 80 && CLOSURE_COMPLETE_UTTERANCE_RES.some((re) => re.test(last))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLongSubstantiveWithoutBoundary(text: string): boolean {
+  const t = text.trim();
+  if (t.length <= MAX_SHORT_COMPLETE_UTTERANCE_CHARS) return false;
+  if (/[.!?…]/u.test(t)) return false;
+  return true;
+}
+
+/** Short warm closure / acknowledgement without terminal punctuation or emoji tail. */
+export function isCompleteShortUtteranceWithoutTerminalPunctuation(
+  text: string
+): boolean {
+  const t = text.trim();
+  if (!t || t.length > MAX_SHORT_COMPLETE_UTTERANCE_CHARS) return false;
+  if (/[.!?…]["')\]]*\s*$/u.test(t)) return false;
+  if (hasObviousUnfinishedTail(t)) return false;
+  if (isLongSubstantiveWithoutBoundary(t)) return false;
+  return matchesClosureOrAcknowledgementShape(t);
+}
+
+function endsWithEmojiAfterCompleteShortPhrase(text: string): boolean {
+  const { core, hadEmoji } = stripTrailingEmoji(text);
+  if (!hadEmoji || !core) return false;
+  if (/[.!?…]["')\]]*\s*$/u.test(core)) return true;
+  return isCompleteShortUtteranceWithoutTerminalPunctuation(core);
+}
+
 /** Trailing word fragment from token limit (e.g. «…в этом мол»). */
 export function hasBrokenEnding(text: string): boolean {
   const t = text.replace(LEGACY_GRACEFUL_TAIL_RE, "").trimEnd();
@@ -19,7 +99,10 @@ export function hasBrokenEnding(text: string): boolean {
 export function endsAtSentenceBoundary(text: string): boolean {
   const t = text.trimEnd();
   if (!t) return true;
-  return /[.!?…]["')\]]*\s*$/.test(t);
+  if (/[.!?…]["')\]]*\s*$/.test(t)) return true;
+  if (endsWithEmojiAfterCompleteShortPhrase(t)) return true;
+  if (isCompleteShortUtteranceWithoutTerminalPunctuation(t)) return true;
+  return false;
 }
 
 /** Trim trailing fragment after the last complete sentence. */
