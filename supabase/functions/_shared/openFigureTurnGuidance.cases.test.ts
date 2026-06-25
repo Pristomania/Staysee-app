@@ -61,18 +61,49 @@ for (const block of [emotionalBlock!, relationalBlock!]) {
 }
 console.log('✓ guidance does not contain "обязательно задай вопрос"');
 
-// 4. open-figure contact guidance
-for (const block of [emotionalBlock!, relationalBlock!]) {
-  assert(
-    /ещё\s+не\s+нашла\s+места\s+в\s+разговоре/i.test(block),
-    "must describe open figure not yet placed"
-  );
-  assert(
-    /один\s+ход,\s+который\s+поддерживает\s+контакт/i.test(block),
-    "must request one contact-supporting move"
-  );
+// 4. open-figure contact guidance (base invariant)
+const baseOnly = buildOpenFigureTurnGuidanceBlock({
+  isOpen: true,
+  kind: "unknown",
+  intensity: "medium",
+  confidence: "low",
+  trigger: "short_emotional",
+  evidence: [],
+});
+assert(
+  /ещё\s+не\s+нашла\s+места\s+в\s+разговоре/i.test(baseOnly),
+  "must describe open figure not yet placed"
+);
+assert(
+  /остаётся\s+в\s+контакте\s+с\s+ней/i.test(baseOnly),
+  "must keep response in contact"
+);
+assert(
+  /помогает\s+ей\s+продолжиться/i.test(baseOnly),
+  "must help figure continue"
+);
+assert(
+  /не\s+превращай\s+активную\s+фигуру\s+в\s+мягкий\s+финал/i.test(baseOnly),
+  "must forbid soft final"
+);
+assert(
+  /форма\s+ответа\s+выбирается\s+по\s+текущему\s+процессу/i.test(baseOnly),
+  "must allow process-appropriate form"
+);
+console.log("✓ guidance describes open figure contact continuation");
+
+// 4b. risky wording removed from base
+const banned = [
+  "Сделай один ход",
+  "один ход",
+  "один шаг",
+  "одна фраза",
+  "мягкое зеркало",
+];
+for (const phrase of banned) {
+  assert(!baseOnly.toLowerCase().includes(phrase.toLowerCase()), `base must not contain: ${phrase}`);
 }
-console.log("✓ guidance describes open figure and one contact move");
+console.log("✓ base guidance excludes risky one-move / mirror-menu wording");
 
 // 5. max one question
 for (const block of [emotionalBlock!, relationalBlock!]) {
