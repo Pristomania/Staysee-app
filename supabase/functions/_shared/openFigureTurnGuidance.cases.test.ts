@@ -61,14 +61,18 @@ for (const block of [emotionalBlock!, relationalBlock!]) {
 }
 console.log('✓ guidance does not contain "обязательно задай вопрос"');
 
-// 4. no observation-only closure
+// 4. open-figure contact guidance
 for (const block of [emotionalBlock!, relationalBlock!]) {
   assert(
-    /не\s+завершай\s+ход\s+одним\s+наблюдением/i.test(block),
-    "must discourage observation-only ending"
+    /ещё\s+не\s+нашла\s+места\s+в\s+разговоре/i.test(block),
+    "must describe open figure not yet placed"
+  );
+  assert(
+    /один\s+ход,\s+который\s+поддерживает\s+контакт/i.test(block),
+    "must request one contact-supporting move"
   );
 }
-console.log("✓ guidance discourages observation-only ending");
+console.log("✓ guidance describes open figure and one contact move");
 
 // 5. max one question
 for (const block of [emotionalBlock!, relationalBlock!]) {
