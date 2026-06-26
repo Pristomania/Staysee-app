@@ -36,6 +36,7 @@ import {
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
 import { logSafetyDiagnosis } from "../_shared/safetyDiagnose.ts";
+import { CRISIS_RESPONSE as CRISIS_RESPONSE_TEXT } from "../_shared/safety.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
 import {
   buildSurgery1BasePrompt,
@@ -48,6 +49,7 @@ import {
   isDuplicateRequest,
   makeRequestKey,
   checkRateLimit,
+  checkIpVelocity,
   incrementUsage,
   estimateTokens,
   trimContextForTier,
@@ -56,6 +58,7 @@ import {
   type UsageTier,
   type ProviderConfig,
 } from "../_shared/cost.ts";
+import { semanticCrisisCheck } from "../_shared/semanticCrisisCheck.ts";
 import {
   computeResponseBudget,
   continuationTokenBudget,
@@ -382,6 +385,22 @@ Deno.serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
+    // ── L7: IP velocity guard (spam / autoclicker) ─────────────────────────
+
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      req.headers.get("x-real-ip") ??
+      "unknown";
+
+    const ipCheck = checkIpVelocity(clientIp);
+    if (!ipCheck.allowed) {
+      console.warn(`[staysee-chat] IP velocity blocked: ${clientIp} reason=${ipCheck.reason}`);
+      return new Response(
+        JSON.stringify({ content: CALM_ERRORS.rateLimit }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // ── L7: Duplicate prevention ────────────────────────────────────────────
 
     const dedupKey = requestId ?? (userId ? makeRequestKey(userId, message) : null);
@@ -593,6 +612,19 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ content: safety.immediateResponse, provider: providerKey, model: reqModel ?? config.model }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // ── L5b: Semantic crisis check (catches implied crisis missed by regex) ──
+
+    if (safety.category === "normal" || safety.category === "emotional_support") {
+      const isCrisis = await semanticCrisisCheck(message);
+      if (isCrisis) {
+        console.log("[staysee-chat] semantic crisis detected — overriding category");
+        return new Response(
+          JSON.stringify({ content: CRISIS_RESPONSE_TEXT, provider: providerKey, model: reqModel ?? config.model }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     if (safety.systemGuidance) {

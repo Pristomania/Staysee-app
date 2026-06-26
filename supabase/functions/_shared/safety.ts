@@ -262,7 +262,7 @@ export function classifyMessage(text: string): SafetyCategory {
 
 // ── Immediate responses (model skipped) ──────────────────────────────────────
 
-const CRISIS_RESPONSE = `Сейчас важно не оставаться с этим в одиночестве.
+export const CRISIS_RESPONSE = `Сейчас важно не оставаться с этим в одиночестве.
 
 Если становится физически небезопасно или появляются мысли навредить себе — лучше связаться с живыми людьми: 112 или 103.
 

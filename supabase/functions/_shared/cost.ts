@@ -107,6 +107,43 @@ export function findFallbackProvider(
   return null;
 }
 
+// ── IP velocity guard (spam / autoclicker protection) ────────────────────────
+
+const ipRequestLog = new Map<string, number[]>();
+const IP_WINDOW_MS = 60_000;   // 1 minute window
+const IP_MAX_REQUESTS = 15;    // max requests per IP per minute
+const MIN_MESSAGE_INTERVAL_MS = 2_000; // min 2s between messages from same IP
+
+export function checkIpVelocity(ip: string): { allowed: boolean; reason?: string } {
+  if (!ip || ip === "unknown") return { allowed: true };
+
+  const now = Date.now();
+  const timestamps = ipRequestLog.get(ip) ?? [];
+  const recent = timestamps.filter((t) => now - t < IP_WINDOW_MS);
+
+  // Too fast (autoclicker)
+  if (recent.length > 0 && now - recent[recent.length - 1] < MIN_MESSAGE_INTERVAL_MS) {
+    return { allowed: false, reason: "too_fast" };
+  }
+
+  // Too many (flood)
+  if (recent.length >= IP_MAX_REQUESTS) {
+    return { allowed: false, reason: "ip_flood" };
+  }
+
+  recent.push(now);
+  ipRequestLog.set(ip, recent);
+
+  // Cleanup stale IPs
+  if (ipRequestLog.size > 2000) {
+    for (const [k, ts] of ipRequestLog) {
+      if (ts.every((t) => now - t > IP_WINDOW_MS)) ipRequestLog.delete(k);
+    }
+  }
+
+  return { allowed: true };
+}
+
 // ── Idempotency / duplicate prevention ───────────────────────────────────────
 
 // In-memory store for recent request hashes (cleared on cold start).
