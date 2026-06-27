@@ -36,7 +36,7 @@ import {
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
 import { logSafetyDiagnosis } from "../_shared/safetyDiagnose.ts";
-import { CRISIS_RESPONSE as CRISIS_RESPONSE_TEXT } from "../_shared/safety.ts";
+import { CRISIS_LEVEL2_RESPONSE } from "../_shared/safety.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
 import {
   buildSurgery1BasePrompt,
@@ -222,7 +222,8 @@ async function callModel(
   systemPrompt: string,
   maxTokens: number,
   temperature: number,
-  modelOverride?: string
+  modelOverride?: string,
+  fallbackModelOverride?: string
 ): Promise<{
   content: string;
   provider: string;
@@ -333,6 +334,13 @@ async function callModel(
   const primaryModel = modelOverride ?? primaryConfig.model;
   const primaryResult = await attempt(primaryProvider, primaryConfig, primaryModel);
   if (primaryResult) return primaryResult;
+
+  // Try alternate model on same provider before switching providers
+  if (fallbackModelOverride && fallbackModelOverride !== primaryModel) {
+    console.log(`[staysee-chat] primary model failed — model fallback: ${fallbackModelOverride}`);
+    const modelFallbackResult = await attempt(primaryProvider, primaryConfig, fallbackModelOverride);
+    if (modelFallbackResult) return modelFallbackResult;
+  }
 
   // Fallback chain
   const fallback = findFallbackProvider([...tried]);
@@ -614,16 +622,22 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── L5b: Semantic crisis check (catches implied crisis missed by regex) ──
+    // ── L5b: Semantic crisis check — primary crisis gate ─────────────────────
+    // Runs for all categories except prompt_attack and boundary_pressure,
+    // which have their own contextual handling and don't short-circuit to a crisis card.
+    // If semantic API fails → fall back to regex as silent safety net.
 
-    if (safety.category === "normal" || safety.category === "emotional_support") {
-      const isCrisis = await semanticCrisisCheck(message);
-      if (isCrisis) {
-        console.log("[staysee-chat] semantic crisis detected — overriding category");
+    if (safety.category !== "prompt_attack" && safety.category !== "boundary_pressure") {
+      const semanticResult = await semanticCrisisCheck(message);
+      if (semanticResult.isCrisis) {
+        console.log("[staysee-chat] semantic crisis detected — specialist referral");
         return new Response(
-          JSON.stringify({ content: CRISIS_RESPONSE_TEXT, provider: providerKey, model: reqModel ?? config.model }),
+          JSON.stringify({ content: CRISIS_LEVEL2_RESPONSE, provider: providerKey, model: reqModel ?? config.model }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+      if (semanticResult.failed) {
+        console.warn("[staysee-chat] semantic crisis check unavailable — proceeding to model");
       }
     }
 
@@ -786,7 +800,8 @@ Deno.serve(async (req: Request) => {
       systemPrompt,
       outputBudget,
       tierCfg.temperature,
-      turnModel
+      turnModel,
+      modelRoute.fallbackModel
     );
 
     // ── Reply completion routes ─────────────────────────────────────────────
@@ -815,7 +830,8 @@ Deno.serve(async (req: Request) => {
           systemPrompt,
           tokenBudget,
           tierCfg.temperature,
-          turnModel
+          turnModel,
+          modelRoute.fallbackModel
         );
         return {
           content: retry.content ?? "",

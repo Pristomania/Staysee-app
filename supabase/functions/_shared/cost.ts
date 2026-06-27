@@ -111,8 +111,8 @@ export function findFallbackProvider(
 
 const ipRequestLog = new Map<string, number[]>();
 const IP_WINDOW_MS = 60_000;   // 1 minute window
-const IP_MAX_REQUESTS = 15;    // max requests per IP per minute
-const MIN_MESSAGE_INTERVAL_MS = 2_000; // min 2s between messages from same IP
+const IP_MAX_REQUESTS = 10;    // max requests per IP per minute
+const MIN_MESSAGE_INTERVAL_MS = 4_000; // min 4s between messages from same IP
 
 export function checkIpVelocity(ip: string): { allowed: boolean; reason?: string } {
   if (!ip || ip === "unknown") return { allowed: true };

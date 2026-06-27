@@ -16,6 +16,8 @@ export interface ModelRouteInput {
 export interface ModelRouteResult {
   model: string;
   source: "request" | "crisis" | "brief" | "medium" | "deep" | "default";
+  /** Alternate model on the same provider — tried if primary model returns error. */
+  fallbackModel?: string;
 }
 
 const DEFAULT_BRIEF = "openai/gpt-4o";
@@ -45,7 +47,7 @@ export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
       envModel("STAYSEE_CHAT_MODEL_DEEP") ??
       envModel("STAYSEE_CHAT_MODEL") ??
       DEFAULT_CRISIS;
-    return { model, source: "crisis" };
+    return { model, source: "crisis", fallbackModel: DEFAULT_DEEP };
   }
 
   const legacy = envModel("STAYSEE_CHAT_MODEL");
@@ -54,21 +56,21 @@ export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
     case "brief": {
       const model =
         envModel("STAYSEE_CHAT_MODEL_BRIEF") ?? legacy ?? DEFAULT_BRIEF;
-      return { model, source: "brief" };
+      return { model, source: "brief", fallbackModel: DEFAULT_DEEP };
     }
     case "medium": {
       const model =
         envModel("STAYSEE_CHAT_MODEL_MEDIUM") ?? legacy ?? DEFAULT_MEDIUM;
-      return { model, source: "medium" };
+      return { model, source: "medium", fallbackModel: DEFAULT_DEEP };
     }
     case "deep": {
       const model =
         envModel("STAYSEE_CHAT_MODEL_DEEP") ?? legacy ?? DEFAULT_DEEP;
-      return { model, source: "deep" };
+      return { model, source: "deep", fallbackModel: DEFAULT_BRIEF };
     }
     default: {
       const model = legacy ?? DEFAULT_FALLBACK;
-      return { model, source: "default" };
+      return { model, source: "default", fallbackModel: DEFAULT_BRIEF };
     }
   }
 }

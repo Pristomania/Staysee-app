@@ -1,11 +1,13 @@
 /**
- * Semantic crisis detection — second-pass check using a lightweight model.
+ * Semantic crisis detection — primary crisis check using a lightweight model.
  *
- * Runs AFTER the regex-based safety.ts classifier returns "normal".
- * Catches implied crisis: hopelessness, indirect self-harm intent, emotional
- * language that doesn't contain explicit trigger words.
+ * Runs for all messages (except prompt_attack / boundary_pressure).
+ * Replaces the regex layer as the main crisis gate — understands context
+ * ("мне приснилось", "3 года назад") that keywords cannot.
  *
- * Fail-safe: any error returns false (never blocks a message on classifier failure).
+ * Returns { isCrisis, failed }:
+ *   failed: true  — API error; caller should fall back to regex for safety
+ *   failed: false — answer is reliable
  * Cost: ~1–3 tokens output, haiku-class model — negligible per message.
  */
 
@@ -19,14 +21,20 @@ const CLASSIFIER_SYSTEM_PROMPT = `Ты классификатор безопас
 
 Ответь "нет" при: грусти, злости, усталости, горе, боли, разочаровании — без угрозы жизни.`;
 
-export async function semanticCrisisCheck(message: string): Promise<boolean> {
-  if (message.trim().length < 8) return false;
+export interface SemanticCrisisResult {
+  isCrisis: boolean;
+  /** true when the API call failed — caller should use regex fallback */
+  failed: boolean;
+}
+
+export async function semanticCrisisCheck(message: string): Promise<SemanticCrisisResult> {
+  if (message.trim().length < 8) return { isCrisis: false, failed: false };
 
   const apiKey = typeof Deno !== "undefined"
     ? Deno.env.get("OPENROUTER_API_KEY")
     : undefined;
 
-  if (!apiKey) return false;
+  if (!apiKey) return { isCrisis: false, failed: true };
 
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -48,12 +56,12 @@ export async function semanticCrisisCheck(message: string): Promise<boolean> {
       }),
     });
 
-    if (!res.ok) return false;
+    if (!res.ok) return { isCrisis: false, failed: true };
 
     const data = await res.json();
     const answer = (data?.choices?.[0]?.message?.content ?? "").toLowerCase().trim();
-    return answer.startsWith("да");
+    return { isCrisis: answer.startsWith("да"), failed: false };
   } catch {
-    return false;
+    return { isCrisis: false, failed: true };
   }
 }
