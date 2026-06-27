@@ -97,7 +97,7 @@ export async function fetchWeekUserMarks(
     .from("progress_entries")
     .select("content, created_at")
     .eq("conversation_id", conversationId)
-    .in("entry_type", ["insight", "tension", "note"])
+    .eq("entry_type", "note")
     .gte("created_at", sinceIsoWeek())
     .order("created_at", { ascending: true })
     .limit(12);
