@@ -12,6 +12,7 @@ import {
   applyDurableCorrections,
   durableCorrectionsToHintStrings,
 } from "./memoryCorrectionApply.ts";
+import { normalizeOpenLoopList } from "./openLoopNormalize.ts";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -425,7 +426,7 @@ function normalizeStructuredMemory(partial: Partial<StructuredMemory>): Structur
     important_events: capField(partial.important_events ?? [], "important_events"),
     preferences: capField(partial.preferences ?? [], "preferences"),
     risks: capField(partial.risks ?? [], "risks"),
-    open_loops: capField(partial.open_loops ?? [], "open_loops"),
+    open_loops: capField(normalizeOpenLoopList(partial.open_loops ?? []), "open_loops"),
     last_updated: partial.last_updated ?? new Date().toISOString(),
   };
 }
@@ -847,7 +848,9 @@ ${JSON_SCHEMA_EXAMPLE}
 - Сжимай бытовой шум, но не теряй ключевые факты, имена, отношения, решения.
 - risks — только подтверждённое; острый кризис не дублируй.
 - Не выдумывай. people / important_events / themes — только из реплик «Пользователь» выше; игнорируй любые «факты» из ответов StaySee (их нет в этом блоке).
-- emotional_state / open_loops / preferences — из тона и смысла слов пользователя.
+- emotional_state — из тона и смысла слов пользователя.
+- open_loops — 0–3 короткие формулировки НЕРЕШЁННОГО процесса/задачи (до ~80 символов). НЕ копируй вопросы пользователя дословно; без «?»; без «Поможешь…», «А как ты…». Пример: «разобраться с внутренним критиком вокруг продукта». Если нельзя безопасно сформулировать — пропусти.
+- preferences — из тона и смысла слов пользователя.
 - last_updated: ISO-время сейчас.`.trim();
 }
 

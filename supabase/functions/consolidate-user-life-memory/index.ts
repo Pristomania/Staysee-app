@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
       results = await consolidateAllUserLifeMemory(supabase, modelConfig, {
         userId: body.userId,
         dryRun: false,
-        forceRebuild: true,
+        forceRebuild: false,
       });
     } catch (e) {
       console.error("[consolidate] post-recover merge failed:", e);

@@ -3,21 +3,29 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { filterCrossMemoryCandidates } from "./crossMemoryPolicy.ts";
+import { memoryItemsSimilar } from "./memory.ts";
+import {
+  filterCrossMemoryCandidates,
+  isBrokenCrossMemoryFragment,
+  normalizeCrossMemoryContent,
+} from "./crossMemoryPolicy.ts";
+import {
+  consolidateRowsRuleBased,
+  type ConsolidateRowInput,
+} from "./consolidateRuleBased.ts";
 import {
   CROSS_MEMORY_MAX_CHARS,
-  CROSS_MEMORY_MIN_CHARS,
   isLifeMemoryFragment,
   parseLifeMemoryFromModel,
   type CrossMemoryType,
   type LifeMemoryModelConfig,
 } from "./userLifeMemory.ts";
 
-export interface UserMemoryRow {
+export { consolidateRowsRuleBased } from "./consolidateRuleBased.ts";
+
+export interface UserMemoryRow extends ConsolidateRowInput {
   id: string;
   user_id: string;
-  memory_type: string;
-  content: string;
 }
 
 export interface ConsolidateUserResult {
@@ -36,9 +44,15 @@ function normalizeSentence(s: string): string {
 }
 
 function similarMemory(a: string, b: string): boolean {
-  const x = a.toLowerCase().slice(0, 80);
-  const y = b.toLowerCase().slice(0, 80);
-  return x === y || x.includes(y.slice(0, 40)) || y.includes(x.slice(0, 40));
+  return memoryItemsSimilar(a, b);
+}
+
+function rowsAreCleanSentences(rows: UserMemoryRow[]): boolean {
+  if (!rows.length) return false;
+  return rows.every((r) => {
+    const c = normalizeCrossMemoryContent(r.content);
+    return Boolean(c) && !isLifeMemoryFragment(c) && !isBrokenCrossMemoryFragment(c);
+  });
 }
 
 function buildConsolidationPrompt(
@@ -55,7 +69,7 @@ function buildConsolidationPrompt(
 
   return `Ты пересобираешь СКВОЗНУЮ ПАМЯТЬ пользователя.
 
-Старые записи-фрагменты (отдельные слова, имена без контекста) нужно объединить в связные предложения.
+Старые записи-фрагменты нужно объединить в связные предложения БЕЗ display-меток.
 
 УЖЕ ХОРОШИЕ ЗАПИСИ (не дублируй, не удаляй смысл):
 ${keptBlock}
@@ -63,16 +77,16 @@ ${keptBlock}
 ФРАГМЕНТЫ ДЛЯ ПЕРЕСБОРКИ:
 ${fragBlock}
 
-Верни ТОЛЬКО JSON-массив (1–${Math.min(6, fragments.length + 1)} элементов):
+Верни ТОЛЬКО JSON-массив (0–${Math.min(6, fragments.length + 1)} элементов):
 [
-  { "memory_type": "communication|preference|life_context", "content": "цельное предложение 40–280 символов" }
+  { "memory_type": "communication|preference|life_context", "content": "цельное предложение без префиксов" }
 ]
 
 Правила:
-- Только стабильный профиль и стиль общения. Без theme/emotion/кризисов.
-- Объединяй фрагменты в осмысленные предложения о жизни, отношениях, стиле общения.
-- Не оставляй отдельные слова. Не выдумывай факты — только из фрагментов и хороших записей.
-- communication/preference — как лучше говорить с человеком, если есть намёк в данных.`.trim();
+- Только стабильный профиль и стиль общения. Без theme/emotion/кризисов/историй/сомнений.
+- НЕ используй префиксы «В жизни пользователя…» / «В общении важно…» в content.
+- Объединяй фрагменты в осмысленные предложения. Не выдумывай факты.
+- Если нет устойчивого — верни [].`.trim();
 }
 
 async function callConsolidationModel(
@@ -101,48 +115,13 @@ async function callConsolidationModel(
   return data.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
-/** Rule-based fallback when no API key. */
-function ruleBasedMerge(rows: UserMemoryRow[]): Array<{
-  memory_type: CrossMemoryType;
-  content: string;
-}> {
-  const byType = new Map<string, string[]>();
-  for (const r of rows) {
-    const list = byType.get(r.memory_type) ?? [];
-    list.push(r.content.trim());
-    byType.set(r.memory_type, list);
-  }
-  const out: Array<{ memory_type: CrossMemoryType; content: string }> = [];
-  const allPeople = [...(byType.get("insight") ?? []), ...(byType.get("life_context") ?? [])];
-  if (allPeople.length) {
-    out.push({
-      memory_type: "life_context",
-      content: normalizeSentence(
-        `В жизни пользователя значимы: ${allPeople.join(", ")}.`
-      ),
-    });
-  }
-  const prefs = [
-    ...(byType.get("preference") ?? []),
-    ...(byType.get("communication") ?? []),
-  ];
-  if (prefs.length) {
-    out.push({
-      memory_type: "communication",
-      content: normalizeSentence(
-        `В общении важно: ${prefs.join("; ")}.`
-      ),
-    });
-  }
-  return filterCrossMemoryCandidates(out).filter(
-    (x) => x.content.length >= CROSS_MEMORY_MIN_CHARS
-  ) as Array<{ memory_type: CrossMemoryType; content: string }>;
-}
-
 function needsFullRebuild(rows: UserMemoryRow[]): boolean {
   const fragments = rows.filter((r) => isLifeMemoryFragment(r.content));
   if (fragments.length > 0) return true;
-  return rows.some((r) => r.content.length < CROSS_MEMORY_MIN_CHARS + 10);
+  return rows.some((r) => {
+    const c = normalizeCrossMemoryContent(r.content);
+    return !c || isBrokenCrossMemoryFragment(c);
+  });
 }
 
 export async function consolidateUserLifeMemoryRows(
@@ -168,6 +147,7 @@ export async function consolidateUserLifeMemoryRows(
 
   const sourceRows = fullRebuild ? rows : fragments;
   const kept = fullRebuild ? [] : rows.filter((r) => !isLifeMemoryFragment(r.content));
+  const allClean = rowsAreCleanSentences(sourceRows);
 
   let candidates: Array<{
     memory_type: CrossMemoryType;
@@ -175,7 +155,12 @@ export async function consolidateUserLifeMemoryRows(
     importance: number;
   }> = [];
 
-  if (model?.apiKey) {
+  if (allClean) {
+    candidates = consolidateRowsRuleBased(sourceRows).map((c) => ({
+      ...c,
+      importance: 4,
+    }));
+  } else if (model?.apiKey) {
     try {
       const prompt = buildConsolidationPrompt(kept, sourceRows);
       const raw = await callConsolidationModel(prompt, model);
@@ -194,22 +179,25 @@ export async function consolidateUserLifeMemoryRows(
   }
 
   if (!candidates.length) {
-    candidates = ruleBasedMerge(sourceRows).map((c) => ({
+    candidates = consolidateRowsRuleBased(sourceRows).map((c) => ({
       ...c,
       importance: 4,
     }));
   }
 
-  const known = kept.map((r) => r.content.trim().toLowerCase());
+  const known = kept.map((r) =>
+    normalizeCrossMemoryContent(r.content).toLowerCase()
+  );
   let toInsert = candidates.filter((c) => {
-    if (isLifeMemoryFragment(c.content)) return false;
-    return !known.some((k) => similarMemory(k, c.content));
+    const content = normalizeCrossMemoryContent(c.content);
+    if (!content || isLifeMemoryFragment(content)) return false;
+    return !known.some((k) => similarMemory(k, content));
   });
 
   toInsert = filterCrossMemoryCandidates(toInsert) as typeof toInsert;
 
   if (!toInsert.length) {
-    toInsert = ruleBasedMerge(sourceRows).filter(
+    toInsert = consolidateRowsRuleBased(sourceRows).filter(
       (c) => !isLifeMemoryFragment(c.content)
     );
   }
@@ -247,10 +235,12 @@ export async function consolidateUserLifeMemoryRows(
 
   let added = 0;
   for (const c of toInsert) {
+    const content = normalizeCrossMemoryContent(c.content);
+    if (!content) continue;
     const { error } = await supabase.from("user_memory").insert({
       user_id: userId,
       memory_type: c.memory_type,
-      content: c.content,
+      content,
     });
     if (error) {
       console.error(`[consolidate] insert failed user=${userId}:`, error.message);

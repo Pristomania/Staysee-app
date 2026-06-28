@@ -18,12 +18,21 @@ import {
 import { estimateTokens } from "./cost.ts";
 import type { OpenRouterUsagePayload } from "./usageAnalytics.ts";
 import {
+  classifyCrossMemoryCategory,
   filterCrossMemoryCandidates,
   filterCrossMemoryRowsForInjection,
   isBlockedCrossMemoryContent,
-  isStableLifeFact,
-  isStablePeopleFact,
+  isPromotableToCrossMemory,
+  normalizeCrossMemoryContent,
+  normalizePeopleFieldToLifeContext,
 } from "./crossMemoryPolicy.ts";
+import {
+  buildCrossMemoryCandidates,
+  type CrossMemoryCandidate,
+  type CrossMemoryType,
+} from "./crossMemoryBuild.ts";
+
+export { buildCrossMemoryCandidates } from "./crossMemoryBuild.ts";
 
 export const CROSS_MEMORY_MIN_CHARS = 40;
 export const CROSS_MEMORY_MAX_CHARS = 420;
@@ -38,11 +47,7 @@ export type CrossMemoryType =
   | "communication"
   | "life_context";
 
-export interface CrossMemoryCandidate {
-  memory_type: CrossMemoryType;
-  content: string;
-  importance: number;
-}
+export type { CrossMemoryCandidate } from "./crossMemoryBuild.ts";
 
 const TYPE_IMPORTANCE: Record<CrossMemoryType, number> = {
   communication: 5,
@@ -74,84 +79,15 @@ export function isLifeMemoryFragment(s: string): boolean {
   return false;
 }
 
-function mergePeopleToSentence(items: string[]): string | null {
-  const parts = items.map((s) => s.trim()).filter((s) => s && isStablePeopleFact(s));
-  if (!parts.length) return null;
-  const long = parts.find((p) => !isLifeMemoryFragment(p));
-  if (long) return normalizeSentence(long);
-  return normalizeSentence(
-    `В жизни пользователя значимы люди: ${parts.join(", ")}.`
-  );
-}
-
-/** @deprecated themes no longer promoted to cross-memory */
-function mergeThemesToSentence(_items: string[]): string | null {
-  return null;
-}
-
-function mergePreferencesToSentence(items: string[]): string | null {
-  const parts = items.map((s) => s.trim()).filter(Boolean);
-  if (!parts.length) return null;
-  const long = parts.filter((p) => p.length >= CROSS_MEMORY_MIN_CHARS);
-  if (long.length === 1) return normalizeSentence(long[0]);
-  if (long.length > 1) {
-    return normalizeSentence(
-      `Предпочтения в общении: ${long.join(" ")}`
-    );
-  }
-  return normalizeSentence(
-    `Пользователю важно в диалоге: ${parts.join("; ")}.`
-  );
-}
-
-/** @deprecated emotional_state no longer promoted to cross-memory */
-function mergeEmotionalToSentence(_items: string[]): string | null {
-  return null;
-}
-
-/** Rule-based: stable profile + contact prefs only (no themes/emotions/crises). */
-export function buildCrossMemoryCandidates(
-  memory: StructuredMemory
-): CrossMemoryCandidate[] {
-  const out: CrossMemoryCandidate[] = [];
-
-  const people = mergePeopleToSentence(memory.people);
-  if (people && !isBlockedCrossMemoryContent(people)) {
-    out.push({ memory_type: "life_context", content: people, importance: 4 });
-  }
-
-  const prefs = mergePreferencesToSentence(memory.preferences);
-  if (prefs && !isBlockedCrossMemoryContent(prefs)) {
-    out.push({
-      memory_type: "communication",
-      content: prefs,
-      importance: 5,
-    });
-  }
-
-  for (const ev of memory.important_events.slice(0, 2)) {
-    const t = ev.trim();
-    if (!isStableLifeFact(t)) continue;
-    out.push({
-      memory_type: "life_context",
-      content: normalizeSentence(t),
-      importance: 4,
-    });
-  }
-
-  return filterCrossMemoryCandidates(out) as CrossMemoryCandidate[];
-}
-
 export function buildLifeMemorySynthesisPrompt(
   memory: StructuredMemory,
   existingContents: string[]
 ): string {
   const snapshot = {
-    people: memory.people.filter((p) => isStablePeopleFact(p)),
+    people: memory.people
+      .map((p) => normalizePeopleFieldToLifeContext(p))
+      .filter(Boolean),
     preferences: memory.preferences,
-    important_events: memory.important_events
-      .filter((e) => isStableLifeFact(e))
-      .slice(0, 2),
   };
 
   const existingBlock =
@@ -161,26 +97,28 @@ export function buildLifeMemorySynthesisPrompt(
 
   return `Ты формируешь СКВОЗНУЮ ПАМЯТЬ о пользователе (между разными беседами).
 
-Только СТАБИЛЬНЫЙ ПРОФИЛЬ и ПРЕДПОЧТЕНИЯ КОНТАКТА. Не переноси темы беседы, эмоции, кризисы, конфликты, страхи.
+Только СТАБИЛЬНЫЙ ПРОФИЛЬ и ПРЕДПОЧТЕНИЯ КОНТАКТА с ассистентом. Не переноси темы беседы, эмоции, прошлые истории, сомнения, конфликты.
 
 Черновик из последней беседы (JSON):
 ${JSON.stringify(snapshot)}
 
 ${existingBlock}
 
-Верни ТОЛЬКО JSON-массив (0–2 элемента), без markdown:
+Верни ТОЛЬКО JSON-массив (0–2 элементов), без markdown:
 [
   {
     "memory_type": "communication|preference|life_context",
-    "content": "полное предложение 40–280 символов"
+    "content": "полное предложение без меток «В жизни…» / «В общении…»"
   }
 ]
 
 Правила:
-- life_context — устойчивые факты профиля (семья как факт, город, работа, проект), без сюжета беседы.
-- communication/preference — как говорить с человеком (тон, слова, что помогает, грамматический род обращения при явном предпочтении).
-- НЕЛЬЗЯ: темы, эмоции, страхи, кризисы, «переживает», «сепарация», «предательство», текущие конфликты.
-- Пример можно: «У пользователя есть сын.» Нельзя: «Переживает сепарацию с сыном.»
+- life_context — устойчивые факты профиля: семья, питомец, стабильное проживание, долгосрочный проект (StaySee).
+- communication/preference — как говорить с человеком: род обращения, прямота, без советов, присутствие, темп.
+- НЕЛЬЗЯ: курсы/преподаватели, одежда/цвет/настроение, эмоции, страхи, кризисы, сомнения о продукте, сюжеты конфликтов, цитаты, вопросы, темы одной беседы, insight/tension/weekly.
+- Без display-префиксов в content. Одно предложение на элемент.
+- Не объединяй разные факты в одну строку. Не удаляй факты из черновика.
+- Если нет устойчивого — верни [].
 - Только подтверждённое из черновика. Не выдумывай.
 - Не дублируй уже записанное.`.trim();
 }
@@ -202,7 +140,9 @@ export function parseLifeMemoryFromModel(raw: string): CrossMemoryCandidate[] {
     ];
     const out: CrossMemoryCandidate[] = [];
     for (const row of arr) {
-      const content = normalizeSentence(row.content ?? "");
+      const content = normalizeSentence(
+        normalizeCrossMemoryContent(row.content ?? "")
+      );
       if (!content || isLifeMemoryFragment(content)) continue;
       if (isBlockedCrossMemoryContent(content)) continue;
       const rawType = String(row.memory_type ?? "life_context").split("|")[0].trim();
@@ -310,7 +250,11 @@ export async function refreshUserLifeMemory(
   const existing = (existingRows ?? []).map((r) => (r.content as string).trim());
   const known = new Set(existing.map((c) => c.toLowerCase()));
 
-  const candidates = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
+  const ruleBased = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
+  const candidates: CrossMemoryCandidate[] = [...ruleBased];
+  const ruleKeys = new Set(
+    ruleBased.map((c) => `${c.memory_type}:${c.content.toLowerCase()}`)
+  );
 
   if (model?.apiKey) {
     try {
@@ -343,7 +287,9 @@ export async function refreshUserLifeMemory(
           usage: data.usage as OpenRouterUsagePayload | undefined,
         });
         candidates.push(
-          ...filterCrossMemoryCandidates(parseLifeMemoryFromModel(text))
+          ...filterCrossMemoryCandidates(parseLifeMemoryFromModel(text)).filter(
+            (c) => !ruleKeys.has(`${c.memory_type}:${c.content.toLowerCase()}`)
+          )
         );
       }
     } catch (e) {
@@ -354,15 +300,27 @@ export async function refreshUserLifeMemory(
   let rowCount = existing.length;
   for (const c of candidates) {
     if (rowCount >= MAX_CROSS_MEMORY_ROWS) break;
-    if (crossMemoryContradictsCorrection(c.content, durableCorrections)) continue;
-    const key = c.content.toLowerCase();
+    const content = normalizeCrossMemoryContent(c.content);
+    if (!content) continue;
+    if (crossMemoryContradictsCorrection(content, durableCorrections)) continue;
+    const key = content.toLowerCase();
     if (known.has(key)) continue;
-    if (existing.some((e) => similarMemory(e, c.content))) continue;
+    if (existing.some((e) => similarMemory(e, content))) continue;
+    if (
+      candidates.some(
+        (other) =>
+          other !== c &&
+          other.memory_type === c.memory_type &&
+          similarMemory(other.content, content)
+      )
+    ) {
+      continue;
+    }
 
     const { error } = await supabase.from("user_memory").insert({
       user_id: userId,
       memory_type: c.memory_type,
-      content: c.content,
+      content,
     });
 
     if (!error) {
