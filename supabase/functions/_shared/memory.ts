@@ -17,7 +17,7 @@ import { normalizeOpenLoopList } from "./openLoopNormalize.ts";
 // ── Config ────────────────────────────────────────────────────────────────────
 
 /** Refresh rolling summary after this many new messages (GPT-like continuity). */
-export const MESSAGES_PER_SUMMARY_UPDATE = 10;
+export const MESSAGES_PER_SUMMARY_UPDATE = 4;
 export const SUMMARY_TOKEN_PRESSURE_THRESHOLD = 5_500;
 
 /** Rebuild summary when memory is older than this (ms) — e.g. return after a few days. */
@@ -843,6 +843,8 @@ ${JSON_SCHEMA_EXAMPLE}
 - Если пользователь уточнил отношения или проживание — новый факт заменяет старый, не дублируй «живу вместе» и «не живу вместе».
 - Сохрани общую линию беседы: кто, что происходит, что важно пользователю сейчас.
 - Это ПАМЯТЬ БЕСЕДЫ: короткие пункты до ~${MAX_ITEM_CHARS} символов в people/themes/events.
+- people: для близких отношений (сын, дочь, партнёр, питомец) пиши текущее состояние компактно, одной строкой, если известно: «сын, 18 лет, сейчас в армии», «партнёр часто остаётся на ночь», «есть собака Крис». Не храни устаревшие состояния рядом с новым. Детали возраста/проживания/армии можно дублировать в important_events короткой фразой («сыну 18», «сын ушёл в армию»).
+- important_events: только факты от пользователя; не клади сюда эмоциональные/conflict/course эпизоды. Короткие стабильные факты о близких (возраст, проживание, армия, имя питомца) — допустимы.
 - preferences: 1–2 цельных фразы про стиль общения (темп, тон, что помогает) — они пойдут в сквозную память. Если из речи явно понятно, в каком грамматическом роде обращаться к пользователю, можно одной фразой: «Обращаться в женском роде.» или «Обращаться в мужском роде.» — только при уверенности, не при сомнении.
 - Не раздувай: макс ${CAPS.themes} тем, ${CAPS.important_events} событий.
 - Сжимай бытовой шум, но не теряй ключевые факты, имена, отношения, решения.
@@ -918,6 +920,7 @@ export function shouldUpdateConversationSummary(check: SummaryRefreshCheck): boo
 export function shouldEagerRefreshSummary(check: SummaryRefreshCheck): boolean {
   if (!shouldUpdateConversationSummary(check)) return false;
   if (check.hasCorrections) return true;
+  if (!check.conversationSummary?.trim()) return true;
   return (
     isSummaryStale(check.summaryUpdatedAt) ||
     isTrivialEmptySummary(check.conversationSummary)
@@ -976,7 +979,7 @@ export function finalizeMemoryUpdate(
 
 export async function updateConversationSummary(
   input: SummaryUpdateInput
-): Promise<void> {
+): Promise<{ ok: boolean; errorCode?: string; errorMessage?: string }> {
   let serialized: string;
   let tone = input.emotionalTone;
 
@@ -985,7 +988,7 @@ export async function updateConversationSummary(
       console.warn(
         `[memory] skip save empty memory conversation=${input.conversationId}`
       );
-      return;
+      return { ok: false, errorMessage: "skip_empty_memory" };
     }
     const { memory, compressed } = compressStructuredMemory(input.memory);
     serialized = serializeMemory(memory);
@@ -1000,7 +1003,7 @@ export async function updateConversationSummary(
     console.log(`[memory] save from model compressed=${compressed}`);
   } else {
     console.error("[memory] updateConversationSummary: no memory or modelOutput");
-    return;
+    return { ok: false, errorMessage: "no_memory_or_model_output" };
   }
 
   const withTimestamp = {
@@ -1020,7 +1023,11 @@ export async function updateConversationSummary(
       .eq("id", input.conversationId));
   }
 
-  if (error) console.error("[memory] updateConversationSummary:", error.message);
+  if (error) {
+    console.error("[memory] updateConversationSummary:", error.message);
+    return { ok: false, errorCode: error.code, errorMessage: error.message };
+  }
+  return { ok: true };
 }
 
 /** @deprecated use refreshUserLifeMemory from userLifeMemory.ts */

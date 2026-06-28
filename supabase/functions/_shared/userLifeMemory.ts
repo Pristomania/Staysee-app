@@ -34,7 +34,14 @@ import {
 import {
   evolveMemoryFacts,
   type ExistingFactRow,
+  classifyFactCandidate,
 } from "./factEvolution.ts";
+import type { MemoryDiagContext } from "./summaryRefresh.ts";
+import {
+  memoryDiagCrossMemory,
+  memoryDiagFactEvolution,
+  memoryDiagUserMemoryAfter,
+} from "./memoryDiag.ts";
 
 export { buildCrossMemoryCandidates } from "./crossMemoryBuild.ts";
 
@@ -231,7 +238,8 @@ export async function refreshUserLifeMemory(
   model?: LifeMemoryModelConfig,
   correctionHints?: string[],
   conversationId?: string | null,
-  durableCorrections: DurableMemoryCorrection[] = []
+  durableCorrections: DurableMemoryCorrection[] = [],
+  diag?: MemoryDiagContext
 ): Promise<void> {
   if (!(await fetchCrossMemoryEnabled(supabase, userId))) {
     return;
@@ -261,6 +269,14 @@ export async function refreshUserLifeMemory(
 
   const ruleBased = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
   const candidates: CrossMemoryCandidate[] = [...ruleBased];
+  const rawCandidates = buildCrossMemoryCandidates(memory);
+  memoryDiagCrossMemory({
+    enabled: !!diag?.enabled,
+    candidatesCount: rawCandidates.length,
+    candidatesPreview: rawCandidates.map((c) => c.content),
+    admittedCount: ruleBased.length,
+    blockedCount: Math.max(0, rawCandidates.length - ruleBased.length),
+  });
   const ruleKeys = new Set(
     ruleBased.map((c) => `${c.memory_type}:${c.content.toLowerCase()}`)
   );
@@ -313,7 +329,16 @@ export async function refreshUserLifeMemory(
     if (rowCount >= MAX_CROSS_MEMORY_ROWS) break;
 
     const evolution = evolveMemoryFacts(trackedRows, c);
-    if (evolution?.action === "ignore") continue;
+    if (evolution?.action === "ignore") {
+      memoryDiagFactEvolution({
+        enabled: !!diag?.enabled,
+        candidate: c.content,
+        parsedSlot: classifyFactCandidate(c.content),
+        action: "ignore",
+        ignoredReason: evolution.reason,
+      });
+      continue;
+    }
 
     if (evolution && (evolution.action === "add" || evolution.action === "enrich" || evolution.action === "replace")) {
       const content = normalizeCrossMemoryContent(evolution.content);
@@ -354,6 +379,14 @@ export async function refreshUserLifeMemory(
           id: inserted.id as string,
           content,
           memory_type: evolution.memory_type,
+        });
+        memoryDiagFactEvolution({
+          enabled: !!diag?.enabled,
+          candidate: c.content,
+          parsedSlot: classifyFactCandidate(c.content),
+          action: evolution.action,
+          insertedContent: content,
+          deletedRows: evolution.deleteRowIds?.length ?? 0,
         });
         console.log(
           `[userLifeMemory] fact evolution ${evolution.action} type=${evolution.memory_type} len=${content.length}`
@@ -402,6 +435,24 @@ export async function refreshUserLifeMemory(
         error.message
       );
     }
+  }
+
+  if (diag?.enabled) {
+    const { data: afterRows } = await supabase
+      .from("user_memory")
+      .select("content, memory_type")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    memoryDiagUserMemoryAfter({
+      enabled: true,
+      lifeContextRows: (afterRows ?? [])
+        .filter((r) => r.memory_type === "life_context")
+        .map((r) => r.content as string),
+      communicationRows: (afterRows ?? [])
+        .filter((r) => r.memory_type === "communication" || r.memory_type === "preference")
+        .map((r) => r.content as string),
+    });
   }
 }
 

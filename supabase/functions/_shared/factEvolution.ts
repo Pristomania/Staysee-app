@@ -377,6 +377,63 @@ export function classifyFactCandidate(content: string): FactSlot | null {
   return parsed?.slot ?? null;
 }
 
+/** Narrative/conflict/course episodes — never promote from important_events. */
+function isBlockedFactEventNarrative(text: string): boolean {
+  const t = bare(text);
+  if (!t) return true;
+  if (t.length > 160) return true;
+  if (
+    /(?:племянниц|купил[аи]?\s+курс|преподавател|дипломом\s+психолог|причинив\s+боль)/iu.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(?:расстроил|обидел|ссор|конфликт|драма|переживает)/iu.test(t) &&
+    !/(?:живёт|живет|арми|сыну\s+\d|съехались|ночев|остаётся|остается)/iu.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when text may be promoted from conversation_summary.important_events
+ * into a stable fact-evolution slot (not generic narrative).
+ */
+export function isFactEvolutionCandidateText(text: string): boolean {
+  const raw = text.replace(/\s+/g, " ").trim();
+  if (!raw || isBlockedFactEventNarrative(raw)) return false;
+
+  const parsed = parseFactFromText(raw, { allowAmbiguousPronoun: false });
+  if (!parsed) return false;
+
+  if (parsed.slot === "relation.pet") {
+    return parsed.pet?.exists === true;
+  }
+
+  if (parsed.slot === "relation.partner") {
+    return (
+      parsed.partner?.cohabitation !== undefined &&
+      parsed.partner.cohabitation !== "unknown"
+    );
+  }
+
+  if (parsed.slot === "relation.son" || parsed.slot === "relation.daughter") {
+    const son = parsed.son;
+    if (!son) return false;
+    if (son.age != null) return true;
+    if (son.livingStatus != null && son.livingStatus !== "unknown") return true;
+    const b = bare(raw);
+    if (/^(?:есть\s+)?(?:сын|дочь)$/u.test(b)) return true;
+    if (/^у\s+меня\s+есть\s+(?:сын|дочь)$/u.test(b)) return true;
+    return false;
+  }
+
+  return false;
+}
+
 /**
  * Decide how a new candidate should evolve existing life-context rows.
  * Returns null for non-evolvable types (communication/preference) — caller uses legacy insert.

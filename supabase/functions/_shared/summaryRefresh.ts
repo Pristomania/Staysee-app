@@ -22,6 +22,15 @@ import {
   type OpenRouterUsagePayload,
 } from "./usageAnalytics.ts";
 import { refreshUserLifeMemory, type LifeMemoryModelConfig } from "./userLifeMemory.ts";
+import {
+  memoryDiagSummaryBuild,
+  memoryDiagSummarySave,
+} from "./memoryDiag.ts";
+
+export interface MemoryDiagContext {
+  enabled: boolean;
+  conversationId: string;
+}
 
 export interface SummaryRefreshRunInput {
   supabase: SupabaseClient;
@@ -33,6 +42,7 @@ export interface SummaryRefreshRunInput {
   model: LifeMemoryModelConfig;
   /** Same-turn corrections not yet visible to loadActiveCorrections. */
   extraDurableCorrections?: DurableMemoryCorrection[];
+  diag?: MemoryDiagContext;
 }
 
 export async function runConversationSummaryRefresh(
@@ -82,6 +92,13 @@ export async function runConversationSummaryRefresh(
 
   if (!res.ok) {
     console.warn("[summaryRefresh] model failed:", res.status);
+    memoryDiagSummaryBuild({
+      enabled: !!input.diag?.enabled,
+      attempted: true,
+      sourceMessageCount: input.transcript.length,
+      userTurnCount: input.transcript.filter((m) => m.role === "user").length,
+      modelFailed: true,
+    });
     return null;
   }
 
@@ -111,14 +128,54 @@ export async function runConversationSummaryRefresh(
       console.warn(
         `[summaryRefresh] skip empty memory conversation=${input.conversationId}`
       );
+      memoryDiagSummaryBuild({
+        enabled: !!input.diag?.enabled,
+        attempted: true,
+        sourceMessageCount: input.transcript.length,
+        userTurnCount: input.transcript.filter((m) => m.role === "user").length,
+        resultBytes: 0,
+        memory: null,
+      });
       return null;
     }
 
-    await updateConversationSummary({
+    memoryDiagSummaryBuild({
+      enabled: !!input.diag?.enabled,
+      attempted: true,
+      sourceMessageCount: input.transcript.length,
+      userTurnCount: input.transcript.filter((m) => m.role === "user").length,
+      resultBytes: JSON.stringify(memory).length,
+      memory,
+    });
+
+    const saveResult = await updateConversationSummary({
       supabase: input.supabase,
       conversationId: input.conversationId,
       memory,
       allowEmptyMemory: durableCorrections.length > 0,
+    });
+
+    let postSummaryBytes = 0;
+    let postSummaryUpdatedAt: string | null = null;
+    if (input.diag?.enabled) {
+      const { data: postRow } = await input.supabase
+        .from("conversations")
+        .select("conversation_summary, summary, summary_updated_at")
+        .eq("id", input.conversationId)
+        .maybeSingle();
+      const postSummary = getConversationSummary(postRow ?? null);
+      postSummaryBytes = postSummary?.length ?? 0;
+      postSummaryUpdatedAt = (postRow?.summary_updated_at as string) ?? null;
+    }
+
+    memoryDiagSummarySave({
+      enabled: !!input.diag?.enabled,
+      attempted: true,
+      success: saveResult.ok,
+      errorCode: saveResult.errorCode ?? null,
+      errorMessage: saveResult.errorMessage ?? null,
+      postSaveSummaryBytes: postSummaryBytes,
+      postSaveSummaryUpdatedAt: postSummaryUpdatedAt,
     });
 
     if (input.userId) {
@@ -129,7 +186,8 @@ export async function runConversationSummaryRefresh(
         input.model,
         input.memoryHints,
         input.conversationId,
-        durableCorrections
+        durableCorrections,
+        input.diag
       );
     }
 

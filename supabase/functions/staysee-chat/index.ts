@@ -20,6 +20,13 @@ import {
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
 import {
+  explainSummaryRefreshDecision,
+  isMemoryDiagConversation,
+  memoryDiagStart,
+  memoryDiagSummaryDecision,
+  memoryDiagBackgroundGate,
+} from "../_shared/memoryDiag.ts";
+import {
   detectMemoryCorrection,
   isEphemeralDenialOnly,
 } from "../_shared/memoryCorrectionDetect.ts";
@@ -499,8 +506,10 @@ Deno.serve(async (req: Request) => {
     let priorSessionProcessState: SessionProcessState | null = null;
     // Carry packet out of block for background summary task
     let packetForSummary: Awaited<ReturnType<typeof buildContextPacket>> | null = null;
+    const smokeDiagSnapshot: Record<string, unknown> = {};
 
     const hasContext = conversationId && userId && authToken && supabaseUrl && supabaseAnonKey;
+    smokeDiagSnapshot.has_context = !!hasContext;
 
     if (hasContext) {
       try {
@@ -533,6 +542,35 @@ Deno.serve(async (req: Request) => {
         logSessionProcessStateRead(extractedSessionProcessState);
         priorSessionProcessState = extractedSessionProcessState.legacy;
 
+        const convTitle = packet.conversationMeta?.title ?? null;
+        const memoryDiagEnabled = isMemoryDiagConversation(convTitle);
+        const memoryDiagCtx = memoryDiagEnabled
+          ? { enabled: true, conversationId }
+          : undefined;
+
+        if (memoryDiagEnabled && userId) {
+          const svcDiag = makeServiceClient();
+          const { count: dbMsgCount } = await svcDiag
+            .from("messages")
+            .select("id", { count: "exact", head: true })
+            .eq("conversation_id", conversationId);
+          const { data: lastMsg } = await svcDiag
+            .from("messages")
+            .select("created_at")
+            .eq("conversation_id", conversationId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          memoryDiagStart({
+            enabled: true,
+            userId,
+            conversationId,
+            requestMessageCount: 1,
+            dbMessageCount: dbMsgCount ?? 0,
+            lastMessageCreatedAt: (lastMsg?.created_at as string) ?? null,
+          });
+        }
+
         const summaryUpdatedAt =
           packet.conversationMeta?.summary_updated_at ?? null;
         const preTranscript = await fetchTranscriptForSummary(
@@ -540,6 +578,8 @@ Deno.serve(async (req: Request) => {
           conversationId,
           summaryUpdatedAt
         );
+        smokeDiagSnapshot.pre_transcript_len = preTranscript.length;
+        smokeDiagSnapshot.messages_since_summary = packet.messagesSinceSummary;
         const preHints = [
           ...new Set([
             ...packet.corrections,
@@ -557,9 +597,31 @@ Deno.serve(async (req: Request) => {
               preHints.length > 0 || packet.durableCorrections.length > 0,
           })
         ) {
+          smokeDiagSnapshot.eager_should = true;
+          const eagerSummary = getConversationSummary(packet.conversationMeta);
+          const eagerExplain = explainSummaryRefreshDecision({
+            hasCorrections: preHints.length > 0 || packet.durableCorrections.length > 0,
+            conversationSummary: eagerSummary,
+            summaryUpdatedAt,
+            messagesSinceSummary: packet.messagesSinceSummary,
+            transcriptLen: preTranscript.length,
+          });
+          memoryDiagSummaryDecision({
+            enabled: memoryDiagEnabled,
+            path: "eager",
+            shouldRefresh: true,
+            reason: eagerExplain.reason,
+            currentSummaryExists: !!eagerSummary?.trim(),
+            currentSummaryBytes: eagerSummary?.length ?? 0,
+            summaryUpdatedAt,
+            transcriptLen: preTranscript.length,
+            messagesSinceSummary: packet.messagesSinceSummary,
+          });
           const apiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey);
+          smokeDiagSnapshot.eager_api_key = !!apiKey;
           if (apiKey) {
             console.log("[staysee-chat] eager summary refresh (stale or empty)");
+            smokeDiagSnapshot.eager_ran = true;
             await runConversationSummaryRefresh({
               supabase: makeServiceClient(),
               conversationId,
@@ -576,6 +638,7 @@ Deno.serve(async (req: Request) => {
                 apiKey,
                 extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
               },
+              diag: memoryDiagCtx,
             });
             packet = await buildContextPacket({
               conversationId,
@@ -593,6 +656,35 @@ Deno.serve(async (req: Request) => {
               };
             }
           }
+        } else if (memoryDiagEnabled) {
+          smokeDiagSnapshot.eager_should = false;
+          const eagerSummary = getConversationSummary(packet.conversationMeta);
+          const shouldUp = shouldUpdateConversationSummary({
+            conversationSummary: eagerSummary,
+            summaryUpdatedAt,
+            messagesSinceSummary: packet.messagesSinceSummary,
+            transcript: preTranscript,
+            hasCorrections:
+              preHints.length > 0 || packet.durableCorrections.length > 0,
+          });
+          const explain = explainSummaryRefreshDecision({
+            hasCorrections: preHints.length > 0 || packet.durableCorrections.length > 0,
+            conversationSummary: eagerSummary,
+            summaryUpdatedAt,
+            messagesSinceSummary: packet.messagesSinceSummary,
+            transcriptLen: preTranscript.length,
+          });
+          memoryDiagSummaryDecision({
+            enabled: true,
+            path: "eager",
+            shouldRefresh: false,
+            reason: shouldUp ? "eager_gate_blocked_first_summary" : explain.reason,
+            currentSummaryExists: !!eagerSummary?.trim(),
+            currentSummaryBytes: eagerSummary?.length ?? 0,
+            summaryUpdatedAt,
+            transcriptLen: preTranscript.length,
+            messagesSinceSummary: packet.messagesSinceSummary,
+          });
         }
 
         // L7: Trim messages and memory to tier limits
@@ -638,6 +730,7 @@ Deno.serve(async (req: Request) => {
           userEvidenceQuotes: archiveSearch.userEvidenceQuotes,
         };
         packetForSummary = trimmedPacket;
+        smokeDiagSnapshot.has_packet = true;
 
         systemPrompt = [BASE_PROMPT, buildContextPrompt(trimmedPacket)].join("\n\n");
 
@@ -666,6 +759,7 @@ Deno.serve(async (req: Request) => {
         memoryItemIds = trimmed.memoryItems.map((m) => m.id);
         historyMessages = trimmed.messages;
       } catch (ctxErr) {
+        smokeDiagSnapshot.ctx_error = String(ctxErr);
         console.error("[staysee-chat] context build error:", ctxErr);
       }
     }
@@ -1194,6 +1288,16 @@ Deno.serve(async (req: Request) => {
         : null;
 
     const clientConnected = !req.signal.aborted;
+    const memoryDiagTitle = packetForSummary?.conversationMeta?.title ?? null;
+    const memoryDiagOn = isMemoryDiagConversation(memoryDiagTitle);
+    memoryDiagBackgroundGate({
+      enabled: memoryDiagOn,
+      hasPacket: !!packetForSummary,
+      hasConversationId: !!conversationId,
+      hasResultContent: !!result.content,
+      isCalmFallback: isCalmFallbackContent,
+      clientConnected,
+    });
 
     if (isReplyPipelineTraceEnabled() && result.content?.trim()) {
       recordReplyPipelineStage("before_http_response", result.content, {
@@ -1208,6 +1312,32 @@ Deno.serve(async (req: Request) => {
     }
 
     const pipelineTrace = getReplyPipelineTraceReport();
+
+    if (conversationId && Object.keys(smokeDiagSnapshot).length > 0) {
+      try {
+        const svcDiagWrite = makeServiceClient();
+        const { data: crow } = await svcDiagWrite
+          .from("conversations")
+          .select("title, metadata")
+          .eq("id", conversationId)
+          .maybeSingle();
+        if (isMemoryDiagConversation(crow?.title ?? null)) {
+          const base =
+            crow?.metadata &&
+            typeof crow.metadata === "object" &&
+            !Array.isArray(crow.metadata)
+              ? (crow.metadata as Record<string, unknown>)
+              : {};
+          smokeDiagSnapshot.ts = new Date().toISOString();
+          await svcDiagWrite
+            .from("conversations")
+            .update({ metadata: { ...base, _smoke_diag: smokeDiagSnapshot } })
+            .eq("id", conversationId);
+        }
+      } catch (diagWriteErr) {
+        console.error("[staysee-chat] smoke diag metadata write:", diagWriteErr);
+      }
+    }
 
     if (userId && clientConnected) {
       const svc = makeServiceClient();
@@ -1231,16 +1361,14 @@ Deno.serve(async (req: Request) => {
           !isCalmFallbackContent
             ? (async () => {
                 try {
-                  const baseTranscript =
-                    authToken && supabaseUrl && supabaseAnonKey
-                      ? await fetchTranscriptForSummary(
-                          createClient(supabaseUrl, supabaseAnonKey, {
-                            global: { headers: { Authorization: `Bearer ${authToken}` } },
-                          }),
-                          conversationId,
-                          packetForSummary.conversationMeta?.summary_updated_at ?? null
-                        )
-                      : messages;
+                  const transcriptClient = svc;
+                  const baseTranscript = conversationId
+                    ? await fetchTranscriptForSummary(
+                        transcriptClient,
+                        conversationId,
+                        packetForSummary.conversationMeta?.summary_updated_at ?? null
+                      )
+                    : messages;
                   const transcriptForSummary: ChatMessage[] = (() => {
                     const tail = baseTranscript.slice(-2);
                     const hasExchange =
@@ -1264,20 +1392,46 @@ Deno.serve(async (req: Request) => {
                     ]),
                   ];
 
-                  if (
-                    !shouldUpdateConversationSummary({
-                      conversationSummary: getConversationSummary(
-                        packetForSummary.conversationMeta
-                      ),
-                      summaryUpdatedAt:
-                        packetForSummary.conversationMeta?.summary_updated_at ?? null,
-                      messagesSinceSummary: packetForSummary.messagesSinceSummary + 2,
-                      transcript: transcriptForSummary,
-                      hasCorrections:
-                        memoryHints.length > 0 ||
-                        packetForSummary.durableCorrections.length > 0,
-                    })
-                  ) {
+                  const bgSummary = getConversationSummary(
+                    packetForSummary.conversationMeta
+                  );
+                  const bgShould = shouldUpdateConversationSummary({
+                    conversationSummary: bgSummary,
+                    summaryUpdatedAt:
+                      packetForSummary.conversationMeta?.summary_updated_at ?? null,
+                    messagesSinceSummary: packetForSummary.messagesSinceSummary + 2,
+                    transcript: transcriptForSummary,
+                    hasCorrections:
+                      memoryHints.length > 0 ||
+                      packetForSummary.durableCorrections.length > 0,
+                  });
+                  const bgExplain = explainSummaryRefreshDecision({
+                    hasCorrections:
+                      memoryHints.length > 0 ||
+                      packetForSummary.durableCorrections.length > 0,
+                    conversationSummary: bgSummary,
+                    summaryUpdatedAt:
+                      packetForSummary.conversationMeta?.summary_updated_at ?? null,
+                    messagesSinceSummary: packetForSummary.messagesSinceSummary + 2,
+                    transcriptLen: transcriptForSummary.length,
+                  });
+                  memoryDiagSummaryDecision({
+                    enabled: isMemoryDiagConversation(
+                      packetForSummary.conversationMeta?.title ?? null
+                    ),
+                    path: "background",
+                    shouldRefresh: bgShould,
+                    reason: bgExplain.reason,
+                    currentSummaryExists: !!bgSummary?.trim(),
+                    currentSummaryBytes: bgSummary?.length ?? 0,
+                    summaryUpdatedAt:
+                      packetForSummary.conversationMeta?.summary_updated_at ?? null,
+                    transcriptLen: transcriptForSummary.length,
+                    messagesSinceSummary: packetForSummary.messagesSinceSummary + 2,
+                    clientConnected,
+                  });
+
+                  if (!bgShould) {
                     return;
                   }
 
@@ -1303,6 +1457,11 @@ Deno.serve(async (req: Request) => {
                       apiKey,
                       extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
                     },
+                    diag: isMemoryDiagConversation(
+                      packetForSummary.conversationMeta?.title ?? null
+                    )
+                      ? { enabled: true, conversationId }
+                      : undefined,
                   });
                 } catch (sumErr) {
                   console.error("[staysee-chat] summary update failed:", sumErr);

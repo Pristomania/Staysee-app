@@ -235,6 +235,10 @@ export function normalizePeopleFieldToLifeContext(text: string): string | null {
     return tryContent(/партн/i.test(bare) ? bare : "живём вместе с партнёром");
   }
 
+  if (/^мы\s+съехались$/iu.test(bare) || /^съехались$/iu.test(bare)) {
+    return tryContent("живём вместе с партнёром");
+  }
+
   if (/^у\s+меня\s+есть\s+сын$/iu.test(bare)) {
     return tryContent("есть сын");
   }

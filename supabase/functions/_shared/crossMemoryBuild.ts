@@ -10,6 +10,7 @@ import {
   normalizeCrossMemoryContent,
   normalizePeopleFieldToLifeContext,
 } from "./crossMemoryPolicy.ts";
+import { isFactEvolutionCandidateText } from "./factEvolution.ts";
 
 function itemTokens(s: string): Set<string> {
   return new Set(
@@ -83,6 +84,21 @@ function dedupeCrossMemoryCandidates(
   return out;
 }
 
+/** Promote important_events only when they parse as a stable fact-evolution slot. */
+export function eventToFactEvolutionCandidate(
+  eventText: string
+): CrossMemoryCandidate | null {
+  const normalized = normalizePeopleFieldToLifeContext(eventText);
+  const probe = normalized ?? eventText.replace(/\s+/g, " ").trim();
+  if (!probe || !isFactEvolutionCandidateText(probe)) return null;
+
+  const content = normalized ?? normalizeCrossMemoryContent(probe);
+  if (!content || isBlockedCrossMemoryContent(content)) return null;
+  if (!isPromotableToCrossMemory("life_context", content)) return null;
+
+  return { memory_type: "life_context", content, importance: 4 };
+}
+
 /** Rule-based: one candidate per allowed people/preference item. */
 export function buildCrossMemoryCandidates(
   memory: CrossMemoryBuildInput
@@ -93,6 +109,11 @@ export function buildCrossMemoryCandidates(
     const content = normalizePeopleFieldToLifeContext(raw);
     if (!content || isBlockedCrossMemoryContent(content)) continue;
     out.push({ memory_type: "life_context", content, importance: 4 });
+  }
+
+  for (const raw of memory.important_events ?? []) {
+    const candidate = eventToFactEvolutionCandidate(raw);
+    if (candidate) out.push(candidate);
   }
 
   for (const raw of memory.preferences) {
