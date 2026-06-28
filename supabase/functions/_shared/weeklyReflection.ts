@@ -9,6 +9,12 @@ import {
   type StructuredMemory,
 } from "./memory.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
+import { WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE } from "./weeklyReflectionPrivacy.ts";
+
+export {
+  isWeeklyReflectionVisibleEntryType,
+  WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE,
+} from "./weeklyReflectionPrivacy.ts";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_TRANSCRIPT_LINES = 36;
@@ -97,7 +103,7 @@ export async function fetchWeekUserMarks(
     .from("progress_entries")
     .select("content, created_at")
     .eq("conversation_id", conversationId)
-    .eq("entry_type", "note")
+    .eq("entry_type", WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE)
     .gte("created_at", sinceIsoWeek())
     .order("created_at", { ascending: true })
     .limit(12);
