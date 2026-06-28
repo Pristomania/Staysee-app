@@ -9,6 +9,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { Lock, Eye, Shield, Trash2, Database } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
+import { LegalDocumentView } from '../legal/LegalDocumentView';
+import { PRIVACY_META, PRIVACY_SECTIONS } from '../../content/legal/privacy';
 
 const sections = [
   {
@@ -237,6 +239,11 @@ export function PrivacyScreen() {
         <p className={`${theme.textMuted} text-[11px] font-light opacity-40`}>
           Здесь можно побыть собой.
         </p>
+
+        <div className={`mt-10 pt-8 border-t ${theme.border}`}>
+          <p className={sectionLabel}>Полный текст политики</p>
+          <LegalDocumentView meta={PRIVACY_META} sections={PRIVACY_SECTIONS} />
+        </div>
     </StickyScreenLayout>
   );
 }
