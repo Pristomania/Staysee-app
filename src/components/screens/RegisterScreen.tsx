@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { mapSignUpError } from '../../lib/authErrors';
-import { ROOM_COPY } from '../../lib/roomCopy';
+import { ROOM_COPY } from '../../lib/roomCopy'; // used for roomExistsEmail, alreadyHaveRoom
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
 export function RegisterScreen() {
@@ -19,10 +19,10 @@ export function RegisterScreen() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [confirmedAge18, setConfirmedAge18] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
 
-  const canSubmit = confirmedAge18 && acceptedTerms && !loading;
+  const canSubmit = acceptedTerms && acceptedPrivacy && !loading;
 
   const openTerms = () => {
     navigateTo('terms', { legalReturnScreen: 'register' });
@@ -36,12 +36,12 @@ export function RegisterScreen() {
     e.preventDefault();
     setError(null);
     setInfo(null);
-    if (!confirmedAge18) {
-      setError(ROOM_COPY.age18Required);
+    if (!acceptedTerms) {
+      setError('Нужно принять Пользовательское соглашение');
       return;
     }
-    if (!acceptedTerms) {
-      setError('Нужно принять публичную оферту');
+    if (!acceptedPrivacy) {
+      setError('Нужно принять политику обработки данных');
       return;
     }
     if (password !== confirmPassword) { setError('Пароли не совпадают'); return; }
@@ -164,18 +164,6 @@ export function RegisterScreen() {
           <label className="flex items-start gap-3 pt-1 cursor-pointer group">
             <input
               type="checkbox"
-              checked={confirmedAge18}
-              onChange={(e) => setConfirmedAge18(e.target.checked)}
-              className="mt-1 w-4 h-4 rounded border border-white/20 bg-transparent accent-[#c9a96e] flex-shrink-0"
-            />
-            <span className={`${theme.textMuted} text-xs font-light leading-[1.65] group-hover:opacity-90`}>
-              {ROOM_COPY.age18Confirm}
-            </span>
-          </label>
-
-          <label className="flex items-start gap-3 cursor-pointer group">
-            <input
-              type="checkbox"
               checked={acceptedTerms}
               onChange={(e) => setAcceptedTerms(e.target.checked)}
               className="mt-1 w-4 h-4 rounded border border-white/20 bg-transparent accent-[#c9a96e] flex-shrink-0"
@@ -184,26 +172,30 @@ export function RegisterScreen() {
               Я принимаю{' '}
               <button
                 type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openTerms();
-                }}
+                onClick={(e) => { e.preventDefault(); openTerms(); }}
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
-                публичную оферту
+                Пользовательское соглашение
               </button>
-              {' '}и ознакомлен(а) с{' '}
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={acceptedPrivacy}
+              onChange={(e) => setAcceptedPrivacy(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border border-white/20 bg-transparent accent-[#c9a96e] flex-shrink-0"
+            />
+            <span className={`${theme.textMuted} text-xs font-light leading-[1.65] group-hover:opacity-90`}>
+              Я согласен(а) с тем, как StaySee хранит и защищает мои данные —{' '}
               <button
                 type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openPrivacy();
-                }}
+                onClick={(e) => { e.preventDefault(); openPrivacy(); }}
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
-                политикой конфиденциальности
+                подробнее
               </button>
-              .
             </span>
           </label>
 
@@ -213,6 +205,10 @@ export function RegisterScreen() {
           {info && (
             <p className={`${theme.textSecondary} text-xs font-light pt-0.5 leading-relaxed`}>{info}</p>
           )}
+
+          <p className={`${theme.textMuted} text-[11px] font-light leading-relaxed opacity-60 pt-1`}>
+            Регистрируясь, вы подтверждаете что вам исполнилось 18 лет
+          </p>
 
           {/* Submit */}
           <button
