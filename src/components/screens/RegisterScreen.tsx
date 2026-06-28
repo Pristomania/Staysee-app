@@ -206,8 +206,8 @@ export function RegisterScreen() {
             <p className={`${theme.textSecondary} text-xs font-light pt-0.5 leading-relaxed`}>{info}</p>
           )}
 
-          <p className={`${theme.textMuted} text-[11px] font-light leading-relaxed opacity-60 pt-1`}>
-            Регистрируясь, вы подтверждаете что вам исполнилось 18 лет
+          <p className={`${theme.textSecondary} text-xs font-light leading-relaxed opacity-75 pt-1`}>
+            Регистрируясь, вы подтверждаете что вам исполнилось 18 лет.
           </p>
 
           {/* Submit */}
