@@ -12,6 +12,12 @@ import {
   type StructuredMemory,
 } from "./memory.ts";
 import {
+  loadActiveCorrections,
+  memoryCorrectionsEnabled,
+  mergeDurableCorrections,
+} from "./memoryCorrections.ts";
+import type { DurableMemoryCorrection } from "./memoryCorrectionApply.ts";
+import {
   logSummaryGenerationUsage,
   type OpenRouterUsagePayload,
 } from "./usageAnalytics.ts";
@@ -25,6 +31,8 @@ export interface SummaryRefreshRunInput {
   transcript: Array<{ role: "user" | "assistant"; content: string }>;
   memoryHints: string[];
   model: LifeMemoryModelConfig;
+  /** Same-turn corrections not yet visible to loadActiveCorrections. */
+  extraDurableCorrections?: DurableMemoryCorrection[];
 }
 
 export async function runConversationSummaryRefresh(
@@ -33,11 +41,27 @@ export async function runConversationSummaryRefresh(
   const apiKey = input.model.apiKey;
   if (!apiKey) return null;
 
+  let durableCorrections: DurableMemoryCorrection[] = [];
+  if (memoryCorrectionsEnabled() && input.userId) {
+    const loaded = await loadActiveCorrections(
+      input.supabase,
+      input.userId,
+      input.conversationId
+    );
+    durableCorrections = mergeDurableCorrections(
+      loaded,
+      input.extraDurableCorrections ?? []
+    );
+  } else if (input.extraDurableCorrections?.length) {
+    durableCorrections = input.extraDurableCorrections;
+  }
+
   const summaryPrompt = buildConversationSummary({
     conversationId: input.conversationId,
     previousSummary: input.previousSummary,
     transcript: input.transcript,
     corrections: input.memoryHints,
+    durableCorrections,
   });
 
   const res = await fetch(`${input.model.baseUrl}/chat/completions`, {
@@ -80,9 +104,10 @@ export async function runConversationSummaryRefresh(
     const { memory, compressed } = finalizeMemoryUpdate(
       input.previousSummary,
       modelOut,
-      input.memoryHints
+      input.memoryHints,
+      durableCorrections
     );
-    if (!structuredMemoryHasContent(memory)) {
+    if (!structuredMemoryHasContent(memory) && !durableCorrections.length) {
       console.warn(
         `[summaryRefresh] skip empty memory conversation=${input.conversationId}`
       );
@@ -93,6 +118,7 @@ export async function runConversationSummaryRefresh(
       supabase: input.supabase,
       conversationId: input.conversationId,
       memory,
+      allowEmptyMemory: durableCorrections.length > 0,
     });
 
     if (input.userId) {
@@ -102,7 +128,8 @@ export async function runConversationSummaryRefresh(
         memory,
         input.model,
         input.memoryHints,
-        input.conversationId
+        input.conversationId,
+        durableCorrections
       );
     }
 

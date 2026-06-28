@@ -20,6 +20,17 @@ import {
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
 import {
+  detectMemoryCorrection,
+  isEphemeralDenialOnly,
+} from "../_shared/memoryCorrectionDetect.ts";
+import {
+  memoryCorrectionsEnabled,
+  candidateToDurable,
+  mergeDurableCorrections,
+  persistMemoryCorrection,
+} from "../_shared/memoryCorrections.ts";
+import type { DurableMemoryCorrection } from "../_shared/memoryCorrectionApply.ts";
+import {
   buildLegacySessionProcessState,
   buildStructuredSessionProcessState,
   extractSessionProcessStateFromMetadata,
@@ -444,6 +455,32 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // ── Durable memory corrections (flag-gated) ───────────────────────────
+
+    let sameTurnDurableCorrection: DurableMemoryCorrection | null = null;
+
+    if (
+      memoryCorrectionsEnabled() &&
+      userId &&
+      conversationId &&
+      !isEphemeralDenialOnly(message)
+    ) {
+      const candidate = detectMemoryCorrection({
+        message,
+        hasConversationId: true,
+      });
+      if (candidate?.confidence === "high") {
+        const persisted = await persistMemoryCorrection(makeServiceClient(), {
+          userId,
+          conversationId,
+          candidate,
+        });
+        if (persisted) {
+          sameTurnDurableCorrection = candidateToDurable(candidate);
+        }
+      }
+    }
+
     const tierCfg = TIER_CONFIG[userTier];
     const gapTier = classifyTimeGap(timeGap);
     const embedApiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey) ?? undefined;
@@ -474,6 +511,15 @@ Deno.serve(async (req: Request) => {
           supabaseAnonKey,
         });
 
+        if (sameTurnDurableCorrection) {
+          packet = {
+            ...packet,
+            durableCorrections: mergeDurableCorrections(packet.durableCorrections, [
+              sameTurnDurableCorrection,
+            ]),
+          };
+        }
+
         // PR3c-1/2 N-1: Turn N reads processState_{N-1} from metadata.
         // Same-turn processState_N is computed later and must not affect this response.
         const extractedSessionProcessState = extractSessionProcessStateFromMetadata(
@@ -502,7 +548,8 @@ Deno.serve(async (req: Request) => {
             summaryUpdatedAt,
             messagesSinceSummary: packet.messagesSinceSummary,
             transcript: preTranscript,
-            hasCorrections: preHints.length > 0,
+            hasCorrections:
+              preHints.length > 0 || packet.durableCorrections.length > 0,
           })
         ) {
           const apiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey);
@@ -515,6 +562,9 @@ Deno.serve(async (req: Request) => {
               previousSummary: getConversationSummary(packet.conversationMeta),
               transcript: preTranscript,
               memoryHints: preHints,
+              extraDurableCorrections: sameTurnDurableCorrection
+                ? [sameTurnDurableCorrection]
+                : undefined,
               model: {
                 baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
                 model: PROVIDERS[ACTIVE_PROVIDER].model,
@@ -529,6 +579,14 @@ Deno.serve(async (req: Request) => {
               supabaseUrl,
               supabaseAnonKey,
             });
+            if (sameTurnDurableCorrection) {
+              packet = {
+                ...packet,
+                durableCorrections: mergeDurableCorrections(packet.durableCorrections, [
+                  sameTurnDurableCorrection,
+                ]),
+              };
+            }
           }
         }
 
@@ -1210,7 +1268,9 @@ Deno.serve(async (req: Request) => {
                         packetForSummary.conversationMeta?.summary_updated_at ?? null,
                       messagesSinceSummary: packetForSummary.messagesSinceSummary + 2,
                       transcript: transcriptForSummary,
-                      hasCorrections: memoryHints.length > 0,
+                      hasCorrections:
+                        memoryHints.length > 0 ||
+                        packetForSummary.durableCorrections.length > 0,
                     })
                   ) {
                     return;
@@ -1229,6 +1289,9 @@ Deno.serve(async (req: Request) => {
                     previousSummary,
                     transcript: transcriptForSummary,
                     memoryHints,
+                    extraDurableCorrections: sameTurnDurableCorrection
+                      ? [sameTurnDurableCorrection]
+                      : undefined,
                     model: {
                       baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
                       model: PROVIDERS[ACTIVE_PROVIDER].model,

@@ -7,6 +7,11 @@ import { normalizeMessageRole } from "./messageRole.ts";
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { estimateTokens } from "./cost.ts";
+import type { DurableMemoryCorrection } from "./memoryCorrectionApply.ts";
+import {
+  applyDurableCorrections,
+  durableCorrectionsToHintStrings,
+} from "./memoryCorrectionApply.ts";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +65,7 @@ export interface MemoryPromptInput {
   conversationTitle?: string | null;
   emotionalTone?: string | null;
   corrections?: string[];
+  durableCorrections?: DurableMemoryCorrection[];
 }
 
 export interface SummaryBuildInput {
@@ -67,6 +73,7 @@ export interface SummaryBuildInput {
   previousSummary: string | null;
   transcript: Array<{ role: "user" | "assistant"; content: string }>;
   corrections?: string[];
+  durableCorrections?: DurableMemoryCorrection[];
 }
 
 export interface SummaryUpdateInput {
@@ -77,6 +84,8 @@ export interface SummaryUpdateInput {
   /** Raw model output to parse when memory not provided. */
   modelOutput?: string;
   emotionalTone?: string;
+  /** Allow saving intentionally cleared memory (e.g. delete_fact). */
+  allowEmptyMemory?: boolean;
 }
 
 export interface SummaryRefreshCheck {
@@ -656,8 +665,12 @@ export function getParsedMemory(meta: ConversationMemoryMeta | null): Structured
 export function injectSummaryIntoPrompt(input: MemoryPromptInput): string {
   const parts: string[] = [];
 
-  if (input.corrections && input.corrections.length > 0) {
-    const list = input.corrections.map((c) => `"${c}"`).join(" | ");
+  const durableHints = durableCorrectionsToHintStrings(input.durableCorrections ?? []);
+  const ephemeralHints = input.corrections ?? [];
+  const allHints = [...new Set([...durableHints, ...ephemeralHints])];
+
+  if (allHints.length > 0) {
+    const list = allHints.map((c) => `"${c}"`).join(" | ");
     parts.push(
       `ПОПРАВКИ ПОЛЬЗОВАТЕЛЯ (высший приоритет — перекрывают память): ${list}\n` +
         `Если память противоречит поправке — верь пользователю, не старой памяти.`
@@ -665,8 +678,11 @@ export function injectSummaryIntoPrompt(input: MemoryPromptInput): string {
   }
 
   let parsed = parseStoredMemory(input.conversationSummary);
-  if (parsed && input.corrections?.length) {
-    parsed = applyCorrectionHints(parsed, input.corrections);
+  if (parsed && (input.durableCorrections?.length ?? 0) > 0) {
+    parsed = applyDurableCorrections(parsed, input.durableCorrections!);
+  }
+  if (parsed && ephemeralHints.length) {
+    parsed = applyCorrectionHints(parsed, ephemeralHints);
   }
   if (parsed) {
     const { text, tokenEstimate, compressed, fieldCounts } = formatMemoryForInjection(parsed);
@@ -749,10 +765,14 @@ export function buildConversationSummary(input: SummaryBuildInput): string {
     .map((m) => `Пользователь: ${m.content}`)
     .join("\n");
 
+  const durableNote = input.durableCorrections?.length
+    ? `\nПОПРАВКИ ПОЛЬЗОВАТЕЛЯ (сохранённые, высший приоритет):\n${input.durableCorrections.map((c) => `• ${c.display_text}`).join("\n")}`
+    : "";
   const correctionNote =
     input.corrections?.length
-      ? `\nПОПРАВКИ (приоритет — удали из JSON противоречащие старые пункты):\n${input.corrections.map((c) => `• ${c}`).join("\n")}`
+      ? `\nПОПРАВКИ (эпизод — удали из JSON противоречащие старые пункты):\n${input.corrections.map((c) => `• ${c}`).join("\n")}`
       : "";
+  const combinedCorrectionNote = `${durableNote}${correctionNote}`;
 
   const prev = parseStoredMemory(input.previousSummary);
   const previousJson = prev
@@ -764,7 +784,7 @@ export function buildConversationSummary(input: SummaryBuildInput): string {
 ПРЕДЫДУЩАЯ ПАМЯТЬ (JSON, объедини — не переписывай с нуля):
 ${previousJson}
 
-ФРАГМЕНТЫ ПОЛЬЗОВАТЕЛЯ (единственный источник фактов для people / important_events / themes):${correctionNote}
+ФРАГМЕНТЫ ПОЛЬЗОВАТЕЛЯ (единственный источник фактов для people / important_events / themes):${combinedCorrectionNote}
 ${userTranscript || "(пока нет реплик пользователя)"}
 
 Задача: верни ТОЛЬКО один JSON (без markdown, без пояснений) по схеме:
@@ -848,6 +868,7 @@ export function shouldUpdateConversationSummary(check: SummaryRefreshCheck): boo
 /** Block on request when memory is empty or older than a day — first reply after pause stays in context. */
 export function shouldEagerRefreshSummary(check: SummaryRefreshCheck): boolean {
   if (!shouldUpdateConversationSummary(check)) return false;
+  if (check.hasCorrections) return true;
   return (
     isSummaryStale(check.summaryUpdatedAt) ||
     isTrivialEmptySummary(check.conversationSummary)
@@ -858,14 +879,23 @@ export function shouldEagerRefreshSummary(check: SummaryRefreshCheck): boolean {
 export function finalizeMemoryUpdate(
   previousRaw: string | null,
   modelOutput: string,
-  correctionHints?: string[]
+  correctionHints?: string[],
+  durableCorrections?: DurableMemoryCorrection[]
 ): { serialized: string; memory: StructuredMemory; compressed: boolean } {
   const incoming = parseSummaryFromModel(modelOutput);
   if (!incoming) {
     throw new Error("unparseable_summary");
   }
   const previous = parseStoredMemory(previousRaw);
-  let merged = mergeStructuredMemory(previous, incoming);
+  let merged = mergeStructuredMemory(
+    previous && durableCorrections?.length
+      ? applyDurableCorrections(previous, durableCorrections)
+      : previous,
+    incoming
+  );
+  if (durableCorrections?.length) {
+    merged = applyDurableCorrections(merged, durableCorrections);
+  }
   if (correctionHints?.length) {
     merged = applyCorrectionHints(merged, correctionHints);
   }
@@ -874,7 +904,8 @@ export function finalizeMemoryUpdate(
   if (
     !structuredMemoryHasContent(memory) &&
     previous &&
-    structuredMemoryHasContent(previous)
+    structuredMemoryHasContent(previous) &&
+    !durableCorrections?.length
   ) {
     console.warn("[memory] reject empty overwrite — keeping previous memory");
     const kept = compressStructuredMemory(previous);
@@ -901,7 +932,7 @@ export async function updateConversationSummary(
   let tone = input.emotionalTone;
 
   if (input.memory) {
-    if (!structuredMemoryHasContent(input.memory)) {
+    if (!structuredMemoryHasContent(input.memory) && !input.allowEmptyMemory) {
       console.warn(
         `[memory] skip save empty memory conversation=${input.conversationId}`
       );

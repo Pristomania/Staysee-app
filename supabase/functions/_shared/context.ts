@@ -21,6 +21,11 @@ import {
   injectSummaryIntoPrompt,
   type ConversationMemoryMeta,
 } from "./memory.ts";
+import type { DurableMemoryCorrection } from "./memoryCorrectionApply.ts";
+import {
+  loadActiveCorrections,
+  memoryCorrectionsEnabled,
+} from "./memoryCorrections.ts";
 import {
   buildNarrativeContext,
   formatNarrativeForPrompt,
@@ -77,6 +82,8 @@ export interface ContextPacket {
   now: string;
   memoryItemIds: string[];
   corrections: string[];
+  /** Active durable corrections loaded from memory_corrections (flag-gated). */
+  durableCorrections: DurableMemoryCorrection[];
   /** Messages in this conversation since summary_updated_at */
   messagesSinceSummary: number;
   /** Retrieved past exchanges from this conversation only (never other chats). */
@@ -264,6 +271,7 @@ export function buildContextPrompt(packet: ContextPacket): string {
     conversationTitle: meta?.title,
     emotionalTone: meta?.emotional_tone,
     corrections: packet.corrections,
+    durableCorrections: packet.durableCorrections,
   });
 
   const parts: string[] = [];
@@ -331,6 +339,9 @@ export async function buildContextPacket(
     : [];
 
   const corrections = collectMemoryCorrectionHints(recentMessages);
+  const durableCorrections = memoryCorrectionsEnabled()
+    ? await loadActiveCorrections(supabase, input.userId, input.conversationId)
+    : [];
   const messagesSinceSummary = await countMessagesSinceSummary(
     supabase,
     input.conversationId,
@@ -344,6 +355,7 @@ export async function buildContextPacket(
     now: new Date().toISOString(),
     memoryItemIds: memoryItems.map((m) => m.id),
     corrections,
+    durableCorrections,
     messagesSinceSummary,
     archiveExcerpts: [],
     userEvidenceQuotes: [],

@@ -11,6 +11,10 @@ import {
   MEMORY_SEPARATE_SIGNAL_RE,
   memoryItemsSimilar,
 } from "./memory.ts";
+import {
+  crossMemoryContradictsCorrection,
+  type DurableMemoryCorrection,
+} from "./memoryCorrectionApply.ts";
 import { estimateTokens } from "./cost.ts";
 import type { OpenRouterUsagePayload } from "./usageAnalytics.ts";
 import {
@@ -222,16 +226,13 @@ function similarMemory(a: string, b: string): boolean {
   return memoryItemsSimilar(a, b);
 }
 
-/** Remove cross-memory rows contradicted by user corrections (e.g. «не живу вместе»). */
+/** Remove cross-memory rows contradicted by durable corrections or ephemeral hints. */
 export async function pruneContradictedCrossMemory(
   supabase: SupabaseClient,
   userId: string,
-  hints: string[]
+  hints: string[],
+  durableCorrections: DurableMemoryCorrection[] = []
 ): Promise<void> {
-  if (!hints.length) return;
-  const combined = hints.join(" ").toLowerCase();
-  if (!MEMORY_SEPARATE_SIGNAL_RE.test(combined)) return;
-
   const { data: rows, error } = await supabase
     .from("user_memory")
     .select("id, content")
@@ -242,12 +243,24 @@ export async function pruneContradictedCrossMemory(
     return;
   }
 
+  const combined = hints.join(" ").toLowerCase();
+  const legacySeparate = MEMORY_SEPARATE_SIGNAL_RE.test(combined);
+
   for (const row of rows ?? []) {
     const content = (row.content as string).trim();
-    if (
+    let shouldDelete = false;
+
+    if (durableCorrections.length && crossMemoryContradictsCorrection(content, durableCorrections)) {
+      shouldDelete = true;
+    } else if (
+      legacySeparate &&
       MEMORY_COHABIT_CONFLICT_RE.test(content) &&
       !MEMORY_SEPARATE_SIGNAL_RE.test(content)
     ) {
+      shouldDelete = true;
+    }
+
+    if (shouldDelete) {
       const { error: delErr } = await supabase
         .from("user_memory")
         .delete()
@@ -273,15 +286,19 @@ export async function refreshUserLifeMemory(
   memory: StructuredMemory,
   model?: LifeMemoryModelConfig,
   correctionHints?: string[],
-  conversationId?: string | null
+  conversationId?: string | null,
+  durableCorrections: DurableMemoryCorrection[] = []
 ): Promise<void> {
   if (!(await fetchCrossMemoryEnabled(supabase, userId))) {
     return;
   }
 
-  if (correctionHints?.length) {
-    await pruneContradictedCrossMemory(supabase, userId, correctionHints);
-  }
+  await pruneContradictedCrossMemory(
+    supabase,
+    userId,
+    correctionHints ?? [],
+    durableCorrections
+  );
 
   const { data: existingRows } = await supabase
     .from("user_memory")
@@ -337,6 +354,7 @@ export async function refreshUserLifeMemory(
   let rowCount = existing.length;
   for (const c of candidates) {
     if (rowCount >= MAX_CROSS_MEMORY_ROWS) break;
+    if (crossMemoryContradictsCorrection(c.content, durableCorrections)) continue;
     const key = c.content.toLowerCase();
     if (known.has(key)) continue;
     if (existing.some((e) => similarMemory(e, c.content))) continue;
