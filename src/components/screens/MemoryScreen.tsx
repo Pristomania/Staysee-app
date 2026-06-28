@@ -45,6 +45,7 @@ import {
   MEMORY_EMPTY_DISPLAY_MESSAGE,
   normalizeMemoryForDisplay,
 } from '../../lib/normalizeMemoryForDisplay';
+import { normalizeMemoryTextForDisplay } from '../../lib/memoryDisplayNormalize';
 import type { Conversation, UserMemory } from '../../types';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -246,7 +247,7 @@ function CollapsibleMemoryDisplaySection({
                   ) : (
                     <>
                       <p className={`flex-1 min-w-0 ${theme.textSecondary} text-[13px] font-light leading-[1.65]`}>
-                        {item.text}
+                        {normalizeMemoryTextForDisplay(item.text)}
                       </p>
                       <button
                         type="button"
@@ -839,7 +840,7 @@ function GlobalMemoryRow({
       ) : (
         <div className="flex gap-2 items-start">
           <p className={`flex-1 ${theme.textSecondary} text-[13px] font-light leading-[1.65]`}>
-            {row.content}
+            {normalizeMemoryTextForDisplay(row.content)}
           </p>
           {!readOnly && (
             <>
