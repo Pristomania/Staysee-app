@@ -477,11 +477,57 @@ export function structuredMemoryHasContent(mem: StructuredMemory | null): boolea
   return MEMORY_CONTENT_FIELDS.some((f) => mem[f].length > 0);
 }
 
+/** Alias: all known arrays empty (or null memory). */
+export function isStructuredMemoryEffectivelyEmpty(
+  memory: StructuredMemory | null | undefined
+): boolean {
+  if (!memory) return true;
+  return !structuredMemoryHasContent(memory);
+}
+
+/** Parsed/raw summary with no meaningful structured content. */
+export function isStructuredMemoryEffectivelyEmptyRaw(
+  raw: string | null | undefined
+): boolean {
+  if (!raw?.trim()) return true;
+  const parsed = parseStoredMemory(raw);
+  if (!parsed) return true;
+  return !structuredMemoryHasContent(parsed);
+}
+
 /** Detect empty JSON shell saved by a failed rolling update. */
 export function isTrivialEmptySummary(raw: string | null | undefined): boolean {
   const parsed = parseStoredMemory(raw);
   if (!parsed) return false;
   return !structuredMemoryHasContent(parsed);
+}
+
+export function structuredMemoryFieldCounts(
+  mem: StructuredMemory
+): Record<string, number> {
+  return Object.fromEntries(
+    MEMORY_CONTENT_FIELDS.map((f) => [f, mem[f]?.length ?? 0])
+  );
+}
+
+/** Whether a candidate summary may replace the stored one. */
+export function evaluateSummarySaveCandidate(input: {
+  previousRaw: string | null;
+  candidate: StructuredMemory;
+  allowEmptyMemory?: boolean;
+}): { allowed: boolean; reason?: string } {
+  if (input.allowEmptyMemory) {
+    return { allowed: true };
+  }
+  if (structuredMemoryHasContent(input.candidate)) {
+    return { allowed: true };
+  }
+  const previousMeaningful =
+    !!input.previousRaw?.trim() && !isTrivialEmptySummary(input.previousRaw);
+  if (previousMeaningful) {
+    return { allowed: false, reason: "empty_summary_guard" };
+  }
+  return { allowed: false, reason: "empty_summary_candidate" };
 }
 
 /** Extract JSON object from model output. */

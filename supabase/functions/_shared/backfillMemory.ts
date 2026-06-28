@@ -7,11 +7,14 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { normalizeMessageRole } from "./messageRole.ts";
 import {
   buildConversationSummary,
+  evaluateSummarySaveCandidate,
   finalizeMemoryUpdate,
   getConversationSummary,
   isTrivialEmptySummary,
   MEMORY_SAFE_RULES,
   serializeMemory,
+  structuredMemoryFieldCounts,
+  structuredMemoryHasContent,
   type SummaryBuildInput,
 } from "./memory.ts";
 import { estimateTokens } from "./cost.ts";
@@ -48,6 +51,21 @@ export interface BackfillOptions {
   force?: boolean;
 }
 
+export interface BackfillDiagnostics {
+  messageCount: number;
+  chunkPlans: number;
+  chunksModelReturned: number;
+  chunksNonEmpty: number;
+  chunksEmptySkipped: number;
+  mergeUsed: boolean;
+  model: string;
+  fieldCounts: Record<string, number>;
+  previousNonEmpty: boolean;
+  candidateEmpty: boolean;
+  allowEmptyMemory: boolean;
+  saveReason?: string;
+}
+
 export interface BackfillResult {
   conversationId: string;
   status: "ok" | "skipped" | "failed";
@@ -55,9 +73,12 @@ export interface BackfillResult {
   messagesFound?: number;
   summaryGenerated?: boolean;
   saved?: boolean;
+  skipped?: boolean;
   forced?: boolean;
   chunks?: number;
+  reason?: string;
   error?: string;
+  diagnostics?: BackfillDiagnostics;
 }
 
 /** Plan which message windows to load (condensed, not full transcript). */
@@ -158,6 +179,17 @@ function formatTranscript(messages: TranscriptMessage[]): string {
 }
 
 /** Short pass for one chunk — keeps prompts small. */
+const CHUNK_JSON_SCHEMA = `{
+  "people": ["имя или роль"],
+  "themes": ["повторяющаяся тема"],
+  "emotional_state": ["как переживает"],
+  "important_events": ["факт от пользователя"],
+  "preferences": ["стиль общения"],
+  "risks": [],
+  "open_loops": ["нерешённое"],
+  "last_updated": ""
+}`;
+
 export function buildChunkSummaryPrompt(
   messages: TranscriptMessage[],
   chunkLabel: string
@@ -165,8 +197,8 @@ export function buildChunkSummaryPrompt(
   const transcript = formatTranscript(messages);
   return `${MEMORY_SAFE_RULES}
 
-Сожми фрагмент (${chunkLabel}). Верни ТОЛЬКО JSON:
-{"people":[],"themes":[],"emotional_state":[],"important_events":[],"preferences":[],"risks":[],"open_loops":[],"last_updated":""}
+Сожми фрагмент (${chunkLabel}). Верни ТОЛЬКО JSON по схеме — заполни поля фактами из фрагмента; не возвращай все массивы пустыми:
+${CHUNK_JSON_SCHEMA}
 
 Фрагмент:
 ${transcript}
@@ -186,10 +218,26 @@ export function buildBackfillMergePrompt(
 ${titleLine}Фрагменты памяти (JSON или текст):
 ${joined}
 
-Объедини в один JSON (только JSON, без markdown):
-{"people":[],"themes":[],"emotional_state":[],"important_events":[],"preferences":[],"risks":[],"open_loops":[],"last_updated":""}
+Объедини в один JSON (только JSON, без markdown) по схеме:
+${CHUNK_JSON_SCHEMA}
 
-Убери дубликаты. Сохрани устойчивые темы. Убери шум.`.trim();
+Убери дубликаты. Сохрани устойчивые темы. Убери шум.
+Запрещено возвращать пустые массивы во всех полях, если во фрагментах выше есть факты — перенеси их.`.trim();
+}
+
+/** Chunk model output with no extractable facts (empty JSON shell). */
+export function chunkSummaryHasContent(text: string): boolean {
+  return !isTrivialEmptySummary(text);
+}
+
+export function logBackfillDiagnostics(
+  conversationId: string,
+  diagnostics: BackfillDiagnostics
+): void {
+  console.log(
+    `[backfill] diagnostics ${conversationId}`,
+    JSON.stringify(diagnostics)
+  );
 }
 
 export interface SummaryModelConfig {
@@ -309,6 +357,11 @@ export async function backfillOneConversation(
 
     const plans = planBackfillChunks(messageCount);
     const chunkSummaries: string[] = [];
+    let chunksModelReturned = 0;
+    let chunksEmptySkipped = 0;
+    const previousSummary = getConversationSummary(conversation);
+    const previousNonEmpty =
+      !!previousSummary?.trim() && !isTrivialEmptySummary(previousSummary);
 
     for (const plan of plans) {
       const slice = await fetchMessageSlice(supabase, id, plan.offset, plan.limit);
@@ -326,7 +379,7 @@ export async function backfillOneConversation(
       if (plans.length === 1) {
         const input: SummaryBuildInput = {
           conversationId: id,
-          previousSummary: getConversationSummary(conversation),
+          previousSummary,
           transcript: slice,
         };
         prompt = buildConversationSummary(input);
@@ -337,32 +390,81 @@ export async function backfillOneConversation(
       }
 
       const part = await callSummaryModel(model, prompt, maxTokens);
-      if (part) chunkSummaries.push(part);
+      if (!part) continue;
+      chunksModelReturned++;
+      if (chunkSummaryHasContent(part)) {
+        chunkSummaries.push(part);
+      } else {
+        chunksEmptySkipped++;
+        console.warn(
+          `[backfill] skip empty chunk ${id} label=${plan.label} bytes=${part.length}`
+        );
+      }
     }
 
     if (chunkSummaries.length === 0) {
+      const reason = previousNonEmpty
+        ? "empty_summary_guard"
+        : "empty_chunk_summaries";
+      const diagnostics: BackfillDiagnostics = {
+        messageCount,
+        chunkPlans: plans.length,
+        chunksModelReturned,
+        chunksNonEmpty: 0,
+        chunksEmptySkipped,
+        mergeUsed: false,
+        model: model.model,
+        fieldCounts: {},
+        previousNonEmpty,
+        candidateEmpty: true,
+        allowEmptyMemory: false,
+        saveReason: reason,
+      };
+      logBackfillDiagnostics(id, diagnostics);
       return {
         conversationId: id,
-        status: "failed",
+        status: previousNonEmpty ? "skipped" : "failed",
         messageCount,
         messagesFound,
-        summaryGenerated: false,
+        summaryGenerated: chunksModelReturned > 0,
         saved: false,
+        skipped: previousNonEmpty,
         forced,
-        error: "empty_chunk_summaries",
+        reason,
+        error: reason,
+        diagnostics,
       };
     }
 
+    const mergeUsed = chunkSummaries.length > 1;
     let modelOut: string | null;
     if (chunkSummaries.length === 1) {
       modelOut = chunkSummaries[0];
     } else {
-      const mergePrompt = buildBackfillMergePrompt(chunkSummaries, conversation.title);
-      modelOut = await callSummaryModel(model, mergePrompt, 550);
+      const mergePrompt = buildBackfillMergePrompt(
+        chunkSummaries,
+        conversation.title
+      );
+      modelOut = await callSummaryModel(model, mergePrompt, 700);
     }
 
     const summaryGenerated = !!modelOut?.trim();
     if (!summaryGenerated) {
+      const diagnostics: BackfillDiagnostics = {
+        messageCount,
+        chunkPlans: plans.length,
+        chunksModelReturned,
+        chunksNonEmpty: chunkSummaries.length,
+        chunksEmptySkipped,
+        mergeUsed,
+        model: model.model,
+        fieldCounts: {},
+        previousNonEmpty,
+        candidateEmpty: true,
+        allowEmptyMemory: false,
+        saveReason: "merge_failed",
+      };
+      logBackfillDiagnostics(id, diagnostics);
       return {
         conversationId: id,
         status: "failed",
@@ -370,15 +472,61 @@ export async function backfillOneConversation(
         messagesFound,
         summaryGenerated: false,
         saved: false,
+        skipped: false,
         forced,
+        chunks: chunkSummaries.length,
+        reason: "merge_failed",
         error: "merge_failed",
+        diagnostics,
       };
     }
 
     const { memory, compressed } = finalizeMemoryUpdate(
-      forced ? null : getConversationSummary(conversation),
+      forced ? null : previousSummary,
       modelOut!
     );
+    const candidateEmpty = !structuredMemoryHasContent(memory);
+    const saveDecision = evaluateSummarySaveCandidate({
+      previousRaw: previousSummary,
+      candidate: memory,
+      allowEmptyMemory: false,
+    });
+    const diagnostics: BackfillDiagnostics = {
+      messageCount,
+      chunkPlans: plans.length,
+      chunksModelReturned,
+      chunksNonEmpty: chunkSummaries.length,
+      chunksEmptySkipped,
+      mergeUsed,
+      model: model.model,
+      fieldCounts: structuredMemoryFieldCounts(memory),
+      previousNonEmpty,
+      candidateEmpty,
+      allowEmptyMemory: false,
+      saveReason: saveDecision.reason,
+    };
+    logBackfillDiagnostics(id, diagnostics);
+
+    if (!saveDecision.allowed) {
+      console.warn(
+        `[backfill] ${forced ? "forced " : ""}skip save ${id} reason=${saveDecision.reason} previousNonEmpty=${previousNonEmpty} candidateEmpty=${candidateEmpty}`
+      );
+      return {
+        conversationId: id,
+        status: "skipped",
+        messageCount,
+        messagesFound,
+        summaryGenerated: true,
+        saved: false,
+        skipped: true,
+        forced,
+        chunks: chunkSummaries.length,
+        reason: saveDecision.reason,
+        error: saveDecision.reason,
+        diagnostics,
+      };
+    }
+
     const serialized = serializeMemory(memory);
     const patch: Record<string, string> = {
       conversation_summary: serialized,
@@ -391,7 +539,10 @@ export async function backfillOneConversation(
       .select("id, conversation_summary")
       .maybeSingle();
 
-    const saved = !updateError && !!updated?.conversation_summary?.trim();
+    const saved =
+      !updateError &&
+      !!updated?.conversation_summary?.trim() &&
+      !isTrivialEmptySummary(updated.conversation_summary);
     console.log(
       `[backfill] ${forced ? "forced " : ""}save ${id} saved=${saved} compressed=${compressed} bytes=${serialized.length} updateError=${updateError?.message ?? "none"}`
     );
@@ -404,9 +555,12 @@ export async function backfillOneConversation(
         messagesFound,
         summaryGenerated: true,
         saved: false,
+        skipped: false,
         forced,
         chunks: chunkSummaries.length,
+        reason: updateError?.message ?? "save_verify_failed",
         error: updateError?.message ?? "save_verify_failed",
+        diagnostics,
       };
     }
 
@@ -417,8 +571,10 @@ export async function backfillOneConversation(
       messagesFound,
       summaryGenerated: true,
       saved: true,
+      skipped: false,
       forced,
       chunks: chunkSummaries.length,
+      diagnostics,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
