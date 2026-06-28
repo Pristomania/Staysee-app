@@ -93,6 +93,7 @@ import {
   userGenderGuidanceInjected,
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
+import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import {
   ensurePublishableReply,
   isPublishableReply,
@@ -158,8 +159,12 @@ interface FullProviderConfig extends ProviderConfig {
 }
 
 /** Legacy single-model override; per-depth routing: see _shared/modelRouter.ts */
-const CHAT_MODEL =
-  Deno.env.get("STAYSEE_CHAT_MODEL")?.trim() || "openai/gpt-4.1";
+const CHAT_MODEL = (() => {
+  const raw = Deno.env.get("STAYSEE_CHAT_MODEL")?.trim();
+  if (!raw) return APPROVED_MODEL_GPT4O;
+  assertApprovedRuntimeModel(raw, "STAYSEE_CHAT_MODEL");
+  return normalizeApprovedModelId(raw);
+})();
 
 const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
   openrouter: {

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { checkRateLimit, CALM_ERRORS } from "../_shared/cost.ts";
+import { resolveApprovedUtilityModel } from "../_shared/approvedModels.ts";
 import { generateWeeklyReflectionText } from "../_shared/weeklyReflection.ts";
 
 const corsHeaders = {
@@ -9,8 +10,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-const REFLECTION_MODEL =
-  Deno.env.get("STAYSEE_REFLECTION_MODEL")?.trim() || "anthropic/claude-3.5-haiku";
+const REFLECTION_MODEL = resolveApprovedUtilityModel("STAYSEE_REFLECTION_MODEL").primary;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

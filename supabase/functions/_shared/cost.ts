@@ -15,6 +15,7 @@
  */
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { APPROVED_MODEL_GPT4O } from "./approvedModels.ts";
 import { buildUsageLogRow, logOpenRouterUsage } from "./usageAnalytics.ts";
 
 // ── Tier definitions ──────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ export const FALLBACK_CHAIN: Array<{ provider: string; config: ProviderConfig }>
     provider: "openrouter",
     config: {
       baseUrl: "https://openrouter.ai/api/v1",
-      model: "anthropic/claude-3.5-haiku",  // haiku is available and cheaper
+      model: APPROVED_MODEL_GPT4O,
       envKey: "OPENROUTER_API_KEY",
       extraHeaders: { "HTTP-Referer": "https://staysee.app", "X-Title": "StaySee AI" },
     },

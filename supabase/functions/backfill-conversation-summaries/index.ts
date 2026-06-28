@@ -10,6 +10,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { makeServiceClient } from "../_shared/cost.ts";
+import { buildOpenRouterUtilityModelConfig } from "../_shared/approvedModels.ts";
 import {
   BACKFILL_CONVERSATIONS_PER_RUN,
   backfillOneConversation,
@@ -26,15 +27,10 @@ const corsHeaders = {
     "Content-Type, Authorization, X-Backfill-Secret, Apikey",
 };
 
-const SUMMARY_MODEL = {
-  baseUrl: "https://openrouter.ai/api/v1",
-  model: "anthropic/claude-3.5-haiku",
-  envKey: "OPENROUTER_API_KEY",
-  extraHeaders: {
-    "HTTP-Referer": "https://staysee.app",
-    "X-Title": "StaySee Backfill",
-  },
-};
+const SUMMARY_MODEL = buildOpenRouterUtilityModelConfig({
+  envKey: "STAYSEE_SUMMARY_MODEL",
+  title: "StaySee Backfill",
+});
 
 interface RequestBody {
   batchSize?: number;

@@ -5,6 +5,7 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { makeServiceClient } from "../_shared/cost.ts";
+import { buildOpenRouterUtilityModelConfig } from "../_shared/approvedModels.ts";
 import { consolidateAllUserLifeMemory } from "../_shared/consolidateUserLifeMemory.ts";
 import {
   emptyStructuredMemory,
@@ -20,14 +21,10 @@ const corsHeaders = {
     "Content-Type, Authorization, X-Backfill-Secret, Apikey",
 };
 
-const MODEL = {
-  baseUrl: "https://openrouter.ai/api/v1",
-  model: "anthropic/claude-3.5-haiku",
-  extraHeaders: {
-    "HTTP-Referer": "https://staysee.app",
-    "X-Title": "StaySee Memory Consolidate",
-  },
-};
+const MODEL = buildOpenRouterUtilityModelConfig({
+  envKey: "STAYSEE_SUMMARY_MODEL",
+  title: "StaySee Memory Consolidate",
+});
 
 function extractAuthToken(req: Request): string | null {
   const auth = req.headers.get("Authorization") ?? "";

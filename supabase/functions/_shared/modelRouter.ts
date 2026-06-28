@@ -3,6 +3,12 @@
  * Configure via Supabase Edge secrets — no frontend changes.
  */
 
+import {
+  APPROVED_MODEL_GPT4O,
+  APPROVED_MODEL_SONNET,
+  assertApprovedRuntimeModel,
+  normalizeApprovedModelId,
+} from "./approvedModels.ts";
 import type { ResponseDepth } from "./responseBudget.ts";
 import type { SafetyCategory } from "./safety.ts";
 
@@ -20,15 +26,17 @@ export interface ModelRouteResult {
   fallbackModel?: string;
 }
 
-const DEFAULT_BRIEF = "openai/gpt-4o";
-const DEFAULT_MEDIUM = "openai/gpt-4o";
-const DEFAULT_DEEP = "anthropic/claude-sonnet-4-5";
-const DEFAULT_CRISIS = "openai/gpt-4o";
-const DEFAULT_FALLBACK = "anthropic/claude-sonnet-4-5";
+const DEFAULT_BRIEF = APPROVED_MODEL_GPT4O;
+const DEFAULT_MEDIUM = APPROVED_MODEL_GPT4O;
+const DEFAULT_DEEP = APPROVED_MODEL_SONNET;
+const DEFAULT_CRISIS = APPROVED_MODEL_GPT4O;
+const DEFAULT_FALLBACK = APPROVED_MODEL_SONNET;
 
 function envModel(key: string): string | undefined {
   const v = Deno.env.get(key)?.trim();
-  return v || undefined;
+  if (!v) return undefined;
+  assertApprovedRuntimeModel(v, key);
+  return normalizeApprovedModelId(v);
 }
 
 /**
@@ -38,7 +46,8 @@ function envModel(key: string): string | undefined {
 export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
   const override = input.requestModel?.trim();
   if (override) {
-    return { model: override, source: "request" };
+    assertApprovedRuntimeModel(override, "requestModel");
+    return { model: normalizeApprovedModelId(override), source: "request" };
   }
 
   if (input.safetyCategory === "crisis") {

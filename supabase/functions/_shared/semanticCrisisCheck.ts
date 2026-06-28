@@ -8,8 +8,10 @@
  * Returns { isCrisis, failed }:
  *   failed: true  — API error; caller should fall back to regex for safety
  *   failed: false — answer is reliable
- * Cost: ~1–3 tokens output, haiku-class model — negligible per message.
+ * Cost: ~1–3 tokens output, approved utility model — negligible per message.
  */
+
+import { resolveApprovedUtilityModel } from "./approvedModels.ts";
 
 const CLASSIFIER_SYSTEM_PROMPT = `Ты классификатор безопасности. Прочти сообщение пользователя и ответь ТОЛЬКО словом "да" или "нет".
 
@@ -36,6 +38,10 @@ export async function semanticCrisisCheck(message: string): Promise<SemanticCris
 
   if (!apiKey) return { isCrisis: false, failed: true };
 
+  const classifierModel = resolveApprovedUtilityModel(
+    "STAYSEE_CRISIS_CLASSIFIER_MODEL",
+  ).primary;
+
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -46,7 +52,7 @@ export async function semanticCrisisCheck(message: string): Promise<SemanticCris
         "X-Title": "StaySee Safety Classifier",
       },
       body: JSON.stringify({
-        model: "anthropic/claude-3.5-haiku",
+        model: classifierModel,
         max_tokens: 3,
         temperature: 0,
         messages: [
