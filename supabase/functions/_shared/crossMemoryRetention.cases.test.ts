@@ -9,6 +9,11 @@ import {
 } from "./crossMemoryPolicy.ts";
 import { consolidateRowsRuleBased } from "./consolidateRuleBased.ts";
 import { buildCrossMemoryCandidates } from "./crossMemoryBuild.ts";
+import {
+  collapseEvolvedLifeContextRows,
+  evolveMemoryFacts,
+} from "./factEvolution.ts";
+import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import type { CrossMemoryBuildInput } from "./crossMemoryBuild.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -187,5 +192,65 @@ assert(
   "seeded communication"
 );
 console.log("PASS: seeded summary retains son + communication prefs");
+
+console.log("\n=== fact evolution sequence ===\n");
+
+function simEvolve(
+  rows: Array<{ id: string; content: string }>,
+  candidate: string
+): Array<{ id: string; content: string }> {
+  const decision = evolveMemoryFacts(
+    rows.map((r) => ({ ...r, memory_type: "life_context" })),
+    { memory_type: "life_context", content: candidate }
+  );
+  if (!decision || decision.action === "ignore") return rows;
+  const next = rows.filter(
+    (r) => !decision.replacedContents?.includes(r.content)
+  );
+  next.push({
+    id: `row-${next.length + 1}`,
+    content: decision.content.replace(/[.!?…]+$/u, ""),
+  });
+  return next;
+}
+
+let sonRows = [{ id: "s1", content: "есть сын" }];
+sonRows = simEvolve(sonRows, "сын, 18 лет");
+assert(sonRows.length === 1 && /18\s+лет/i.test(sonRows[0].content), "evolve son age");
+sonRows = simEvolve(sonRows, "сын живёт со мной");
+assert(
+  sonRows.length === 1 && /живёт со мной/i.test(sonRows[0].content),
+  "evolve son living"
+);
+sonRows = simEvolve(sonRows, "сын сейчас в армии");
+assert(
+  sonRows.length === 1 &&
+    /армии/i.test(sonRows[0].content) &&
+    !/живёт со мной/i.test(sonRows[0].content),
+  "evolve son army"
+);
+console.log("PASS: son fact evolution sequence");
+
+const injectRows = filterCrossMemoryRowsForInjection([
+  { memory_type: "life_context", content: "сын, 18 лет, живёт со мной." },
+  { memory_type: "life_context", content: "сын, 18 лет, сейчас в армии." },
+  { memory_type: "communication", content: "важна прямота." },
+]);
+assert(
+  injectRows.filter((r) => r.memory_type === "life_context").length === 1,
+  "injection dedupe son rows"
+);
+assert(
+  injectRows.some((r) => r.memory_type === "communication"),
+  "communication survives injection dedupe"
+);
+console.log("PASS: injection does not emit contradictory son rows");
+
+const collapsedOnly = collapseEvolvedLifeContextRows([
+  { memory_type: "life_context", content: "важна прямота." },
+  { memory_type: "communication", content: "не нужны пустые слова." },
+]);
+assert(collapsedOnly.length === 2, "communication rows not collapsed");
+console.log("PASS: communication style rows not replaced by evolution");
 
 console.log("\n=== crossMemoryRetention.cases.test.ts OK ===\n");

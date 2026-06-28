@@ -31,6 +31,10 @@ import {
   type CrossMemoryCandidate,
   type CrossMemoryType,
 } from "./crossMemoryBuild.ts";
+import {
+  evolveMemoryFacts,
+  type ExistingFactRow,
+} from "./factEvolution.ts";
 
 export { buildCrossMemoryCandidates } from "./crossMemoryBuild.ts";
 
@@ -247,7 +251,12 @@ export async function refreshUserLifeMemory(
     .order("created_at", { ascending: false })
     .limit(MAX_CROSS_MEMORY_ROWS);
 
-  const existing = (existingRows ?? []).map((r) => (r.content as string).trim());
+  const existingRowRecords = (existingRows ?? []).map((r) => ({
+    id: r.id as string,
+    content: (r.content as string).trim(),
+    memory_type: r.memory_type as string,
+  }));
+  const existing = existingRowRecords.map((r) => r.content);
   const known = new Set(existing.map((c) => c.toLowerCase()));
 
   const ruleBased = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
@@ -298,14 +307,72 @@ export async function refreshUserLifeMemory(
   }
 
   let rowCount = existing.length;
+  let trackedRows: ExistingFactRow[] = [...existingRowRecords];
+
   for (const c of candidates) {
     if (rowCount >= MAX_CROSS_MEMORY_ROWS) break;
+
+    const evolution = evolveMemoryFacts(trackedRows, c);
+    if (evolution?.action === "ignore") continue;
+
+    if (evolution && (evolution.action === "add" || evolution.action === "enrich" || evolution.action === "replace")) {
+      const content = normalizeCrossMemoryContent(evolution.content);
+      if (!content) continue;
+      if (crossMemoryContradictsCorrection(content, durableCorrections)) continue;
+
+      for (const id of evolution.deleteRowIds ?? []) {
+        const { error: delErr } = await supabase.from("user_memory").delete().eq("id", id);
+        if (!delErr) {
+          const removed = trackedRows.find((r) => r.id === id);
+          if (removed) {
+            known.delete(removed.content.toLowerCase());
+            rowCount = Math.max(0, rowCount - 1);
+          }
+          trackedRows = trackedRows.filter((r) => r.id !== id);
+          console.log("[userLifeMemory] fact evolution removed outdated row");
+        }
+      }
+
+      const key = content.toLowerCase();
+      if (known.has(key)) continue;
+      if (trackedRows.some((r) => similarMemory(r.content, content))) continue;
+
+      const { data: inserted, error } = await supabase
+        .from("user_memory")
+        .insert({
+          user_id: userId,
+          memory_type: evolution.memory_type,
+          content,
+        })
+        .select("id")
+        .single();
+
+      if (!error && inserted?.id) {
+        known.add(key);
+        rowCount++;
+        trackedRows.push({
+          id: inserted.id as string,
+          content,
+          memory_type: evolution.memory_type,
+        });
+        console.log(
+          `[userLifeMemory] fact evolution ${evolution.action} type=${evolution.memory_type} len=${content.length}`
+        );
+      } else if (error) {
+        console.error(
+          `[userLifeMemory] fact evolution insert failed type=${evolution.memory_type}:`,
+          error.message
+        );
+      }
+      continue;
+    }
+
     const content = normalizeCrossMemoryContent(c.content);
     if (!content) continue;
     if (crossMemoryContradictsCorrection(content, durableCorrections)) continue;
     const key = content.toLowerCase();
     if (known.has(key)) continue;
-    if (existing.some((e) => similarMemory(e, content))) continue;
+    if (trackedRows.some((r) => similarMemory(r.content, content))) continue;
     if (
       candidates.some(
         (other) =>

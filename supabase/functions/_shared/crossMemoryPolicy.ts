@@ -3,6 +3,8 @@
  * Shared gate for write-path and injection-path.
  */
 
+import { collapseEvolvedLifeContextRows } from "./factEvolution.ts";
+
 export type AllowedCrossMemoryType = "life_context" | "communication" | "preference";
 export type DeprecatedCrossMemoryType = "theme" | "emotion" | "insight";
 
@@ -78,6 +80,7 @@ const LIFE_CONTEXT_CATEGORY_RES = [
   uRx(String.raw`\bкрис\b`),
   uRx(String.raw`\b(?:живёт|живет|проживает)\s+(?:одн|с\s+|отдельно|раздельно)`),
   uRx(String.raw`\b(?:не\s+жив(?:ёт|ет)\s+вместе|раздельно\s+жив)`),
+  uRx(String.raw`\b(?:живём|живем)\s+вместе\b`),
   uRx(String.raw`\b(?:работает\s+над|разрабатывает|создаёт|создает)\b`),
   uRx(String.raw`\b(?:автор|основатель)\b`),
   uRx(String.raw`\b(?:staysee|стэйси|stay\s*see)\b`),
@@ -136,6 +139,7 @@ export function isBlockedCrossMemoryContent(content: string): boolean {
   const t = normalizeCrossMemoryContent(content);
   if (!t) return true;
   if (isBrokenCrossMemoryFragment(t)) return true;
+  if (/,?\s*сейчас\s+в\s+армии/iu.test(t)) return false;
   return BLOCKED_CROSS_MEMORY_RES.some((re) => re.test(t));
 }
 
@@ -217,14 +221,40 @@ export function normalizePeopleFieldToLifeContext(text: string): string | null {
     return tryContent(bare);
   }
 
+  const sonAge = bare.match(/^сыну\s+(\d{1,2})$/iu);
+  if (sonAge) {
+    return tryContent(`сын, ${sonAge[1]} лет`);
+  }
+
+  const petNamed = bare.match(/^собаку\s+зовут\s+([\p{L}][\p{L}-]{0,30})$/iu);
+  if (petNamed) {
+    return tryContent(`есть собака ${petNamed[1]}`);
+  }
+
+  if (/^(?:живём|живем)\s+вместе/i.test(bare)) {
+    return tryContent(/партн/i.test(bare) ? bare : "живём вместе с партнёром");
+  }
+
+  if (/^у\s+меня\s+есть\s+сын$/iu.test(bare)) {
+    return tryContent("есть сын");
+  }
+
+  if (/^у\s+меня\s+есть\s+собака$/iu.test(bare)) {
+    return tryContent("есть собака");
+  }
+
   const familyPet =
     /^(?:сын|дочь|дети|ребёнок|ребенок)(?:$|[\s,.!?])/iu.test(`${bare} `) ||
     /^(?:собака|кот|кошка|питомец)(?:$|[\s,.!?])/iu.test(`${bare} `) ||
     /\bкрис\b/i.test(bare);
 
   if (familyPet) {
-    const body = bare.replace(/^есть\s+/i, "");
-    return tryContent(`У пользователя есть ${body}`);
+    const body = bare.replace(/^есть\s+/i, "").trim();
+    const singleToken = /^[\p{L}]+$/u.test(body);
+    if (singleToken) {
+      return tryContent(`У пользователя есть ${body}`);
+    }
+    return tryContent(body);
   }
 
   return tryContent(bare);
@@ -270,12 +300,13 @@ export interface CrossMemoryRowLike {
 export function filterCrossMemoryRowsForInjection<T extends CrossMemoryRowLike>(
   rows: T[]
 ): T[] {
-  return rows.filter((row) => {
+  const filtered = rows.filter((row) => {
     if (!isAllowedCrossMemoryType(row.memory_type, "inject")) return false;
     const content = normalizeCrossMemoryContent(row.content);
     if (!content) return false;
     return isPromotableToCrossMemory(row.memory_type, content);
   });
+  return collapseEvolvedLifeContextRows(filtered);
 }
 
 export type CrossMemoryAuditVerdict = "keep" | "hide" | "delete";
