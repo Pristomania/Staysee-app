@@ -27,6 +27,10 @@ import {
   memoryDiagBackgroundGate,
 } from "../_shared/memoryDiag.ts";
 import {
+  isSummaryDiagConversation,
+  summaryDiagStart,
+} from "../_shared/summaryDiag.ts";
+import {
   detectMemoryCorrection,
   isEphemeralDenialOnly,
 } from "../_shared/memoryCorrectionDetect.ts";
@@ -544,11 +548,26 @@ Deno.serve(async (req: Request) => {
 
         const convTitle = packet.conversationMeta?.title ?? null;
         const memoryDiagEnabled = isMemoryDiagConversation(convTitle);
-        const memoryDiagCtx = memoryDiagEnabled
-          ? { enabled: true, conversationId }
+        const summaryDiagEnabled = isSummaryDiagConversation(convTitle);
+        const memoryDiagCtx = memoryDiagEnabled || summaryDiagEnabled
+          ? {
+              enabled: memoryDiagEnabled,
+              conversationId,
+              summaryDiag: summaryDiagEnabled
+                ? {
+                    enabled: true,
+                    clientType: "service" as const,
+                    path: "eager" as const,
+                    title: convTitle,
+                  }
+                : undefined,
+            }
           : undefined;
 
-        if (memoryDiagEnabled && userId) {
+        const summaryUpdatedAt =
+          packet.conversationMeta?.summary_updated_at ?? null;
+
+        if ((memoryDiagEnabled || summaryDiagEnabled) && userId) {
           const svcDiag = makeServiceClient();
           const { count: dbMsgCount } = await svcDiag
             .from("messages")
@@ -561,18 +580,32 @@ Deno.serve(async (req: Request) => {
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-          memoryDiagStart({
-            enabled: true,
-            userId,
-            conversationId,
-            requestMessageCount: 1,
-            dbMessageCount: dbMsgCount ?? 0,
-            lastMessageCreatedAt: (lastMsg?.created_at as string) ?? null,
-          });
+          const eagerSummary = getConversationSummary(packet.conversationMeta);
+          if (memoryDiagEnabled) {
+            memoryDiagStart({
+              enabled: true,
+              userId,
+              conversationId,
+              requestMessageCount: 1,
+              dbMessageCount: dbMsgCount ?? 0,
+              lastMessageCreatedAt: (lastMsg?.created_at as string) ?? null,
+            });
+          }
+          if (summaryDiagEnabled) {
+            summaryDiagStart({
+              enabled: true,
+              userId,
+              conversationId,
+              title: convTitle,
+              path: "eager",
+              clientType: "service",
+              dbMessageCount: dbMsgCount ?? 0,
+              currentSummaryBytes: eagerSummary?.length ?? 0,
+              currentSummaryUpdatedAt: summaryUpdatedAt,
+            });
+          }
         }
 
-        const summaryUpdatedAt =
-          packet.conversationMeta?.summary_updated_at ?? null;
         const preTranscript = await fetchTranscriptForSummary(
           userSupabase,
           conversationId,
@@ -1459,8 +1492,27 @@ Deno.serve(async (req: Request) => {
                     },
                     diag: isMemoryDiagConversation(
                       packetForSummary.conversationMeta?.title ?? null
+                    ) || isSummaryDiagConversation(
+                      packetForSummary.conversationMeta?.title ?? null
                     )
-                      ? { enabled: true, conversationId }
+                      ? {
+                          enabled: isMemoryDiagConversation(
+                            packetForSummary.conversationMeta?.title ?? null
+                          ),
+                          conversationId,
+                          summaryDiag: isSummaryDiagConversation(
+                            packetForSummary.conversationMeta?.title ?? null
+                          )
+                            ? {
+                                enabled: true,
+                                clientType: "service",
+                                path: "background",
+                                title:
+                                  packetForSummary.conversationMeta?.title ??
+                                  null,
+                              }
+                            : undefined,
+                        }
                       : undefined,
                   });
                 } catch (sumErr) {

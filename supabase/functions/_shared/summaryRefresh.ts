@@ -6,7 +6,6 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   buildConversationSummary,
   finalizeMemoryUpdate,
-  getConversationSummary,
   structuredMemoryHasContent,
   updateConversationSummary,
   type StructuredMemory,
@@ -26,10 +25,17 @@ import {
   memoryDiagSummaryBuild,
   memoryDiagSummarySave,
 } from "./memoryDiag.ts";
+import {
+  summaryDiagBuild,
+  summaryDiagMemoryRefresh,
+  summaryDiagSaveResult,
+  type SummaryDiagContext,
+} from "./summaryDiag.ts";
 
 export interface MemoryDiagContext {
   enabled: boolean;
   conversationId: string;
+  summaryDiag?: SummaryDiagContext;
 }
 
 export interface SummaryRefreshRunInput {
@@ -147,26 +153,28 @@ export async function runConversationSummaryRefresh(
       resultBytes: JSON.stringify(memory).length,
       memory,
     });
+    summaryDiagBuild({
+      enabled: !!input.diag?.summaryDiag?.enabled,
+      attempted: true,
+      sourceMessageCount: input.transcript.length,
+      resultBytes: JSON.stringify(memory).length,
+      peopleCount: memory.people.length,
+      importantEventsCount: memory.important_events.length,
+      openLoopsCount: memory.open_loops.length,
+    });
 
     const saveResult = await updateConversationSummary({
       supabase: input.supabase,
       conversationId: input.conversationId,
       memory,
       allowEmptyMemory: durableCorrections.length > 0,
+      diag: input.diag?.summaryDiag
+        ? {
+            enabled: true,
+            clientType: input.diag.summaryDiag.clientType,
+          }
+        : undefined,
     });
-
-    let postSummaryBytes = 0;
-    let postSummaryUpdatedAt: string | null = null;
-    if (input.diag?.enabled) {
-      const { data: postRow } = await input.supabase
-        .from("conversations")
-        .select("conversation_summary, summary, summary_updated_at")
-        .eq("id", input.conversationId)
-        .maybeSingle();
-      const postSummary = getConversationSummary(postRow ?? null);
-      postSummaryBytes = postSummary?.length ?? 0;
-      postSummaryUpdatedAt = (postRow?.summary_updated_at as string) ?? null;
-    }
 
     memoryDiagSummarySave({
       enabled: !!input.diag?.enabled,
@@ -174,8 +182,17 @@ export async function runConversationSummaryRefresh(
       success: saveResult.ok,
       errorCode: saveResult.errorCode ?? null,
       errorMessage: saveResult.errorMessage ?? null,
-      postSaveSummaryBytes: postSummaryBytes,
-      postSaveSummaryUpdatedAt: postSummaryUpdatedAt,
+      postSaveSummaryBytes: saveResult.savedSummaryBytes ?? 0,
+      postSaveSummaryUpdatedAt: null,
+    });
+    summaryDiagSaveResult({
+      enabled: !!input.diag?.summaryDiag?.enabled,
+      success: saveResult.ok,
+      usedTimestampFallback: saveResult.usedTimestampFallback,
+      errorCode: saveResult.errorCode ?? null,
+      errorMessage: saveResult.errorMessage ?? null,
+      postSaveSummaryBytes: saveResult.savedSummaryBytes ?? 0,
+      postSaveSummaryUpdatedAt: null,
     });
 
     if (input.userId) {
@@ -189,6 +206,21 @@ export async function runConversationSummaryRefresh(
         durableCorrections,
         input.diag
       );
+      if (input.diag?.summaryDiag?.enabled) {
+        const { data: memRows } = await input.supabase
+          .from("user_memory")
+          .select("content, memory_type")
+          .eq("user_id", input.userId)
+          .order("created_at", { ascending: false })
+          .limit(8);
+        summaryDiagMemoryRefresh({
+          enabled: true,
+          attempted: true,
+          lifeContextRows: (memRows ?? [])
+            .filter((r) => r.memory_type === "life_context")
+            .map((r) => String(r.content)),
+        });
+      }
     }
 
     console.log(

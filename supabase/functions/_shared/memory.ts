@@ -977,9 +977,29 @@ export function finalizeMemoryUpdate(
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
+/** PostgREST/Supabase error when prod schema lacks summary_updated_at. */
+export function isSummaryTimestampColumnError(message: string | undefined): boolean {
+  if (!message) return false;
+  return /summary_updated_at/i.test(message);
+}
+
+export const SAFE_CONVERSATION_SUMMARY_SELECT =
+  "conversation_summary, summary";
+
 export async function updateConversationSummary(
-  input: SummaryUpdateInput
-): Promise<{ ok: boolean; errorCode?: string; errorMessage?: string }> {
+  input: SummaryUpdateInput & {
+    diag?: {
+      enabled: boolean;
+      clientType?: "service" | "user";
+    };
+  }
+): Promise<{
+  ok: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+  usedTimestampFallback?: boolean;
+  savedSummaryBytes?: number;
+}> {
   let serialized: string;
   let tone = input.emotionalTone;
 
@@ -1011,12 +1031,25 @@ export async function updateConversationSummary(
     summary_updated_at: new Date().toISOString(),
   };
 
+  if (input.diag?.enabled) {
+    const { summaryDiagSaveAttempt } = await import("./summaryDiag.ts");
+    summaryDiagSaveAttempt({
+      enabled: true,
+      clientType: input.diag.clientType ?? "service",
+      updatePayloadKeys: Object.keys(withTimestamp),
+      whereId: input.conversationId,
+      summaryBytesToSave: serialized.length,
+    });
+  }
+
+  let usedTimestampFallback = false;
   let { error } = await input.supabase
     .from("conversations")
     .update(withTimestamp)
     .eq("id", input.conversationId);
 
-  if (error?.message?.includes("summary_updated_at")) {
+  if (isSummaryTimestampColumnError(error?.message)) {
+    usedTimestampFallback = true;
     ({ error } = await input.supabase
       .from("conversations")
       .update({ conversation_summary: serialized })
@@ -1025,9 +1058,52 @@ export async function updateConversationSummary(
 
   if (error) {
     console.error("[memory] updateConversationSummary:", error.message);
-    return { ok: false, errorCode: error.code, errorMessage: error.message };
+    if (input.diag?.enabled) {
+      const { summaryDiagSaveResult } = await import("./summaryDiag.ts");
+      summaryDiagSaveResult({
+        enabled: true,
+        success: false,
+        usedTimestampFallback,
+        errorCode: error.code,
+        errorMessage: error.message,
+      });
+    }
+    return {
+      ok: false,
+      errorCode: error.code,
+      errorMessage: error.message,
+      usedTimestampFallback,
+    };
   }
-  return { ok: true };
+
+  let postSummaryBytes = 0;
+  let postSummaryUpdatedAt: string | null = null;
+  const { data: postRow, error: readErr } = await input.supabase
+    .from("conversations")
+    .select(SAFE_CONVERSATION_SUMMARY_SELECT)
+    .eq("id", input.conversationId)
+    .maybeSingle();
+  if (!readErr && postRow) {
+    const postSummary = getConversationSummary(postRow);
+    postSummaryBytes = postSummary?.length ?? 0;
+  }
+
+  if (input.diag?.enabled) {
+    const { summaryDiagSaveResult } = await import("./summaryDiag.ts");
+    summaryDiagSaveResult({
+      enabled: true,
+      success: postSummaryBytes > 0,
+      usedTimestampFallback,
+      postSaveSummaryBytes: postSummaryBytes,
+      postSaveSummaryUpdatedAt,
+    });
+  }
+
+  return {
+    ok: postSummaryBytes > 0 || serialized.length === 0,
+    usedTimestampFallback,
+    savedSummaryBytes: postSummaryBytes || serialized.length,
+  };
 }
 
 /** @deprecated use refreshUserLifeMemory from userLifeMemory.ts */
