@@ -1,21 +1,24 @@
 /**
  * Read-only schema drift audit: staging vs production.
  *
- * Requires:
+ * DATABASE_URL mode (default):
  *   STAGING_DATABASE_URL
  *   PRODUCTION_DATABASE_URL
- *
- * Run:
  *   npm run audit:schema
+ *
+ * Supabase CLI linked mode:
+ *   npm run audit:schema:cli
+ *   or AUDIT_SCHEMA_SUPABASE_MODE=cli
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import {
   assertReadOnlySql,
+  buildAuditSafetyNotes,
   buildExecutiveSummary,
   buildKnownMemoryChecks,
   compareColumns,
@@ -25,7 +28,10 @@ import {
   compareTables,
   DEFAULT_NOT_PERFORMED,
   DEFAULT_RECOMMENDED_ACTIONS,
+  maskSecrets,
   renderMarkdownReport,
+  resolveAuditSchemaMode,
+  type AuditSchemaMode,
   type ColumnMeta,
   type IndexMeta,
   type PolicyMeta,
@@ -33,8 +39,9 @@ import {
   type SchemaDriftReport,
 } from "./lib/schema-drift.ts";
 
-const STAGING_PROJECT_REF = "hdmoetcvlszrdukqpiia";
-const PRODUCTION_PROJECT_REF = "jnxrildlwvtxhtiwucbt";
+const DEFAULT_STAGING_PROJECT_REF = "hdmoetcvlszrdukqpiia";
+const DEFAULT_PRODUCTION_PROJECT_REF = "jnxrildlwvtxhtiwucbt";
+const LINKED_PROJECT_REF_FILE = resolve("supabase/.temp/project-ref");
 
 const SQL = {
   tables: `
@@ -89,6 +96,14 @@ const SQL = {
   `,
 } as const;
 
+function resolveProjectRefs(): { stagingRef: string; productionRef: string } {
+  return {
+    stagingRef: process.env.STAGING_PROJECT_REF?.trim() || DEFAULT_STAGING_PROJECT_REF,
+    productionRef:
+      process.env.PRODUCTION_PROJECT_REF?.trim() || DEFAULT_PRODUCTION_PROJECT_REF,
+  };
+}
+
 function requireDatabaseUrls(): { stagingUrl: string; productionUrl: string } {
   const stagingUrl = process.env.STAGING_DATABASE_URL?.trim();
   const productionUrl = process.env.PRODUCTION_DATABASE_URL?.trim();
@@ -100,10 +115,51 @@ function requireDatabaseUrls(): { stagingUrl: string; productionUrl: string } {
     for (const name of missing) console.error(`  - ${name}`);
     console.error("");
     console.error("Set Postgres connection URLs for staging and production.");
+    console.error("Or run via Supabase CLI linked mode: npm run audit:schema:cli");
     console.error("This audit is read-only and does not use Supabase service keys in code.");
     process.exit(1);
   }
   return { stagingUrl: stagingUrl!, productionUrl: productionUrl! };
+}
+
+function readLinkedProjectRef(): string | null {
+  try {
+    const content = readFileSync(LINKED_PROJECT_REF_FILE, "utf8").trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
+
+function execSupabase(args: string[]): string {
+  try {
+    return execFileSync("npx", ["supabase", ...args], {
+      encoding: "utf8",
+      maxBuffer: 50 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
+    });
+  } catch (error) {
+    const err = error as { stderr?: string | Buffer; stdout?: string | Buffer; message?: string };
+    const stderr =
+      typeof err.stderr === "string"
+        ? err.stderr
+        : err.stderr instanceof Buffer
+          ? err.stderr.toString("utf8")
+          : "";
+    const stdout =
+      typeof err.stdout === "string"
+        ? err.stdout
+        : err.stdout instanceof Buffer
+          ? err.stdout.toString("utf8")
+          : "";
+    const parts = [err.message, stderr, stdout].filter(Boolean).join("\n");
+    throw new Error(`[audit:schema] Supabase CLI failed: ${maskSecrets(parts)}`);
+  }
+}
+
+function linkProjectRef(projectRef: string): void {
+  execSupabase(["link", "--project-ref", projectRef, "--yes"]);
 }
 
 function parseSupabaseQueryOutput(stdout: string): Record<string, unknown>[] {
@@ -111,38 +167,52 @@ function parseSupabaseQueryOutput(stdout: string): Record<string, unknown>[] {
   const end = stdout.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
-      `[audit:schema] Could not parse Supabase CLI output:\n${stdout.slice(0, 500)}`
+      `[audit:schema] Could not parse Supabase CLI output:\n${maskSecrets(stdout.slice(0, 500))}`
     );
   }
   const parsed = JSON.parse(stdout.slice(start, end + 1)) as { rows?: Record<string, unknown>[] };
   return parsed.rows ?? [];
 }
 
-function runReadOnlyQuery(dbUrl: string, sql: string): Record<string, unknown>[] {
-  assertReadOnlySql(sql);
+function writeTmpSqlFile(sql: string): string {
   const tmpPath = join(tmpdir(), `staysee-schema-audit-${randomUUID()}.sql`);
   writeFileSync(tmpPath, `${sql.trim()}\n`, "utf8");
+  return tmpPath;
+}
+
+function removeTmpSqlFile(tmpPath: string): void {
   try {
-    const command = process.platform === "win32" ? "npx.cmd" : "npx";
-    const stdout = execFileSync(
-      command,
-      ["supabase", "db", "query", "--db-url", dbUrl, "-f", tmpPath],
-      {
-        encoding: "utf8",
-        maxBuffer: 50 * 1024 * 1024,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
-    );
+    unlinkSync(tmpPath);
+  } catch {
+    /* ignore */
+  }
+}
+
+function runReadOnlyQueryDbUrl(dbUrl: string, sql: string): Record<string, unknown>[] {
+  assertReadOnlySql(sql);
+  const tmpPath = writeTmpSqlFile(sql);
+  try {
+    const stdout = execSupabase(["db", "query", "--db-url", dbUrl, "-f", tmpPath]);
     return parseSupabaseQueryOutput(stdout);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[audit:schema] Query failed: ${message}`);
+    throw new Error(maskSecrets(message));
   } finally {
-    try {
-      unlinkSync(tmpPath);
-    } catch {
-      /* ignore */
-    }
+    removeTmpSqlFile(tmpPath);
+  }
+}
+
+function runReadOnlyQueryLinked(sql: string): Record<string, unknown>[] {
+  assertReadOnlySql(sql);
+  const tmpPath = writeTmpSqlFile(sql);
+  try {
+    const stdout = execSupabase(["db", "query", "--linked", "-f", tmpPath]);
+    return parseSupabaseQueryOutput(stdout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(maskSecrets(message));
+  } finally {
+    removeTmpSqlFile(tmpPath);
   }
 }
 
@@ -191,13 +261,15 @@ function mapPolicies(rows: Record<string, unknown>[]): PolicyMeta[] {
   }));
 }
 
-async function fetchEnvironmentSchema(dbUrl: string, label: string) {
+type QueryRunner = (sql: string) => Record<string, unknown>[];
+
+function fetchEnvironmentSchema(runQuery: QueryRunner, label: string) {
   console.log(`[audit:schema] Reading ${label} schema (read-only)...`);
-  const tableRows = runReadOnlyQuery(dbUrl, SQL.tables);
-  const columnRows = runReadOnlyQuery(dbUrl, SQL.columns);
-  const indexRows = runReadOnlyQuery(dbUrl, SQL.indexes);
-  const rlsRows = runReadOnlyQuery(dbUrl, SQL.rls);
-  const policyRows = runReadOnlyQuery(dbUrl, SQL.policies);
+  const tableRows = runQuery(SQL.tables);
+  const columnRows = runQuery(SQL.columns);
+  const indexRows = runQuery(SQL.indexes);
+  const rlsRows = runQuery(SQL.rls);
+  const policyRows = runQuery(SQL.policies);
 
   return {
     tables: tableRows.map((r) => asString(r.table_name)).filter(Boolean),
@@ -206,6 +278,12 @@ async function fetchEnvironmentSchema(dbUrl: string, label: string) {
     rls: mapRls(rlsRows),
     policies: mapPolicies(policyRows),
   };
+}
+
+function fetchEnvironmentSchemaCli(projectRef: string, label: string) {
+  console.log(`[audit:schema] Linking ${label} (${projectRef})...`);
+  linkProjectRef(projectRef);
+  return fetchEnvironmentSchema(runReadOnlyQueryLinked, label);
 }
 
 function printConsoleSummary(report: SchemaDriftReport): void {
@@ -231,35 +309,70 @@ function printConsoleSummary(report: SchemaDriftReport): void {
 }
 
 async function main(): Promise<void> {
-  const { stagingUrl, productionUrl } = requireDatabaseUrls();
+  const mode: AuditSchemaMode = resolveAuditSchemaMode();
+  const { stagingRef, productionRef } = resolveProjectRefs();
+  let restoredLinkRef: string | null = null;
+  let originalLinkRef: string | null = null;
+
+  if (mode === "cli") {
+    originalLinkRef = readLinkedProjectRef();
+    console.log(
+      `[audit:schema] CLI linked mode (staging=${stagingRef}, production=${productionRef})`
+    );
+    if (originalLinkRef) {
+      console.log(`[audit:schema] Saved original linked project ref for restore.`);
+    } else {
+      console.log("[audit:schema] No original linked project ref found; restore will be skipped.");
+    }
+  }
+
+  let staging;
+  let production;
+
+  try {
+    if (mode === "cli") {
+      staging = fetchEnvironmentSchemaCli(stagingRef, "staging");
+      production = fetchEnvironmentSchemaCli(productionRef, "production");
+    } else {
+      const { stagingUrl, productionUrl } = requireDatabaseUrls();
+      staging = fetchEnvironmentSchema((sql) => runReadOnlyQueryDbUrl(stagingUrl, sql), "staging");
+      production = fetchEnvironmentSchema(
+        (sql) => runReadOnlyQueryDbUrl(productionUrl, sql),
+        "production"
+      );
+    }
+  } finally {
+    if (mode === "cli") {
+      if (originalLinkRef) {
+        console.log(`[audit:schema] Restoring original linked project ref...`);
+        linkProjectRef(originalLinkRef);
+        restoredLinkRef = originalLinkRef;
+      } else {
+        console.log("[audit:schema] Local link restore skipped because no original link.");
+      }
+    }
+  }
 
   const generatedAt = new Date().toISOString().slice(0, 10);
-  const staging = await fetchEnvironmentSchema(stagingUrl, "staging");
-  const production = await fetchEnvironmentSchema(productionUrl, "production");
-
-  const tables = compareTables(staging.tables, production.tables);
-  const columns = compareColumns(staging.columns, production.columns);
-  const indexes = compareIndexes(staging.indexes, production.indexes);
-  const rls = compareRls(staging.rls, production.rls);
-  const policies = comparePolicies(staging.policies, production.policies);
+  const tables = compareTables(staging!.tables, production!.tables);
+  const columns = compareColumns(staging!.columns, production!.columns);
+  const indexes = compareIndexes(staging!.indexes, production!.indexes);
+  const rls = compareRls(staging!.rls, production!.rls);
+  const policies = comparePolicies(staging!.policies, production!.policies);
   const known_memory_checks = buildKnownMemoryChecks({
-    stagingColumns: staging.columns,
-    productionColumns: production.columns,
-    stagingIndexes: staging.indexes,
-    productionIndexes: production.indexes,
+    stagingColumns: staging!.columns,
+    productionColumns: production!.columns,
+    stagingIndexes: staging!.indexes,
+    productionIndexes: production!.indexes,
   });
 
   const baseReport: Omit<SchemaDriftReport, "executive_summary"> = {
     generated_at: generatedAt,
     environments: {
-      staging: { label: "staging", project_ref: STAGING_PROJECT_REF },
-      production: { label: "production", project_ref: PRODUCTION_PROJECT_REF },
+      staging: { label: "staging", project_ref: stagingRef },
+      production: { label: "production", project_ref: productionRef },
     },
-    safety_notes: [
-      "Read-only audit using SELECT queries against information_schema and pg_catalog views.",
-      "All SQL strings are checked for forbidden verbs before execution.",
-      "No migrations, DML, DDL, deploy, backfill, or consolidate were run.",
-    ],
+    safety_notes: buildAuditSafetyNotes(mode, restoredLinkRef),
     tables,
     columns,
     indexes,
@@ -293,6 +406,6 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`[audit:schema] ${message}`);
+  console.error(`[audit:schema] ${maskSecrets(message)}`);
   process.exit(1);
 });

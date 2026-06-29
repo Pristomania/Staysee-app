@@ -4,11 +4,14 @@
 
 import {
   assertReadOnlySql,
+  buildAuditSafetyNotes,
   buildKnownMemoryChecks,
   compareColumns,
   compareIndexes,
   compareTables,
+  maskSecrets,
   renderMarkdownReport,
+  resolveAuditSchemaMode,
   type ColumnMeta,
   type IndexMeta,
   type SchemaDriftReport,
@@ -128,5 +131,49 @@ const report: SchemaDriftReport = {
 const md = renderMarkdownReport(report);
 assert(md.includes("# Schema Drift Audit"), "markdown title");
 assert(md.includes("conversations.emotional_tone"), "markdown memory section");
+
+assert(
+  resolveAuditSchemaMode(["node", "script"], {}) === "database-url",
+  "default mode is database-url"
+);
+assert(
+  resolveAuditSchemaMode(["node", "script", "--mode=cli"], {}) === "cli",
+  "arg --mode=cli"
+);
+assert(
+  resolveAuditSchemaMode(["node", "script"], { AUDIT_SCHEMA_SUPABASE_MODE: "cli" }) === "cli",
+  "env AUDIT_SCHEMA_SUPABASE_MODE=cli"
+);
+
+const masked = maskSecrets(
+  "failed postgres://user:secret@host:5432/db password=abc access_token=xyz"
+);
+assert(masked.includes("postgresql://***"), "maskSecrets postgres URL");
+assert(!masked.includes("secret@host"), "maskSecrets hides password in URL");
+assert(masked.includes("password=***"), "maskSecrets password=");
+
+const cliNotes = buildAuditSafetyNotes("cli", "jnxrildlwvtxhtiwucbt");
+assert(
+  cliNotes.some((n) => n.includes("Management API tunnel")),
+  "CLI safety notes include tunnel"
+);
+assert(cliNotes.some((n) => n.includes("No DATABASE_URL was used")), "CLI safety notes no DATABASE_URL");
+assert(
+  cliNotes.some((n) => n.includes("Local link restored to jnxrildlwvtxhtiwucbt")),
+  "CLI safety notes restored ref"
+);
+
+const cliNotesSkipped = buildAuditSafetyNotes("cli", null);
+assert(
+  cliNotesSkipped.some((n) => n.includes("restore skipped because no original link")),
+  "CLI safety notes skipped restore"
+);
+
+const cliReport: SchemaDriftReport = {
+  ...report,
+  safety_notes: cliNotes,
+};
+const cliMd = renderMarkdownReport(cliReport);
+assert(cliMd.includes("No DATABASE_URL was used"), "markdown CLI safety notes");
 
 console.log("=== schema-drift.cases.test.ts OK ===\n");

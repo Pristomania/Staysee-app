@@ -170,6 +170,59 @@ export function assertReadOnlySql(sql: string): void {
   }
 }
 
+export type AuditSchemaMode = "database-url" | "cli";
+
+export function resolveAuditSchemaMode(
+  argv: string[] = process.argv,
+  env: NodeJS.ProcessEnv = process.env
+): AuditSchemaMode {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] ?? "";
+    if (arg === "--mode=cli" || arg.startsWith("--mode=cli")) return "cli";
+    if (arg === "--mode=database-url" || arg.startsWith("--mode=database-url")) {
+      return "database-url";
+    }
+    if (arg === "--mode" && argv[i + 1] === "cli") return "cli";
+    if (arg === "--mode" && argv[i + 1] === "database-url") return "database-url";
+  }
+  if (env.AUDIT_SCHEMA_SUPABASE_MODE?.trim().toLowerCase() === "cli") return "cli";
+  return "database-url";
+}
+
+export function maskSecrets(text: string): string {
+  return text
+    .replace(/postgres(ql)?:\/\/[^\s'"]+/gi, "postgresql://***")
+    .replace(/password[=:\s][^\s&'"]+/gi, "password=***")
+    .replace(/access_token[=:\s][^\s'"]+/gi, "access_token=***")
+    .replace(/refresh_token[=:\s][^\s'"]+/gi, "refresh_token=***")
+    .replace(/service_role[=:\s][^\s'"]+/gi, "service_role=***")
+    .replace(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "jwt:***");
+}
+
+export function buildAuditSafetyNotes(
+  mode: AuditSchemaMode,
+  restoredLinkRef: string | null
+): string[] {
+  if (mode === "cli") {
+    const restoreNote = restoredLinkRef
+      ? `Local link restored to ${restoredLinkRef}`
+      : "Local link restore skipped because no original link";
+    return [
+      "Read-only audit using SELECT queries against information_schema and pg_catalog views.",
+      "All SQL strings are checked for forbidden verbs before execution.",
+      "Supabase CLI linked mode via authenticated Management API tunnel",
+      "No DATABASE_URL was used",
+      restoreNote,
+      "No migrations/deploy/backfill/consolidate were run",
+    ];
+  }
+  return [
+    "Read-only audit using SELECT queries against information_schema and pg_catalog views.",
+    "All SQL strings are checked for forbidden verbs before execution.",
+    "No migrations, DML, DDL, deploy, backfill, or consolidate were run.",
+  ];
+}
+
 function columnKey(col: Pick<ColumnMeta, "table_name" | "column_name">): string {
   return `${col.table_name}.${col.column_name}`;
 }

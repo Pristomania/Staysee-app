@@ -15,7 +15,8 @@
     "setup:memory-prod": "node scripts/setup-memory-prod.mjs",
     "usage:report": "node scripts/usage-report.mjs",
     "usage:breakdown": "node scripts/usage-breakdown-7d.mjs",
-    "audit:schema": "npx tsx scripts/audit-schema-drift.ts"
+    "audit:schema": "npx tsx scripts/audit-schema-drift.ts",
+    "audit:schema:cli": "npx tsx scripts/audit-schema-drift.ts --mode=cli"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
