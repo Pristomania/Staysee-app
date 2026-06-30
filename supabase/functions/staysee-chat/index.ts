@@ -85,6 +85,7 @@ import {
   computeResponseBudget,
   continuationTokenBudget,
   OUTPUT_TOKEN_CEILING_GUIDANCE,
+  analyzeEmotionalTrajectory,
 } from "../_shared/responseBudget.ts";
 import {
   buildUncertaintyTurnGuidance,
@@ -98,6 +99,10 @@ import {
   buildOpenFigureTurnGuidance,
   openFigureGuidanceInjected,
 } from "../_shared/openFigureTurnGuidance.ts";
+import {
+  buildPauseInArcTurnGuidance,
+  pauseInArcGuidanceInjected,
+} from "../_shared/pauseInArcTurnGuidance.ts";
 import { detectUserGrammaticalGender } from "../_shared/userGrammaticalGender.ts";
 import {
   buildUserGenderTurnGuidance,
@@ -931,6 +936,22 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, openFigureGuidance].join("\n\n");
     }
 
+    const pauseInArcGuidanceInput = {
+      message,
+      depthReason: responseBudget.depthReason,
+      openFigure: responseBudget.openFigure,
+      emotionalMomentum: responseBudget.emotionalMomentum,
+      shortAfterEmotional: analyzeEmotionalTrajectory(message, modelMessages)
+        .shortAfterEmotional,
+      recentHistory: modelMessages,
+      safetyCategory: safety.category,
+    };
+    const pauseInArcGuidance = buildPauseInArcTurnGuidance(pauseInArcGuidanceInput);
+    const pauseInArcGuidanceOn = pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
+    if (pauseInArcGuidance) {
+      systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
+    }
+
     const uncertaintyGuidance = buildUncertaintyTurnGuidance({
       depthReason: responseBudget.depthReason,
       message,
@@ -1202,6 +1223,7 @@ Deno.serve(async (req: Request) => {
         open_figure_trigger: responseBudget.openFigure.trigger,
         sessionProcessGuidanceInjected: sessionProcessGuidanceOn,
         openFigureGuidanceInjected: openFigureGuidanceOn,
+        pauseInArcGuidanceInjected: pauseInArcGuidanceOn,
         uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
         explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
         process_contact: processState.contact,
