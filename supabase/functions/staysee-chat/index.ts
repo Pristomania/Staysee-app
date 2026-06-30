@@ -81,6 +81,15 @@ import {
   type ProviderConfig,
 } from "../_shared/cost.ts";
 import { semanticCrisisCheck } from "../_shared/semanticCrisisCheck.ts";
+import { detectExplicitSafetyHardStop } from "../_shared/explicitSafetyHardStop.ts";
+import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
+import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
+import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
+import {
+  getSemanticCrisisMode,
+  isProtocolSignalsEnabled,
+} from "../_shared/protocolSignalMode.ts";
+import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
 import {
   computeResponseBudget,
   continuationTokenBudget,
@@ -818,17 +827,94 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── L5b: Semantic crisis check — primary crisis gate ─────────────────────
-    // Runs for all categories except prompt_attack and boundary_pressure,
-    // which have their own contextual handling and don't short-circuit to a crisis card.
-    // If semantic API fails → fall back to regex as silent safety net.
+    // ── PR7a: Explicit high-confidence hard-stops (phrase/construction only) ──
 
-    if (safety.category !== "prompt_attack" && safety.category !== "boundary_pressure") {
+    const explicitCrisisStop = detectExplicitSafetyHardStop(message);
+    if (explicitCrisisStop.shouldStop && explicitCrisisStop.response) {
+      void logProtocolEvent(makeServiceClient(), {
+        userId: userId ?? null,
+        conversationId: conversationId ?? null,
+        requestId: requestId ?? null,
+        eventType: "crisis_hard_stop",
+        severity: "tier_3",
+        protocol: explicitCrisisStop.protocol ?? "regex_crisis_explicit",
+        actionTaken: "hard_stop",
+        confidence: "high",
+        matchedPattern: explicitCrisisStop.matched_pattern ?? null,
+        promptVersion: getPromptAuditVersion(),
+        reason: "explicit_crisis_construction",
+      });
+      console.log(
+        `[staysee-chat] explicit crisis hard-stop: ${explicitCrisisStop.matched_pattern}`
+      );
+      return new Response(
+        JSON.stringify({
+          content: explicitCrisisStop.response,
+          provider: providerKey,
+          model: reqModel ?? config.model,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
+    if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
+      void logProtocolEvent(makeServiceClient(), {
+        userId: userId ?? null,
+        conversationId: conversationId ?? null,
+        requestId: requestId ?? null,
+        eventType: "prompt_attack_hard_stop",
+        severity: "tier_3",
+        protocol: explicitPromptAttackStop.protocol ?? "regex_prompt_attack_explicit",
+        actionTaken: "hard_stop",
+        confidence: "high",
+        matchedPattern: explicitPromptAttackStop.matched_pattern ?? null,
+        promptVersion: getPromptAuditVersion(),
+        reason: "explicit_prompt_attack_construction",
+      });
+      console.log(
+        `[staysee-chat] explicit prompt-attack hard-stop: ${explicitPromptAttackStop.matched_pattern}`
+      );
+      return new Response(
+        JSON.stringify({
+          content: explicitPromptAttackStop.response,
+          provider: providerKey,
+          model: reqModel ?? config.model,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── L5b: Semantic crisis — legacy opt-in only (default off, PR7a) ─────────
+    // STAYSEE_SEMANTIC_CRISIS_MODE=hard_stop to restore legacy context-blind gate.
+
+    if (
+      getSemanticCrisisMode() === "hard_stop" &&
+      safety.category !== "prompt_attack" &&
+      safety.category !== "boundary_pressure"
+    ) {
       const semanticResult = await semanticCrisisCheck(message);
       if (semanticResult.isCrisis) {
-        console.log("[staysee-chat] semantic crisis detected — specialist referral");
+        console.log("[staysee-chat] semantic crisis hard-stop (legacy mode)");
+        void logProtocolEvent(makeServiceClient(), {
+          userId: userId ?? null,
+          conversationId: conversationId ?? null,
+          requestId: requestId ?? null,
+          eventType: "crisis_hard_stop",
+          severity: "tier_3",
+          protocol: "semantic_crisis_legacy",
+          actionTaken: "hard_stop",
+          confidence: "medium",
+          classifierSummary: "semantic:da",
+          promptVersion: getPromptAuditVersion(),
+          reason: "legacy_semantic_classifier",
+        });
         return new Response(
-          JSON.stringify({ content: CRISIS_LEVEL2_RESPONSE, provider: providerKey, model: reqModel ?? config.model }),
+          JSON.stringify({
+            content: CRISIS_LEVEL2_RESPONSE,
+            provider: providerKey,
+            model: reqModel ?? config.model,
+          }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -970,6 +1056,10 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
     }
 
+    if (isProtocolSignalsEnabled()) {
+      systemPrompt = [systemPrompt, buildProtocolSignalPrompt()].join("\n\n");
+    }
+
     systemPrompt = [systemPrompt, OUTPUT_TOKEN_CEILING_GUIDANCE].join("\n\n");
 
     const modelRoute = resolveChatModel({
@@ -1065,6 +1155,7 @@ Deno.serve(async (req: Request) => {
     let wasFinalizeUsed = recovery.wasFinalizeUsed;
     let wasTruncated = recovery.wasTruncated;
     let replyPublishable = false;
+    let protocolSignalsForLog: ReturnType<typeof parseAndStripProtocolSignals> | null = null;
     let lengthBeforeMerge = recovery.lengthBeforeMerge;
     let lengthAfterMerge = recovery.lengthAfterMerge;
     let lastMergeStrategy = recovery.lastMergeStrategy;
@@ -1127,6 +1218,13 @@ Deno.serve(async (req: Request) => {
         userMessage: message,
         relationalLifeTurn: diagnosis.relationalLifeTurn,
       });
+
+      const signalParse = parseAndStripProtocolSignals(safe);
+      safe = signalParse.text;
+      if (signalParse.signals.length > 0 || signalParse.leakageSanitized) {
+        protocolSignalsForLog = signalParse;
+      }
+
       result = { ...result, content: safe };
 
       if (isReplyPipelineTraceEnabled()) {
@@ -1573,6 +1671,21 @@ Deno.serve(async (req: Request) => {
             constitutionVersion: AI_AUDIT_CONSTITUTION_VERSION,
             diagnostics: recoveryDiagnostics,
           }),
+
+          protocolSignalsForLog
+            ? logProtocolSignals(
+                svc,
+                {
+                  userId,
+                  conversationId: conversationId ?? null,
+                  requestId: requestId ?? null,
+                  promptVersion: getPromptAuditVersion(),
+                  model: result.model,
+                },
+                protocolSignalsForLog.signals,
+                { leakageSanitized: protocolSignalsForLog.leakageSanitized }
+              )
+            : Promise.resolve(),
 
           // Embed new messages for semantic archive (this chat only)
           conversationId && embedApiKey
