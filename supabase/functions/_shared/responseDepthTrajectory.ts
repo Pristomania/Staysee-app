@@ -400,7 +400,7 @@ export interface AnalyzeOpenFigureInput {
 
 export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureState {
   const trimmed = input.message.trim();
-  if (!trimmed || isExplicitConversationClosure(trimmed)) {
+  if (!trimmed) {
     return CLOSED_OPEN_FIGURE;
   }
 
@@ -695,7 +695,11 @@ export function analyzeResponseDepth(
     trajectory,
   };
 
-  if (isExplicitConversationClosure(trimmed)) {
+  if (
+    isExplicitConversationClosure(trimmed) &&
+    !trajectory.emotionalMomentum &&
+    !trajectory.shortAfterEmotional
+  ) {
     return buildAnalysis(
       "brief",
       "explicit_closure",
