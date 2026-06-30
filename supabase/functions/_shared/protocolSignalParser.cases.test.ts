@@ -22,6 +22,13 @@ function assert(cond: boolean, msg: string) {
 
 const visible = "Слышу тебя. Это важно.";
 
+const FORBIDDEN_LEAK_RE =
+  /STAYSEE_SIGNAL|\[STAYSEE|crisis_detected|role_attack_detected|boundary_pressure_detected/i;
+
+function assertNoLeak(text: string, msg: string) {
+  assert(!FORBIDDEN_LEAK_RE.test(text), msg);
+}
+
 console.log("=== protocolSignalParser ===\n");
 
 {
@@ -62,6 +69,31 @@ console.log("=== protocolSignalParser ===\n");
   const out = parseAndStripProtocolSignals("");
   assert(out.text === "", "empty-after-strip handled");
   assert(out.signals.length === 0, "empty has no signals");
+}
+
+console.log("\n=== bare signal line leaks ===\n");
+
+for (const signal of [
+  "crisis_detected",
+  "role_attack_detected",
+  "boundary_pressure_detected",
+] as const) {
+  const text = `${visible}\n${signal}`;
+  const out = parseAndStripProtocolSignals(text);
+  assert(out.text === visible, `bare ${signal} line stripped`);
+  assert(out.leakageSanitized === true, `bare ${signal} sets leakageSanitized`);
+  assertNoLeak(out.text, `no ${signal} in client text`);
+}
+
+{
+  const out = parseAndStripProtocolSignals(
+    "В коде мы обсуждали crisis_detected как внутренний флаг."
+  );
+  assert(
+    /crisis_detected/.test(out.text),
+    "inline prose with signal substring preserved"
+  );
+  assert(out.leakageSanitized === false, "inline prose does not set leakageSanitized");
 }
 
 console.log(`\n=== ${failed === 0 ? "All passed" : `${failed} failed`} ===`);
