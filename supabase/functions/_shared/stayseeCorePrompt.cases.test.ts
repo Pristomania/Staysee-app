@@ -108,6 +108,27 @@ for (const [check, label] of summaryRequestGuards) {
 
 console.log("✓ B2. summary-request wording guards");
 
+const identityGuards: Array<[RegExp | ((text: string) => boolean), string]> = [
+  [/у тебя психологическая основа/i, "psychological foundation in identity"],
+  [
+    /умеешь присутствовать внутри того, что происходит с человеком/i,
+    "presence inside what happens with the person",
+  ],
+  [
+    (text) => !/не\s+психолог\s+в\s+формальном\s+смысле/i.test(text),
+    "old identity negation: not formal psychologist",
+  ],
+  [(text) => !/не\s+коуч/i.test(text), "old identity negation: not coach"],
+  [(text) => !/не\s+ассистент/i.test(text), "old identity negation: not assistant"],
+];
+
+for (const [check, label] of identityGuards) {
+  const ok = typeof check === "function" ? check(v1Prompt) : check.test(v1Prompt);
+  assert(ok, `v1 identity guard missing: ${label}`);
+}
+
+console.log("✓ B3. identity wording guards");
+
 console.log("✓ B. flag v1 invariants");
 
 // ── C. Compatibility ─────────────────────────────────────────────────────────
