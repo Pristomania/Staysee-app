@@ -83,13 +83,30 @@ const invariants: Array<[RegExp, string]> = [
   [/пауза — не закрытие разговора/i, "pause is not closure"],
   [/следующий ход не обязательно вопрос/i, "next move not necessarily question"],
   [/живое закрывается тёплой фразой/i, "softness must not close live figure"],
-  [/итог не подводится пока человек сам/i, "no premature summary"],
+  [/стэйси не подводит итог разговора первой/i, "no unsolicited summary"],
   [/не availability-хвостом/i, "no availability tail principle"],
 ];
 
 for (const [re, label] of invariants) {
   assert(re.test(v1Prompt), `v1 invariant missing: ${label}`);
 }
+
+const summaryRequestGuards: Array<[RegExp | ((text: string) => boolean), string]> = [
+  [/если пользователь прямо просит итог/i, "explicit permission for user-requested summary"],
+  [/если материала для итога нет/i, "direct no-material handling"],
+  [
+    (text) => !/итог не подводится пока[\s\S]*или прямо не попросил/i.test(text),
+    "no confusing double-negative summary wording",
+  ],
+  [/или попросил об этом/i, "contact-break explicit-request exception"],
+];
+
+for (const [check, label] of summaryRequestGuards) {
+  const ok = typeof check === "function" ? check(v1Prompt) : check.test(v1Prompt);
+  assert(ok, `v1 summary-request guard missing: ${label}`);
+}
+
+console.log("✓ B2. summary-request wording guards");
 
 console.log("✓ B. flag v1 invariants");
 
