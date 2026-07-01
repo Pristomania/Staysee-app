@@ -62,7 +62,7 @@ import { CRISIS_LEVEL2_RESPONSE } from "../_shared/safety.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
 import {
   buildSurgery1BasePrompt,
-  SURGERY1_LAYER_ID,
+  resolveActivePromptLayerId,
 } from "../_shared/surgery1Prompt.ts";
 import {
   TIER_CONFIG,
@@ -127,7 +127,7 @@ import {
   AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
   AI_AUDIT_CONSTITUTION_VERSION,
   AI_AUDIT_MEMORY_VERSION,
-  AI_AUDIT_PROMPT_VERSION,
+  getPromptAuditVersion,
 } from "../_shared/aiAuditVersions.ts";
 import {
   buildUsageLogRow,
@@ -216,9 +216,10 @@ const ACTIVE_PROVIDER: AiProvider = "openrouter";
 // Per-turn: evaluateTurnSafety (roleEnforcement) + memory context + time gap
 
 const BASE_PROMPT = buildSurgery1BasePrompt();
+const ACTIVE_PROMPT_LAYER_ID = resolveActivePromptLayerId();
 
 console.log(
-  `[staysee-chat] ${SURGERY1_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
+  `[staysee-chat] ${ACTIVE_PROMPT_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
 );
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -1309,7 +1310,7 @@ Deno.serve(async (req: Request) => {
               wasTruncated,
               autoContinueUsed: wasAutoContinued,
               finalizeUsed: wasFinalizeUsed,
-              promptVersion: AI_AUDIT_PROMPT_VERSION,
+              promptVersion: getPromptAuditVersion(),
               constitutionVersion: AI_AUDIT_CONSTITUTION_VERSION,
               cognitiveSignatureVersion: AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
               memoryVersion: AI_AUDIT_MEMORY_VERSION,
@@ -1546,7 +1547,7 @@ Deno.serve(async (req: Request) => {
             conversationId: conversationId ?? null,
             userId,
             model: result.model,
-            promptVersion: AI_AUDIT_PROMPT_VERSION,
+            promptVersion: getPromptAuditVersion(),
             constitutionVersion: AI_AUDIT_CONSTITUTION_VERSION,
             diagnostics: recoveryDiagnostics,
           }),

@@ -1,0 +1,144 @@
+/**
+ * StaySee prompt core v1 — unit cases.
+ * Run: npx tsx supabase/functions/_shared/stayseeCorePrompt.cases.test.ts
+ */
+
+import { getPromptAuditVersion } from "./aiAuditVersions.ts";
+import {
+  getPromptCoreMode,
+  parsePromptCoreMode,
+  resolveActivePromptLayerId,
+} from "./promptCore/promptCoreMode.ts";
+import {
+  buildStayseeCorePrompt,
+  STAYSEE_CORE_LAYER_ID,
+} from "./promptCore/stayseeCorePrompt.ts";
+import {
+  buildLegacySurgery1BasePrompt,
+  buildSurgery1BasePrompt,
+  SURGERY1_BLOCKS,
+  SURGERY1_LAYER_ID,
+} from "./surgery1Prompt.ts";
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) throw new Error(message);
+}
+
+const envMissing = () => undefined;
+const envEmpty = () => "" as string | undefined;
+const envInvalid = () => "unknown" as string | undefined;
+const envLegacy = () => "legacy" as string | undefined;
+const envV1 = () => "v1" as string | undefined;
+
+// ── A. Default legacy ────────────────────────────────────────────────────────
+
+assert(parsePromptCoreMode(undefined) === "legacy", "missing env → legacy");
+assert(parsePromptCoreMode("") === "legacy", "empty env → legacy");
+assert(parsePromptCoreMode("invalid") === "legacy", "invalid env → legacy");
+assert(parsePromptCoreMode("legacy") === "legacy", "legacy env → legacy");
+assert(getPromptCoreMode(envMissing) === "legacy", "getter missing → legacy");
+assert(getPromptCoreMode(envEmpty) === "legacy", "getter empty → legacy");
+assert(getPromptCoreMode(envInvalid) === "legacy", "getter invalid → legacy");
+
+const legacyDefault = buildSurgery1BasePrompt(envMissing);
+const legacyExplicit = buildLegacySurgery1BasePrompt();
+assert(legacyDefault === legacyExplicit, "default buildSurgery1BasePrompt === buildLegacySurgery1BasePrompt");
+
+assert(
+  !legacyDefault.includes("# STAYSEE CORE V1"),
+  "default output must not contain STAYSEE CORE V1 header"
+);
+assert(
+  resolveActivePromptLayerId(envMissing) === SURGERY1_LAYER_ID,
+  "default layer id = SURGERY1_LAYER_ID"
+);
+assert(
+  getPromptAuditVersion(envMissing) === SURGERY1_LAYER_ID,
+  "default audit version = SURGERY1_LAYER_ID"
+);
+
+console.log("✓ A. default legacy parity");
+
+// ── B. Flag v1 ───────────────────────────────────────────────────────────────
+
+assert(parsePromptCoreMode("v1") === "v1", "v1 env → v1");
+assert(getPromptCoreMode(envV1) === "v1", "getter v1 → v1");
+
+const v1Prompt = buildSurgery1BasePrompt(envV1);
+const v1Direct = buildStayseeCorePrompt();
+assert(v1Prompt === v1Direct, "v1 flag routes to buildStayseeCorePrompt");
+assert(
+  resolveActivePromptLayerId(envV1) === STAYSEE_CORE_LAYER_ID,
+  "v1 layer id = staysee-core-v1"
+);
+assert(
+  getPromptAuditVersion(envV1) === STAYSEE_CORE_LAYER_ID,
+  "v1 audit version = staysee-core-v1"
+);
+assert(v1Prompt.includes("# STAYSEE CORE V1"), "v1 contains core header");
+
+const invariants: Array<[RegExp, string]> = [
+  [/не на стороне того как он уходит от себя/i, "not fixing / not siding with avoidance"],
+  [/разговор не закрывается пока человек сам/i, "process not closed by Stacey"],
+  [/пауза — не закрытие разговора/i, "pause is not closure"],
+  [/следующий ход не обязательно вопрос/i, "next move not necessarily question"],
+  [/живое закрывается тёплой фразой/i, "softness must not close live figure"],
+  [/итог не подводится пока человек сам/i, "no premature summary"],
+  [/не availability-хвостом/i, "no availability tail principle"],
+];
+
+for (const [re, label] of invariants) {
+  assert(re.test(v1Prompt), `v1 invariant missing: ${label}`);
+}
+
+console.log("✓ B. flag v1 invariants");
+
+// ── C. Compatibility ─────────────────────────────────────────────────────────
+
+assert(SURGERY1_LAYER_ID === "surgery1-v3-cognitive-v1-process-core", "SURGERY1_LAYER_ID unchanged");
+assert(typeof SURGERY1_BLOCKS.identity === "string", "SURGERY1_BLOCKS.identity available");
+assert(typeof SURGERY1_BLOCKS.processCore === "string", "SURGERY1_BLOCKS.processCore available");
+assert(typeof SURGERY1_BLOCKS.voice === "string", "SURGERY1_BLOCKS.voice available");
+
+assert(
+  legacyDefault.includes("# ЯДРО ПРОЦЕССА"),
+  "legacy contains process core marker"
+);
+assert(
+  legacyDefault.includes("# STAYSEE AI — VOICE V3"),
+  "legacy contains voice v3 marker"
+);
+assert(
+  legacyDefault.includes("# STAYSEE AI — CONSTITUTION V3 BETA"),
+  "legacy contains constitution marker"
+);
+
+assert(
+  !v1Prompt.includes("# STAYSEE AI — VOICE V3"),
+  "v1 must not include legacy VOICE V3 section header"
+);
+assert(
+  !v1Prompt.includes("# STAYSEE AI — CONSTITUTION V3 BETA"),
+  "v1 must not include legacy constitution section header"
+);
+assert(
+  !v1Prompt.includes("# STAYSEE AI — COGNITIVE SIGNATURE V1"),
+  "v1 must not include legacy cognitive signature section header"
+);
+assert(
+  !v1Prompt.includes("# ЯДРО ПРОЦЕССА"),
+  "v1 must not include legacy process core header"
+);
+
+assert(
+  getPromptCoreMode(envLegacy) === "legacy",
+  "explicit legacy env stays legacy"
+);
+assert(
+  buildSurgery1BasePrompt(envLegacy) === legacyExplicit,
+  "explicit legacy env === buildLegacySurgery1BasePrompt"
+);
+
+console.log("✓ C. compatibility");
+
+console.log("\nAll stayseeCorePrompt cases passed.");
