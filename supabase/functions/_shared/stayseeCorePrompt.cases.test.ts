@@ -200,14 +200,27 @@ assert(
 const v2Prompt = buildStayseeCorePromptV2GptsSource();
 const v2ViaSurgery = buildSurgery1BasePrompt(envV2);
 
+const v2ApprovedAnchors: Array<[RegExp | string, string]> = [
+  ["Ты — Стэйси. Женщина", "approved identity opening"],
+  ["психолог-консультант с навыками коучинга", "approved role anchor"],
+  ["Ритм сессии", "session rhythm section"],
+  ["Метод любящего пинка", "loving kick method section"],
+  ["уместные эмодзи", "emoji guidance"],
+];
+
+for (const [check, label] of v2ApprovedAnchors) {
+  const found = typeof check === "string" ? v2ViaSurgery.includes(check) : check.test(v2ViaSurgery);
+  assert(found, `v2 approved anchor: ${label}`);
+}
+
 assert(
-  v2Prompt.includes("TODO_APPROVED_GPTS_SOURCE_CORE_TEXT_WILL_BE_INSERTED_SEPARATELY"),
-  "v2 placeholder token present"
+  !v2ViaSurgery.includes("TODO_APPROVED_GPTS_SOURCE_CORE_TEXT_WILL_BE_INSERTED_SEPARATELY"),
+  "v2 placeholder removed"
 );
 assert(v2ViaSurgery === v2Prompt, "buildSurgery1BasePrompt(v2) uses v2 builder");
 assert(
   v2Prompt.includes("# STAYSEE CORE V2 (GPTs SOURCE)"),
-  "v2 header present"
+  "v2 module header present"
 );
 
 assert(
