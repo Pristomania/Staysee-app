@@ -14,6 +14,10 @@ import {
   STAYSEE_CORE_LAYER_ID,
 } from "./promptCore/stayseeCorePrompt.ts";
 import {
+  buildStayseeCorePromptV2GptsSource,
+  STAYSEE_CORE_V2_LAYER_ID,
+} from "./promptCore/stayseeCorePromptV2GptsSource.ts";
+import {
   buildLegacySurgery1BasePrompt,
   buildSurgery1BasePrompt,
   SURGERY1_BLOCKS,
@@ -29,6 +33,7 @@ const envEmpty = () => "" as string | undefined;
 const envInvalid = () => "unknown" as string | undefined;
 const envLegacy = () => "legacy" as string | undefined;
 const envV1 = () => "v1" as string | undefined;
+const envV2 = () => "v2" as string | undefined;
 
 // ── A. Default legacy ────────────────────────────────────────────────────────
 
@@ -178,5 +183,87 @@ assert(
 );
 
 console.log("✓ C. compatibility");
+
+// ── D. v2 GPTs source plumbing (placeholder only) ───────────────────────────
+
+assert(parsePromptCoreMode("v2") === "v2", "v2 env → v2");
+assert(getPromptCoreMode(envV2) === "v2", "getter v2 → v2");
+assert(
+  resolveActivePromptLayerId(envV2) === STAYSEE_CORE_V2_LAYER_ID,
+  "resolveActivePromptLayerId(v2) → staysee-core-v2-gpts-source"
+);
+assert(
+  getPromptAuditVersion(envV2) === STAYSEE_CORE_V2_LAYER_ID,
+  "getPromptAuditVersion(v2) → staysee-core-v2-gpts-source"
+);
+
+const v2Prompt = buildStayseeCorePromptV2GptsSource();
+const v2ViaSurgery = buildSurgery1BasePrompt(envV2);
+
+const v2ApprovedAnchors: Array<[RegExp | string, string]> = [
+  ["Ты — Стэйси. Женщина", "approved identity opening"],
+  ["психолог-консультант с навыками коучинга", "approved role anchor"],
+  ["Ритм сессии", "session rhythm section"],
+  ["Метод любящего пинка", "loving kick method section"],
+  ["уместные эмодзи", "emoji guidance"],
+];
+
+for (const [check, label] of v2ApprovedAnchors) {
+  const found = typeof check === "string" ? v2ViaSurgery.includes(check) : check.test(v2ViaSurgery);
+  assert(found, `v2 approved anchor: ${label}`);
+}
+
+assert(
+  !v2ViaSurgery.includes("TODO_APPROVED_GPTS_SOURCE_CORE_TEXT_WILL_BE_INSERTED_SEPARATELY"),
+  "v2 placeholder removed"
+);
+assert(v2ViaSurgery === v2Prompt, "buildSurgery1BasePrompt(v2) uses v2 builder");
+assert(
+  v2Prompt.includes("# STAYSEE CORE V2 (GPTs SOURCE)"),
+  "v2 module header present"
+);
+
+assert(
+  v1Prompt === buildStayseeCorePrompt(),
+  "v1 builder output unchanged after v2 plumbing"
+);
+assert(
+  buildSurgery1BasePrompt(envV1) === v1Prompt,
+  "v1 routing unchanged after v2 plumbing"
+);
+assert(
+  parsePromptCoreMode("v2") !== "v1",
+  "v2 does not alias to v1"
+);
+assert(parsePromptCoreMode("v2") !== "legacy", "v2 does not fall through to legacy");
+
+const legacyIsolationMarkers: Array<[RegExp | string, string]> = [
+  ["Вопрос не обязателен", "legacy PROCESS_CORE phrase"],
+  ["# STAYSEE AI — CONSTITUTION V3 BETA", "legacy constitution header"],
+  ["# STAYSEE AI — COGNITIVE SIGNATURE V1", "legacy cognitive signature header"],
+  ["# STAYSEE AI — VOICE V3", "legacy voice header"],
+  ["# ЯДРО ПРОЦЕССА", "legacy process core header"],
+  [/ИДЕНТИЧНОСТЬ \(внутреннее\)/i, "legacy IDENTITY_BLOCK header"],
+  [/цифровая точка опоры для осознанной жизни/i, "legacy IDENTITY_BLOCK anchor"],
+  [/ПРИРОДА СТЭЙСИ \(внутреннее\)/i, "legacy CONSTRAINTS_BLOCK header"],
+  ["# STAYSEE CORE V1", "v1 core header must not leak into v2"],
+];
+
+for (const [check, label] of legacyIsolationMarkers) {
+  const found =
+    typeof check === "string" ? v2ViaSurgery.includes(check) : check.test(v2ViaSurgery);
+  assert(!found, `v2 isolated from legacy: ${label}`);
+}
+
+assert(
+  buildSurgery1BasePrompt(envLegacy) === legacyExplicit,
+  "legacy routing unchanged after v2 plumbing"
+);
+assert(
+  legacyDefault === buildSurgery1BasePrompt(envMissing),
+  "default routing still legacy"
+);
+
+console.log("✓ D. v2 GPTs source plumbing");
 
 console.log("\nAll stayseeCorePrompt cases passed.");
