@@ -66,7 +66,7 @@ No Stacey Core V2 prose was invented, rewritten, or composed in this PR.
 1. Product owner places five `.docx` in `docs/gpts-source/_source/`
 2. Run `node scripts/extract-gpts-source-docx.mjs` → full verbatim snapshots
 3. Product owner/chat inserts approved GPTs core text into `stayseeCorePromptV2GptsSource.ts`
-4. PR8b: flip staging `STAYSEE_PROMPT_CORE=v2`, run `scripts/pr8-staging-gpts-source-smoke.mjs`
+4. PR8b: flip staging `STAYSEE_PROMPT_CORE=v2`, run `PR8_SMOKE_RUN=1 node scripts/pr8-staging-gpts-source-smoke.mjs`
 
 ---
 
