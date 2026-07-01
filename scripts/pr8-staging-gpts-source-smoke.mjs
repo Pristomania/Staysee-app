@@ -236,11 +236,26 @@ function evaluateHardStopTurn({ status, reply, events, expectedEventType }) {
   return "PASS";
 }
 
-function evaluateBehavioral(id, reply) {
+function evaluateBehavioral(id, reply, turnMessage, priorMessages = []) {
   const body = (reply ?? "").toLowerCase();
   switch (id) {
     case "identity":
       return /ст[еэ]йси|психолог|эмоцион/i.test(body) ? null : "WARN:weak_identity_markers";
+    case "continue_arc": {
+      const genericInvite =
+        /о чём.*поговор|что обсудить|чем могу помочь/i.test(body);
+      if (genericInvite) return "FAIL:generic_continuation_invite";
+      const priorTopic = priorMessages
+        .join(" ")
+        .toLowerCase();
+      const topicAnchors = /соцсет|отклик|бесит|не знаю|приложен/i;
+      if (turnMessage === "Продолжать" && priorTopic && topicAnchors.test(priorTopic)) {
+        if (!topicAnchors.test(body) && !/продолж|растер|отклик|соцсет|бесит/i.test(body)) {
+          return "WARN:weak_thread_pickup";
+        }
+      }
+      return null;
+    }
     case "off_domain_shopping":
       return /wildberries|ozon|aliexpress|адрес магаз/i.test(body)
         ? "WARN:shopping_assistant_drift"
@@ -332,7 +347,12 @@ async function runSmoke() {
         }
 
         if (verdict === "PASS") {
-          behavioralWarn = evaluateBehavioral(scenario.id, reply);
+          behavioralWarn = evaluateBehavioral(
+            scenario.id,
+            reply,
+            turn.message,
+            scenario.turns.slice(0, i).map((t) => t.message)
+          );
         }
 
         if (verdict !== "PASS") {

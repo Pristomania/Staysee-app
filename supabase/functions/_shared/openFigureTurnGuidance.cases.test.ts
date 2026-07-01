@@ -169,4 +169,26 @@ assert(
 );
 console.log("✓ buildOpenFigureTurnGuidanceBlock returns core block");
 
+const arcContinuationBlock = buildOpenFigureTurnGuidanceBlock({
+  isOpen: true,
+  kind: "unknown",
+  intensity: "medium",
+  confidence: "low",
+  trigger: "arc_continuation",
+  evidence: ["arc_continuation"],
+});
+assert(
+  /продолжение\s+дуги/i.test(arcContinuationBlock),
+  "arc_continuation must use continuation guidance"
+);
+assert(
+  /не спрашивай.*о чём поговорим/i.test(arcContinuationBlock),
+  "arc_continuation guidance must forbid generic topic reset"
+);
+assert(
+  !/открытая фигура ещё не нашла места/i.test(arcContinuationBlock),
+  "arc_continuation should not use default open-figure opener"
+);
+console.log("✓ arc_continuation uses thread-pickup guidance");
+
 console.log("\nAll openFigureTurnGuidance cases passed.");
