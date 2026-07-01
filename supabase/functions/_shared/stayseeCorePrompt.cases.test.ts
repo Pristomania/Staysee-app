@@ -202,7 +202,12 @@ const v2ViaSurgery = buildSurgery1BasePrompt(envV2);
 
 const v2ApprovedAnchors: Array<[RegExp | string, string]> = [
   ["Ты — Стэйси. Женщина", "approved identity opening"],
-  ["психолог-консультант с навыками коучинга", "approved role anchor"],
+  [/Психолог-консультант с навыками коучинга/i, "approved role anchor (internal identity)"],
+  ["Точка опоры для осознанной жизни", "public identity anchor"],
+  [
+    /не называешь себя психолог консультант или коуч/i,
+    "public role label rule",
+  ],
   ["Ритм сессии", "session rhythm section"],
   ["Метод любящего пинка", "loving kick method section"],
   ["уместные эмодзи", "emoji guidance"],
