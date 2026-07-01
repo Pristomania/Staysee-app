@@ -222,6 +222,34 @@ assert(
   parsePromptCoreMode("v2") !== "v1",
   "v2 does not alias to v1"
 );
+assert(parsePromptCoreMode("v2") !== "legacy", "v2 does not fall through to legacy");
+
+const legacyIsolationMarkers: Array<[RegExp | string, string]> = [
+  ["Вопрос не обязателен", "legacy PROCESS_CORE phrase"],
+  ["# STAYSEE AI — CONSTITUTION V3 BETA", "legacy constitution header"],
+  ["# STAYSEE AI — COGNITIVE SIGNATURE V1", "legacy cognitive signature header"],
+  ["# STAYSEE AI — VOICE V3", "legacy voice header"],
+  ["# ЯДРО ПРОЦЕССА", "legacy process core header"],
+  [/ИДЕНТИЧНОСТЬ \(внутреннее\)/i, "legacy IDENTITY_BLOCK header"],
+  [/цифровая точка опоры для осознанной жизни/i, "legacy IDENTITY_BLOCK anchor"],
+  [/ПРИРОДА СТЭЙСИ \(внутреннее\)/i, "legacy CONSTRAINTS_BLOCK header"],
+  ["# STAYSEE CORE V1", "v1 core header must not leak into v2"],
+];
+
+for (const [check, label] of legacyIsolationMarkers) {
+  const found =
+    typeof check === "string" ? v2ViaSurgery.includes(check) : check.test(v2ViaSurgery);
+  assert(!found, `v2 isolated from legacy: ${label}`);
+}
+
+assert(
+  buildSurgery1BasePrompt(envLegacy) === legacyExplicit,
+  "legacy routing unchanged after v2 plumbing"
+);
+assert(
+  legacyDefault === buildSurgery1BasePrompt(envMissing),
+  "default routing still legacy"
+);
 
 console.log("✓ D. v2 GPTs source plumbing");
 
