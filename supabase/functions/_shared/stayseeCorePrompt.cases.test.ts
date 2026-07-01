@@ -14,6 +14,10 @@ import {
   STAYSEE_CORE_LAYER_ID,
 } from "./promptCore/stayseeCorePrompt.ts";
 import {
+  buildStayseeCorePromptV2GptsSource,
+  STAYSEE_CORE_V2_LAYER_ID,
+} from "./promptCore/stayseeCorePromptV2GptsSource.ts";
+import {
   buildLegacySurgery1BasePrompt,
   buildSurgery1BasePrompt,
   SURGERY1_BLOCKS,
@@ -29,6 +33,7 @@ const envEmpty = () => "" as string | undefined;
 const envInvalid = () => "unknown" as string | undefined;
 const envLegacy = () => "legacy" as string | undefined;
 const envV1 = () => "v1" as string | undefined;
+const envV2 = () => "v2" as string | undefined;
 
 // ── A. Default legacy ────────────────────────────────────────────────────────
 
@@ -178,5 +183,46 @@ assert(
 );
 
 console.log("✓ C. compatibility");
+
+// ── D. v2 GPTs source plumbing (placeholder only) ───────────────────────────
+
+assert(parsePromptCoreMode("v2") === "v2", "v2 env → v2");
+assert(getPromptCoreMode(envV2) === "v2", "getter v2 → v2");
+assert(
+  resolveActivePromptLayerId(envV2) === STAYSEE_CORE_V2_LAYER_ID,
+  "resolveActivePromptLayerId(v2) → staysee-core-v2-gpts-source"
+);
+assert(
+  getPromptAuditVersion(envV2) === STAYSEE_CORE_V2_LAYER_ID,
+  "getPromptAuditVersion(v2) → staysee-core-v2-gpts-source"
+);
+
+const v2Prompt = buildStayseeCorePromptV2GptsSource();
+const v2ViaSurgery = buildSurgery1BasePrompt(envV2);
+
+assert(
+  v2Prompt.includes("TODO_APPROVED_GPTS_SOURCE_CORE_TEXT_WILL_BE_INSERTED_SEPARATELY"),
+  "v2 placeholder token present"
+);
+assert(v2ViaSurgery === v2Prompt, "buildSurgery1BasePrompt(v2) uses v2 builder");
+assert(
+  v2Prompt.includes("# STAYSEE CORE V2 (GPTs SOURCE)"),
+  "v2 header present"
+);
+
+assert(
+  v1Prompt === buildStayseeCorePrompt(),
+  "v1 builder output unchanged after v2 plumbing"
+);
+assert(
+  buildSurgery1BasePrompt(envV1) === v1Prompt,
+  "v1 routing unchanged after v2 plumbing"
+);
+assert(
+  parsePromptCoreMode("v2") !== "v1",
+  "v2 does not alias to v1"
+);
+
+console.log("✓ D. v2 GPTs source plumbing");
 
 console.log("\nAll stayseeCorePrompt cases passed.");
