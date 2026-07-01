@@ -78,11 +78,31 @@ export function isCompleteShortUtteranceWithoutTerminalPunctuation(
   return matchesClosureOrAcknowledgementShape(t);
 }
 
+/**
+ * Short live phrase + trailing emoji (Core V2). Not closure-list only —
+ * requires substantive words and rejects connector / fragment tails.
+ */
+function isSubstantiveShortPhraseForEmojiTail(core: string): boolean {
+  const t = core.trim();
+  if (!t || t.length < 4) return false;
+  if (t.length > MAX_SHORT_COMPLETE_UTTERANCE_CHARS) return false;
+  if (hasObviousUnfinishedTail(t)) return false;
+  if (INCOMPLETE_SUBSTANTIVE_FRAGMENT_RES.some((re) => re.test(t))) return false;
+  if (isLongSubstantiveWithoutBoundary(t)) return false;
+  if (!/\p{L}{2,}/u.test(t)) return false;
+
+  const words = t.match(/\p{L}+/gu) ?? [];
+  if (words.length === 0) return false;
+  if (words.length === 1 && words[0]!.length < 5) return false;
+  return true;
+}
+
 function endsWithEmojiAfterCompleteShortPhrase(text: string): boolean {
   const { core, hadEmoji } = stripTrailingEmoji(text);
   if (!hadEmoji || !core) return false;
   if (/[.!?…]["')\]]*\s*$/u.test(core)) return true;
-  return isCompleteShortUtteranceWithoutTerminalPunctuation(core);
+  if (isCompleteShortUtteranceWithoutTerminalPunctuation(core)) return true;
+  return isSubstantiveShortPhraseForEmojiTail(core);
 }
 
 /** Trailing word fragment from token limit (e.g. «…в этом мол»). */

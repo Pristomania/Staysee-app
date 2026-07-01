@@ -9,6 +9,7 @@ import {
 } from "./replyEnding.ts";
 import { isPublishableReply } from "./completeReply.ts";
 import { explainPublishability } from "./replyPublishability.ts";
+import { classifyInitialRoute } from "./replyRecovery.ts";
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -54,5 +55,36 @@ assert(endsAtSentenceBoundary(""), "empty boundary");
 const longNoBoundary =
   "Ты прошла через многое сегодня и поняла важные вещи о себе без финальной точки";
 assert(!isPublishableReply(longNoBoundary), "long substantive without boundary");
+
+const EMOJI_ACCEPT = [
+  "Я рядом 🌿",
+  "Ох, понимаю 😅",
+  "Давай чуть выдохнем 💫",
+  "Это звучит тяжело ❤️",
+  "Понимаю тебя 😔",
+  "Можно чуть мягче к себе сегодня 🌱",
+];
+
+for (const text of EMOJI_ACCEPT) {
+  assert(endsAtSentenceBoundary(text), `emoji boundary: ${text}`);
+  assert(!hasBrokenEnding(text), `emoji not broken: ${text}`);
+  assert(isPublishableReply(text), `emoji publishable: ${text}`);
+  assert(
+    classifyInitialRoute(text, "stop") === "normal_publishable",
+    `emoji no stop_not_publishable_repair: ${text}`
+  );
+  console.log(`✓ emoji accept: ${text}`);
+}
+
+const EMOJI_REJECT = ["🌿", "😅", "Похоже, это 😅", "Ты сегодня смогла 😅", "это 💫"];
+
+for (const text of EMOJI_REJECT) {
+  assert(!isPublishableReply(text), `emoji reject publishable: ${text}`);
+  assert(
+    classifyInitialRoute(text, "stop") === "stop_not_publishable_repair",
+    `emoji reject repair route: ${text}`
+  );
+  console.log(`✓ emoji reject: ${text}`);
+}
 
 console.log("\nAll replyEnding cases passed.");

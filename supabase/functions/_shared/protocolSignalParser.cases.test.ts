@@ -96,5 +96,46 @@ for (const signal of [
   assert(out.leakageSanitized === false, "inline prose does not set leakageSanitized");
 }
 
+console.log("\n=== emoji preservation with protocol strip ===\n");
+
+const emojiVisible = "Я рядом 🌿";
+const emojiCases: Array<{ label: string; input: string; expected: string }> = [
+  {
+    label: "tag before text",
+    input: `[STAYSEE_SIGNAL: boundary_pressure_detected]\n${emojiVisible}`,
+    expected: emojiVisible,
+  },
+  {
+    label: "tag after text",
+    input: `${emojiVisible}\n[STAYSEE_SIGNAL: crisis_detected]`,
+    expected: emojiVisible,
+  },
+  {
+    label: "bracketed bare signal",
+    input: `[crisis_detected]\n${emojiVisible}`,
+    expected: emojiVisible,
+  },
+  {
+    label: "inline prose with signal name",
+    input: "Обсуждали crisis_detected как флаг 😅",
+    expected: "Обсуждали crisis_detected как флаг 😅",
+  },
+];
+
+for (const { label, input, expected } of emojiCases) {
+  const out = parseAndStripProtocolSignals(input);
+  assert(out.text === expected, `${label}: text preserved`);
+  assert(
+    /[\p{Extended_Pictographic}]/u.test(out.text),
+    `${label}: emoji still present`
+  );
+  if (label === "inline prose with signal name") {
+    assert(/crisis_detected/.test(out.text), `${label}: inline signal name kept`);
+    assert(!/STAYSEE_SIGNAL/i.test(out.text), `${label}: no STAYSEE tag leak`);
+  } else {
+    assertNoLeak(out.text, `${label}: no protocol leak`);
+  }
+}
+
 console.log(`\n=== ${failed === 0 ? "All passed" : `${failed} failed`} ===`);
 if (failed > 0) process.exit(1);
