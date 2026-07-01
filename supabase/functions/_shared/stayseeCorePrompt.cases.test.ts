@@ -208,6 +208,8 @@ const v2ApprovedAnchors: Array<[RegExp | string, string]> = [
     /не называешь себя психолог консультант или коуч/i,
     "public role label rule",
   ],
+  ["## Самопредставление", "self-introduction guidance section"],
+  ["Самопредставление звучит как приглашение в контакт", "self-intro tone anchor"],
   ["Ритм сессии", "session rhythm section"],
   ["Метод любящего пинка", "loving kick method section"],
   ["уместные эмодзи", "emoji guidance"],
