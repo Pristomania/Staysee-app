@@ -22,6 +22,11 @@ const SAFETY_BRIEF_CATEGORIES: SafetyCategory[] = [
   "medical_boundary",
 ];
 
+const ARC_CONTINUATION_TURN_GUIDANCE = `ТЕКУЩИЙ ХОД: продолжение дуги.
+
+Человек просит продолжить — не открывай новую тему и не спрашивай «о чём поговорим?».
+Назови нить из последнего обмена своими словами и сделай следующий мягкий шаг в той же теме.`.trim();
+
 const OPEN_FIGURE_TURN_GUIDANCE_BASE = `ТЕКУЩИЙ ХОД: открытая фигура.
 
 Открытая фигура ещё не нашла места в разговоре.
@@ -51,6 +56,9 @@ function kindFocusLine(kind: OpenFigureKind): string | null {
 export function buildOpenFigureTurnGuidanceBlock(
   openFigure: OpenFigureState
 ): string {
+  if (openFigure.trigger === "arc_continuation") {
+    return ARC_CONTINUATION_TURN_GUIDANCE;
+  }
   const focus = kindFocusLine(openFigure.kind);
   return focus
     ? `${OPEN_FIGURE_TURN_GUIDANCE_BASE}\n\n${focus}`

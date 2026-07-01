@@ -117,17 +117,50 @@ function isShortAcknowledgement(text: string): boolean {
   return BRIEF_SHORT.test(text.trim());
 }
 
+function normalizeContinuationCandidate(message: string): string {
+  return message.trim().replace(/\s+/g, " ").replace(/[!?.…]+$/u, "").trim();
+}
+
+const CONTINUATION_TOKEN_PATTERNS: RegExp[] = [
+  /^продолжать$/iu,
+  /^продолжи$/iu,
+  /^продолжай$/iu,
+  /^дальше$/iu,
+  /^давай\s+дальше$/iu,
+  /^и$/iu,
+  /^ну\s+и$/iu,
+  /^ещё$/iu,
+  /^continue$/iu,
+  /^go\s+on$/iu,
+];
+
+/** Explicit arc continuation request — separate from brief ack tokens (да/угу). */
+export function isContinuationToken(message: string): boolean {
+  const norm = normalizeContinuationCandidate(message);
+  if (!norm) return false;
+  return CONTINUATION_TOKEN_PATTERNS.some((p) => p.test(norm));
+}
+
+function isArcContinuationInActiveConversation(
+  message: string,
+  recentHistory: ChatTurn[]
+): boolean {
+  const trimmed = message.trim();
+  if (!isShortAcknowledgement(trimmed) && !isContinuationToken(trimmed)) {
+    return false;
+  }
+  const lastAssistant = lastAssistantContent(recentHistory);
+  if (!lastAssistant) return false;
+  if (isPureGreetingOnlyAssistant(lastAssistant)) return false;
+  return true;
+}
+
 /** Short ack after a real assistant turn — continue arc, not greeting reset. */
 function isShortAckInActiveConversation(
   message: string,
   recentHistory: ChatTurn[]
 ): boolean {
-  const trimmed = message.trim();
-  if (!isShortAcknowledgement(trimmed)) return false;
-  const lastAssistant = lastAssistantContent(recentHistory);
-  if (!lastAssistant) return false;
-  if (isPureGreetingOnlyAssistant(lastAssistant)) return false;
-  return true;
+  return isArcContinuationInActiveConversation(message, recentHistory);
 }
 
 function shouldClassifyGreetingShort(
@@ -141,6 +174,9 @@ function shouldClassifyGreetingShort(
   }
   if (isShortAcknowledgement(trimmed)) {
     return !isShortAckInActiveConversation(trimmed, recentHistory);
+  }
+  if (isContinuationToken(trimmed)) {
+    return !isArcContinuationInActiveConversation(trimmed, recentHistory);
   }
   return false;
 }
@@ -415,7 +451,7 @@ export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureStat
   const priorTurns = input.trajectory.recentUserTurns.slice(0, -1);
   const lastAssistant = lastAssistantContent(input.recentHistory);
   const shortAckContinuation =
-    isShortAcknowledgement(trimmed) &&
+    (isShortAcknowledgement(trimmed) || isContinuationToken(trimmed)) &&
     !!lastAssistant &&
     !isPureGreetingOnlyAssistant(lastAssistant) &&
     priorTurns.length > 0;
