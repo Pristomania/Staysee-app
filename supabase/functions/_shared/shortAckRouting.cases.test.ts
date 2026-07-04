@@ -1,5 +1,5 @@
 /**
- * Short acknowledgement + continuation token routing.
+ * Short acknowledgement + continuation token routing (diagnostic only).
  * Run: npx tsx supabase/functions/_shared/shortAckRouting.cases.test.ts
  */
 
@@ -7,7 +7,6 @@ import {
   analyzeResponseDepth,
   isContinuationToken,
 } from "./responseDepthTrajectory.ts";
-import { buildOpenFigureTurnGuidance } from "./openFigureTurnGuidance.ts";
 
 type Turn = { role: "user" | "assistant"; content: string };
 
@@ -43,22 +42,8 @@ function expectContinuationRouting(
     analysis.openFigure.trigger === "arc_continuation",
     `${name}: expected arc_continuation trigger, got ${analysis.openFigure.trigger}`
   );
-  const guidance = buildOpenFigureTurnGuidance({
-    openFigure: analysis.openFigure,
-    depthReason: analysis.depthReason,
-    safetyCategory: "normal",
-  });
-  assert(Boolean(guidance), `${name}: expected guidance`);
-  assert(
-    /продолжение\s+дуги/i.test(guidance!),
-    `${name}: expected arc continuation guidance`
-  );
-  assert(
-    /не спрашивай.*о чём поговорим/i.test(guidance!),
-    `${name}: guidance must forbid generic topic reset`
-  );
   console.log(
-    `PASS: ${name} → reason=${analysis.depthReason} open=${analysis.openFigure.isOpen}`
+    `PASS: ${name} → reason=${analysis.depthReason} trigger=${analysis.openFigure.trigger}`
   );
 }
 
@@ -68,7 +53,6 @@ const legacyCases: Array<{
   history: Turn[];
   notGreetingShort: boolean;
   openFigure?: boolean;
-  guidance?: boolean;
 }> = [
   {
     name: "fear arc да",
@@ -78,7 +62,6 @@ const legacyCases: Array<{
     ]),
     notGreetingShort: true,
     openFigure: true,
-    guidance: true,
   },
   {
     name: "gold arc да",
@@ -90,7 +73,6 @@ const legacyCases: Array<{
     ]),
     notGreetingShort: true,
     openFigure: true,
-    guidance: true,
   },
   {
     name: "uncertainty угу",
@@ -100,7 +82,6 @@ const legacyCases: Array<{
     ]),
     notGreetingShort: true,
     openFigure: true,
-    guidance: true,
   },
   {
     name: "isolated да",
@@ -139,24 +120,12 @@ for (const c of legacyCases) {
     );
   }
 
-  if (c.guidance !== undefined) {
-    const guidance = buildOpenFigureTurnGuidance({
-      openFigure: analysis.openFigure,
-      depthReason: analysis.depthReason,
-      safetyCategory: "normal",
-    });
-    assert(
-      Boolean(guidance) === c.guidance,
-      `${c.name}: guidance=${Boolean(guidance)} expected ${c.guidance}`
-    );
-  }
-
   console.log(
     `PASS: ${c.name} → reason=${analysis.depthReason} open=${analysis.openFigure.isOpen}`
   );
 }
 
-console.log("\n=== continuation token routing ===\n");
+console.log("\n=== continuation token routing (diagnostic) ===\n");
 
 const bodyShameHistory = buildHistory([
   [

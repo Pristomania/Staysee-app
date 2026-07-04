@@ -9,10 +9,6 @@ import { buildSurgery1BasePrompt, SURGERY1_LAYER_ID } from "../supabase/function
 import { evaluateTurnSafety } from "../supabase/functions/_shared/roleEnforcement.ts";
 import { analyzeResponseDepth } from "../supabase/functions/_shared/responseDepthTrajectory.ts";
 import {
-  buildUncertaintyTurnGuidance,
-  uncertaintyGuidanceInjected,
-} from "../supabase/functions/_shared/uncertaintyTurnGuidance.ts";
-import {
   buildExplicitClosureTurnGuidance,
   explicitClosureGuidanceInjected,
 } from "../supabase/functions/_shared/explicitClosureTurnGuidance.ts";
@@ -76,16 +72,6 @@ function buildSystemPrompt(message: string, history: Turn[]) {
   const timeGap = buildTimeGapPrompt(undefined);
   if (timeGap) systemPrompt = [systemPrompt, timeGap].join("\n\n");
 
-  const uncertaintyOn = uncertaintyGuidanceInjected({
-    depthReason: budget.depthReason,
-    message,
-  });
-  const uncertainty = buildUncertaintyTurnGuidance({
-    depthReason: budget.depthReason,
-    message,
-  });
-  if (uncertainty) systemPrompt = [systemPrompt, uncertainty].join("\n\n");
-
   const closureOn = explicitClosureGuidanceInjected({
     depthReason: budget.depthReason,
     message,
@@ -103,7 +89,7 @@ function buildSystemPrompt(message: string, history: Turn[]) {
       safety: safety.category,
       depth: budget.depth,
       depthReason: budget.depthReason,
-      uncertaintyInjected: uncertaintyOn,
+      uncertaintyInjected: false,
       explicitClosureGuidanceInjected: closureOn,
       model: MODEL,
       closureDetector: isExplicitConversationClosure(message),
@@ -255,7 +241,6 @@ async function main() {
       "buildSurgery1BasePrompt",
       "evaluateTurnSafety",
       "analyzeResponseDepth",
-      "buildUncertaintyTurnGuidance",
       "buildExplicitClosureTurnGuidance",
       "buildTimeGapPrompt",
       "no memory/context (isolated turns)",

@@ -16,9 +16,7 @@ import { fileURLToPath } from "node:url";
 import { analyzeResponseDepth } from "../supabase/functions/_shared/responseDepthTrajectory.ts";
 import { classifyMessage } from "../supabase/functions/_shared/safety.ts";
 import { computeProcessState } from "../supabase/functions/_shared/processState.ts";
-import { openFigureGuidanceInjected } from "../supabase/functions/_shared/openFigureTurnGuidance.ts";
 import { explicitClosureGuidanceInjected } from "../supabase/functions/_shared/explicitClosureTurnGuidance.ts";
-import { uncertaintyGuidanceInjected } from "../supabase/functions/_shared/uncertaintyTurnGuidance.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CASES_PATH = resolve(__dirname, "open-figure-regression-cases.json");
@@ -105,16 +103,7 @@ function processStateFields(processState) {
 
 function analyzeRouting(message, history, safetyCategory) {
   const analysis = analyzeResponseDepth(message, safetyCategory, history);
-  const guidanceInput = {
-    openFigure: analysis.openFigure,
-    depthReason: analysis.depthReason,
-    safetyCategory,
-  };
-  const uncertaintyGuidanceOn = uncertaintyGuidanceInjected({
-    depthReason: analysis.depthReason,
-    message,
-    openFigure: { isOpen: analysis.openFigure.isOpen },
-  });
+  const uncertaintyDiagnostic = analysis.depthReason === "uncertainty_in_process";
   const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
     depthReason: analysis.depthReason,
     message,
@@ -127,7 +116,7 @@ function analyzeRouting(message, history, safetyCategory) {
     },
     depth: analysis.depth,
     explicitClosure: explicitClosureGuidanceOn,
-    uncertainty: uncertaintyGuidanceOn,
+    uncertainty: uncertaintyDiagnostic,
     recentUserTurns: analysis.recentUserTurns,
     safetyCategory,
   });
@@ -141,8 +130,9 @@ function analyzeRouting(message, history, safetyCategory) {
     openFigureIntensity: analysis.openFigure.intensity,
     openFigureConfidence: analysis.openFigure.confidence,
     recentUserTurns: analysis.recentUserTurns,
-    openFigureGuidanceInjected: openFigureGuidanceInjected(guidanceInput),
-    uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
+    openFigureGuidanceInjected: false,
+    uncertaintyGuidanceInjected: false,
+    uncertaintyDiagnostic,
     explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
     safetyCategory,
     processState,

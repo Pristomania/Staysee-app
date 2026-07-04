@@ -97,17 +97,9 @@ import {
   analyzeEmotionalTrajectory,
 } from "../_shared/responseBudget.ts";
 import {
-  buildUncertaintyTurnGuidance,
-  uncertaintyGuidanceInjected,
-} from "../_shared/uncertaintyTurnGuidance.ts";
-import {
   buildExplicitClosureTurnGuidance,
   explicitClosureGuidanceInjected,
 } from "../_shared/explicitClosureTurnGuidance.ts";
-import {
-  buildOpenFigureTurnGuidance,
-  openFigureGuidanceInjected,
-} from "../_shared/openFigureTurnGuidance.ts";
 import {
   buildPauseInArcTurnGuidance,
   pauseInArcGuidanceInjected,
@@ -1012,24 +1004,6 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
     }
 
-    const openFigureGuidance = flatOrdinary
-      ? null
-      : buildOpenFigureTurnGuidance({
-          openFigure: responseBudget.openFigure,
-          depthReason: responseBudget.depthReason,
-          safetyCategory: safety.category,
-        });
-    const openFigureGuidanceOn = flatOrdinary
-      ? false
-      : openFigureGuidanceInjected({
-          openFigure: responseBudget.openFigure,
-          depthReason: responseBudget.depthReason,
-          safetyCategory: safety.category,
-        });
-    if (openFigureGuidance) {
-      systemPrompt = [systemPrompt, openFigureGuidance].join("\n\n");
-    }
-
     const pauseInArcGuidanceInput = {
       message,
       depthReason: responseBudget.depthReason,
@@ -1044,24 +1018,6 @@ Deno.serve(async (req: Request) => {
     const pauseInArcGuidanceOn = pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
     if (pauseInArcGuidance) {
       systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
-    }
-
-    const uncertaintyGuidance = flatOrdinary
-      ? null
-      : buildUncertaintyTurnGuidance({
-          depthReason: responseBudget.depthReason,
-          message,
-          openFigure: { isOpen: responseBudget.openFigure.isOpen },
-        });
-    const uncertaintyGuidanceOn = flatOrdinary
-      ? false
-      : uncertaintyGuidanceInjected({
-          depthReason: responseBudget.depthReason,
-          message,
-          openFigure: { isOpen: responseBudget.openFigure.isOpen },
-        });
-    if (uncertaintyGuidance) {
-      systemPrompt = [systemPrompt, uncertaintyGuidance].join("\n\n");
     }
 
     if (explicitClosureGuidance) {
@@ -1091,7 +1047,7 @@ Deno.serve(async (req: Request) => {
       },
       depth: responseDepth,
       explicitClosure: explicitClosureGuidanceOn,
-      uncertainty: uncertaintyGuidanceOn,
+      uncertainty: responseBudget.depthReason === "uncertainty_in_process",
       recentUserTurns: responseBudget.recentUserTurns,
       safetyCategory: safety.category,
     });
@@ -1335,9 +1291,9 @@ Deno.serve(async (req: Request) => {
         open_figure_confidence: responseBudget.openFigure.confidence,
         open_figure_trigger: responseBudget.openFigure.trigger,
         sessionProcessGuidanceInjected: sessionProcessGuidanceOn,
-        openFigureGuidanceInjected: openFigureGuidanceOn,
+        openFigureGuidanceInjected: false,
         pauseInArcGuidanceInjected: pauseInArcGuidanceOn,
-        uncertaintyGuidanceInjected: uncertaintyGuidanceOn,
+        uncertaintyGuidanceInjected: false,
         explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
         process_contact: processState.contact,
         process_movement: processState.movement,

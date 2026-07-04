@@ -8,7 +8,6 @@ import {
   buildExplicitClosureTurnGuidance,
   explicitClosureGuidanceInjected,
 } from "./explicitClosureTurnGuidance.ts";
-import { buildUncertaintyTurnGuidance } from "./uncertaintyTurnGuidance.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -52,13 +51,6 @@ for (const phrase of EXIT_PHRASES) {
       message: phrase,
     }),
     `${phrase}: guidanceInjected`
-  );
-  assert(
-    !buildUncertaintyTurnGuidance({
-      depthReason: analysis.depthReason,
-      message: phrase,
-    }),
-    `${phrase}: uncertainty must not inject on closure`
   );
 }
 console.log(`✓ ${EXIT_PHRASES.length} exit phrases`);
