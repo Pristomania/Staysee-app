@@ -70,4 +70,16 @@ console.log("✓ closure > uncertainty on compound messages");
 assert(!isExplicitConversationClosure("Даже не знаю"), "uncertainty is not closure");
 console.log("✓ uncertainty phrases not closure");
 
+{
+  const block = buildExplicitClosureTurnGuidance({
+    depthReason: "explicit_closure",
+    message: "На сегодня всё, пока.",
+  });
+  assert(!!block, "closure guidance block");
+  assert(/буду\s+ждать/i.test(block!), "forbids буду ждать");
+  assert(/я\s+всегда\s+здесь/i.test(block!), "forbids я всегда здесь");
+  assert(/возвращайся/i.test(block!), "forbids возвращайся");
+  console.log("✓ explicit closure guidance forbids invite-back / availability");
+}
+
 console.log("\nAll explicitClosureTurnGuidance cases passed.");

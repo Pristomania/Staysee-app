@@ -30,9 +30,12 @@ const SAFETY_BRIEF_CATEGORIES: SafetyCategory[] = [
   "medical_boundary",
 ];
 
-export const PAUSE_IN_ARC_TURN_GUIDANCE_BLOCK = `Человек обозначает паузу — не закрытие разговора.
+export const PAUSE_IN_ARC_TURN_GUIDANCE_BLOCK = `Человек обозначает паузу или временный уход — не закрытие разговора.
 
-Прими паузу кратко. Не подводи итог. Не предлагай вернуться. Не обещай, что ты здесь или будешь ждать. Не произноси прощания. Не открывай новую тему. Одно-два предложения — максимум.`.trim();
+Прими паузу коротко и спокойно, без эмоционального удержания.
+Запрещено: «буду ждать», «я всегда здесь», «я здесь», «возвращайся», «вернёшься — напиши», «если захочешь», «буду рада услышать», любые availability-хвосты.
+Не подводи итог. Не предлагай продолжить. Не произноси прощания. Не открывай новую тему.
+Одно короткое предложение — максимум.`.trim();
 
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
@@ -75,12 +78,14 @@ export function isPauseDeparturePhrase(message: string): boolean {
   if (
     hasCyrToken(norm, "пойду") ||
     hasCyrToken(norm, "отойду") ||
+    /(?:^|[\s,.!?«"'(\[—–-])отойти(?=[\s,.!?»"')\]—–-]|$)/iu.test(norm) ||
     hasCyrToken(norm, "вернусь") ||
     hasCyrToken(norm, "уйду") ||
     hasCyrToken(norm, "выйду")
   ) {
     return true;
   }
+  if (/потом\s+продолжим/i.test(norm)) return true;
   if (hasCyrToken(norm, "пока") && words <= 5) return true;
   if (hasCyrToken(norm, "потом") && words <= 15) return true;
 
@@ -101,9 +106,23 @@ export function buildPauseInArcTurnGuidance(
   if (input.depthReason === "explicit_closure") return null;
   if (input.safetyCategory === "crisis") return null;
   if (SAFETY_BRIEF_CATEGORIES.includes(input.safetyCategory)) return null;
-  if (!hasEmotionalOpenContext(input)) return null;
   if (!isPauseDeparturePhrase(input.message)) return null;
+  if (!hasEmotionalOpenContext(input) && !isTemporaryDeparturePhrase(input.message)) {
+    return null;
+  }
   return PAUSE_IN_ARC_TURN_GUIDANCE_BLOCK;
+}
+
+/** Pause with return / step-away — not final conversation exit. */
+function isTemporaryDeparturePhrase(message: string): boolean {
+  const norm = message.trim().replace(/[.!?…]+$/u, "").replace(/\s+/g, " ").trim();
+  if (!norm) return false;
+  if (/^пока$/iu.test(norm)) return false;
+  if (/^на\s+сегодня\s+/iu.test(norm)) return false;
+  return (
+    /вернусь|позже|потом\s+продолжим|отойти|отойду|на\s+минуту/i.test(norm) ||
+    (/пойду/i.test(norm) && /пока|вернусь|позже|потом/i.test(norm))
+  );
 }
 
 export function pauseInArcGuidanceInjected(
