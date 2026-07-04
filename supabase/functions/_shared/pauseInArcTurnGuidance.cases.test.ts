@@ -182,11 +182,85 @@ function arcInput(message: string, history = buildEmotionalArcHistory()) {
 {
   const block = PAUSE_IN_ARC_TURN_GUIDANCE_BLOCK;
   assert(/не\s+подводи\s+итог/i.test(block), "guards summary");
-  assert(/не\s+предлагай\s+вернуться/i.test(block), "guards invite-back");
-  assert(/не\s+обещай.*здесь|будешь\s+ждать/i.test(block), "guards availability");
-  assert(/не\s+произноси\s+прощания/i.test(block), "guards farewell");
-  assert(/одно-два\s+предложения/i.test(block), "length cap");
+  assert(/буду\s+ждать/i.test(block), "forbids буду ждать");
+  assert(/я\s+всегда\s+здесь/i.test(block), "forbids я всегда здесь");
+  assert(/возвращайся/i.test(block), "forbids возвращайся");
+  assert(/без\s+эмоционального\s+удержания/i.test(block), "guards attachment");
+  assert(/одно\s+короткое\s+предложение/i.test(block), "length cap");
   console.log("✓ guidance block guards availability/farewell/summary");
+}
+
+// 9. No emotional arc — temporary departure still gets pause guidance
+{
+  const message = "Я пока пойду, вернусь позже.";
+  const history: ChatTurn[] = [];
+  const analysis = analyzeResponseDepth(message, "normal", history);
+  assert(analysis.depthReason !== "explicit_closure", "temporary departure not explicit_closure");
+  const input = {
+    message,
+    depthReason: analysis.depthReason,
+    openFigure: analysis.openFigure,
+    emotionalMomentum: analysis.emotionalMomentum,
+    shortAfterEmotional: false,
+    recentHistory: history,
+    safetyCategory: "normal" as const,
+  };
+  assert(isPauseDeparturePhrase(message), "pause phrase");
+  assert(!!buildPauseInArcTurnGuidance(input), "pause guidance without open arc");
+  console.log('✓ no arc + "Я пока пойду, вернусь позже." → pause guidance');
+}
+
+// 10. Pause phrase routing table
+{
+  const pausePhrases = [
+    "я пока пойду",
+    "вернусь позже",
+    "потом продолжим",
+    "мне надо отойти",
+  ];
+  for (const phrase of pausePhrases) {
+    assert(isPauseDeparturePhrase(phrase), `${phrase} is pause departure`);
+    const analysis = analyzeResponseDepth(phrase, "normal", []);
+    assert(
+      analysis.depthReason !== "explicit_closure",
+      `${phrase} must not be explicit_closure`
+    );
+    const input = {
+      message: phrase,
+      depthReason: analysis.depthReason,
+      openFigure: analysis.openFigure,
+      emotionalMomentum: analysis.emotionalMomentum,
+      shortAfterEmotional: false,
+      recentHistory: [],
+      safetyCategory: "normal" as const,
+    };
+    assert(!!buildPauseInArcTurnGuidance(input), `${phrase} → pause guidance`);
+  }
+  console.log("✓ pause phrase routing table");
+}
+
+// 11. Explicit closure phrases stay on closure path
+{
+  for (const phrase of ["на сегодня всё", "пока"]) {
+    const analysis = analyzeResponseDepth(phrase, "normal", []);
+    assert(
+      analysis.depthReason === "explicit_closure",
+      `${phrase} → explicit_closure`
+    );
+    assert(
+      !buildPauseInArcTurnGuidance({
+        message: phrase,
+        depthReason: analysis.depthReason,
+        openFigure: analysis.openFigure,
+        emotionalMomentum: analysis.emotionalMomentum,
+        shortAfterEmotional: false,
+        recentHistory: [],
+        safetyCategory: "normal",
+      }),
+      `${phrase} → pause guidance off`
+    );
+  }
+  console.log("✓ explicit closure phrases unchanged");
 }
 
 // Uncertainty exclusion

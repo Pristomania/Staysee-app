@@ -1,12 +1,10 @@
 /**
- * Short acknowledgement + continuation token routing (diagnostic only).
+ * Short acknowledgement routing (diagnostic only).
+ * Legacy continuation tokens (Продолжать/продолжи/дальше) are not session routing.
  * Run: npx tsx supabase/functions/_shared/shortAckRouting.cases.test.ts
  */
 
-import {
-  analyzeResponseDepth,
-  isContinuationToken,
-} from "./responseDepthTrajectory.ts";
+import { analyzeResponseDepth } from "./responseDepthTrajectory.ts";
 
 type Turn = { role: "user" | "assistant"; content: string };
 
@@ -21,30 +19,6 @@ function buildHistory(pairs: Array<[string, string?]>): Turn[] {
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
-}
-
-function expectContinuationRouting(
-  name: string,
-  message: string,
-  history: Turn[]
-): void {
-  const analysis = analyzeResponseDepth(message, "normal", history);
-  assert(
-    analysis.depthReason !== "greeting_short",
-    `${name}: expected not greeting_short, got ${analysis.depthReason}`
-  );
-  assert(
-    analysis.depthReason !== "short_neutral",
-    `${name}: expected not short_neutral, got ${analysis.depthReason}`
-  );
-  assert(analysis.openFigure.isOpen, `${name}: expected openFigure.isOpen`);
-  assert(
-    analysis.openFigure.trigger === "arc_continuation",
-    `${name}: expected arc_continuation trigger, got ${analysis.openFigure.trigger}`
-  );
-  console.log(
-    `PASS: ${name} → reason=${analysis.depthReason} trigger=${analysis.openFigure.trigger}`
-  );
 }
 
 const legacyCases: Array<{
@@ -125,33 +99,17 @@ for (const c of legacyCases) {
   );
 }
 
-console.log("\n=== continuation token routing (diagnostic) ===\n");
+console.log("\n=== legacy continuation tokens — no arc_continuation routing ===\n");
 
-const bodyShameHistory = buildHistory([
+const emotionalHistory = buildHistory([
   [
     "Мне кажется, на мне всё сидит ужасно.",
     "Понимаю, как это может быть неприятно. Можем вместе исследовать, что стоит за этими мыслями.",
   ],
 ]);
-expectContinuationRouting(
-  "body shame + Продолжать",
-  "Продолжать",
-  bodyShameHistory
-);
-
-const confusionHistory = buildHistory([
-  [
-    "Я теряюсь и не понимаю, что мне подойдёт.",
-    "Давай разберёмся вместе — что для тебя важно в выборе и где сейчас растерянность.",
-  ],
-]);
-expectContinuationRouting(
-  "confusion + Продолжать",
-  "Продолжать",
-  confusionHistory
-);
 
 for (const variant of [
+  "Продолжать",
   "продолжи",
   "продолжай",
   "дальше",
@@ -159,15 +117,20 @@ for (const variant of [
   "и?",
   "ну и?",
   "ещё",
+  "continue",
+  "go on",
 ]) {
+  const analysis = analyzeResponseDepth(variant, "normal", emotionalHistory);
   assert(
-    isContinuationToken(variant),
-    `isContinuationToken should match: ${variant}`
+    analysis.openFigure.trigger !== "arc_continuation",
+    `${variant}: must not route arc_continuation, got ${analysis.openFigure.trigger}`
   );
-  expectContinuationRouting(
-    `confusion + ${variant}`,
-    variant,
-    confusionHistory
+  console.log(
+    `PASS: ${variant} → trigger=${analysis.openFigure.trigger} reason=${analysis.depthReason}`
+  );
+  assert(
+    !analysis.openFigure.isOpen,
+    `${variant}: must not open figure in emotional arc`
   );
 }
 
@@ -192,8 +155,7 @@ for (const variant of [
     greetingOnlyHistory
   );
   assert(
-    !analysis.openFigure.isOpen ||
-      analysis.openFigure.trigger !== "arc_continuation",
+    analysis.openFigure.trigger !== "arc_continuation",
     "greeting-only prior assistant: must not open arc_continuation"
   );
   console.log("PASS: greeting-only prior assistant + Продолжать → no arc");

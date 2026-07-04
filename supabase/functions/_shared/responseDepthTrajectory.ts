@@ -117,50 +117,25 @@ function isShortAcknowledgement(text: string): boolean {
   return BRIEF_SHORT.test(text.trim());
 }
 
-function normalizeContinuationCandidate(message: string): string {
-  return message.trim().replace(/\s+/g, " ").replace(/[!?.…]+$/u, "").trim();
+/** Legacy session-continuation stubs — not psychological routing (technical auto-continue is separate). */
+const LEGACY_CONTINUATION_STUB = /^(?:продолжать|продолжи|продолжай|дальше|давай\s+дальше|и\?|ну\s+и\?|ещё|continue|go\s+on)$/iu;
+
+function isLegacyContinuationStub(message: string): boolean {
+  const norm = message.trim().replace(/\s+/g, " ").replace(/[!?.…]+$/u, "").trim();
+  return LEGACY_CONTINUATION_STUB.test(norm);
 }
 
-const CONTINUATION_TOKEN_PATTERNS: RegExp[] = [
-  /^продолжать$/iu,
-  /^продолжи$/iu,
-  /^продолжай$/iu,
-  /^дальше$/iu,
-  /^давай\s+дальше$/iu,
-  /^и$/iu,
-  /^ну\s+и$/iu,
-  /^ещё$/iu,
-  /^continue$/iu,
-  /^go\s+on$/iu,
-];
-
-/** Explicit arc continuation request — separate from brief ack tokens (да/угу). */
-export function isContinuationToken(message: string): boolean {
-  const norm = normalizeContinuationCandidate(message);
-  if (!norm) return false;
-  return CONTINUATION_TOKEN_PATTERNS.some((p) => p.test(norm));
-}
-
-function isArcContinuationInActiveConversation(
-  message: string,
-  recentHistory: ChatTurn[]
-): boolean {
-  const trimmed = message.trim();
-  if (!isShortAcknowledgement(trimmed) && !isContinuationToken(trimmed)) {
-    return false;
-  }
-  const lastAssistant = lastAssistantContent(recentHistory);
-  if (!lastAssistant) return false;
-  if (isPureGreetingOnlyAssistant(lastAssistant)) return false;
-  return true;
-}
-
-/** Short ack after a real assistant turn — continue arc, not greeting reset. */
+/** Short ack after a real assistant turn — not an isolated greeting reset. */
 function isShortAckInActiveConversation(
   message: string,
   recentHistory: ChatTurn[]
 ): boolean {
-  return isArcContinuationInActiveConversation(message, recentHistory);
+  const trimmed = message.trim();
+  if (!isShortAcknowledgement(trimmed)) return false;
+  const lastAssistant = lastAssistantContent(recentHistory);
+  if (!lastAssistant) return false;
+  if (isPureGreetingOnlyAssistant(lastAssistant)) return false;
+  return true;
 }
 
 function shouldClassifyGreetingShort(
@@ -174,9 +149,6 @@ function shouldClassifyGreetingShort(
   }
   if (isShortAcknowledgement(trimmed)) {
     return !isShortAckInActiveConversation(trimmed, recentHistory);
-  }
-  if (isContinuationToken(trimmed)) {
-    return !isArcContinuationInActiveConversation(trimmed, recentHistory);
   }
   return false;
 }
@@ -414,7 +386,6 @@ function inferOpenFigureIntensity(
   if (trigger === "strong_uncertainty" || trigger === "short_emotional") {
     return distressMarkers >= 2 ? "high" : "medium";
   }
-  if (trigger === "arc_continuation") return "medium";
   return "low";
 }
 
@@ -450,29 +421,21 @@ export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureStat
 
   const priorTurns = input.trajectory.recentUserTurns.slice(0, -1);
   const lastAssistant = lastAssistantContent(input.recentHistory);
-  const shortAckContinuation =
-    (isShortAcknowledgement(trimmed) || isContinuationToken(trimmed)) &&
+  const shortAckInArc =
+    isShortAcknowledgement(trimmed) &&
     !!lastAssistant &&
     !isPureGreetingOnlyAssistant(lastAssistant) &&
     priorTurns.length > 0;
   const emotionalHits = detectShortEmotional(trimmed);
   const uncertaintyHits = detectStrongUncertaintyInfix(trimmed);
   const relationalHits = detectRelationalCharge(trimmed);
-  const arcContinuation =
-    trimmed.length < 100 &&
-    priorTurns.length > 0 &&
-    (shortAckContinuation ||
-      (hasSubstantivePriorArc(priorTurns) &&
-        (turnHasEmotionalSignal(trimmed) ||
-          input.trajectory.shortAfterEmotional ||
-          uncertaintyHits.length > 0)));
 
   const evidence = [
     ...emotionalHits,
     ...uncertaintyHits,
     ...relationalHits,
   ];
-  if (arcContinuation) evidence.push("arc_continuation");
+  if (shortAckInArc) evidence.push("short_ack_in_arc");
   if (input.trajectory.emotionalMomentum) evidence.push("emotional_momentum");
 
   let trigger: OpenFigureTrigger = "none";
@@ -485,8 +448,18 @@ export function analyzeOpenFigure(input: AnalyzeOpenFigureInput): OpenFigureStat
     trigger = "relational_charge";
   } else if (input.trajectory.emotionalMomentum) {
     trigger = "emotional_momentum";
-  } else if (arcContinuation) {
-    trigger = "arc_continuation";
+  } else if (shortAckInArc) {
+    trigger = input.trajectory.emotionalMomentum
+      ? "emotional_momentum"
+      : "short_emotional";
+  } else if (
+    input.trajectory.shortAfterEmotional &&
+    priorTurns.length > 0 &&
+    hasSubstantivePriorArc(priorTurns) &&
+    !isLegacyContinuationStub(trimmed)
+  ) {
+    trigger = "short_emotional";
+    evidence.push("short_after_emotional");
   } else if (emotionalHits.length > 0) {
     trigger = "short_emotional";
   }
