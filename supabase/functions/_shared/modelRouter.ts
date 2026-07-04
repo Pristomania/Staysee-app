@@ -17,11 +17,20 @@ export interface ModelRouteInput {
   safetyCategory: SafetyCategory;
   /** Explicit override from request body (dev / A-B only). */
   requestModel?: string;
+  /** Core V2 flat ordinary runtime — gpt-4o primary regardless of depth. */
+  flatOrdinary?: boolean;
 }
 
 export interface ModelRouteResult {
   model: string;
-  source: "request" | "crisis" | "brief" | "medium" | "deep" | "default";
+  source:
+    | "request"
+    | "crisis"
+    | "brief"
+    | "medium"
+    | "deep"
+    | "default"
+    | "flat_ordinary";
   /** Alternate model on the same provider — tried if primary model returns error. */
   fallbackModel?: string;
 }
@@ -57,6 +66,15 @@ export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
       envModel("STAYSEE_CHAT_MODEL") ??
       DEFAULT_CRISIS;
     return { model, source: "crisis", fallbackModel: DEFAULT_DEEP };
+  }
+
+  if (input.flatOrdinary) {
+    const model =
+      envModel("STAYSEE_CHAT_MODEL_BRIEF") ??
+      envModel("STAYSEE_CHAT_MODEL_MEDIUM") ??
+      envModel("STAYSEE_CHAT_MODEL") ??
+      DEFAULT_BRIEF;
+    return { model, source: "flat_ordinary", fallbackModel: DEFAULT_FALLBACK };
   }
 
   const legacy = envModel("STAYSEE_CHAT_MODEL");
