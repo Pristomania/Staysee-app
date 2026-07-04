@@ -3,7 +3,7 @@
  *
  * Order (legacy): IDENTITY → PROCESS CORE → CONSTITUTION V3 Beta → COGNITIVE SIGNATURE V1 → VOICE → CONSTRAINTS
  *
- * STAYSEE_PROMPT_CORE=v1 routes to stayseeCorePrompt.ts; default legacy unchanged.
+ * STAYSEE_PROMPT_CORE=v1 routes to stayseeCorePrompt.ts; v2 routes to stayseeCorePromptV2GptsSource.ts; default legacy unchanged.
  */
 
 import { COGNITIVE_SIGNATURE_V1 } from "./promptBlocks/cognitiveSignature.ts";
@@ -12,6 +12,7 @@ import { PROCESS_CORE } from "./promptBlocks/processCore.ts";
 import { VOICE_BLOCK } from "./promptBlocks/voiceBlock.ts";
 import { getPromptCoreMode } from "./promptCore/promptCoreMode.ts";
 import { buildStayseeCorePrompt } from "./promptCore/stayseeCorePrompt.ts";
+import { buildStayseeCorePromptV2GptsSource } from "./promptCore/stayseeCorePromptV2GptsSource.ts";
 
 export const SURGERY1_LAYER_ID = "surgery1-v3-cognitive-v1-process-core";
 
@@ -58,8 +59,12 @@ export function buildLegacySurgery1BasePrompt(): string {
 export function buildSurgery1BasePrompt(
   readEnv?: () => string | undefined
 ): string {
-  if (getPromptCoreMode(readEnv) === "v1") {
+  const mode = getPromptCoreMode(readEnv);
+  if (mode === "v1") {
     return buildStayseeCorePrompt();
+  }
+  if (mode === "v2") {
+    return buildStayseeCorePromptV2GptsSource();
   }
   return buildLegacySurgery1BasePrompt();
 }

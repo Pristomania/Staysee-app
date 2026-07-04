@@ -1,9 +1,12 @@
 /**
- * Short acknowledgement routing — must not reset greeting inside active conversation.
+ * Short acknowledgement + continuation token routing.
  * Run: npx tsx supabase/functions/_shared/shortAckRouting.cases.test.ts
  */
 
-import { analyzeResponseDepth } from "./responseDepthTrajectory.ts";
+import {
+  analyzeResponseDepth,
+  isContinuationToken,
+} from "./responseDepthTrajectory.ts";
 import { buildOpenFigureTurnGuidance } from "./openFigureTurnGuidance.ts";
 
 type Turn = { role: "user" | "assistant"; content: string };
@@ -21,7 +24,45 @@ function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 
-const cases: Array<{
+function expectContinuationRouting(
+  name: string,
+  message: string,
+  history: Turn[]
+): void {
+  const analysis = analyzeResponseDepth(message, "normal", history);
+  assert(
+    analysis.depthReason !== "greeting_short",
+    `${name}: expected not greeting_short, got ${analysis.depthReason}`
+  );
+  assert(
+    analysis.depthReason !== "short_neutral",
+    `${name}: expected not short_neutral, got ${analysis.depthReason}`
+  );
+  assert(analysis.openFigure.isOpen, `${name}: expected openFigure.isOpen`);
+  assert(
+    analysis.openFigure.trigger === "arc_continuation",
+    `${name}: expected arc_continuation trigger, got ${analysis.openFigure.trigger}`
+  );
+  const guidance = buildOpenFigureTurnGuidance({
+    openFigure: analysis.openFigure,
+    depthReason: analysis.depthReason,
+    safetyCategory: "normal",
+  });
+  assert(Boolean(guidance), `${name}: expected guidance`);
+  assert(
+    /продолжение\s+дуги/i.test(guidance!),
+    `${name}: expected arc continuation guidance`
+  );
+  assert(
+    /не спрашивай.*о чём поговорим/i.test(guidance!),
+    `${name}: guidance must forbid generic topic reset`
+  );
+  console.log(
+    `PASS: ${name} → reason=${analysis.depthReason} open=${analysis.openFigure.isOpen}`
+  );
+}
+
+const legacyCases: Array<{
   name: string;
   message: string;
   history: Turn[];
@@ -77,7 +118,7 @@ const cases: Array<{
 
 console.log("=== short ack routing ===\n");
 
-for (const c of cases) {
+for (const c of legacyCases) {
   const analysis = analyzeResponseDepth(c.message, "normal", c.history);
   if (c.notGreetingShort) {
     assert(
@@ -113,6 +154,80 @@ for (const c of cases) {
   console.log(
     `PASS: ${c.name} → reason=${analysis.depthReason} open=${analysis.openFigure.isOpen}`
   );
+}
+
+console.log("\n=== continuation token routing ===\n");
+
+const bodyShameHistory = buildHistory([
+  [
+    "Мне кажется, на мне всё сидит ужасно.",
+    "Понимаю, как это может быть неприятно. Можем вместе исследовать, что стоит за этими мыслями.",
+  ],
+]);
+expectContinuationRouting(
+  "body shame + Продолжать",
+  "Продолжать",
+  bodyShameHistory
+);
+
+const confusionHistory = buildHistory([
+  [
+    "Я теряюсь и не понимаю, что мне подойдёт.",
+    "Давай разберёмся вместе — что для тебя важно в выборе и где сейчас растерянность.",
+  ],
+]);
+expectContinuationRouting(
+  "confusion + Продолжать",
+  "Продолжать",
+  confusionHistory
+);
+
+for (const variant of [
+  "продолжи",
+  "продолжай",
+  "дальше",
+  "давай дальше",
+  "и?",
+  "ну и?",
+  "ещё",
+]) {
+  assert(
+    isContinuationToken(variant),
+    `isContinuationToken should match: ${variant}`
+  );
+  expectContinuationRouting(
+    `confusion + ${variant}`,
+    variant,
+    confusionHistory
+  );
+}
+
+{
+  const analysis = analyzeResponseDepth("Продолжать", "normal", []);
+  assert(
+    !analysis.openFigure.isOpen,
+    "isolated Продолжать: openFigure must stay closed"
+  );
+  assert(
+    analysis.openFigure.trigger !== "arc_continuation",
+    "isolated Продолжать: must not invent arc_continuation"
+  );
+  console.log("PASS: isolated Продолжать → no arc without prior context");
+}
+
+{
+  const greetingOnlyHistory = buildHistory([["привет", "Привет!"]]);
+  const analysis = analyzeResponseDepth(
+    "Продолжать",
+    "normal",
+    greetingOnlyHistory
+  );
+  assert(
+    !analysis.openFigure.isOpen ||
+      analysis.openFigure.trigger !== "arc_continuation",
+    "greeting-only prior assistant: must not open arc_continuation"
+  );
+  console.log("PASS: greeting-only prior assistant + Продолжать → no arc");
 }
 
 console.log("\nAll short ack routing cases passed.");
