@@ -118,6 +118,7 @@ import {
   userGenderGuidanceInjected,
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
+import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
 import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import {
   ensurePublishableReply,
@@ -977,11 +978,14 @@ Deno.serve(async (req: Request) => {
 
     // ── L7: Dynamic response budget + model call ─────────────────────────────
 
+    const flatOrdinary = isFlatCoreV2OrdinaryRuntime(safety.category);
+
     const responseBudget = computeResponseBudget(
       message,
       safety.category,
       modelMessages,
-      userTier
+      userTier,
+      { flatOrdinary },
     );
     let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
 
@@ -1008,16 +1012,20 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
     }
 
-    const openFigureGuidance = buildOpenFigureTurnGuidance({
-      openFigure: responseBudget.openFigure,
-      depthReason: responseBudget.depthReason,
-      safetyCategory: safety.category,
-    });
-    const openFigureGuidanceOn = openFigureGuidanceInjected({
-      openFigure: responseBudget.openFigure,
-      depthReason: responseBudget.depthReason,
-      safetyCategory: safety.category,
-    });
+    const openFigureGuidance = flatOrdinary
+      ? null
+      : buildOpenFigureTurnGuidance({
+          openFigure: responseBudget.openFigure,
+          depthReason: responseBudget.depthReason,
+          safetyCategory: safety.category,
+        });
+    const openFigureGuidanceOn = flatOrdinary
+      ? false
+      : openFigureGuidanceInjected({
+          openFigure: responseBudget.openFigure,
+          depthReason: responseBudget.depthReason,
+          safetyCategory: safety.category,
+        });
     if (openFigureGuidance) {
       systemPrompt = [systemPrompt, openFigureGuidance].join("\n\n");
     }
@@ -1038,16 +1046,20 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
     }
 
-    const uncertaintyGuidance = buildUncertaintyTurnGuidance({
-      depthReason: responseBudget.depthReason,
-      message,
-      openFigure: { isOpen: responseBudget.openFigure.isOpen },
-    });
-    const uncertaintyGuidanceOn = uncertaintyGuidanceInjected({
-      depthReason: responseBudget.depthReason,
-      message,
-      openFigure: { isOpen: responseBudget.openFigure.isOpen },
-    });
+    const uncertaintyGuidance = flatOrdinary
+      ? null
+      : buildUncertaintyTurnGuidance({
+          depthReason: responseBudget.depthReason,
+          message,
+          openFigure: { isOpen: responseBudget.openFigure.isOpen },
+        });
+    const uncertaintyGuidanceOn = flatOrdinary
+      ? false
+      : uncertaintyGuidanceInjected({
+          depthReason: responseBudget.depthReason,
+          message,
+          openFigure: { isOpen: responseBudget.openFigure.isOpen },
+        });
     if (uncertaintyGuidance) {
       systemPrompt = [systemPrompt, uncertaintyGuidance].join("\n\n");
     }
@@ -1066,6 +1078,7 @@ Deno.serve(async (req: Request) => {
       depth: responseDepth,
       safetyCategory: safety.category,
       requestModel: reqModel,
+      flatOrdinary,
     });
     const turnModel = modelRoute.model;
 
@@ -1108,7 +1121,7 @@ Deno.serve(async (req: Request) => {
 
     // ── Reply completion routes ─────────────────────────────────────────────
     const firstSegmentContent = result.content?.trim() ?? "";
-    const segmentBudget = continuationTokenBudget(userTier, responseDepth);
+    const segmentBudget = continuationTokenBudget(userTier, responseDepth, flatOrdinary);
 
     const recovery = await runReplyRecoveryRoutes({
       firstSegment: {
@@ -1310,6 +1323,8 @@ Deno.serve(async (req: Request) => {
 
     console.log(
       `[staysee-chat] depth_meta=${JSON.stringify({
+        runtimeMode: flatOrdinary ? "core_v2_flat_ordinary" : "depth_routed",
+        depthDiagnosticOnly: flatOrdinary,
         depth: responseDepth,
         depthReason: responseBudget.depthReason,
         recentUserTurns: responseBudget.recentUserTurns,

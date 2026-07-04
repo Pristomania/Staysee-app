@@ -10,6 +10,22 @@ import {
   type SafetyCategory,
 } from "./responseDepthTrajectory.ts";
 
+const TIER_CEILING = { free: 1600, basic: 1200, premium: 1800 } as const;
+const DEPTH_TOKEN_TARGET = { brief: 380, medium: 900, deep: 1600 } as const;
+const OUTPUT_TOKEN_CEILING_GUIDANCE =
+  "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
+
+function legacyBudgetMaxTokens(
+  depth: ResponseDepth,
+  tier: keyof typeof TIER_CEILING,
+): number {
+  return Math.min(TIER_CEILING[tier], DEPTH_TOKEN_TARGET[depth]);
+}
+
+function flatBudgetMaxTokens(tier: keyof typeof TIER_CEILING): number {
+  return TIER_CEILING[tier];
+}
+
 type Turn = { role: "user" | "assistant"; content: string };
 
 /** Pre-trajectory router (length-only baseline). */
@@ -236,3 +252,53 @@ if (failed > 0) {
 }
 
 console.log("All cases passed.");
+
+console.log("\n=== responseBudget flat ordinary ceiling ===\n");
+
+let flatFailed = 0;
+function flatAssert(condition: boolean, message: string): void {
+  if (!condition) {
+    console.log(`FAIL: ${message}`);
+    flatFailed++;
+    return;
+  }
+  console.log(`PASS: ${message}`);
+}
+
+const deepMsg =
+  "Мне так тревожно последние недели, я не могу спать, постоянно думаю что со мной не так и боюсь что всё рухнет";
+
+for (const [depthLabel, msg] of [
+  ["brief", "Привет"],
+  ["medium", "устала"],
+  ["deep", deepMsg],
+] as const) {
+  const analysis = analyzeResponseDepth(msg, "normal", []);
+  const legacy = legacyBudgetMaxTokens(analysis.depth, "free");
+  const flat = flatBudgetMaxTokens("free");
+  flatAssert(flat === 1600, `flat ${depthLabel} free → 1600 ceiling`);
+  flatAssert(
+    flat !== legacy || depthLabel === "deep",
+    `flat ${depthLabel} ≠ legacy depth target when not deep`,
+  );
+  if (depthLabel === "brief") flatAssert(legacy === 380, "legacy brief still 380 for comparison");
+  if (depthLabel === "medium") flatAssert(legacy === 900, "legacy medium still 900 for comparison");
+}
+
+flatAssert(
+  OUTPUT_TOKEN_CEILING_GUIDANCE.includes("ceiling is a boundary, not a requested response length"),
+  "OUTPUT_TOKEN_CEILING_GUIDANCE unchanged",
+);
+flatAssert(TIER_CEILING.premium === 1800, "premium ceiling configured");
+flatAssert(flatBudgetMaxTokens("premium") === 1800, "flat premium uses tier ceiling");
+flatAssert(
+  flatBudgetMaxTokens("basic") === TIER_CEILING.basic,
+  "flat basic uses tier ceiling",
+);
+
+if (flatFailed > 0) {
+  console.error(`\n${flatFailed} flat budget case(s) failed`);
+  process.exit(1);
+}
+
+console.log("\nAll flat budget cases passed.");
