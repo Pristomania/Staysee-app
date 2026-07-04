@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -41,6 +41,10 @@ import {
 } from '../../lib/chatCaptureTriggers';
 import type { SelfNoteKind } from '../../lib/reflectionCopy';
 import { messagesForConversation } from '../../lib/chatNavigation';
+import {
+  isPrivacyNoticeAccepted,
+  markPrivacyNoticeAccepted,
+} from '../../lib/privacyNotice';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -138,6 +142,7 @@ export function ChatScreen() {
   const [roomMessages, setRoomMessages] = useState<Message[]>([]);
   const [isNewRoom, setIsNewRoom] = useState(false);
   const [guidedOpen, setGuidedOpen] = useState(false);
+  const [privacyNoticeAccepted, setPrivacyNoticeAccepted] = useState(false);
   const [stream, setStream] = useState<StreamState>(EMPTY_STREAM);
   const [captureNudge, setCaptureNudge] = useState<{
     kind: 'notes';
@@ -206,6 +211,21 @@ export function ChatScreen() {
   );
 
   const isEmptyConversation = isNewRoom && roomMessages.length <= 1 && roomMessages[0]?.id === 'greeting';
+
+  const showPrivacyNotice =
+    isEmptyConversation &&
+    !!currentConversation?.id &&
+    !privacyNoticeAccepted &&
+    !sending;
+
+  const handleAcceptPrivacyNotice = useCallback(() => {
+    if (!user?.id || !currentConversation?.id) return;
+    markPrivacyNoticeAccepted({
+      userId: user.id,
+      conversationId: currentConversation.id,
+    });
+    setPrivacyNoticeAccepted(true);
+  }, [user?.id, currentConversation?.id]);
 
   // ── Scroll — messages live in their own pane (not window) ─────────────────────
 
@@ -362,7 +382,16 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (inputValue.trim() && guidedOpen) setGuidedOpen(false);
-  }, [inputValue]);
+  }, [inputValue, guidedOpen]);
+
+  useEffect(() => {
+    const convId = currentConversation?.id;
+    if (!convId) {
+      setPrivacyNoticeAccepted(false);
+      return;
+    }
+    setPrivacyNoticeAccepted(isPrivacyNoticeAccepted(convId));
+  }, [currentConversation?.id]);
 
   useEffect(() => {
     return () => {
@@ -1081,6 +1110,32 @@ export function ChatScreen() {
         >
           <div className={`${LAYOUT_CONTAINER_CLASS} py-3 pb-safe`}>
 
+            {/* Privacy notice — new empty chat only, client UI (not in AI history) */}
+            {showPrivacyNotice && (
+              <div
+                className={`mb-3 rounded-xl border ${theme.border} ${theme.surface} px-4 py-3 flex items-start gap-3`}
+                role="note"
+                aria-live="polite"
+              >
+                <Shield
+                  className={`w-4 h-4 mt-0.5 shrink-0 ${theme.textSecondary} opacity-80`}
+                  strokeWidth={1.5}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className={`${theme.textSecondary} text-xs font-light leading-relaxed`}>
+                    Не отправляйте в чат данные банковских карт, паспортов, пароли и коды доступа.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAcceptPrivacyNotice}
+                    className={`mt-2.5 px-3 py-1.5 rounded-lg border text-xs font-light transition-all duration-200 ${theme.border} ${theme.surfaceHover} ${theme.textSecondary} hover:opacity-90`}
+                  >
+                    Понятно
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Guided prompt panel */}
             <div
               className={`overflow-hidden transition-all duration-300 ease-in-out ${
@@ -1113,12 +1168,18 @@ export function ChatScreen() {
             </div>
 
             {/* "Don't know where to start" hint */}
-            {isEmptyConversation && !guidedOpen && !inputValue && (
-              <div className="flex justify-center mb-2.5">
+            {isEmptyConversation && !guidedOpen && !inputValue && !showPrivacyNotice && (
+              <div className="flex justify-center mb-3">
                 <button
+                  type="button"
                   onClick={() => setGuidedOpen(true)}
-                  className={`${theme.textMuted} text-xs font-light opacity-50 hover:opacity-80 transition-opacity duration-200`}
+                  className={`
+                    inline-flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-200
+                    ${theme.border} ${theme.surface} ${theme.surfaceHover}
+                    ${theme.textSecondary} text-xs font-light opacity-90 hover:opacity-100
+                  `}
                 >
+                  <Feather className="w-3.5 h-3.5 opacity-75" strokeWidth={1.5} />
                   Не знаю, с чего начать
                 </button>
               </div>

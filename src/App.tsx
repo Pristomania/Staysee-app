@@ -11,7 +11,6 @@ import {
   MainScreen,
   ChatScreen,
   ProfileScreen,
-  OnboardingScreen,
   MemoryScreen,
   ConversationDynamicsScreen,
   ConversationNotesScreen,
@@ -26,7 +25,7 @@ const PUBLIC_SCREENS = ['welcome', 'login', 'register', 'terms', 'privacy', 'dis
 const AUTH_ENTRY_SCREENS = ['welcome', 'login', 'register'] as const;
 
 function AppContent() {
-  const { user, profile, loading, passwordRecoveryPending, emergencyResetAuth } = useAuth();
+  const { user, loading, passwordRecoveryPending, emergencyResetAuth } = useAuth();
   const {
     currentScreen,
     currentConversation,
@@ -92,13 +91,6 @@ function AppContent() {
       return;
     }
 
-    if (profile && profile.onboarding_completed === false) {
-      if (AUTH_ENTRY_SCREENS.includes(currentScreen as (typeof AUTH_ENTRY_SCREENS)[number])) {
-        replaceNavigation('onboarding');
-        return;
-      }
-    }
-
     if (AUTH_ENTRY_SCREENS.includes(currentScreen as (typeof AUTH_ENTRY_SCREENS)[number])) {
       replaceNavigation('main');
     }
@@ -108,7 +100,6 @@ function AppContent() {
     }
   }, [
     user,
-    profile,
     loading,
     passwordRecoveryPending,
     currentScreen,
@@ -159,7 +150,6 @@ function AppContent() {
       case 'login':     return <LoginScreen />;
       case 'reset-password': return <ResetPasswordScreen />;
       case 'register':    return <RegisterScreen />;
-      case 'onboarding':  return user ? <OnboardingScreen /> : <WelcomeScreen />;
       case 'main':        return user ? <MainScreen /> : <WelcomeScreen />;
       case 'chat':      return user ? <ChatScreen /> : <WelcomeScreen />;
       case 'profile':   return user ? <ProfileScreen /> : <WelcomeScreen />;

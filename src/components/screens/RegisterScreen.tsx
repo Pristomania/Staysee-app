@@ -63,7 +63,7 @@ export function RegisterScreen() {
         );
         return;
       }
-      // status === 'session' — App переключит экран на main / onboarding
+      // status === 'session' — App переключит экран на main
     } catch {
       setError(mapSignUpError('auth_timeout'));
     } finally {

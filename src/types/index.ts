@@ -51,7 +51,6 @@ export type Screen =
   | 'login'
   | 'reset-password'
   | 'register'
-  | 'onboarding'
   | 'main'
   | 'chat'
   | 'profile'
