@@ -63,16 +63,23 @@ const DEPTH_TOKEN_TARGET: Record<ResponseDepth, number> = {
   deep: 1600,
 };
 
+export interface ResponseBudgetOptions {
+  /** Core V2 flat ordinary runtime — tier ceiling only, depth diagnostic-only. */
+  flatOrdinary?: boolean;
+}
+
 export function computeResponseBudget(
   message: string,
   safetyCategory: SafetyCategory,
   recentHistory: Array<{ role: string; content: string }>,
-  tier: UsageTier
+  tier: UsageTier,
+  options: ResponseBudgetOptions = {},
 ): ResponseBudget {
   const analysis = analyzeResponseDepth(message, safetyCategory, recentHistory);
   const tierCeiling = TIER_CONFIG[tier].maxTokensOutput;
-  const target = DEPTH_TOKEN_TARGET[analysis.depth];
-  const maxTokens = Math.min(tierCeiling, target);
+  const maxTokens = options.flatOrdinary
+    ? tierCeiling
+    : Math.min(tierCeiling, DEPTH_TOKEN_TARGET[analysis.depth]);
 
   return { ...analysis, maxTokens };
 }
@@ -81,8 +88,12 @@ export function computeResponseBudget(
 export function continuationTokenBudget(
   tier: UsageTier,
   depth: ResponseDepth = "medium",
+  flatOrdinary = false,
 ): number {
   const tierCeiling = TIER_CONFIG[tier].maxTokensOutput;
+  if (flatOrdinary) {
+    return Math.min(tierCeiling, Math.max(280, Math.floor(tierCeiling * 0.55)));
+  }
   const target = Math.floor(DEPTH_TOKEN_TARGET[depth] * 0.55);
   return Math.min(tierCeiling, Math.max(280, target));
 }
