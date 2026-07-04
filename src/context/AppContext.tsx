@@ -73,7 +73,6 @@ const AUTHENTICATED_SCREENS: Screen[] = [
   'memory',
   'conversation-dynamics',
   'conversation-notes',
-  'onboarding',
   'reset-password',
 ];
 

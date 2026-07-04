@@ -6,7 +6,6 @@ export { RegisterScreen } from './RegisterScreen';
 export { MainScreen } from './MainScreen';
 export { ChatScreen } from './ChatScreen';
 export { ProfileScreen } from './ProfileScreen';
-export { OnboardingScreen } from './OnboardingScreen';
 export { MemoryScreen } from './MemoryScreen';
 export { ConversationDynamicsScreen } from './ConversationDynamicsScreen';
 export { ConversationNotesScreen } from './ConversationNotesScreen';
