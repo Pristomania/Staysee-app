@@ -8,8 +8,12 @@ import type { Conversation } from '../../types';
 import { formatRelativeTime, GREETING } from './ChatScreen';
 import { AppContainer } from '../layout';
 import { filterVisibleConversations } from '../../lib/conversationFilters';
-
-const MAX_ROOMS = 5;
+import {
+  canCreateRoom,
+  getConversationFetchLimit,
+  getMaxRooms,
+  hasUnlimitedRooms,
+} from '../../lib/roomLimits';
 
 interface Modal {
   type: 'rename' | 'delete';
@@ -71,7 +75,7 @@ export function MainScreen() {
       .eq('user_id', user!.id)
       .eq('is_active', true)
       .order('last_message_at', { ascending: false })
-      .limit(MAX_ROOMS + 1);
+      .limit(getConversationFetchLimit(user!.id));
     setConversations(filterVisibleConversations(data || []));
     setLoading(false);
   }
@@ -91,7 +95,7 @@ export function MainScreen() {
   }
 
   async function createNewRoom() {
-    if (conversations.length >= MAX_ROOMS) {
+    if (!canCreateRoom(user?.id, conversations.length)) {
       setLimitReached(true);
       setTimeout(() => setLimitReached(false), 4000);
       return;
@@ -168,7 +172,7 @@ export function MainScreen() {
         </div>
 
       {/* Limit notice */}
-      {limitReached && (
+      {limitReached && !hasUnlimitedRooms(user?.id) && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
             Пока можно открыть до пяти бесед. Можно вернуться в одну из уже начатых.
@@ -266,7 +270,7 @@ export function MainScreen() {
               );
             })}
 
-            {conversations.length < MAX_ROOMS && (
+            {conversations.length < getMaxRooms(user?.id) && (
               <button
                 type="button"
                 onClick={createNewRoom}
