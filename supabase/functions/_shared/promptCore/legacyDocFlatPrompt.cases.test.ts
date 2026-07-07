@@ -18,7 +18,9 @@ import {
   resolveV2Document,
 } from "./promptCoreMode.ts";
 import {
+  buildLegacyDocFlatCleanPrompt,
   buildLegacyDocFlatPrompt,
+  LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
   LEGACY_DOC_FLAT_LAYER_ID,
 } from "./legacyDocFlatPrompt.ts";
 import {
@@ -49,6 +51,7 @@ const docNone = () => undefined as string | undefined;
 const docEmpty = () => "" as string | undefined;
 const docUnknown = () => "something_else" as string | undefined;
 const docLegacy = () => "legacy_doc_flat" as string | undefined;
+const docClean = () => "legacy_doc_flat_clean" as string | undefined;
 
 // ── A. Doc flag parsing ──────────────────────────────────────────────────────
 
@@ -59,7 +62,12 @@ assert(
   parsePromptCoreDoc("legacy_doc_flat") === "legacy_doc_flat",
   "legacy_doc_flat opts in",
 );
+assert(
+  parsePromptCoreDoc("legacy_doc_flat_clean") === "legacy_doc_flat_clean",
+  "legacy_doc_flat_clean opts in",
+);
 assert(getPromptCoreDoc(docLegacy) === "legacy_doc_flat", "getter legacy_doc_flat");
+assert(getPromptCoreDoc(docClean) === "legacy_doc_flat_clean", "getter legacy_doc_flat_clean");
 assert(getPromptCoreDoc(docUnknown) === "gpts_source", "getter unknown → gpts_source");
 
 console.log("✓ A. doc flag parsing");
@@ -194,6 +202,97 @@ assert(
 );
 
 console.log("✓ F. v1 / legacy unchanged");
+
+// ── G. legacy_doc_flat_clean variant ─────────────────────────────────────────
+
+const cleanText = buildLegacyDocFlatCleanPrompt();
+
+assert(
+  resolveV2Document(docClean).layerId === LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
+  "legacy_doc_flat_clean → layer staysee-legacy-doc-flat-clean",
+);
+assert(
+  LEGACY_DOC_FLAT_CLEAN_LAYER_ID === "staysee-legacy-doc-flat-clean",
+  "clean layer id literal",
+);
+assert(
+  resolveV2Document(docClean).text === cleanText,
+  "legacy_doc_flat_clean → text is clean doc",
+);
+assert(
+  resolveActivePromptLayerId(envV2, docClean) === LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
+  "resolveActivePromptLayerId(v2, clean) → staysee-legacy-doc-flat-clean",
+);
+assert(
+  getPromptAuditVersion(envV2, docClean) === LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
+  "prompt_version under clean → staysee-legacy-doc-flat-clean",
+);
+assert(
+  buildSurgery1BasePrompt(envV2, docClean) === cleanText,
+  "buildSurgery1BasePrompt(v2, clean) === buildLegacyDocFlatCleanPrompt()",
+);
+
+// clean = legacy_doc_flat base + adaptation block (base reused verbatim)
+assert(
+  cleanText.startsWith(legacyDocText),
+  "clean doc begins with the exact legacy_doc_flat base",
+);
+assert(cleanText.length > legacyDocText.length, "clean doc adds content over base");
+assert(cleanText !== legacyDocText, "clean differs from legacy_doc_flat");
+assert(cleanText !== gptsSourceText, "clean differs from gpts-source");
+
+// all 3 adaptation headings + rule anchors present
+const cleanAdaptationAnchors: string[] = [
+  "ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ",
+  "1. Незнание и бессилие.",
+  "не возвращай ему задачу найти ответ",
+  "2. Практические вопросы.",
+  "не начинай с длинного списка",
+  "3. Пауза и завершение.",
+  "без хвоста доступности",
+];
+for (const anchor of cleanAdaptationAnchors) {
+  assert(cleanText.includes(anchor), `clean adaptation anchor: ${anchor}`);
+}
+
+// clean still carries base layers
+assert(
+  cleanText.includes("Диагнозы, симптомы, лекарства — область врача"),
+  "clean keeps presence medical-boundary line",
+);
+assert(cleanText.includes("# ЯДРО ПРОЦЕССА"), "clean keeps process/contact layer");
+
+// legacy_doc_flat MUST NOT contain the adaptation block (unchanged)
+assert(
+  !legacyDocText.includes("ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
+  "legacy_doc_flat unchanged (no adaptation block)",
+);
+assert(
+  buildLegacyDocFlatPrompt() === legacyDocText,
+  "legacy_doc_flat builder output unchanged",
+);
+
+// default gpts-source unchanged with clean flag; runtime/model orthogonal
+assert(getPromptCoreMode(envV2) === "v2", "core mode stays v2 with clean flag");
+assert(
+  isFlatCoreV2OrdinaryRuntime("normal", envV2) === true,
+  "flat ordinary runtime active with clean flag (orthogonal)",
+);
+const routeClean = resolveChatModel({
+  depth: "deep",
+  safetyCategory: "normal",
+  flatOrdinary: true,
+});
+assert(
+  routeClean.model === APPROVED_MODEL_GPT4O && routeClean.source === "flat_ordinary",
+  "model router unchanged with clean flag (gpt-4o)",
+);
+assert(
+  resolveActivePromptLayerId(envV1, docClean) === "staysee-core-v1",
+  "v1 ignores clean doc flag",
+);
+
+console.log("✓ G. legacy_doc_flat_clean variant");
 
 if (failed > 0) {
   console.error(`\n${failed} case(s) failed`);

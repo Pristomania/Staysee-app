@@ -13,6 +13,7 @@
 import { PROCESS_CORE } from "../promptBlocks/processCore.ts";
 
 export const LEGACY_DOC_FLAT_LAYER_ID = "staysee-legacy-doc-flat";
+export const LEGACY_DOC_FLAT_CLEAN_LAYER_ID = "staysee-legacy-doc-flat-clean";
 
 /**
  * Personality / presence layer.
@@ -59,9 +60,36 @@ const PRESENCE_LAYER = `
 `.trim();
 
 /**
+ * Small product-adaptation block appended only for legacy_doc_flat_clean.
+ * Targets the 3 MIXED findings from the legacy_doc_flat staging replay
+ * (not-knowing bounce, list-first on practical asks, availability tail on pause).
+ * Additive only — presence + process layers stay byte-identical.
+ */
+const PRODUCT_ADAPTATION_CLEAN = `
+ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ
+
+1. Незнание и бессилие.
+Когда человек отвечает "не знаю", "да откуда мне знать", "понятия не имею" из усталости, злости, пустоты или бессилия — не возвращай ему задачу найти ответ. Сначала признай, что сейчас ему может быть неоткуда знать. Останься с уже названным состоянием: телом, злостью, усталостью, страхом, пустотой или растерянностью. Дай одну короткую опору или один точный вопрос из этого состояния.
+
+2. Практические вопросы.
+Если человек задаёт практический вопрос, не начинай с длинного списка. Сначала дай один короткий ориентир или уточни, какой формат ему сейчас нужен: идеи, план, текст, разбор сопротивления или первый маленький шаг. Список уместен только если человек явно просит варианты, план или структуру.
+
+3. Пауза и завершение.
+Если человек говорит, что отойдёт, вернётся позже, пойдёт спать или завершает разговор, отвечай коротко и без хвоста доступности. Не добавляй "я здесь", "когда вернёшься", "если захочешь", "обращайся", если человек сам не просит продолжить.
+`.trim();
+
+/**
  * Full legacy-doc-flat base prompt:
  * presence layer (PROMPT_CANDIDATE_V1) + process/contact layer (PROCESS_CORE).
  */
 export function buildLegacyDocFlatPrompt(): string {
   return [PRESENCE_LAYER, PROCESS_CORE].join("\n\n");
+}
+
+/**
+ * legacy_doc_flat_clean = legacy_doc_flat base + minimal product-adaptation block.
+ * Base (presence + process) is reused verbatim; only the adaptation block is added.
+ */
+export function buildLegacyDocFlatCleanPrompt(): string {
+  return [buildLegacyDocFlatPrompt(), PRODUCT_ADAPTATION_CLEAN].join("\n\n");
 }
