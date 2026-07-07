@@ -9,9 +9,10 @@ import { SURGERY1_LAYER_ID } from "./surgery1Prompt.ts";
 export const AI_AUDIT_PROMPT_VERSION = SURGERY1_LAYER_ID;
 
 export function getPromptAuditVersion(
-  readEnv?: () => string | undefined
+  readEnv?: () => string | undefined,
+  readDocEnv?: () => string | undefined
 ): string {
-  return resolveActivePromptLayerId(readEnv);
+  return resolveActivePromptLayerId(readEnv, readDocEnv);
 }
 
 export const AI_AUDIT_CONSTITUTION_VERSION = "constitution-v3-beta";
