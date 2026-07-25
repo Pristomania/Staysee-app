@@ -241,27 +241,59 @@ assert(cleanText.length > legacyDocText.length, "clean doc adds content over bas
 assert(cleanText !== legacyDocText, "clean differs from legacy_doc_flat");
 assert(cleanText !== gptsSourceText, "clean differs from gpts-source");
 
-// all 3 adaptation headings + rule anchors present
+// adaptation block anchors (PRODUCT_ADAPTATION_CLEAN)
 const cleanAdaptationAnchors: string[] = [
-  "ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ",
+  "ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ",
   "1. Незнание и бессилие.",
   "не возвращай ему задачу найти ответ",
+  "одну короткую смысловую опору",
   "2. Практические вопросы.",
   "не начинай с длинного списка",
-  "3. Пауза, завершение и граница.",
-  "Различай паузу, завершение и границу.",
-  'Допустимо: "Хорошо", "Ок, я здесь", "До связи".',
-  "без приглашения продолжать",
-  "Граница — когда человек останавливает тему или контакт",
-  'Для однословных резких границ вроде "хватит" или "стоп" ответ должен быть особенно коротким',
-  '"Поняла." или "Остановимся."',
-  "Не добавляй второе предложение.",
-  "Не объясняй долго",
-  'не добавляй "если захочешь", "я буду здесь", "если решишь вернуться", "обращайся"',
+  "3. Пауза, закрытие темы, завершение и граница.",
+  "Различай паузу, закрытие конкретной темы, завершение всего разговора и границу.",
+  '"Хорошо." или "Ок."',
+  "Не обещай ждать, не прощайся и не добавляй эмоциональное удержание.",
+  "Закрытие темы — когда человек останавливает только конкретную тему",
+  '"Хорошо, про соцсети остановимся."',
+  "не приглашай вернуться к теме",
+  "не открывай новую тему вопросом",
+  "Завершение — когда человек закрывает весь разговор",
+  "Граница — когда человек резко останавливает тему или контакт",
+  "Не добавляй второе предложение, объяснение, приглашение вернуться или фразу о своей доступности.",
+  "4. Практики и телесные опоры.",
+  "Стэйси не только разговаривает.",
+  "одну короткую добровольную практику",
+  "Практика появляется после контакта, а не вместо него.",
+  "одно спокойное дыхание",
+  "короткое заземление",
+  "Не предлагай список техник, план продуктивности или домашнее задание.",
+  "практика не является лечением и не заменяет врача",
+  "не должна предлагаться как способ устранить сам симптом",
+  "практика не заменяет кризисную помощь и правила безопасности",
 ];
 for (const anchor of cleanAdaptationAnchors) {
   assert(cleanText.includes(anchor), `clean adaptation anchor: ${anchor}`);
 }
+
+assert(
+  !cleanText.includes("ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
+  "clean no longer uses ТРИ ПРАВКИ header",
+);
+
+// pause paragraph in PRODUCT_ADAPTATION_CLEAN must not allow "Ок, я здесь"
+const cleanAdaptationOnly = cleanText.slice(legacyDocText.length);
+assert(
+  cleanAdaptationOnly.includes("ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
+  "adaptation slice starts after legacy base",
+);
+assert(
+  !cleanAdaptationOnly.includes("Ок, я здесь"),
+  "PRODUCT_ADAPTATION_CLEAN pause no longer allows Ок, я здесь",
+);
+assert(
+  !/Пауза[\s\S]*?Допустимо:[\s\S]*?Ок, я здесь/.test(cleanAdaptationOnly),
+  "pause paragraph has no Допустимо…Ок, я здесь",
+);
 
 // clean still carries base layers
 assert(
@@ -272,8 +304,12 @@ assert(cleanText.includes("# ЯДРО ПРОЦЕССА"), "clean keeps process/c
 
 // legacy_doc_flat MUST NOT contain the adaptation block (unchanged)
 assert(
-  !legacyDocText.includes("ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
+  !legacyDocText.includes("ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
   "legacy_doc_flat unchanged (no adaptation block)",
+);
+assert(
+  !legacyDocText.includes("ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
+  "legacy_doc_flat unchanged (no old adaptation header)",
 );
 assert(
   buildLegacyDocFlatPrompt() === legacyDocText,
