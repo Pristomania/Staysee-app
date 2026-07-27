@@ -11,7 +11,9 @@ export type ProtocolEventType =
   | "role_attack_detected"
   | "boundary_pressure_detected"
   | "prompt_attack_hard_stop"
-  | "tag_leak_sanitized";
+  | "tag_leak_sanitized"
+  | "psychological_crisis_support_offered"
+  | "physical_emergency_support_offered";
 
 export type ProtocolSeverity = "tier_1" | "tier_2" | "tier_3";
 

@@ -58,7 +58,6 @@ import {
   evaluateTurnSafety,
 } from "../_shared/roleEnforcement.ts";
 import { logSafetyDiagnosis } from "../_shared/safetyDiagnose.ts";
-import { CRISIS_LEVEL2_RESPONSE } from "../_shared/safety.ts";
 import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
 import {
   buildSurgery1BasePrompt,
@@ -80,15 +79,11 @@ import {
   type UsageTier,
   type ProviderConfig,
 } from "../_shared/cost.ts";
-import { semanticCrisisCheck } from "../_shared/semanticCrisisCheck.ts";
-import { detectExplicitSafetyHardStop } from "../_shared/explicitSafetyHardStop.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
-import {
-  getSemanticCrisisMode,
-  isProtocolSignalsEnabled,
-} from "../_shared/protocolSignalMode.ts";
+import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
+import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
 import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
 import {
   computeResponseBudget,
@@ -820,35 +815,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── PR7a: Explicit high-confidence hard-stops (phrase/construction only) ──
-
-    const explicitCrisisStop = detectExplicitSafetyHardStop(message);
-    if (explicitCrisisStop.shouldStop && explicitCrisisStop.response) {
-      void logProtocolEvent(makeServiceClient(), {
-        userId: userId ?? null,
-        conversationId: conversationId ?? null,
-        requestId: requestId ?? null,
-        eventType: "crisis_hard_stop",
-        severity: "tier_3",
-        protocol: explicitCrisisStop.protocol ?? "regex_crisis_explicit",
-        actionTaken: "hard_stop",
-        confidence: "high",
-        matchedPattern: explicitCrisisStop.matched_pattern ?? null,
-        promptVersion: getPromptAuditVersion(),
-        reason: "explicit_crisis_construction",
-      });
-      console.log(
-        `[staysee-chat] explicit crisis hard-stop: ${explicitCrisisStop.matched_pattern}`
-      );
-      return new Response(
-        JSON.stringify({
-          content: explicitCrisisStop.response,
-          provider: providerKey,
-          model: reqModel ?? config.model,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // ── PR7a: Explicit prompt-attack hard-stop only (crisis hard-stop removed) ──
 
     const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
     if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
@@ -876,44 +843,6 @@ Deno.serve(async (req: Request) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
-    }
-
-    // ── L5b: Semantic crisis — legacy opt-in only (default off, PR7a) ─────────
-    // STAYSEE_SEMANTIC_CRISIS_MODE=hard_stop to restore legacy context-blind gate.
-
-    if (
-      getSemanticCrisisMode() === "hard_stop" &&
-      safety.category !== "prompt_attack" &&
-      safety.category !== "boundary_pressure"
-    ) {
-      const semanticResult = await semanticCrisisCheck(message);
-      if (semanticResult.isCrisis) {
-        console.log("[staysee-chat] semantic crisis hard-stop (legacy mode)");
-        void logProtocolEvent(makeServiceClient(), {
-          userId: userId ?? null,
-          conversationId: conversationId ?? null,
-          requestId: requestId ?? null,
-          eventType: "crisis_hard_stop",
-          severity: "tier_3",
-          protocol: "semantic_crisis_legacy",
-          actionTaken: "hard_stop",
-          confidence: "medium",
-          classifierSummary: "semantic:da",
-          promptVersion: getPromptAuditVersion(),
-          reason: "legacy_semantic_classifier",
-        });
-        return new Response(
-          JSON.stringify({
-            content: CRISIS_LEVEL2_RESPONSE,
-            provider: providerKey,
-            model: reqModel ?? config.model,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (semanticResult.failed) {
-        console.warn("[staysee-chat] semantic crisis check unavailable — proceeding to model");
-      }
     }
 
     if (safety.systemGuidance) {
@@ -1655,6 +1584,21 @@ Deno.serve(async (req: Request) => {
                 },
                 protocolSignalsForLog.signals,
                 { leakageSanitized: protocolSignalsForLog.leakageSanitized }
+              )
+            : Promise.resolve(),
+
+          // Passive post-reply scan: contacts already present in final assistant text only.
+          result.content
+            ? logCrisisContactsFromAssistantReply(svc, {
+                userId,
+                conversationId: conversationId ?? null,
+                requestId: requestId ?? null,
+                assistantMessageId: null,
+                promptVersion: getPromptAuditVersion(),
+                model: result.model,
+                assistantText: result.content,
+              }).catch((err) =>
+                console.error("[staysee-chat] crisis contact log fail-open:", err)
               )
             : Promise.resolve(),
 
