@@ -29,6 +29,7 @@ import {
 } from "./stayseeCorePromptV2GptsSource.ts";
 import { buildStayseeCorePrompt } from "./stayseeCorePrompt.ts";
 import { buildSurgery1BasePrompt } from "../surgery1Prompt.ts";
+import { PROCESS_CORE } from "../promptBlocks/processCore.ts";
 
 // Model router reads Deno.env.get internally; stub it (all readers below are explicit).
 (globalThis as unknown as { Deno: unknown }).Deno = { env: { get: () => undefined } };
@@ -241,7 +242,39 @@ assert(cleanText.length > legacyDocText.length, "clean doc adds content over bas
 assert(cleanText !== legacyDocText, "clean differs from legacy_doc_flat");
 assert(cleanText !== gptsSourceText, "clean differs from gpts-source");
 
-// adaptation block anchors (PRODUCT_ADAPTATION_CLEAN)
+const PRACTICE_ORGANIC_PARAGRAPH =
+  "Ты замечаешь когда переживание становится настолько сильным, что человеку трудно думать, говорить или сделать то что сейчас необходимо. Иногда подходящая этому моменту практика может принести облегчение и вернуть достаточно устойчивости для того чтобы продолжить разговор, яснее увидеть происходящее или действовать. Какой она будет, складывается из человека, его состояния и того что уже появилось между вами. Практика сама по себе не заменяет контакт, но может стать его естественным продолжением.";
+
+const NEXT_MOVE_PARAGRAPH =
+  "В каждый момент ты держишь в уме несколько вещей: что человек сказал сейчас, что из этого ещё не прояснилось, что появлялось раньше, как он себя чувствует в этом обмене — включая то как реагирует на тебя. Из этого ты выбираешь следующий ход. Глубина и точность приходят по мере того как в разговоре появляется больше. Следующий ход не обязательно вопрос — это может быть наблюдение, уточнение или что-то что продолжает контакт с тем что уже появилось.";
+
+assert(
+  cleanText.includes(PRACTICE_ORGANIC_PARAGRAPH),
+  "clean contains approved practice organic paragraph verbatim",
+);
+assert(
+  legacyDocText.includes(PRACTICE_ORGANIC_PARAGRAPH),
+  "legacy_doc_flat presence also contains practice organic paragraph",
+);
+{
+  const idxMove = cleanText.indexOf(NEXT_MOVE_PARAGRAPH);
+  const idxPractice = cleanText.indexOf(PRACTICE_ORGANIC_PARAGRAPH);
+  assert(idxMove >= 0 && idxPractice >= 0, "next-move and practice paragraphs found");
+  assert(
+    idxPractice === idxMove + NEXT_MOVE_PARAGRAPH.length + 2,
+    "practice paragraph sits immediately after next-move paragraph",
+  );
+  assert(
+    cleanText.split(PRACTICE_ORGANIC_PARAGRAPH).length - 1 === 1,
+    "approved practice paragraph appears exactly once",
+  );
+  assert(
+    !PRACTICE_ORGANIC_PARAGRAPH.includes("—"),
+    "approved practice paragraph has no em dash",
+  );
+}
+
+// adaptation block anchors (PRODUCT_ADAPTATION_CLEAN) — practices section removed
 const cleanAdaptationAnchors: string[] = [
   "ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ",
   "1. Незнание и бессилие.",
@@ -260,17 +293,7 @@ const cleanAdaptationAnchors: string[] = [
   "Завершение — когда человек закрывает весь разговор",
   "Граница — когда человек резко останавливает тему или контакт",
   "Не добавляй второе предложение, объяснение, приглашение вернуться или фразу о своей доступности.",
-  "4. Практики и телесные опоры.",
-  "Стэйси не только разговаривает.",
-  "одну короткую добровольную практику",
-  "Практика появляется после контакта, а не вместо него.",
-  "одно спокойное дыхание",
-  "короткое заземление",
-  "Не предлагай список техник, план продуктивности или домашнее задание.",
-  "практика не является лечением и не заменяет врача",
-  "не должна предлагаться как способ устранить сам симптом",
-  "практика не заменяет кризисную помощь и правила безопасности",
-  "5. Тёплые эмодзи.",
+  "4. Тёплые эмодзи.",
   "Иногда можно использовать один тёплый и естественный эмодзи",
   "Эмодзи не обязателен",
   "не должен появляться в каждом сообщении",
@@ -280,6 +303,31 @@ const cleanAdaptationAnchors: string[] = [
 for (const anchor of cleanAdaptationAnchors) {
   assert(cleanText.includes(anchor), `clean adaptation anchor: ${anchor}`);
 }
+
+assert(
+  !cleanText.includes("4. Практики и телесные опоры."),
+  "old practices section header removed",
+);
+assert(
+  !cleanText.includes("5. Тёплые эмодзи."),
+  "emoji section no longer numbered 5",
+);
+assert(
+  !cleanText.includes("одно спокойное дыхание"),
+  "old technical breath example removed",
+);
+assert(
+  !cleanText.includes("короткое заземление"),
+  "old technical grounding example removed",
+);
+assert(
+  !cleanText.includes("Стэйси не только разговаривает."),
+  "old practices intro sentence removed",
+);
+assert(
+  !cleanText.includes("Практика появляется после контакта, а не вместо него."),
+  "old practices contact-order line removed",
+);
 
 assert(
   !cleanText.includes("ТРИ ПРАВКИ ДЛЯ ПРИЛОЖЕНИЯ"),
@@ -301,12 +349,38 @@ assert(
   "pause paragraph has no Допустимо…Ок, я здесь",
 );
 
+// PRODUCT_ADAPTATION sections 1–3 byte-identical block (through end of section 3)
+const product123Expected = `1. Незнание и бессилие.
+Когда человек отвечает "не знаю", "да откуда мне знать", "понятия не имею" из усталости, злости, пустоты или бессилия — не возвращай ему задачу найти ответ. Сначала признай, что сейчас ему может быть неоткуда знать. Останься с уже названным состоянием: телом, злостью, усталостью, страхом, пустотой или растерянностью. Дай одну короткую смысловую опору или один точный вопрос из этого состояния.
+
+2. Практические вопросы.
+Если человек задаёт практический вопрос, не начинай с длинного списка. Сначала дай один короткий ориентир или уточни, какой формат ему сейчас нужен: идеи, план, текст, разбор сопротивления или первый маленький шаг. Список уместен только если человек явно просит варианты, план или структуру.
+
+3. Пауза, закрытие темы, завершение и граница.
+Различай паузу, закрытие конкретной темы, завершение всего разговора и границу.
+
+Пауза — когда человек ненадолго отходит или сам говорит, что продолжит позже: "отойду", "вернусь", "продолжим позже". Ответь коротко и спокойно: "Хорошо." или "Ок." Не обещай ждать, не прощайся и не добавляй эмоциональное удержание.
+
+Закрытие темы — когда человек останавливает только конкретную тему, но не завершает весь разговор: "хватит про соцсети", "на сегодня хватит про это", "давай не про это". Останови только названную тему: "Хорошо, про соцсети остановимся." Не пиши "пока" или "до связи", не приглашай вернуться к теме и не открывай новую тему вопросом.
+
+Завершение — когда человек закрывает весь разговор: "пойду спать", "на сегодня всё", "пока". Ответь коротко и тепло, без новой темы и без приглашения продолжать. Достаточно: "Спокойной ночи.", "Хорошо, до связи." или "Пока."
+
+Граница — когда человек резко останавливает тему или контакт: "хватит", "не хочу это обсуждать", "стоп". Просто уважай её. Достаточно: "Поняла." или "Хорошо, остановимся." Для однословных резких границ вроде "хватит" или "стоп" ответ должен быть особенно коротким. Не добавляй второе предложение, объяснение, приглашение вернуться или фразу о своей доступности.`;
+assert(
+  cleanAdaptationOnly.includes(product123Expected),
+  "PRODUCT_ADAPTATION_CLEAN sections 1–3 remain byte-identical",
+);
+
 // clean still carries base layers
 assert(
   cleanText.includes("Диагнозы, симптомы, лекарства — область врача"),
   "clean keeps presence medical-boundary line",
 );
 assert(cleanText.includes("# ЯДРО ПРОЦЕССА"), "clean keeps process/contact layer");
+assert(
+  cleanText.endsWith(PROCESS_CORE) || cleanText.includes(PROCESS_CORE),
+  "PROCESS_CORE remains present byte-identical",
+);
 
 // legacy_doc_flat MUST NOT contain the adaptation block (unchanged)
 assert(
