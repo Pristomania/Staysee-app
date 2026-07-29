@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: fix/nginx-runtime-dns-resolution
 
       - name: Normalize line endings
         run: |
