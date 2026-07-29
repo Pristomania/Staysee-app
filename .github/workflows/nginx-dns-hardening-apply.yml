@@ -1,6 +1,6 @@
 name: Nginx DNS hardening apply
 
-# One-shot apply + isolated DNS-failure test + production reload/restart.
+# One-shot: isolated DNS-failure test + production apply + restart.
 # Does not rebuild frontend. Does not touch prompt/DB/Supabase.
 
 on:
@@ -10,7 +10,7 @@ jobs:
   apply:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout fix branch
         uses: actions/checkout@v4
         with:
           ref: fix/nginx-runtime-dns-resolution
@@ -27,10 +27,10 @@ jobs:
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh,deploy/nginx/reload-or-start-nginx.sh"
+          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh,deploy/nginx/reload-or-start-nginx.sh,deploy/nginx/runtime-dns-hardening-apply.sh"
           target: "/tmp/staysee-nginx-dns/"
 
-      - name: Isolated DNS-failure test + production apply
+      - name: Run hardening apply on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAYSEE_HOST }}
@@ -43,133 +43,4 @@ jobs:
             NGINX_SCRIPTS=/tmp/staysee-nginx-dns/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
             sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
-            TS=$(date +%s)
-            BAK="/etc/nginx/sites-enabled/staysee.bak.${TS}"
-
-            echo "===== locate deploy-staysee ====="
-            type deploy-staysee || true
-            command -v deploy-staysee || true
-            ls -la "$(command -v deploy-staysee 2>/dev/null || true)" 2>/dev/null || true
-            grep -n 'nginx\|systemctl' "$(command -v deploy-staysee)" 2>/dev/null | head -n 40 || true
-
-            echo "===== render proposed production config (dry) ====="
-            export STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf"
-            bash "$NGINX_SCRIPTS/apply-on-vps.sh" --dry-run
-            # Render to temp for isolated test + preflight
-            WEB_ROOT=/var/www/Staysee-app/dist
-            RENDERED="/tmp/staysee.proposed.${TS}.conf"
-            sed 's/\r$//' "$NGINX_SCRIPTS/staysee.ru.conf" | sed "s|@@STAYSEE_WEB_ROOT@@|${WEB_ROOT}|g" > "$RENDERED"
-            echo "----- proposed /supabase/ block -----"
-            sed -n '/location \/supabase\//,/^    }/p' "$RENDERED"
-
-            echo "===== PRE: backup live config ====="
-            sudo cp -a /etc/nginx/sites-enabled/staysee "$BAK"
-            echo "backup=$BAK"
-
-            echo "===== ISOLATED DNS-FAILURE nginx (port 18080) ====="
-            ISO_PREFIX="/tmp/nginx-dns-iso-${TS}"
-            mkdir -p "$ISO_PREFIX"/{logs,html,conf}
-            echo '<!doctype html><title>iso-ok</title>iso-static-ok' > "$ISO_PREFIX/html/index.html"
-            # Write config via python to avoid appleboy/heredoc injection and leading-space issues.
-            python3 - "$ISO_PREFIX" <<'PY'
-import sys
-from pathlib import Path
-p = Path(sys.argv[1])
-conf = f"""worker_processes 1;
-error_log {p}/logs/error.log;
-pid {p}/nginx.pid;
-events {{ worker_connections 64; }}
-http {{
-  access_log {p}/logs/access.log;
-  resolver 127.0.0.53 valid=30s;
-  resolver_timeout 5s;
-  server {{
-    listen 127.0.0.1:18080;
-    server_name localhost;
-    root {p}/html;
-    index index.html;
-    location / {{
-      try_files $uri /index.html;
-    }}
-    location /supabase/ {{
-      set $supabase_origin https://this-host-must-not-resolve.invalid;
-      rewrite ^/supabase/(.*)$ /$1 break;
-      proxy_pass $supabase_origin;
-      proxy_ssl_server_name on;
-      proxy_ssl_name this-host-must-not-resolve.invalid;
-      proxy_connect_timeout 3s;
-      proxy_read_timeout 3s;
-    }}
-  }}
-}}
-"""
-(p / "conf" / "nginx.conf").write_text(conf)
-print("iso_conf_bytes", (p / "conf" / "nginx.conf").stat().st_size)
-PY
-            # Config test of isolated instance (must pass despite unresolvable upstream hostname)
-            nginx -t -c "$ISO_PREFIX/conf/nginx.conf" -p "$ISO_PREFIX/"
-            nginx -c "$ISO_PREFIX/conf/nginx.conf" -p "$ISO_PREFIX/"
-            sleep 1
-            echo "iso static:"
-            curl -sS -D- --max-time 5 http://127.0.0.1:18080/ | head -n 20
-            echo "iso proxy (expect 502/504):"
-            set +e
-            ISO_HDR=$(curl -sS -D- --max-time 8 http://127.0.0.1:18080/supabase/rest/v1/ -o /tmp/iso-proxy.body)
-            echo "$ISO_HDR" | head -n 15
-            set -e
-            head -n 5 /tmp/iso-proxy.body || true
-            # nginx master must still be alive
-            kill -0 "$(cat "$ISO_PREFIX/nginx.pid")"
-            echo "iso_pid_alive=yes"
-            nginx -s stop -c "$ISO_PREFIX/conf/nginx.conf" -p "$ISO_PREFIX/" || true
-            echo "ISOLATED_DNS_FAILURE_TEST=PASS"
-
-            echo "===== PRODUCTION config test with proposed file ====="
-            # Install proposed into sites-available, test, restore on fail
-            sudo cp "$RENDERED" /etc/nginx/sites-available/staysee
-            sudo ln -sf /etc/nginx/sites-available/staysee /etc/nginx/sites-enabled/staysee
-            if ! sudo nginx -t; then
-              echo "nginx -t FAILED — restoring backup"
-              sudo cp -a "$BAK" /etc/nginx/sites-enabled/staysee
-              # sites-enabled may be symlink; restore sites-available from bak if bak is file
-              if [ -L /etc/nginx/sites-enabled/staysee ]; then
-                sudo cp -a "$BAK" /etc/nginx/sites-available/staysee
-              fi
-              sudo nginx -t
-              exit 1
-            fi
-
-            echo "===== reload-or-start production nginx ====="
-            bash "$NGINX_SCRIPTS/reload-or-start-nginx.sh"
-            systemctl is-active nginx
-            ss -lptn | grep -E ':80|:443' || true
-
-            echo "===== functional checks ====="
-            curl -sS -I --max-time 15 https://staysee.ru | head -n 15
-            curl -sS -I --max-time 15 https://www.staysee.ru | head -n 15
-            curl -sS --max-time 15 https://staysee.ru/ | head -c 200; echo
-            # Proxied route smoke (anon key not required for OPTIONS-like GET that may 401)
-            curl -sS -D- --max-time 20 -o /tmp/proxy.body \
-              -H 'apikey: invalid' \
-              -H 'Authorization: Bearer invalid' \
-              "https://staysee.ru/supabase/rest/v1/" | head -n 25
-            head -c 300 /tmp/proxy.body; echo
-            # query string preservation probe (expect Supabase/auth error, not nginx 404)
-            curl -sS -o /tmp/proxy-q.body -w "proxy_qs_http=%{http_code}\n" --max-time 20 \
-              "https://staysee.ru/supabase/auth/v1/health?x=1"
-            head -c 200 /tmp/proxy-q.body; echo
-
-            echo "===== controlled restart ====="
-            sudo systemctl restart nginx
-            systemctl is-active nginx
-            systemctl is-enabled nginx
-            ss -lptn | grep -E ':80|:443' || true
-            curl -sS -o /dev/null -w "after_restart_staysee=%{http_code}\n" --max-time 15 https://staysee.ru
-            curl -sS -o /dev/null -w "after_restart_www=%{http_code}\n" --max-time 15 https://www.staysee.ru
-
-            echo "===== recent nginx errors ====="
-            sudo journalctl -u nginx -n 30 --no-pager || true
-            sudo tail -n 30 /var/log/nginx/error.log || true
-
-            echo "===== DONE APPLY ====="
-            echo "backup=$BAK"
+            bash "$NGINX_SCRIPTS/runtime-dns-hardening-apply.sh"

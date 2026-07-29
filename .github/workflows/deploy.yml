@@ -25,7 +25,7 @@ jobs:
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh"
+          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh,deploy/nginx/reload-or-start-nginx.sh"
           target: "/tmp/staysee-nginx/"
 
       - name: Deploy to VPS
@@ -36,11 +36,21 @@ jobs:
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
           script: |
+            set -euo pipefail
+            # Build frontend / sync dist. May still call reload; tolerate inactive nginx.
+            set +e
             deploy-staysee
+            DS_RC=$?
+            set -e
+            if [ "$DS_RC" -ne 0 ]; then
+              echo "WARN: deploy-staysee exited $DS_RC — continuing with nginx apply helper"
+            fi
             NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
             sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
             STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf"
             test -f "$STAYSEE_NGINX_SRC"
+            test -f "$NGINX_SCRIPTS/reload-or-start-nginx.sh"
             export STAYSEE_NGINX_SRC
             bash "$NGINX_SCRIPTS/apply-on-vps.sh"
+            bash "$NGINX_SCRIPTS/reload-or-start-nginx.sh"

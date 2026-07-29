@@ -93,7 +93,16 @@ fi
 
 sudo cp "$CONF_RENDERED" "$CONF_DST"
 sudo ln -sf "$CONF_DST" /etc/nginx/sites-enabled/staysee
-sudo nginx -t
-sudo systemctl reload nginx
+# Prefer helper next to this script (CI scp) or in repo deploy/nginx.
+RELOAD_HELPER="$SCRIPT_DIR/reload-or-start-nginx.sh"
+if [[ ! -f "$RELOAD_HELPER" && -f "$REPO_DIR/deploy/nginx/reload-or-start-nginx.sh" ]]; then
+  RELOAD_HELPER="$REPO_DIR/deploy/nginx/reload-or-start-nginx.sh"
+fi
+if [[ ! -f "$RELOAD_HELPER" ]]; then
+  echo "reload-or-start-nginx.sh not found next to apply script" >&2
+  exit 1
+fi
+chmod +x "$RELOAD_HELPER"
+bash "$RELOAD_HELPER"
 rm -f "$CONF_RENDERED"
-echo "nginx reloaded (http2 unchanged)"
+echo "nginx apply complete (http2 unchanged)"
