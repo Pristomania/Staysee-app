@@ -1,0 +1,46 @@
+name: Nginx runtime DNS apply
+
+# Thin dispatcher. Real logic lives in deploy/nginx/runtime-dns-hardening-apply.sh
+# on branch fix/nginx-runtime-dns-resolution.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/nginx-runtime-dns-resolution
+
+      - name: Normalize line endings
+        run: |
+          sed -i 's/\r$//' deploy/nginx/*.sh deploy/nginx/*.conf
+          chmod +x deploy/nginx/*.sh
+
+      - name: Copy nginx scripts to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh,deploy/nginx/reload-or-start-nginx.sh,deploy/nginx/runtime-dns-hardening-apply.sh"
+          target: "/tmp/staysee-nginx-dns/"
+
+      - name: Run hardening apply on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            NGINX_SCRIPTS=/tmp/staysee-nginx-dns/deploy/nginx
+            chmod +x "$NGINX_SCRIPTS"/*.sh
+            sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
+            bash "$NGINX_SCRIPTS/runtime-dns-hardening-apply.sh"
