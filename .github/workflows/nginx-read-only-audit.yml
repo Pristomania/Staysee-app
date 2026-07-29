@@ -1,0 +1,36 @@
+name: Nginx read-only audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only nginx / DNS audit on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          script: |
+            set -euo pipefail
+            echo "===== nginx -V ====="
+            nginx -V 2>&1 || true
+            echo "===== resolv.conf ====="
+            cat /etc/resolv.conf
+            echo "===== getent hosts ====="
+            getent hosts jnxrildlwvtxhtiwucbt.supabase.co || true
+            echo "===== resolvectl ====="
+            resolvectl status 2>/dev/null || true
+            echo "===== sites-enabled staysee lines 35-70 ====="
+            sudo nl -ba /etc/nginx/sites-enabled/staysee | sed -n '35,70p'
+            echo "===== grep supabase/proxy/resolver ====="
+            sudo grep -RniE 'jnxrildlwvtxhtiwucbt|supabase\.co|proxy_pass|upstream|resolver' /etc/nginx 2>/dev/null || true
+            echo "===== nginx -T staysee excerpt ====="
+            sudo nginx -T 2>/dev/null | awk '/server_name staysee.ru/,/^}/ {print} /^# configuration file.*staysee/{print}' | head -n 200
+            echo "===== is-active / is-enabled ====="
+            systemctl is-active nginx || true
+            systemctl is-enabled nginx || true
+            echo "===== DONE AUDIT ====="
