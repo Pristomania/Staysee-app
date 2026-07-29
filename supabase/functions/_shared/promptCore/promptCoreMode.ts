@@ -14,7 +14,9 @@ import {
   STAYSEE_CORE_V2_LAYER_ID,
 } from "./stayseeCorePromptV2GptsSource.ts";
 import {
+  buildLegacyDocFlatCleanPrompt,
   buildLegacyDocFlatPrompt,
+  LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
   LEGACY_DOC_FLAT_LAYER_ID,
 } from "./legacyDocFlatPrompt.ts";
 
@@ -27,7 +29,10 @@ export const PROMPT_CORE_DOC_ENV_KEY = "STAYSEE_PROMPT_CORE_DOC";
 export type PromptCoreMode = "legacy" | "v1" | "v2";
 
 /** Base document mounted under v2. Default keeps the approved GPTs source. */
-export type PromptCoreDoc = "gpts_source" | "legacy_doc_flat";
+export type PromptCoreDoc =
+  | "gpts_source"
+  | "legacy_doc_flat"
+  | "legacy_doc_flat_clean";
 
 /** Parse raw env value; unknown / empty / missing → "legacy". */
 export function parsePromptCoreMode(
@@ -39,11 +44,14 @@ export function parsePromptCoreMode(
   return "legacy";
 }
 
-/** Parse doc flag; only "legacy_doc_flat" opts in, everything else → gpts_source. */
+/** Parse doc flag; only known experiment values opt in, everything else → gpts_source. */
 export function parsePromptCoreDoc(
   raw: string | undefined | null
 ): PromptCoreDoc {
-  return raw?.trim() === "legacy_doc_flat" ? "legacy_doc_flat" : "gpts_source";
+  const trimmed = raw?.trim();
+  if (trimmed === "legacy_doc_flat") return "legacy_doc_flat";
+  if (trimmed === "legacy_doc_flat_clean") return "legacy_doc_flat_clean";
+  return "gpts_source";
 }
 
 function defaultCoreEnvReader(): string | undefined {
@@ -79,10 +87,17 @@ export function getPromptCoreDoc(
 export function resolveV2Document(
   readDocEnv: () => string | undefined = defaultDocEnvReader
 ): { text: string; layerId: string } {
-  if (getPromptCoreDoc(readDocEnv) === "legacy_doc_flat") {
+  const doc = getPromptCoreDoc(readDocEnv);
+  if (doc === "legacy_doc_flat") {
     return {
       text: buildLegacyDocFlatPrompt(),
       layerId: LEGACY_DOC_FLAT_LAYER_ID,
+    };
+  }
+  if (doc === "legacy_doc_flat_clean") {
+    return {
+      text: buildLegacyDocFlatCleanPrompt(),
+      layerId: LEGACY_DOC_FLAT_CLEAN_LAYER_ID,
     };
   }
   return {

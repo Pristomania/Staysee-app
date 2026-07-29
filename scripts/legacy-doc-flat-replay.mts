@@ -1,38 +1,56 @@
 /**
- * Offline compare helper: current Core V2 (gpts-source) vs legacy_doc_flat.
+ * Offline compare helper: current Core V2 (gpts-source) vs legacy_doc_flat
+ * vs legacy_doc_flat_clean.
  *
- * Assembles the two BASE prompts locally and prints the replay set for
+ * Assembles the BASE prompts locally and prints the replay set for
  * side-by-side manual review. NO network, NO model calls, NO deploy, NO secrets.
  *
- * Run: npx tsx scripts/legacy-doc-flat-replay.mts
- * Optional: npx tsx scripts/legacy-doc-flat-replay.mts --print-prompts
+ * Run (all variants): npx tsx scripts/legacy-doc-flat-replay.mts
+ * Single variant:     npx tsx scripts/legacy-doc-flat-replay.mts --doc legacy_doc_flat_clean
+ * Print full prompts: npx tsx scripts/legacy-doc-flat-replay.mts --print-prompts
  *
  * Live A/B (separate, manual, staging only): set STAYSEE_PROMPT_CORE=v2 and toggle
- * STAYSEE_PROMPT_CORE_DOC=legacy_doc_flat on a non-prod deploy, then run the existing
- * prod-smoke style scripts. This file does not perform any of that.
+ * STAYSEE_PROMPT_CORE_DOC=legacy_doc_flat|legacy_doc_flat_clean on a non-prod deploy,
+ * then run the staging replay script. This file does not perform any of that.
  */
 
 import { buildSurgery1BasePrompt } from "../supabase/functions/_shared/surgery1Prompt.ts";
 import { resolveActivePromptLayerId } from "../supabase/functions/_shared/promptCore/promptCoreMode.ts";
 
 const envV2 = () => "v2";
-const docGptsSource = () => undefined;
-const docLegacy = () => "legacy_doc_flat";
 
-const variants = [
+const ALL_VARIANTS = [
   {
     key: "current_core_v2",
+    doc: undefined as string | undefined,
     label: "current Core V2 (gpts-source)",
-    text: buildSurgery1BasePrompt(envV2, docGptsSource),
-    layerId: resolveActivePromptLayerId(envV2, docGptsSource),
   },
   {
     key: "legacy_doc_flat",
+    doc: "legacy_doc_flat",
     label: "legacy_doc_flat (PROMPT_CANDIDATE_V1 + processCore)",
-    text: buildSurgery1BasePrompt(envV2, docLegacy),
-    layerId: resolveActivePromptLayerId(envV2, docLegacy),
+  },
+  {
+    key: "legacy_doc_flat_clean",
+    doc: "legacy_doc_flat_clean",
+    label: "legacy_doc_flat_clean (base + 3 product adaptations)",
   },
 ];
+
+const docArgIdx = process.argv.indexOf("--doc");
+const docFilter = docArgIdx !== -1 ? process.argv[docArgIdx + 1] : undefined;
+
+const variants = ALL_VARIANTS.filter(
+  (v) => !docFilter || v.doc === docFilter || v.key === docFilter,
+).map((v) => {
+  const reader = () => v.doc;
+  return {
+    key: v.key,
+    label: v.label,
+    text: buildSurgery1BasePrompt(envV2, reader),
+    layerId: resolveActivePromptLayerId(envV2, reader),
+  };
+});
 
 const replaySet: Array<{ id: string; note: string; turns: string[] }> = [
   { id: "A", note: "body weakness → uncertainty; hold powerlessness/anger/body, no closure, no «если захочешь»/«береги себя»", turns: ["Мое тело, оно как будто стало слабое. Я если хоть недолго что-то поделаю, сразу ноги ватные, только лежать. Это меня бесит", "Да откуда мне знать"] },
