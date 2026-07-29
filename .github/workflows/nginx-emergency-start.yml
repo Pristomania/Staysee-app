@@ -1,0 +1,65 @@
+name: Emergency nginx start
+
+on:
+  workflow_dispatch:
+
+jobs:
+  start-nginx:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnose and start nginx on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            echo "===== PRE DIAGNOSTICS ====="
+            systemctl status nginx --no-pager -l || true
+            nginx -t
+            journalctl -u nginx --since "2 hours ago" --no-pager || true
+            ss -lptn | grep -E ':80|:443' || true
+            df -h
+            free -h
+            ls -la /var/www/Staysee-app/dist
+            test -f /var/www/Staysee-app/dist/index.html && echo "index.html exists"
+
+            echo "===== PRECONDITIONS ====="
+            nginx -t
+            if ss -lptn | grep -E ':80|:443' | grep -v nginx; then
+              echo "ERROR: ports 80/443 held by non-nginx process" >&2
+              ss -lptn
+              exit 2
+            fi
+            test -f /var/www/Staysee-app/dist/index.html
+            # Fail if root filesystem > 95% full
+            use=$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+            echo "root_disk_use_percent=$use"
+            if [ "$use" -ge 95 ]; then
+              echo "ERROR: disk critically full" >&2
+              exit 3
+            fi
+
+            echo "===== START NGINX ====="
+            sudo systemctl start nginx
+
+            echo "===== POST CHECKS ====="
+            systemctl is-active nginx
+            systemctl status nginx --no-pager -l
+            ss -lptn | grep -E ':80|:443' || true
+            curl -sS -I --max-time 10 http://127.0.0.1 | head -n 20
+            curl -sS -Ik --max-time 10 https://127.0.0.1 -H 'Host: staysee.ru' | head -n 20
+            curl -sS -I --max-time 15 https://staysee.ru | head -n 20 || true
+
+            echo "===== ENABLE IF NEEDED ====="
+            enabled=$(systemctl is-enabled nginx || true)
+            echo "is-enabled=$enabled"
+            if [ "$enabled" = "disabled" ]; then
+              sudo systemctl enable nginx
+              echo "enabled nginx for autostart"
+            fi
+
+            echo "===== DONE ====="
