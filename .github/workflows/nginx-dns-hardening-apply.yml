@@ -70,35 +70,42 @@ jobs:
             ISO_PREFIX="/tmp/nginx-dns-iso-${TS}"
             mkdir -p "$ISO_PREFIX"/{logs,html,conf}
             echo '<!doctype html><title>iso-ok</title>iso-static-ok' > "$ISO_PREFIX/html/index.html"
-            cat > "$ISO_PREFIX/conf/nginx.conf" <<EOF
-            worker_processes 1;
-            error_log $ISO_PREFIX/logs/error.log;
-            pid $ISO_PREFIX/nginx.pid;
-            events { worker_connections 64; }
-            http {
-              access_log $ISO_PREFIX/logs/access.log;
-              resolver 127.0.0.53 valid=30s;
-              resolver_timeout 5s;
-              server {
-                listen 127.0.0.1:18080;
-                server_name localhost;
-                root $ISO_PREFIX/html;
-                index index.html;
-                location / {
-                  try_files \$uri /index.html;
-                }
-                location /supabase/ {
-                  set \$supabase_origin https://this-host-must-not-resolve.invalid;
-                  rewrite ^/supabase/(.*)\$ /\$1 break;
-                  proxy_pass \$supabase_origin;
-                  proxy_ssl_server_name on;
-                  proxy_ssl_name this-host-must-not-resolve.invalid;
-                  proxy_connect_timeout 3s;
-                  proxy_read_timeout 3s;
-                }
-              }
-            }
-            EOF
+            # Write config via python to avoid appleboy/heredoc injection and leading-space issues.
+            python3 - "$ISO_PREFIX" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+conf = f"""worker_processes 1;
+error_log {p}/logs/error.log;
+pid {p}/nginx.pid;
+events {{ worker_connections 64; }}
+http {{
+  access_log {p}/logs/access.log;
+  resolver 127.0.0.53 valid=30s;
+  resolver_timeout 5s;
+  server {{
+    listen 127.0.0.1:18080;
+    server_name localhost;
+    root {p}/html;
+    index index.html;
+    location / {{
+      try_files $uri /index.html;
+    }}
+    location /supabase/ {{
+      set $supabase_origin https://this-host-must-not-resolve.invalid;
+      rewrite ^/supabase/(.*)$ /$1 break;
+      proxy_pass $supabase_origin;
+      proxy_ssl_server_name on;
+      proxy_ssl_name this-host-must-not-resolve.invalid;
+      proxy_connect_timeout 3s;
+      proxy_read_timeout 3s;
+    }}
+  }}
+}}
+"""
+(p / "conf" / "nginx.conf").write_text(conf)
+print("iso_conf_bytes", (p / "conf" / "nginx.conf").stat().st_size)
+PY
             # Config test of isolated instance (must pass despite unresolvable upstream hostname)
             nginx -t -c "$ISO_PREFIX/conf/nginx.conf" -p "$ISO_PREFIX/"
             nginx -c "$ISO_PREFIX/conf/nginx.conf" -p "$ISO_PREFIX/"
@@ -107,10 +114,10 @@ jobs:
             curl -sS -D- --max-time 5 http://127.0.0.1:18080/ | head -n 20
             echo "iso proxy (expect 502/504):"
             set +e
-            curl -sS -D- --max-time 8 http://127.0.0.1:18080/supabase/rest/v1/  -o /tmp/iso-proxy.body
-            ISO_CODE=$?
+            ISO_HDR=$(curl -sS -D- --max-time 8 http://127.0.0.1:18080/supabase/rest/v1/ -o /tmp/iso-proxy.body)
+            echo "$ISO_HDR" | head -n 15
             set -e
-            head -n 20 /tmp/iso-proxy.body || true
+            head -n 5 /tmp/iso-proxy.body || true
             # nginx master must still be alive
             kill -0 "$(cat "$ISO_PREFIX/nginx.pid")"
             echo "iso_pid_alive=yes"
