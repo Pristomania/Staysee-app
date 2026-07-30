@@ -232,6 +232,88 @@ export async function incrementUsage(
   if (error) console.error("[cost] incrementUsage:", error.message);
 }
 
+// ── Atomic daily reserve + monthly-only token accounting (variant B) ─────────
+
+const RESERVE_ALLOWED_TIERS = new Set<UsageTier>(["free", "basic", "premium"]);
+const RESERVE_DENY_REASONS = new Set([
+  "suspended",
+  "daily_limit",
+  "missing_tier",
+]);
+
+function failClosedLimitCheck(): RateLimitResult {
+  return { allowed: false, tier: "free", reason: "limit_check_error" };
+}
+
+export async function reserveAiRequest(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<RateLimitResult> {
+  let data: unknown;
+  let error: { message: string } | null = null;
+
+  try {
+    const response = await supabase.rpc("reserve_ai_request", {
+      p_user_id: userId,
+    });
+    data = response.data;
+    error = response.error;
+  } catch {
+    return failClosedLimitCheck();
+  }
+
+  if (error) return failClosedLimitCheck();
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return failClosedLimitCheck();
+  }
+
+  const payload = data as {
+    allowed?: unknown;
+    tier?: unknown;
+    reason?: unknown;
+  };
+
+  if (
+    typeof payload.tier !== "string" ||
+    !RESERVE_ALLOWED_TIERS.has(payload.tier as UsageTier)
+  ) {
+    return failClosedLimitCheck();
+  }
+  const tier = payload.tier as UsageTier;
+
+  if (payload.allowed === true) {
+    if (payload.reason !== undefined) return failClosedLimitCheck();
+    return { allowed: true, tier };
+  }
+
+  if (payload.allowed !== false) return failClosedLimitCheck();
+  if (
+    typeof payload.reason !== "string" ||
+    !RESERVE_DENY_REASONS.has(payload.reason)
+  ) {
+    return failClosedLimitCheck();
+  }
+
+  return { allowed: false, tier, reason: payload.reason };
+}
+
+export async function recordTokenUsage(
+  supabase: SupabaseClient,
+  userId: string,
+  tokens: number,
+): Promise<void> {
+  try {
+    const { error } = await supabase.rpc("add_ai_token_usage", {
+      p_user_id: userId,
+      p_tokens: tokens,
+    });
+    if (error) console.error("[cost] recordTokenUsage:", error.message);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown";
+    console.error("[cost] recordTokenUsage:", message);
+  }
+}
+
 // ── Usage logging (non-blocking) ─────────────────────────────────────────────
 
 export interface UsageLogEntry {
