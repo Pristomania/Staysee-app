@@ -1,8 +1,8 @@
 # Atomic Chat Quota — Design
 
-Date: 2026-07-30  
-Branch: `fix/atomic-chat-quota`  
-Base: `origin/main` @ `a374254e117b104e5f94e392741174edb0f76dc1`  
+Date: 2026-07-30
+Branch: `fix/atomic-chat-quota`
+Base: `origin/main` @ `a374254e117b104e5f94e392741174edb0f76dc1`
 Approach: A — atomic `reserve_ai_request` RPC (no reservation ledger)
 
 ## Goal
@@ -20,14 +20,33 @@ Close the parallel daily-limit bypass: before the first model/provider call, ato
 
 ## Product semantics
 
-- Auth, IP velocity, and in-memory dedup run before quota.
+- Auth, IP velocity, and in-memory dedup run before quota work.
+- After verified auth and duplicate prevention, keep the existing early `checkRateLimit` as a **cheap preliminary filter** (defense in depth).
 - Safety `immediateResponse` and explicit prompt-attack hard-stop paths do **not** consume a daily slot.
-- Atomic reserve runs **immediately before the first provider/model call** (`callModel`).
+- Authoritative atomic reserve runs **immediately before the first provider/model call** (`callModel`).
 - One user turn consumes one daily slot even when that turn later performs recovery, fallback, or shadow provider calls.
+- Daily usage is incremented exactly once, and only inside `reserve_ai_request` on allow.
 - After a successful reserve, the slot is never returned.
 - Abort or early return **before** reserve does not consume a slot.
 - Abort or provider failure **after** reserve consumes the slot (cost protection, not free retry).
 - Monthly tokens are recorded from actual usage after the model response path.
+
+## Defense in depth: preliminary `checkRateLimit`
+
+The current early `checkRateLimit` after verified auth + duplicate prevention is **kept**.
+
+Purpose of the preliminary SELECT:
+
+- immediately reject `suspended`;
+- immediately reject an already exhausted daily limit;
+- fail closed on missing row / SELECT error;
+- prevent obviously blocked requests from doing memory / context / safety work.
+
+Explicit limits of the preliminary check:
+
+- the early SELECT is **not** a concurrency guarantee;
+- two parallel requests can both pass the preliminary check when `remaining = 1`;
+- authoritative enforcement is performed **only** by atomic `reserve_ai_request` immediately before the first model call.
 
 ## Architecture
 
@@ -38,9 +57,11 @@ Approach A only:
 3. Wrappers in `supabase/functions/_shared/cost.ts`:
    - `reserveAiRequest`
    - `recordTokenUsage`
-4. `staysee-chat` calls `reserveAiRequest` exactly once, immediately before the first `callModel`.
-5. The chat-path post-call `incrementUsage` is replaced with `recordTokenUsage`.
-6. Legacy `checkRateLimit` and `incrementUsage` remain in the codebase for compatibility/rollback in this change, but `staysee-chat` stops using them.
+4. `staysee-chat` keeps `checkRateLimit` as the preliminary guard after auth/dedup.
+5. `staysee-chat` calls `reserveAiRequest` exactly once, immediately before the first `callModel`.
+6. The chat-path post-call `incrementUsage` is replaced with `recordTokenUsage`.
+7. Legacy `incrementUsage` remains exported for compatibility/rollback, but the chat-path no longer uses it.
+8. Legacy `checkRateLimit` remains exported and continues to be used by `staysee-chat` as the preliminary guard only.
 
 Approaches B (reservation ledger) and C (advisory lock across check+increment) are out of implementation scope.
 
@@ -53,7 +74,7 @@ Create one additive migration immediately after the latest applied version `2026
 The migration must:
 
 - define both RPCs with schema-qualified `public.*` names;
-- set a safe `search_path` (`public` only, matching existing SECURITY DEFINER pattern);
+- set `search_path = ''` on each new `SECURITY DEFINER` function (all objects are schema-qualified; do not use `search_path = public`);
 - `REVOKE ALL` from `PUBLIC`, `anon`, and `authenticated`;
 - `GRANT EXECUTE` to `service_role` only (same security pattern as migration 025 for `increment_usage`);
 - not drop or alter legacy `increment_usage` in this PR.
@@ -64,7 +85,7 @@ The migration must:
 
 - `SECURITY DEFINER`
 - schema-qualified `public.*`
-- safe `search_path`
+- `SET search_path = ''`
 - `EXECUTE` for `service_role` only
 - revoked from `PUBLIC` / `anon` / `authenticated`
 
@@ -97,7 +118,7 @@ v_now - user_usage_tiers.day_reset_at > interval '24 hours'
 
 - `SECURITY DEFINER`
 - schema-qualified `public.*`
-- safe `search_path`
+- `SET search_path = ''`
 - `EXECUTE` for `service_role` only
 - revoked from `PUBLIC` / `anon` / `authenticated`
 
@@ -129,42 +150,54 @@ v_now - user_usage_tiers.day_reset_at > interval '24 hours'
 - Logs errors; does not throw into the user response path.
 - Must not call legacy `increment_usage`.
 
-Legacy `checkRateLimit` / `incrementUsage` remain exported for rollback compatibility but are unused by `staysee-chat` after this change.
+Legacy `checkRateLimit` remains the preliminary SELECT helper used by `staysee-chat`.
+Legacy `incrementUsage` remains exported for rollback compatibility but is unused by the chat-path after this change.
 
 ## Handler wiring (`staysee-chat/index.ts`)
 
-Keep current order through auth and early free paths:
+Fixed order:
 
 1. IP velocity
 2. verified auth (`resolveVerifiedChatUser`)
 3. duplicate prevention
-4. durable memory / context / safety evaluation
-5. safety `immediateResponse` return (no reserve)
-6. explicit prompt-attack hard-stop return (no reserve)
+4. preliminary `checkRateLimit`
+5. memory / context / safety evaluation
+6. free early responses (safety `immediateResponse`, explicit prompt-attack hard-stop) — no reserve
 7. build prompts / budgets
-8. **`reserveAiRequest` via service-role client**
-9. on deny/error → respond without provider
-10. first `callModel` (and any recovery/shadow calls for the same turn)
-11. replace post-call `incrementUsage(...)` with `recordTokenUsage(...)`
+8. atomic `reserveAiRequest` via service-role client, immediately before the first model call
+9. provider / model (`callModel`, including any recovery/shadow calls for the same turn)
+10. `recordTokenUsage` (monthly tokens only; never a second daily charge)
 
-### Handler responses for reserve outcomes
+### Error mapping
+
+#### Preliminary `checkRateLimit`
 
 | Reason | HTTP response |
 |--------|----------------|
-| `suspended` | existing suspended/rate calm body (same mapping as today’s rate-limit path) |
+| `suspended` | existing suspended/rate calm body (429) |
+| `daily_limit` | existing 429 calm rate-limit body |
+| `missing_tier` | `503` `{ "error": "service_unavailable" }` (not a false 429) |
+| SELECT / `limit_check_error` | `503` `{ "error": "service_unavailable" }` (not a false 429) |
+
+Preliminary deny must skip memory/context/safety work and must not call provider.
+
+#### Atomic `reserveAiRequest`
+
+| Reason | HTTP response |
+|--------|----------------|
+| `suspended` | existing suspended/rate calm body (429) |
 | `daily_limit` | existing 429 calm rate-limit body |
 | `missing_tier` | `503` `{ "error": "service_unavailable" }` |
 | RPC/DB / `limit_check_error` | `503` `{ "error": "service_unavailable" }` |
 
-Provider/model must not be called on any reserve deny or reserve error.
-
-Remove the early read-only `checkRateLimit` call that currently runs before memory/context; quota enforcement moves to the pre-`callModel` reserve. Auth/IP/dedup remain before that work as today.
+Atomic reserve is the **final** decision before AI. Provider/model must not be called on any reserve deny or reserve error.
 
 ## Concurrency guarantee
 
-When `daily_request_limit - daily_requests_used = 1` for one user, two concurrent `reserve_ai_request` calls:
+When `daily_request_limit - daily_requests_used = 1` for one user:
 
-- exactly one returns `allowed: true`;
+- two parallel requests may both pass preliminary `checkRateLimit`;
+- two concurrent `reserve_ai_request` calls still yield exactly one `allowed: true`;
 - the other returns `daily_limit`;
 - the final `daily_requests_used` increases by exactly 1;
 - the row lock is held only for the short SQL transaction and **not** during the model call.
@@ -174,10 +207,13 @@ When `daily_request_limit - daily_requests_used = 1` for one user, two concurren
 ### Local RED/GREEN (tsx case tests, no Docker required)
 
 - wrapper maps RPC allow payload;
-- suspended / daily_limit / missing_tier deny mapping;
+- suspended / daily_limit / missing_tier deny mapping for reserve;
 - RPC/transport error → fail-closed `limit_check_error`;
-- `recordTokenUsage` calls only `add_ai_token_usage`;
-- handler seam: reserve deny/error → provider fetch count stays 0;
+- `recordTokenUsage` calls only `add_ai_token_usage` and changes only monthly tokens;
+- preliminary deny → context/provider seam is not invoked;
+- preliminary allow + atomic deny under race → provider is not invoked;
+- preliminary allow + atomic allow → exactly one provider path;
+- neither preliminary check nor reserve performs a post-call daily increment;
 - chat-path no longer invokes legacy post-call daily `increment_usage`.
 
 ### Staging
@@ -196,7 +232,7 @@ When `daily_request_limit - daily_requests_used = 1` for one user, two concurren
 - migration first;
 - Edge `staysee-chat` deploy second;
 - security smokes + one authorized smoke;
-- rollback plan: redeploy Edge to the pre-B commit; additive SQL functions may remain unused temporarily (no automatic `DROP FUNCTION` as part of rollback).
+- rollback plan: redeploy Edge to the pre-B commit so the handler returns to preliminary `checkRateLimit` + post-call `incrementUsage`; additive SQL functions may remain unused temporarily (no automatic `DROP FUNCTION` as part of rollback).
 
 ## Required files
 
@@ -210,13 +246,15 @@ When `daily_request_limit - daily_requests_used = 1` for one user, two concurren
 ## Risks
 
 - Double daily charge if legacy `incrementUsage` remains in the chat-path.
+- Treating preliminary `checkRateLimit` as concurrency-safe would leave the race open; only `reserve_ai_request` is authoritative.
 - Placing reserve too early would start charging safety/hard-stop responses (forbidden by this design).
 - Placing reserve after the first provider call would fail to close the race.
 - Missing tier must deny; do not auto-insert rows in reserve.
-- Migration grants must repeat the migration 025 security pattern.
+- Migration grants must repeat the migration 025 security pattern, with `search_path = ''` on new SECURITY DEFINER RPCs.
 - Merge to `main` triggers frontend/VPS `deploy.yml` but does **not** deploy Supabase functions; Edge deploy remains an explicit step.
 
 ## Rollback
 
-- Redeploy `staysee-chat` from the pre-Variant-B commit so the handler again uses legacy `checkRateLimit` + `incrementUsage`.
-- Do not require or automate `DROP FUNCTION` for `reserve_ai_request` / `add_ai_token_usage` during emergency rollback; unused additive RPCs may remain until a later cleanup migration.
+- Redeploy `staysee-chat` from the pre-Variant-B commit so the handler again uses preliminary `checkRateLimit` + post-call `incrementUsage`.
+- New additive RPCs (`reserve_ai_request`, `add_ai_token_usage`) remain unused after Edge rollback.
+- Do not require or automate `DROP FUNCTION` for those RPCs during emergency rollback; unused additive RPCs may remain until a later cleanup migration.
