@@ -1,8 +1,6 @@
 /**
- * Fail-closed rate-limit regression (variant A) + RED atomic quota wrappers (variant B).
+ * Fail-closed rate-limit regression (variant A) + Variant B atomic quota wrappers.
  * Run: ./node_modules/.bin/tsx.cmd supabase/functions/_shared/cost.cases.test.ts
- *
- * Variant B section expects RED until reserveAiRequest / recordTokenUsage exist in cost.ts.
  */
 
 import { register } from "node:module";
@@ -196,7 +194,7 @@ const recentDayReset = new Date().toISOString();
   console.log("✓ within limit → allowed:true, tier:basic");
 }
 
-// ── Variant B RED: reserveAiRequest / recordTokenUsage ───────────────────────
+// ── Variant B regression: reserveAiRequest / recordTokenUsage ────────────────
 
 type RpcCall = { fn: string; args: Record<string, unknown> };
 

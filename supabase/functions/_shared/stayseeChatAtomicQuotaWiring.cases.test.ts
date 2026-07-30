@@ -140,14 +140,7 @@ export function validateAtomicQuotaWiring(source: string): void {
     }
   }
 
-  // ── 5. No late runAtomicModelGate dependency ──────────────────────────────
-
-  assert(
-    !/\brunAtomicModelGate\s*\(/.test(handler),
-    "handler must not depend on runAtomicModelGate; use an early reserve barrier",
-  );
-
-  // ── 6. Atomic deny: full balanced block, no provider seams inside ─────────
+  // ── 5. Atomic deny: full balanced block, no provider seams inside ─────────
 
   const denyIfRe = /if\s*\(\s*!reserveResult\.allowed\s*\)/;
   const denyIfMatch = denyIfRe.exec(handler);
@@ -192,7 +185,7 @@ export function validateAtomicQuotaWiring(source: string): void {
     "atomic deny block end must be before the first provider-backed seam",
   );
 
-  // ── 7. Disconnect-independent token accounting ────────────────────────────
+  // ── 6. Disconnect-independent token accounting ────────────────────────────
 
   assert(
     !/\bincrementUsage\s*\(/.test(handler),

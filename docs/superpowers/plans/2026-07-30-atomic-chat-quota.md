@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Atomically reserve one daily AI request immediately before the first model call, while preserving the preliminary quota filter and recording actual monthly tokens separately.
+**Goal:** Atomically reserve one daily AI request before any provider-backed work, while preserving the preliminary quota filter and recording actual monthly tokens separately (disconnect-independent).
 
-**Architecture:** Keep the existing read-only `checkRateLimit` as an early defense-in-depth filter. Add service-role-only PostgreSQL RPCs for atomic daily reservation and monthly-only token accounting, then place a tested quota gate immediately before the first provider call.
+**Architecture:** Keep the existing read-only `checkRateLimit` as an early defense-in-depth filter. Free message-only guards run before reserve. Call `reserveAiRequest` exactly once before eager summary / memory refresh / main model / recovery / shadow. Record monthly tokens via `recordTokenUsage` immediately after `totalTokens`, independent of `clientConnected`.
 
 **Tech Stack:** Supabase PostgreSQL/PLpgSQL, Supabase Edge Functions/Deno TypeScript, Node `tsx` case tests, Supabase CLI.
 
@@ -56,16 +56,14 @@ Rollback (authorized only): redeploy Edge to pre-Variant-B commit (preliminary `
 | `supabase/functions/_shared/cost.cases.test.ts` | Wrapper contracts including malformed payload fail-closed cases |
 | `supabase/functions/_shared/quotaDenyResponse.ts` | Shared HTTP mapping for preliminary + atomic denies |
 | `supabase/functions/_shared/quotaDenyResponse.cases.test.ts` | 429 vs 503 mapping contract |
-| `supabase/functions/_shared/atomicModelGate.ts` | Testable seam: reserve once, then optional single model call |
-| `supabase/functions/_shared/atomicModelGate.cases.test.ts` | Gate call-count / throw / no-rereserve contracts |
-| `supabase/functions/_shared/atomicQuotaMigration.cases.test.ts` | RED then GREEN static contract over migration `031` SQL text |
-| `supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts` | Architecture regression: reads real `staysee-chat/index.ts` source |
-| `supabase/functions/staysee-chat/index.ts` | Keep preliminary check; gate before first `callModel`; `recordTokenUsage` after |
+| `supabase/functions/_shared/atomicQuotaMigration.cases.test.ts` | Static contract over migration `031` SQL text |
+| `supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts` | Architecture regression + mutation self-checks over real handler source |
+| `supabase/functions/staysee-chat/index.ts` | Preliminary check; free guards; early reserve; `recordTokenUsage` after `totalTokens` |
 | `scripts/atomic-quota-staging-smoke.mts` | Tracked staging concurrency smoke (no secrets in source or output) |
 
 Out of scope: everything under `src/`, prompts, model router, memory modules, package.json / lockfile (already has `tsx`), rewriting legacy `increment_usage` SQL body.
 
-Important: `stayseeChatAtomicQuotaWiring.cases.test.ts` is an **architecture regression test**. It proves handler source order and chat-path accounting shape. It does **not** prove concurrent atomicity; concurrency is proven only by SQL `FOR UPDATE` + staging parallel smoke.
+Important: `stayseeChatAtomicQuotaWiring.cases.test.ts` is an **architecture regression test**. It proves handler source order, deny-block integrity, disconnect-independent accounting shape, and mutation self-checks. It does **not** prove concurrent atomicity; concurrency is proven only by SQL `FOR UPDATE` + staging parallel smoke.
 
 ---
 
@@ -534,149 +532,11 @@ Suggested message:
 
 ---
 
-### Task 5: RED/GREEN - atomic model gate seam
+### Task 5: Retired after provider-boundary review
 
-**Files:**
-- Create: `supabase/functions/_shared/atomicModelGate.ts`
-- Create: `supabase/functions/_shared/atomicModelGate.cases.test.ts`
+**Status:** retired (do not recreate).
 
-**Interfaces:**
-- Consumes: `RateLimitResult`
-- Produces:
-
-```ts
-export type AtomicModelGateResult<T> =
-  | { ok: true; value: T; reserve: RateLimitResult }
-  | { ok: false; reserve: RateLimitResult };
-
-export async function runAtomicModelGate<T>(opts: {
-  reserve: () => Promise<RateLimitResult>;
-  callModel: () => Promise<T>;
-}): Promise<AtomicModelGateResult<T>>
-```
-
-Required behaviors:
-
-- `reserve` called exactly once
-- on deny: provider called 0 times
-- on allow: provider called exactly 1 time
-- provider throw is rethrown
-- after provider throw, no second `reserve`
-
-- [ ] **Step 1: Write RED cases**
-
-```ts
-import { runAtomicModelGate } from "./atomicModelGate.ts";
-import type { RateLimitResult } from "./cost.ts";
-
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(message);
-}
-
-{
-  let reserveCalls = 0;
-  let providerCalls = 0;
-  const result = await runAtomicModelGate({
-    reserve: async (): Promise<RateLimitResult> => {
-      reserveCalls += 1;
-      return { allowed: false, tier: "free", reason: "daily_limit" };
-    },
-    callModel: async () => {
-      providerCalls += 1;
-      return "MODEL";
-    },
-  });
-  assert(result.ok === false, "deny ok");
-  assert(reserveCalls === 1, "deny reserve once");
-  assert(providerCalls === 0, "deny provider zero");
-}
-
-{
-  let reserveCalls = 0;
-  let providerCalls = 0;
-  const result = await runAtomicModelGate({
-    reserve: async (): Promise<RateLimitResult> => {
-      reserveCalls += 1;
-      return { allowed: true, tier: "basic" };
-    },
-    callModel: async () => {
-      providerCalls += 1;
-      return "MODEL";
-    },
-  });
-  assert(result.ok === true, "allow ok");
-  assert(reserveCalls === 1, "allow reserve once");
-  assert(providerCalls === 1, "allow provider once");
-}
-
-{
-  let reserveCalls = 0;
-  let threw = false;
-  try {
-    await runAtomicModelGate({
-      reserve: async (): Promise<RateLimitResult> => {
-        reserveCalls += 1;
-        return { allowed: true, tier: "free" };
-      },
-      callModel: async () => {
-        throw new Error("provider down");
-      },
-    });
-  } catch (err) {
-    threw = err instanceof Error && err.message === "provider down";
-  }
-  assert(threw, "provider throw rethrown");
-  assert(reserveCalls === 1, "no second reserve after throw");
-}
-
-console.log("=== atomicModelGate.cases.test.ts OK ===");
-```
-
-- [ ] **Step 2: Witness RED**
-
-```powershell
-.\node_modules\.bin\tsx.cmd supabase/functions/_shared/atomicModelGate.cases.test.ts
-```
-
-Expected: FAIL (missing module).
-
-- [ ] **Step 3: Implement GREEN**
-
-```ts
-import type { RateLimitResult } from "./cost.ts";
-
-export type AtomicModelGateResult<T> =
-  | { ok: true; value: T; reserve: RateLimitResult }
-  | { ok: false; reserve: RateLimitResult };
-
-export async function runAtomicModelGate<T>(opts: {
-  reserve: () => Promise<RateLimitResult>;
-  callModel: () => Promise<T>;
-}): Promise<AtomicModelGateResult<T>> {
-  const reserve = await opts.reserve();
-  if (!reserve.allowed) {
-    return { ok: false, reserve };
-  }
-  const value = await opts.callModel();
-  return { ok: true, value, reserve };
-}
-```
-
-- [ ] **Step 4: Run GREEN**
-
-```powershell
-.\node_modules\.bin\tsx.cmd supabase/functions/_shared/atomicModelGate.cases.test.ts
-```
-
-Expected: exit `0`.
-
-- [ ] **Step 5: Stop for commit authorization**
-
-Suggested message:
-
-```text
-[agent] feat: add atomic model gate seam
-```
+Late model-only gate seam was an incorrect architecture: it reserved immediately before the first `callModel` while earlier provider-backed paths (eager conversation summary / related AI work) could still run without an authoritative daily slot. After review, the handler uses an early `reserveAiRequest` barrier before **all** provider-backed seams. The gate module and its case suite were removed; do not add Task/code/commands that recreate it.
 
 ---
 
@@ -949,174 +809,54 @@ Do **not** apply to staging/production in this task.
 ### Task 8: RED - staysee-chat architecture wiring test
 
 **Files:**
-- Create: `supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts`
-- Do **not** edit `staysee-chat/index.ts` yet
+- Create / harden: `supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts`
+- Do **not** edit `staysee-chat/index.ts` in the RED step
 
 **Interfaces:**
 - Consumes: real source text of `supabase/functions/staysee-chat/index.ts`
-- Produces: architecture regression assertions
+- Produces: `validateAtomicQuotaWiring(source)` + mutation self-checks
 
-This test is **not** proof of concurrent atomicity.
+This test is **not** proof of concurrent atomicity. Concurrency is proven by staging parallel smoke.
 
-- [ ] **Step 1: Write RED source-reading test**
+Required architecture assertions (comment-stripped `Deno.serve` handler body):
 
-```ts
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+- preliminary `checkRateLimit` before exactly one `reserveAiRequest`
+- free guards (`safety.immediateResponse`, prompt-attack hard-stop) before reserve
+- every provider seam (`runConversationSummaryRefresh(`, `callModel(`, `callModelStructured(`) after reserve
+- balanced `{ ... }` for `if (!reserveResult.allowed)` contains `mapQuotaDenyResponse` + `return new Response`, contains no provider seam, and ends before the first provider seam
+- exactly one `recordTokenUsage` as direct `EdgeRuntime.waitUntil(...)` argument immediately after `totalTokens` (whitespace-only gap; no `if` / ternary / `&&` / `clientConnected` / `req.signal.aborted`)
+- `incrementUsage(` absent from chat-path
+- mutation A: inject `callModel(...)` into deny block -> validator must reject
+- mutation B: wrap `recordTokenUsage` in `if (!req.signal.aborted)` -> validator must reject
 
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(message);
-}
-
-/**
- * Architecture regression only.
- * Do NOT use source.search(/callModel\(/) or first reserveAiRequest( across the whole file:
- * that hits imports and `async function callModel` and is not handler wiring proof.
- */
-const raw = readFileSync(
-  resolve("supabase/functions/staysee-chat/index.ts"),
-  "utf8",
-);
-
-// Strip block comments and line comments before call-site scans.
-const noBlockComments = raw.replace(/\/\*[\s\S]*?\*\//g, "");
-const noComments = noBlockComments.replace(/(^|[^:])\/\/.*$/gm, "$1");
-
-// Exclude import section (everything before first non-import runtime declaration).
-const importEnd = (() => {
-  const lines = noComments.split(/\r?\n/);
-  let lastImport = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (!t) continue;
-    if (t.startsWith("import ")) {
-      lastImport = i;
-      continue;
-    }
-    // Keep scanning while still in multi-line import; otherwise stop at first non-import.
-    if (lastImport >= 0 && i > lastImport) return lines.slice(0, i).join("\n").length;
-  }
-  return 0;
-})();
-const afterImports = noComments.slice(importEnd);
-
-// Exclude helper declaration `async function callModel(...) { ... }` so later
-// scans target the Deno.serve handler body, not the local helper signature/body.
-const callModelDecl = afterImports.match(
-  /async\s+function\s+callModel\s*\([\s\S]*?\n\}\n/,
-);
-assert(callModelDecl && callModelDecl.index !== undefined, "callModel helper decl must exist");
-const handlerBody = afterImports.slice(0, callModelDecl.index) +
-  afterImports.slice(callModelDecl.index + callModelDecl[0].length);
-
-// Preliminary check remains in handler body (not only an import name).
-assert(
-  /checkRateLimit\s*\(/.test(handlerBody),
-  "preliminary checkRateLimit call must remain in handler body",
-);
-
-// Concrete gate invocation (exact shape from Task 9), not first symbol mention.
-const gatedAssignRe =
-  /const\s+gated\s*=\s*await\s+runAtomicModelGate\s*\(/;
-const gatedMatch = handlerBody.match(gatedAssignRe);
-assert(gatedMatch && gatedMatch.index !== undefined, "const gated = await runAtomicModelGate(...) required");
-const gatedPos = gatedMatch.index;
-
-// Extract the runAtomicModelGate({ ... }) argument object starting at gatedPos.
-function extractBalanced(src: string, openIdx: number, openCh: string, closeCh: string): string {
-  let depth = 0;
-  for (let i = openIdx; i < src.length; i++) {
-    if (src[i] === openCh) depth++;
-    else if (src[i] === closeCh) {
-      depth--;
-      if (depth === 0) return src.slice(openIdx, i + 1);
-    }
-  }
-  throw new Error("unbalanced " + openCh + closeCh);
-}
-
-const gateCallOpen = handlerBody.indexOf("(", gatedPos);
-const gateCall = extractBalanced(handlerBody, gateCallOpen, "(", ")");
-const optsOpen = gateCall.indexOf("{");
-assert(optsOpen >= 0, "gate options object required");
-const gateOpts = extractBalanced(gateCall, optsOpen, "{", "}");
-
-// Inside callback: reserve callback before provider callModel callback.
-const reserveCb = gateOpts.search(/reserve\s*:/);
-const providerCb = gateOpts.search(/callModel\s*:\s*(?:async\s*)?\(?/);
-assert(reserveCb >= 0 && providerCb >= 0, "reserve and callModel callbacks required");
-assert(reserveCb < providerCb, "inside gate opts: reserve -> provider order");
-
-// Provider path is the nested callModel(...) inside the callModel callback.
-assert(
-  /callModel\s*:\s*(?:async\s*)?\(?[\s\S]*?=>\s*[\s\S]*?\bcallModel\s*\(/.test(gateOpts),
-  "callModel callback must invoke helper callModel(...)",
-);
-
-// Safety immediate response + prompt hard-stop appear in handler body before const gated.
-const beforeGated = handlerBody.slice(0, gatedPos);
-assert(
-  /immediateResponse/.test(beforeGated),
-  "safety immediateResponse must appear before const gated",
-);
-assert(
-  /explicitPromptAttack|prompt-attack|hard-stop|hardStop/i.test(beforeGated),
-  "prompt hard-stop path must appear before const gated",
-);
-
-// Deny block after gate assign, before gated.value use.
-const afterGated = handlerBody.slice(gatedPos);
-const denyIdx = afterGated.search(/if\s*\(\s*!gated\.ok\s*\)/);
-const valueIdx = afterGated.search(/let\s+result\s*=\s*gated\.value/);
-assert(denyIdx >= 0, "if (!gated.ok) deny block required after gate");
-assert(valueIdx >= 0, "let result = gated.value required");
-assert(denyIdx < valueIdx, "deny block must be before gated.value use");
-
-// incrementUsage( call absent outside imports/comments (already stripped).
-assert(
-  !/\bincrementUsage\s*\(/.test(handlerBody),
-  "incrementUsage( must be absent from chat-path (ignoring imports/comments)",
-);
-
-// recordTokenUsage( after gated.value assignment.
-const afterValue = afterGated.slice(valueIdx);
-assert(
-  /recordTokenUsage\s*\(/.test(afterValue),
-  "recordTokenUsage( must appear after gated.value",
-);
-
-console.log("=== stayseeChatAtomicQuotaWiring.cases.test.ts OK ===");
-```
-
-Do not fall back to whole-file `search` for the first `callModel(` or first `reserveAiRequest(`.
-
-- [ ] **Step 2: Run RED against current handler**
+- [ ] **Step 1: Implement / harden the wiring suite as above**
+- [ ] **Step 2: Run against handler until GREEN**
 
 ```powershell
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts
 ```
 
-Expected: FAIL (no `reserveAiRequest` / `runAtomicModelGate` / `recordTokenUsage`; `incrementUsage` still present).
+Expected: real handler PASS; both mutations rejected; exit `0`.
 
 - [ ] **Step 3: Stop for commit authorization**
 
 Suggested message:
 
 ```text
-[agent] test: red staysee-chat atomic quota wiring
+[agent] fix: reserve quota before all provider work
 ```
 
 ---
 
-### Task 9: GREEN - wire `staysee-chat/index.ts` + tracked staging smoke script
+### Task 9: GREEN - early reserve wiring + tracked staging smoke script
 
 **Files:**
 - Modify: `supabase/functions/staysee-chat/index.ts`
 - Create: `scripts/atomic-quota-staging-smoke.mts`
-- Test: wiring suite + all prior local suites
+- Test: wiring suite + remaining local suites
 
 **Interfaces:**
-- Consumes: `checkRateLimit`, `mapQuotaDenyResponse`, `reserveAiRequest`, `runAtomicModelGate`, `recordTokenUsage`, `makeServiceClient`
+- Consumes: `checkRateLimit`, `mapQuotaDenyResponse`, `reserveAiRequest`, `recordTokenUsage`, `makeServiceClient`
 - Produces: handler order from design; tracked smoke entrypoint with **no secrets in code or output**
 
 Fixed handler order:
@@ -1125,121 +865,45 @@ Fixed handler order:
 2. verified auth
 3. duplicate prevention
 4. preliminary `checkRateLimit`
-5. memory / context / safety
-6. free early responses
-7. build prompts / budgets
-8. atomic reserve via `runAtomicModelGate` / `reserveAiRequest`
-9. provider / model
-10. `recordTokenUsage`
+5. free message-only guards (immediateResponse + prompt-attack)
+6. authoritative `reserveAiRequest` (exactly once) + deny map
+7. durable memory / context / eager summary / category+guidance safety
+8. main model / recovery / shadow (same reserved turn)
+9. `recordTokenUsage` immediately after `totalTokens` (disconnect-independent)
 
-- [ ] **Step 1: Update imports**
+- [ ] **Step 1: Wire early reserve after free guards; restore direct `callModel`**
 
-Remove chat-path `incrementUsage` import. Add:
+Do **not** introduce a late model-only gate. Service-client create failure -> `503 { error: "service_unavailable" }`.
 
-```ts
-import {
-  checkRateLimit,
-  reserveAiRequest,
-  recordTokenUsage,
-  // ...other existing cost imports still needed
-} from "../_shared/cost.ts";
-import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
-import { runAtomicModelGate } from "../_shared/atomicModelGate.ts";
-```
+- [ ] **Step 2: Keep preliminary deny mapping**
 
-- [ ] **Step 2: Fix preliminary deny mapping (keep the check)**
+- [ ] **Step 3: Move `recordTokenUsage` before `clientConnected` memory/summary background gating**
 
-```ts
-const rateLimitResult = await checkRateLimit(userSupabase, userId);
-userTier = rateLimitResult.tier;
+- [ ] **Step 4: Tracked smoke script**
 
-if (!rateLimitResult.allowed) {
-  const mapped = mapQuotaDenyResponse(rateLimitResult.reason, {
-    suspended: CALM_ERRORS.suspended,
-    rateLimit: CALM_ERRORS.rateLimit,
-  });
-  console.warn(
-    `[staysee-chat] preliminary rate limit for user ${userId}: ${rateLimitResult.reason}`,
-  );
-  return new Response(JSON.stringify(mapped.body), {
-    status: mapped.status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-```
+`scripts/atomic-quota-staging-smoke.mts`:
 
-- [ ] **Step 3: Insert atomic gate immediately before first `callModel`**
-
-```ts
-const svcForReserve = makeServiceClient();
-const gated = await runAtomicModelGate({
-  reserve: () => reserveAiRequest(svcForReserve, userId),
-  callModel: () =>
-    callModel(
-      providerKey,
-      config,
-      modelMessages,
-      systemPrompt,
-      outputBudget,
-      tierCfg.temperature,
-      turnModel,
-      modelRoute.fallbackModel,
-    ),
-});
-
-if (!gated.ok) {
-  const mapped = mapQuotaDenyResponse(gated.reserve.reason, {
-    suspended: CALM_ERRORS.suspended,
-    rateLimit: CALM_ERRORS.rateLimit,
-  });
-  console.warn(
-    `[staysee-chat] atomic reserve deny for user ${userId}: ${gated.reserve.reason}`,
-  );
-  return new Response(JSON.stringify(mapped.body), {
-    status: mapped.status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-let result = gated.value;
-```
-
-Same-turn recovery/shadow `callModel` calls remain after successful reserve (no second reserve).
-
-- [ ] **Step 4: Replace post-call daily increment**
-
-Replace `incrementUsage(svc, userId, totalTokens)` with `recordTokenUsage(svc, userId, totalTokens)`.
-
-- [ ] **Step 5: Add tracked smoke script skeleton**
-
-Create `scripts/atomic-quota-staging-smoke.mts`:
-
-- read staging URL / service role / test user id from env vars only
+- env-only credentials; staging URL must match `hdmoetcvlszrdukqpiia`
 - never hardcode secrets
-- print only booleans/counts/reasons (`allowed`, `daily_limit`, used delta)
+- print only booleans/counts/reasons
 - never print JWTs, keys, emails, message bodies
+- never call staysee-chat / AI providers in the RPC smoke
 
-- [ ] **Step 6: Run local GREEN suites**
+- [ ] **Step 5: Run local GREEN suites**
 
 ```powershell
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/cost.cases.test.ts
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/authUser.cases.test.ts
 .\node_modules\.bin\tsx.cmd src/lib/ai/client.cases.test.ts
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/quotaDenyResponse.cases.test.ts
-.\node_modules\.bin\tsx.cmd supabase/functions/_shared/atomicModelGate.cases.test.ts
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/atomicQuotaMigration.cases.test.ts
 .\node_modules\.bin\tsx.cmd supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts
+.\node_modules\.bin\tsx.cmd scripts/atomic-quota-staging-smoke.mts --dry-run
 ```
 
 Expected: all exit `0`.
 
-- [ ] **Step 7: Stop for commit authorization**
-
-Suggested message:
-
-```text
-[agent] feat: wire atomic chat quota gate
-```
+- [ ] **Step 6: Stop for commit authorization**
 
 ---
 
@@ -1254,6 +918,19 @@ Hard gates before any staging command:
 - Explicit Nastya authorization for that exact command class (link / db push / functions deploy / smoke)
 - Exact staging project ref: `hdmoetcvlszrdukqpiia`
 - No production ref in this task
+
+- [ ] **Step 0: Mandatory read-only preflight audit (no PII)**
+
+Before deploy/migration apply, run a **read-only** aggregate audit:
+
+- count rows grouped by `tier` + `daily_request_limit` + `monthly_token_limit`
+- never print `user_id`, email, or other PII
+- treat real DB row limits as authoritative for enforcement
+- Variant B must **not** automatically rewrite / normalize tariffs
+- record the known `TIER_CONFIG` vs DB defaults discrepancy before deploy:
+  - Edge `TIER_CONFIG.free.monthlyTokenLimit` = `200_000`
+  - DB table default `monthly_token_limit` = `500000` (migrations 006/021)
+  - free daily defaults currently both `50`; basic/premium exist in `TIER_CONFIG` but row values come from DB
 
 - [ ] **Step 1: Link staging and verify project-ref**
 
@@ -1294,7 +971,7 @@ npx.cmd supabase functions deploy staysee-chat --project-ref hdmoetcvlszrdukqpii
 
 Re-check `supabase/.temp/project-ref` is still staging before deploy if link state could have drifted.
 
-- [ ] **Step 5: Concurrency smoke (separate authorization)**
+- [ ] **Step 5: RPC concurrency smoke (separate authorization)**
 
 ```powershell
 .\node_modules\.bin\tsx.cmd scripts/atomic-quota-staging-smoke.mts
@@ -1306,9 +983,23 @@ Required checks:
 - expired day window -> reset + one allow
 - token RPC changes monthly counters only
 - deny path never reaches AI
-- restore fixtures; one authorized model smoke
+- restore fixtures
 
 No secrets in script output.
+
+- [ ] **Step 6: Future handler parallel check (do not run without separate authorization)**
+
+Separate future check (not part of the RPC smoke; requires explicit permission for one paid provider call):
+
+- authenticated temp user
+- remaining daily slot = 1
+- two parallel handler (`staysee-chat`) requests
+- expect exactly one allowed AI path and one quota deny
+- at most one billable main model request
+- requires separate explicit authorization for that single provider call
+- cleanup temp user/rows afterward
+
+Do **not** run Step 6 in this cleanup or without that authorization.
 
 ---
 
@@ -1363,12 +1054,14 @@ npx.cmd supabase functions deploy staysee-chat --project-ref jnxrildlwvtxhtiwucb
 
 ## Self-review checklist (plan author)
 
-- Spec coverage: preliminary keep, atomic-before-model, monthly-only tokens, `search_path=''`, grants, error mapping 429/503, concurrency caveat, rollback, non-goals -> each has a task.
-- Handler proof is source wiring regression (`stayseeChatAtomicQuotaWiring`), not `simulateHandlerOrder`; positions come from handler body after excluding imports and `async function callModel`, anchored on `const gated = await runAtomicModelGate`.
+- Spec coverage: preliminary keep, free guards before reserve, early reserve before all provider seams, monthly-only tokens, disconnect-independent accounting, `search_path=''`, grants, error mapping 429/503, concurrency caveat, rollback, non-goals -> each has a task.
+- Handler proof is source wiring regression (`validateAtomicQuotaWiring`) with mutation self-checks; concurrency is staging parallel smoke only.
 - Migration has its own RED before SQL exists; each RPC body is extracted separately for SECURITY DEFINER / `search_path=''` / daily vs monthly checks.
 - `add_ai_token_usage` null/negative guard is explicit.
 - `reserveAiRequest` rejects unknown tier/reason/malformed payloads.
-- Gate tests cover reserve-once, provider 0/1, throw rethrow, no rereserve.
+- Late model-only gate retired after provider-boundary review (Task 5).
+- Staging preflight requires read-only aggregate tier-limit audit without PII; DB row limits are authoritative; no automatic tariff rewrites.
+- Staging checklist includes a future authorized handler parallel check (not run by default).
 - Staging flow uses exact `link` / `.temp/project-ref` / dry-run / push commands.
 - Delivery order includes commit/push/Draft PR/staging/prod gates as separately authorized steps.
 - Tracked smoke path is `scripts/atomic-quota-staging-smoke.mts`.

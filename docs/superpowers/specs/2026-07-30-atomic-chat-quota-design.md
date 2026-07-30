@@ -7,7 +7,7 @@ Approach: A — atomic `reserve_ai_request` RPC (no reservation ledger)
 
 ## Goal
 
-Close the parallel daily-limit bypass: before the first model/provider call, atomically reserve exactly one daily request slot for the verified user.
+Close the parallel daily-limit bypass: atomically reserve exactly one daily request slot for the verified user **before any provider-backed work** (eager summary, life-memory refresh, main model, recovery, shadow).
 
 ## Non-goals
 
@@ -17,19 +17,21 @@ Close the parallel daily-limit bypass: before the first model/provider call, ato
 - Do not add a reservation ledger or `requestId` idempotency table.
 - Do not return (refund) a daily slot after provider/network failure once reserve succeeded.
 - Do not fix the repository-wide CI/typecheck baseline.
+- Do not auto-change user tier limits as part of Variant B.
 
 ## Product semantics
 
 - Auth, IP velocity, and in-memory dedup run before quota work.
 - After verified auth and duplicate prevention, keep the existing early `checkRateLimit` as a **cheap preliminary filter** (defense in depth).
-- Safety `immediateResponse` and explicit prompt-attack hard-stop paths do **not** consume a daily slot.
-- Authoritative atomic reserve runs **immediately before the first provider/model call** (`callModel`).
+- Free message-only guards — safety `immediateResponse` (message-level) and explicit prompt-attack hard-stop — run **before** reserve and do **not** consume a daily slot.
+- Authoritative `reserveAiRequest` runs exactly once after free guards and **before** any provider-backed seam.
 - One user turn consumes one daily slot even when that turn later performs recovery, fallback, or shadow provider calls.
 - Daily usage is incremented exactly once, and only inside `reserve_ai_request` on allow.
 - After a successful reserve, the slot is never returned.
 - Abort or early return **before** reserve does not consume a slot.
 - Abort or provider failure **after** reserve consumes the slot (cost protection, not free retry).
-- Monthly tokens are recorded from actual usage after the model response path.
+- Monthly tokens are recorded via `recordTokenUsage` immediately after `totalTokens` is known, **independent of** `clientConnected` / `req.signal.aborted`.
+- Memory/summary background work may still be skipped on disconnect; token accounting is not.
 
 ## Defense in depth: preliminary `checkRateLimit`
 
@@ -40,13 +42,13 @@ Purpose of the preliminary SELECT:
 - immediately reject `suspended`;
 - immediately reject an already exhausted daily limit;
 - fail closed on missing row / SELECT error;
-- prevent obviously blocked requests from doing memory / context / safety work.
+- prevent obviously blocked requests from doing memory / context / provider work.
 
 Explicit limits of the preliminary check:
 
 - the early SELECT is **not** a concurrency guarantee;
 - two parallel requests can both pass the preliminary check when `remaining = 1`;
-- authoritative enforcement is performed **only** by atomic `reserve_ai_request` immediately before the first model call.
+- authoritative enforcement is performed **only** by atomic `reserve_ai_request` before any provider-backed work.
 
 ## Architecture
 
@@ -58,10 +60,12 @@ Approach A only:
    - `reserveAiRequest`
    - `recordTokenUsage`
 4. `staysee-chat` keeps `checkRateLimit` as the preliminary guard after auth/dedup.
-5. `staysee-chat` calls `reserveAiRequest` exactly once, immediately before the first `callModel`.
-6. The chat-path post-call `incrementUsage` is replaced with `recordTokenUsage`.
-7. Legacy `incrementUsage` remains exported for compatibility/rollback, but the chat-path no longer uses it.
-8. Legacy `checkRateLimit` remains exported and continues to be used by `staysee-chat` as the preliminary guard only.
+5. Free message-only guards run before reserve.
+6. `staysee-chat` calls `reserveAiRequest` exactly once after free guards and before any provider-backed work.
+7. The chat-path post-call `incrementUsage` is replaced with `recordTokenUsage`.
+8. Legacy `incrementUsage` remains exported for compatibility/rollback, but the chat-path no longer uses it.
+9. Legacy `checkRateLimit` remains exported and continues to be used by `staysee-chat` as the preliminary guard only.
+10. A late model-only gate seam is **not** part of the architecture (removed after provider-boundary review).
 
 Approaches B (reservation ledger) and C (advisory lock across check+increment) are out of implementation scope.
 
@@ -132,7 +136,7 @@ v_now - user_usage_tiers.day_reset_at > interval '24 hours'
   - on expire: set `monthly_tokens_used` from this call’s tokens and set `month_reset_at = v_now`
 - Otherwise add `p_tokens` to `monthly_tokens_used`.
 - Never modify `daily_requests_used`.
-- Edge calls this best-effort after the model response path.
+- Edge calls this best-effort after `totalTokens` is computed, independent of client disconnect.
 - Token-accounting failure does not refund the daily slot and does not alter the already-built HTTP response.
 
 ## Edge wrappers (`cost.ts`)
@@ -161,12 +165,11 @@ Fixed order:
 2. verified auth (`resolveVerifiedChatUser`)
 3. duplicate prevention
 4. preliminary `checkRateLimit`
-5. memory / context / safety evaluation
-6. free early responses (safety `immediateResponse`, explicit prompt-attack hard-stop) — no reserve
-7. build prompts / budgets
-8. atomic `reserveAiRequest` via service-role client, immediately before the first model call
-9. provider / model (`callModel`, including any recovery/shadow calls for the same turn)
-10. `recordTokenUsage` (monthly tokens only; never a second daily charge)
+5. free message-only guards (`evaluateTurnSafety(message, [])` immediateResponse; explicit prompt-attack hard-stop) — no reserve
+6. atomic `reserveAiRequest` via service-role client (exactly once); deny via `mapQuotaDenyResponse` returns before any provider seam
+7. durable memory / context / eager summary / post-context safety category+guidance (no second immediate-return)
+8. provider / model (`callModel`, including recovery/shadow for the same reserved turn)
+9. `recordTokenUsage` immediately after `totalTokens`, before `clientConnected` gating of memory/summary background work
 
 ### Error mapping
 
@@ -179,7 +182,7 @@ Fixed order:
 | `missing_tier` | `503` `{ "error": "service_unavailable" }` (not a false 429) |
 | SELECT / `limit_check_error` | `503` `{ "error": "service_unavailable" }` (not a false 429) |
 
-Preliminary deny must skip memory/context/safety work and must not call provider.
+Preliminary deny must skip memory/context/provider work and must not call provider.
 
 #### Atomic `reserveAiRequest`
 
@@ -190,7 +193,7 @@ Preliminary deny must skip memory/context/safety work and must not call provider
 | `missing_tier` | `503` `{ "error": "service_unavailable" }` |
 | RPC/DB / `limit_check_error` | `503` `{ "error": "service_unavailable" }` |
 
-Atomic reserve is the **final** decision before AI. Provider/model must not be called on any reserve deny or reserve error.
+Atomic reserve is the **final** decision before any provider-backed work. Provider/model/eager summary must not be called on any reserve deny or reserve error.
 
 ## Concurrency guarantee
 
@@ -200,7 +203,7 @@ When `daily_request_limit - daily_requests_used = 1` for one user:
 - two concurrent `reserve_ai_request` calls still yield exactly one `allowed: true`;
 - the other returns `daily_limit`;
 - the final `daily_requests_used` increases by exactly 1;
-- the row lock is held only for the short SQL transaction and **not** during the model call.
+- the row lock is held only for the short SQL transaction and **not** during provider work.
 
 ## Testing
 
@@ -210,21 +213,23 @@ When `daily_request_limit - daily_requests_used = 1` for one user:
 - suspended / daily_limit / missing_tier deny mapping for reserve;
 - RPC/transport error → fail-closed `limit_check_error`;
 - `recordTokenUsage` calls only `add_ai_token_usage` and changes only monthly tokens;
-- preliminary deny → context/provider seam is not invoked;
-- preliminary allow + atomic deny under race → provider is not invoked;
-- preliminary allow + atomic allow → exactly one provider path;
-- neither preliminary check nor reserve performs a post-call daily increment;
+- free guards + reserve precede every provider-backed seam;
+- atomic deny block contains `mapQuotaDenyResponse` + `return new Response` and no provider seams;
+- `recordTokenUsage` is unconditional `EdgeRuntime.waitUntil(...)` immediately after `totalTokens`;
+- source wiring test includes mutation self-checks (provider-inside-deny and abort-gated accounting must fail validation);
 - chat-path no longer invokes legacy post-call daily `increment_usage`.
 
 ### Staging
 
+- mandatory read-only preflight audit (aggregate tier counts only; no userId/email);
 - apply migration `031`;
 - verify EXECUTE grants (service_role only);
-- remaining=1 + two parallel reserves → one allow;
+- remaining=1 + two parallel reserves → one allow (RPC smoke);
+- future authorized handler parallel check (temp user, one paid AI path max);
 - expired day window → reset + one allow;
 - token RPC changes monthly counters only;
 - deny path never reaches AI;
-- after concurrency fixtures restore, one valid authorized model smoke.
+- concurrency is proven by staging parallel smoke, not by the source wiring test alone.
 
 ### Production
 
@@ -239,18 +244,20 @@ When `daily_request_limit - daily_requests_used = 1` for one user:
 - `supabase/migrations/20260730120000_031_atomic_chat_quota.sql`
 - `supabase/functions/_shared/cost.ts`
 - `supabase/functions/_shared/cost.cases.test.ts`
+- `supabase/functions/_shared/quotaDenyResponse.ts`
+- `supabase/functions/_shared/stayseeChatAtomicQuotaWiring.cases.test.ts`
 - `supabase/functions/staysee-chat/index.ts`
-- optional local case-test only for the handler/provider seam if wiring cannot be covered from `cost.cases.test.ts` alone
-- staging concurrency smoke script only after SQL/Edge GREEN (not part of the first RED patch)
+- `scripts/atomic-quota-staging-smoke.mts`
 
 ## Risks
 
 - Double daily charge if legacy `incrementUsage` remains in the chat-path.
 - Treating preliminary `checkRateLimit` as concurrency-safe would leave the race open; only `reserve_ai_request` is authoritative.
 - Placing reserve too early would start charging safety/hard-stop responses (forbidden by this design).
-- Placing reserve after the first provider call would fail to close the race.
+- Placing reserve after the first provider-backed seam (eager summary included) would fail to close the race.
 - Missing tier must deny; do not auto-insert rows in reserve.
 - Migration grants must repeat the migration 025 security pattern, with `search_path = ''` on new SECURITY DEFINER RPCs.
+- `TIER_CONFIG` client/Edge defaults may diverge from authoritative DB row limits; Variant B must not auto-rewrite tiers.
 - Merge to `main` triggers frontend/VPS `deploy.yml` but does **not** deploy Supabase functions; Edge deploy remains an explicit step.
 
 ## Rollback
