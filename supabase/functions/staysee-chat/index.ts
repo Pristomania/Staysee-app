@@ -82,7 +82,6 @@ import {
 } from "../_shared/cost.ts";
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
-import { runAtomicModelGate } from "../_shared/atomicModelGate.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
@@ -528,6 +527,77 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // ── Free message-only guards (no daily slot) ────────────────────────────
+
+    let safety = evaluateTurnSafety(message, []);
+    if (safety.immediateResponse) {
+      return new Response(
+        JSON.stringify({
+          content: safety.immediateResponse,
+          provider: providerKey,
+          model: reqModel ?? config.model,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── PR7a: Explicit prompt-attack hard-stop only (crisis hard-stop removed) ──
+
+    const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
+    if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
+      void logProtocolEvent(makeServiceClient(), {
+        userId: userId ?? null,
+        conversationId: conversationId ?? null,
+        requestId: requestId ?? null,
+        eventType: "prompt_attack_hard_stop",
+        severity: "tier_3",
+        protocol: explicitPromptAttackStop.protocol ?? "regex_prompt_attack_explicit",
+        actionTaken: "hard_stop",
+        confidence: "high",
+        matchedPattern: explicitPromptAttackStop.matched_pattern ?? null,
+        promptVersion: getPromptAuditVersion(),
+        reason: "explicit_prompt_attack_construction",
+      });
+      console.log(
+        `[staysee-chat] explicit prompt-attack hard-stop: ${explicitPromptAttackStop.matched_pattern}`
+      );
+      return new Response(
+        JSON.stringify({
+          content: explicitPromptAttackStop.response,
+          provider: providerKey,
+          model: reqModel ?? config.model,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Authoritative daily reserve (before any provider-backed work) ───────
+
+    let quotaServiceClient: ReturnType<typeof makeServiceClient>;
+    try {
+      quotaServiceClient = makeServiceClient();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "service_unavailable" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const reserveResult = await reserveAiRequest(quotaServiceClient, userId);
+    if (!reserveResult.allowed) {
+      const mapped = mapQuotaDenyResponse(reserveResult.reason, {
+        suspended: CALM_ERRORS.suspended,
+        rateLimit: CALM_ERRORS.rateLimit,
+      });
+      console.warn(
+        `[staysee-chat] atomic reserve deny for user ${userId}: ${reserveResult.reason}`,
+      );
+      return new Response(JSON.stringify(mapped.body), {
+        status: mapped.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // ── Durable memory corrections (flag-gated) ───────────────────────────
 
     let sameTurnDurableCorrection: DurableMemoryCorrection | null = null;
@@ -856,48 +926,11 @@ Deno.serve(async (req: Request) => {
 
     // ── L5: Safety check ────────────────────────────────────────────────────
 
-    const safety = evaluateTurnSafety(message, historyMessages);
+    safety = evaluateTurnSafety(message, historyMessages);
     const diagnosis = logSafetyDiagnosis(message, historyMessages);
     console.log(
       `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated} rule=${diagnosis.matchedRule}`
     );
-
-    if (safety.immediateResponse) {
-      return new Response(
-        JSON.stringify({ content: safety.immediateResponse, provider: providerKey, model: reqModel ?? config.model }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ── PR7a: Explicit prompt-attack hard-stop only (crisis hard-stop removed) ──
-
-    const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
-    if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
-      void logProtocolEvent(makeServiceClient(), {
-        userId: userId ?? null,
-        conversationId: conversationId ?? null,
-        requestId: requestId ?? null,
-        eventType: "prompt_attack_hard_stop",
-        severity: "tier_3",
-        protocol: explicitPromptAttackStop.protocol ?? "regex_prompt_attack_explicit",
-        actionTaken: "hard_stop",
-        confidence: "high",
-        matchedPattern: explicitPromptAttackStop.matched_pattern ?? null,
-        promptVersion: getPromptAuditVersion(),
-        reason: "explicit_prompt_attack_construction",
-      });
-      console.log(
-        `[staysee-chat] explicit prompt-attack hard-stop: ${explicitPromptAttackStop.matched_pattern}`
-      );
-      return new Response(
-        JSON.stringify({
-          content: explicitPromptAttackStop.response,
-          provider: providerKey,
-          model: reqModel ?? config.model,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     if (safety.systemGuidance) {
       systemPrompt = [systemPrompt, safety.systemGuidance].join("\n\n");
@@ -1047,37 +1080,16 @@ Deno.serve(async (req: Request) => {
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
     );
 
-    const svcForReserve = makeServiceClient();
-    const gated = await runAtomicModelGate({
-      reserve: () => reserveAiRequest(svcForReserve, userId),
-      callModel: () =>
-        callModel(
-          providerKey,
-          config,
-          modelMessages,
-          systemPrompt,
-          outputBudget,
-          tierCfg.temperature,
-          turnModel,
-          modelRoute.fallbackModel
-        ),
-    });
-
-    if (!gated.ok) {
-      const mapped = mapQuotaDenyResponse(gated.reserve.reason, {
-        suspended: CALM_ERRORS.suspended,
-        rateLimit: CALM_ERRORS.rateLimit,
-      });
-      console.warn(
-        `[staysee-chat] atomic reserve deny for user ${userId}: ${gated.reserve.reason}`,
-      );
-      return new Response(JSON.stringify(mapped.body), {
-        status: mapped.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    let result = gated.value;
+    let result = await callModel(
+      providerKey,
+      config,
+      modelMessages,
+      systemPrompt,
+      outputBudget,
+      tierCfg.temperature,
+      turnModel,
+      modelRoute.fallbackModel
+    );
 
     // ── Reply completion routes ─────────────────────────────────────────────
     const firstSegmentContent = result.content?.trim() ?? "";
@@ -1347,6 +1359,9 @@ Deno.serve(async (req: Request) => {
 
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
+    EdgeRuntime.waitUntil(
+      recordTokenUsage(quotaServiceClient, userId, totalTokens),
+    );
     const modelUnavailable = result.content === CALM_ERRORS.unavailable;
     const replyRecoveryFailed =
       recoveryDiagnostics.failClosedUsed ||
@@ -1630,9 +1645,6 @@ Deno.serve(async (req: Request) => {
               )
             : Promise.resolve(),
 
-          // Monthly token accounting only (daily slot already reserved)
-          recordTokenUsage(svc, userId, totalTokens),
-
           // OpenRouter usage analytics (ai_usage_logs)
           usageLogRow ? logOpenRouterUsage(svc, usageLogRow) : Promise.resolve(),
 
@@ -1692,7 +1704,7 @@ Deno.serve(async (req: Request) => {
         ])
       );
     } else if (userId && !clientConnected) {
-      console.log("[staysee-chat] client disconnected — skip memory, usage, summary");
+      console.log("[staysee-chat] client disconnected — skip memory, summary");
     }
 
     return new Response(
