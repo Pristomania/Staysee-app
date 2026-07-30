@@ -71,7 +71,8 @@ import {
   makeRequestKey,
   checkRateLimit,
   checkIpVelocity,
-  incrementUsage,
+  reserveAiRequest,
+  recordTokenUsage,
   estimateTokens,
   trimContextForTier,
   makeServiceClient,
@@ -80,6 +81,8 @@ import {
   type ProviderConfig,
 } from "../_shared/cost.ts";
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
+import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
+import { runAtomicModelGate } from "../_shared/atomicModelGate.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
@@ -512,14 +515,17 @@ Deno.serve(async (req: Request) => {
     userTier = rateLimitResult.tier;
 
     if (!rateLimitResult.allowed) {
-      const msg = rateLimitResult.reason === "suspended"
-        ? CALM_ERRORS.suspended
-        : CALM_ERRORS.rateLimit;
-      console.warn(`[staysee-chat] rate limit for user ${userId}: ${rateLimitResult.reason}`);
-      return new Response(
-        JSON.stringify({ content: msg }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      const mapped = mapQuotaDenyResponse(rateLimitResult.reason, {
+        suspended: CALM_ERRORS.suspended,
+        rateLimit: CALM_ERRORS.rateLimit,
+      });
+      console.warn(
+        `[staysee-chat] preliminary rate limit for user ${userId}: ${rateLimitResult.reason}`,
       );
+      return new Response(JSON.stringify(mapped.body), {
+        status: mapped.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // ── Durable memory corrections (flag-gated) ───────────────────────────
@@ -1041,16 +1047,37 @@ Deno.serve(async (req: Request) => {
       `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
     );
 
-    let result = await callModel(
-      providerKey,
-      config,
-      modelMessages,
-      systemPrompt,
-      outputBudget,
-      tierCfg.temperature,
-      turnModel,
-      modelRoute.fallbackModel
-    );
+    const svcForReserve = makeServiceClient();
+    const gated = await runAtomicModelGate({
+      reserve: () => reserveAiRequest(svcForReserve, userId),
+      callModel: () =>
+        callModel(
+          providerKey,
+          config,
+          modelMessages,
+          systemPrompt,
+          outputBudget,
+          tierCfg.temperature,
+          turnModel,
+          modelRoute.fallbackModel
+        ),
+    });
+
+    if (!gated.ok) {
+      const mapped = mapQuotaDenyResponse(gated.reserve.reason, {
+        suspended: CALM_ERRORS.suspended,
+        rateLimit: CALM_ERRORS.rateLimit,
+      });
+      console.warn(
+        `[staysee-chat] atomic reserve deny for user ${userId}: ${gated.reserve.reason}`,
+      );
+      return new Response(JSON.stringify(mapped.body), {
+        status: mapped.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let result = gated.value;
 
     // ── Reply completion routes ─────────────────────────────────────────────
     const firstSegmentContent = result.content?.trim() ?? "";
@@ -1603,8 +1630,8 @@ Deno.serve(async (req: Request) => {
               )
             : Promise.resolve(),
 
-          // Increment usage counters
-          incrementUsage(svc, userId, totalTokens),
+          // Monthly token accounting only (daily slot already reserved)
+          recordTokenUsage(svc, userId, totalTokens),
 
           // OpenRouter usage analytics (ai_usage_logs)
           usageLogRow ? logOpenRouterUsage(svc, usageLogRow) : Promise.resolve(),
