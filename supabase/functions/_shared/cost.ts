@@ -193,8 +193,8 @@ export async function checkRateLimit(
     .eq("user_id", userId)
     .maybeSingle();
 
-  // If no row exists yet, treat as free tier and allow
-  if (error || !data) return { allowed: true, tier: "free" };
+  if (error) return { allowed: false, tier: "free", reason: "limit_check_error" };
+  if (!data) return { allowed: false, tier: "free", reason: "missing_tier" };
 
   const tier = (data.tier as UsageTier) ?? "free";
 

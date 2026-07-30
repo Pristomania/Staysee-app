@@ -1,7 +1,9 @@
-import { supabase } from '../supabase';
-import { resolveSupabasePublicConfig } from '../supabaseEnv';
 import type { TimeGapMeta } from '../timeGap';
 import { classifyHttp200Content } from './calmFallback';
+import {
+  sendAuthorizedChatRequest,
+  type ChatTransportDeps,
+} from './clientTransport';
 import type { AiSendResult } from './sendResult';
 export type { AiSendResult, AiSendStatus } from './sendResult';
 export { isAiSendSuccess } from './sendResult';
@@ -27,6 +29,30 @@ const inFlight = new Set<string>();
 function makeClientKey(userId: string, message: string): string {
   return `${userId}::${message.slice(0, 120)}`;
 }
+
+let resolveSupabasePublicConfig: ChatTransportDeps['getPublicConfig'] | null = null;
+
+const defaultChatTransportDeps: ChatTransportDeps = {
+  getAccessToken: async () => {
+    const { supabase } = await import('../supabase');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token ?? null;
+    if (typeof token === 'string' && token.trim()) {
+      const env = await import('../supabaseEnv');
+      resolveSupabasePublicConfig = env.resolveSupabasePublicConfig;
+    }
+    return token;
+  },
+  getPublicConfig: () => {
+    if (!resolveSupabasePublicConfig) {
+      throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY');
+    }
+    return resolveSupabasePublicConfig();
+  },
+  fetch: (input, init) => globalThis.fetch(input, init),
+};
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -59,7 +85,10 @@ export interface SendMessageOptions {
  * Sends one message to the staysee-chat edge function.
  * Returns a discriminated result — callers must not persist non-success content as AI.
  */
-export async function sendAiMessage(options: SendMessageOptions): Promise<AiSendResult> {
+export async function sendAiMessage(
+  options: SendMessageOptions,
+  deps: ChatTransportDeps = defaultChatTransportDeps,
+): Promise<AiSendResult> {
   const { message, conversationId, userId, requestId, signal } = options;
 
   if (signal?.aborted) throw new AiRequestAborted();
@@ -76,10 +105,6 @@ export async function sendAiMessage(options: SendMessageOptions): Promise<AiSend
   }
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const { url: supabaseUrl, anonKey } = resolveSupabasePublicConfig();
-
     const body: Record<string, unknown> = { message };
     if (requestId) body.requestId = requestId;
     if (conversationId) body.conversationId = conversationId;
@@ -90,16 +115,15 @@ export async function sendAiMessage(options: SendMessageOptions): Promise<AiSend
 
     let response: Response;
     try {
-      response = await fetch(`${supabaseUrl}/functions/v1/staysee-chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token ?? anonKey}`,
-          Apikey: anonKey,
-        },
-        body: JSON.stringify(body),
+      const transportResult = await sendAuthorizedChatRequest({
+        body,
         signal,
+        deps,
       });
+      if (!transportResult.ok) {
+        return transportResult.result;
+      }
+      response = transportResult.response;
     } catch {
       return {
         status: 'network_error',

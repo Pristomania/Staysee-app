@@ -79,6 +79,7 @@ import {
   type UsageTier,
   type ProviderConfig,
 } from "../_shared/cost.ts";
+import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
@@ -401,7 +402,15 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body: RequestBody = await req.json();
-    const { message, conversationId, userId, provider: reqProvider, model: reqModel, requestId, timeGap } = body;
+    const {
+      message,
+      conversationId,
+      userId: requestedUserId,
+      provider: reqProvider,
+      model: reqModel,
+      requestId,
+      timeGap,
+    } = body;
 
     if (!message || typeof message !== "string" || message.trim() === "") {
       return new Response(
@@ -419,10 +428,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const authToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-
     // ── L7: IP velocity guard (spam / autoclicker) ─────────────────────────
 
     const clientIp =
@@ -439,6 +444,51 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const authorizationHeader = req.headers.get("Authorization");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return new Response(
+        JSON.stringify({ error: "service_unavailable" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const verifiedUser = await resolveVerifiedChatUser({
+      authorizationHeader,
+      requestedUserId,
+      getUser: async (token) => {
+        const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
+
+        const { data, error } = await authClient.auth.getUser(token);
+
+        return {
+          user: data.user,
+          error,
+        };
+      },
+    });
+
+    if (!verifiedUser.ok) {
+      return new Response(
+        JSON.stringify({ error: verifiedUser.reason }),
+        {
+          status: verifiedUser.status,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const userId = verifiedUser.userId;
+    const authToken = verifiedUser.authToken;
+
     // ── L7: Duplicate prevention ────────────────────────────────────────────
 
     const dedupKey = requestId ?? (userId ? makeRequestKey(userId, message) : null);
@@ -454,24 +504,22 @@ Deno.serve(async (req: Request) => {
 
     let userTier: UsageTier = "free";
 
-    if (userId && authToken && supabaseUrl && supabaseAnonKey) {
-      const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${authToken}` } },
-      });
+    const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${authToken}` } },
+    });
 
-      const rateLimitResult = await checkRateLimit(userSupabase, userId);
-      userTier = rateLimitResult.tier;
+    const rateLimitResult = await checkRateLimit(userSupabase, userId);
+    userTier = rateLimitResult.tier;
 
-      if (!rateLimitResult.allowed) {
-        const msg = rateLimitResult.reason === "suspended"
-          ? CALM_ERRORS.suspended
-          : CALM_ERRORS.rateLimit;
-        console.warn(`[staysee-chat] rate limit for user ${userId}: ${rateLimitResult.reason}`);
-        return new Response(
-          JSON.stringify({ content: msg }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+    if (!rateLimitResult.allowed) {
+      const msg = rateLimitResult.reason === "suspended"
+        ? CALM_ERRORS.suspended
+        : CALM_ERRORS.rateLimit;
+      console.warn(`[staysee-chat] rate limit for user ${userId}: ${rateLimitResult.reason}`);
+      return new Response(
+        JSON.stringify({ content: msg }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // ── Durable memory corrections (flag-gated) ───────────────────────────
