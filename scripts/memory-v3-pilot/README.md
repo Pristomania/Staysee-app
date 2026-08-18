@@ -158,3 +158,15 @@ Offline OpenRouter **boundary** only. The adapter is provider-neutral relative t
 - `calculateBudgetCeiling` / `assertBudgetGate` compute a **configured worst-case ceiling** from case count × token caps × dated USD/million prices. That is not a promise of actual billing.
 - The pricing snapshot used in tests is dated `2026-08-18` for `openai/gpt-5.6-luna` and must be refreshed before any future live run.
 - Live transport, `.env` loading, paid benchmark, and a results file are **not** part of this stage.
+
+## HTTP fetch transport and offline runner (Task 3B)
+
+Tested wiring only. Still **no** live OpenRouter call, `.env` loader, CLI, or results file.
+
+- `createOpenRouterFetchTransport({ fetchImpl, timeoutMs, maxResponseBytes, setTimeoutImpl?, clearTimeoutImpl? })` is the HTTP boundary. `fetchImpl` is required; there is no `globalThis.fetch` fallback. Timer helpers are optional **together**; omit both to use native `setTimeout` / `clearTimeout`.
+- One transport request becomes one `fetchImpl` call: `POST` to `https://openrouter.ai/api/v1/chat/completions`, JSON-serialized body, `AbortSignal` timeout covering `fetchImpl`, `response.text()`, the byte check, and JSON parse, and a byte cap on the HTTP text body. No retry. The timer is cleared once in an outer `finally`.
+- The fetch layer returns `{ status, body }` for the existing OpenRouter adapter. It does not parse Memory V3 items; `extractor-core` still owns that. Native Fetch `Response` status/`text` may live on the prototype; the transport does not treat the HTTP response as a JSON-data-only plain object.
+- `runOfflineBenchmark({ dataset, modelAdapter, budget, extractorVersion, maxPromptRequestBytesPerCase })` is extraction-only. The structural evaluator stays a **separate** layer. Live CLI, `.env`, and provider calls are not part of this stage; paid Task 3C remains later.
+- All preflight runs before the first adapter call: JSON-data-only options/dataset/cases, dense non-empty cases, `validateCase`, unique `caseId`, `budget.caseCount === dataset.cases.length`, `buildExtractorRequest` byte cap via `maxPromptRequestBytesPerCase`, then `assertBudgetGate`.
+- Cases run sequentially with concurrency **1**. A case failure is recorded as `{ caseId, stage }` and the runner continues without retry. Raw errors, dialogue, gold, title, category, and messages are not returned.
+- `budget.caseCount` must equal `dataset.cases.length`. The runner does not read the filesystem or provider env. Prompt request bytes are a size cap, not tokens and not actual billing.
