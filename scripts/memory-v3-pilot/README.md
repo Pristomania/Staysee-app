@@ -145,3 +145,16 @@ Failure behavior: one call, no retry, no repair, no dropping of invalid items. E
 Assistant and system messages are context only. They are never Memory V3 evidence for `supports`, `contradicts`, `corrects`, or `rejects`.
 
 This stage does not score semantic quality. Structural checks and the existing evaluator remain separate from paraphrase or psychological correctness.
+
+## OpenRouter adapter and preflight budget (Task 3A)
+
+Offline OpenRouter **boundary** only. The adapter is provider-neutral relative to Memory V3 core: it turns `buildExtractorRequest` output into one OpenRouter chat-completions envelope and returns `choices[0].message.content` as a string. `extractor-core` still owns parse, allowlisting, and `validateExtraction`.
+
+- Transport is a **required injected dependency**. There is no `globalThis.fetch` fallback, so the network is technically impossible unless a caller supplies a transport.
+- One extractor case is **at most one** transport call. The adapter does not retry, heal responses, stream, select a model, or fall back to another provider.
+- The request uses strict structured output (`response_format.type = json_schema`, `strict: true`, `additionalProperties: false`). Provider routing is locked to `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
+- Optional `reasoningEffort` is allowlisted as `none | low | medium | high` and maps to OpenRouter `reasoning_effort`. The field is omitted when unset.
+- The adapter projects one trusted content path from a JSON-data-only response: `choices[0].message.content`. Official OpenRouter metadata (`id`, `usage`, `model`, and similar) is ignored, not copied. Only `finish_reason: "stop"` is accepted.
+- `calculateBudgetCeiling` / `assertBudgetGate` compute a **configured worst-case ceiling** from case count × token caps × dated USD/million prices. That is not a promise of actual billing.
+- The pricing snapshot used in tests is dated `2026-08-18` for `openai/gpt-5.6-luna` and must be refreshed before any future live run.
+- Live transport, `.env` loading, paid benchmark, and a results file are **not** part of this stage.
