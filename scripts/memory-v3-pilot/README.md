@@ -85,4 +85,14 @@ From `contracts.mjs`:
 
 ```bash
 node --test scripts/memory-v3-pilot/contracts.cases.test.mjs
+node --test scripts/memory-v3-pilot/memory-v3-dataset.test.mjs
+node --test scripts/memory-v3-pilot/*.test.mjs
 ```
+
+## Russian golden dataset (stage 2)
+
+`memory-v3-ru-golden.v1.json` is a synthetic-only offline benchmark. It contains 24 Russian-language cases, balanced across six categories: biographical events, genuine multi-episode recurrences, explicitly uncertain psychological hypotheses, user corrections, counterexamples that require abstention, and safety/privacy boundaries.
+
+The dataset deliberately includes long time spans, repeated retellings of one episode, assistant-invented biography, third-party sensitive information, rejected interpretations, and hypotheses with counterevidence. `mustNotRemember` is an evaluator target: it records claims a memory system must abstain from storing as user facts. It is not extractor output and must never be treated as positive evidence.
+
+All message ids are local fixture ids. All dialogue is synthetic; no production conversations, user ids, provider calls, or database access are involved.
