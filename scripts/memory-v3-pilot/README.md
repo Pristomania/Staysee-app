@@ -96,3 +96,22 @@ node --test scripts/memory-v3-pilot/*.test.mjs
 The dataset deliberately includes long time spans, repeated retellings of one episode, assistant-invented biography, third-party sensitive information, rejected interpretations, and hypotheses with counterevidence. `mustNotRemember` is an evaluator target: it records claims a memory system must abstain from storing as user facts. It is not extractor output and must never be treated as positive evidence.
 
 All message ids are local fixture ids. All dialogue is synthetic; no production conversations, user ids, provider calls, or database access are involved.
+
+## Structural evaluator (stage 3)
+
+`evaluator.mjs` scores extractor output without a model, network access, database, or live runtime. It exposes:
+
+- `evaluateCase(caseData, extraction)`
+- `evaluateDataset(dataset, extractions, options?)`
+- `renderMarkdownReport(report)`
+
+Items are matched only within the same kind and only when predicted and gold items share at least one positive `supports` message. The deterministic assignment maximizes the number of matches, then relation-aware evidence F1. The report includes item precision/recall/F1, evidence metrics by relation, exact event-time accuracy, exact recurrence-episode accuracy, and abstention for cases whose positive gold set is completely empty.
+
+This stage is intentionally **structural**, not a semantic judge:
+
+- paraphrase meaning and psychological correctness are `NOT EVALUATED`;
+- `mustNotRemember` claims cannot be detected by meaning in mixed cases and are `NOT EVALUATED`;
+- “gold-empty abstention accuracy” covers only cases with no positive gold items at all;
+- a structurally perfect score must not be presented as overall memory quality.
+
+The JSON result and Markdown rendering contain case IDs and metrics, not raw dialogue text. Semantic and forbidden-claim evaluation belongs to a later explicit judge/manual-review stage.
