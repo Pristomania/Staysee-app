@@ -55,7 +55,7 @@ The adapter does not supply `run`; the core creates `run.caseId` and `run.extrac
 
 `itemRef` is a response-local non-empty string used only to connect evidence to an item. It must be unique across items, every evidence `itemRef` must resolve to one item, and the core removes it after replacing it with the generated contract `localItemKey` / `itemKey`. The model never creates contract identity keys.
 
-Only `items` and `evidence` are allowed at the top level. Adapter items use exactly the fields shown above; adapter evidence uses exactly the fields shown above. Unknown fields are rejected rather than ignored.
+Only `items` and `evidence` are allowed at the top level. Adapter items use exactly the fields shown above; adapter evidence uses exactly the fields shown above. Unknown fields are rejected rather than ignored. Plain-object adapter output must be JSON-data-only: expected enumerable string keys and data descriptors on `Object.prototype` or null-prototype records. Accessors, symbol keys, non-enumerable properties, sparse arrays, and extra array properties are rejected.
 
 The core performs one adapter call and no retry. Rejection is explicit for adapter errors, malformed JSON, non-object output, unknown or missing shape fields, and any contract-invalid item or evidence.
 
@@ -83,6 +83,7 @@ Normalization is deliberately mechanical, not semantic:
 - set every item to `scope: "cross_conversation"` and `conversationId: null`; scope is a trusted pilot policy, not a model decision;
 - derive evidence `provenanceRole` and `mentionTime` exactly from the cited case message's `role` and `createdAt`;
 - preserve claims, kinds, statuses, sensitivities, dates, alternatives, episode keys, and evidence relations from the adapter output;
+- reject every item that lacks related user evidence or the relation required by its status: active/candidate/supported use `supports`, corrected uses `corrects`, stale uses `contradicts`, and rejected uses `rejects`; active/candidate recurrences additionally require two distinct user episode keys;
 - do not invent evidence, episode identities, dates, alternatives, or claims;
 - reject rather than repair contract-invalid semantic output.
 
@@ -90,7 +91,7 @@ No model output is silently dropped to make a run pass. Silent repair would hide
 
 ## Failure behavior
 
-All failures throw an error with a stable prefix: `[memory-v3:adapter]`, `[memory-v3:parse]`, `[memory-v3:shape]`, or `[memory-v3:contract]`. Error messages may include case ID and structural field names, but never raw dialogue text. Case validation before the adapter is a `shape` failure.
+All failures throw an error with a stable prefix: `[memory-v3:adapter]`, `[memory-v3:parse]`, `[memory-v3:shape]`, or `[memory-v3:contract]`. Error messages may include case ID and structural field names, but never raw dialogue text. Case validation before the adapter is a `shape` failure. Internal extractor errors use an unforgeable module-local identity; an adapter-controlled `error.name` is never trusted.
 
 An empty `{ items: [], evidence: [] }` result is valid and represents abstention.
 
@@ -104,6 +105,7 @@ Tests use a fake adapter only and prove:
 - trusted cross-conversation scope plus provenance role and mention time derived from the cited message;
 - JSON string and plain-object responses;
 - rejection of duplicate or unresolved `itemRef`, unknown fields, malformed JSON, unknown message IDs, assistant support, one-episode recurrence, and hypothesis without an alternative;
+- rejection of evidence-free items, wrong status/relation combinations, accessors, symbols, non-enumerable fields, Proxy traps, cyclic field values, and spoofed extractor error names;
 - no retries after an adapter error;
 - all existing Memory V3 tests remain green.
 

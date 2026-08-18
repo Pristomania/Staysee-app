@@ -43,6 +43,14 @@ Calendar components are checked strictly (no `Date.parse` rollover). Impossible 
 
 When `validateExtraction(extraction, caseData)` is given `caseData`, `extraction.run.caseId` must equal `caseData.caseId`. Matching message ids alone is not enough. Every `caseData` argument is always run through `validateCase` first; a caller-supplied `_messageById` does not bypass validation.
 
+An item does not exist without related **user** evidence. The required relation depends on status:
+
+- `event` `active` → `supports`; `corrected` → `corrects`; `rejected` → `rejects`
+- `recurrence` `candidate` / `active` → `supports` from at least two distinct user `episodeKey`s; `stale` → `contradicts`; `rejected` → `rejects`
+- `hypothesis` `candidate` / `supported` → `supports`; `stale` → `contradicts`; `rejected` → `rejects`
+
+Assistant and system messages are never evidence for any relation.
+
 ### Recurrence vs retelling one episode
 
 A recurrence that is `candidate` or `active` needs at least **two** `supports` relations from **user** evidence with **two different** `episodeKey` values. Two messages about the same episode (same `episodeKey`) do not create a recurrence.
@@ -115,3 +123,25 @@ This stage is intentionally **structural**, not a semantic judge:
 - a structurally perfect score must not be presented as overall memory quality.
 
 The JSON result and Markdown rendering contain case IDs and metrics, not raw dialogue text. Semantic and forbidden-claim evaluation belongs to a later explicit judge/manual-review stage.
+
+## Offline extractor core (stage 4)
+
+Provider-neutral offline extraction. An injected adapter is called once; the core does not select a model, read `.env`, call a network/provider API, or touch a database.
+
+Public APIs:
+
+- `buildExtractorRequest(caseData)` from `extractor-prompt.mjs` — validates the case and returns `{ system, input }` with only `caseId` and four-field messages. Golden fields never enter the adapter request.
+- `extractCase(caseData, modelAdapter, { extractorVersion })` from `extractor-core.mjs` — calls `modelAdapter(request)` exactly once, parses a JSON string or plain object, allowlists adapter fields, derives trusted run/scope/provenance, and returns `validateExtraction(result, caseData)`.
+
+Adapter contract: return `{ items, evidence }` only. Items use response-local `itemRef`; evidence points at the same `itemRef`. The core deletes `itemRef` and creates `localItemKey` / evidence `itemKey`. The adapter must not supply `run`, `scope`, `conversationId`, `provenanceRole`, or `mentionTime`. Adapter objects must be JSON-data-only: `Object.prototype` or `null` prototype, expected enumerable string keys, data descriptors only. Accessors, symbol keys, and non-enumerable properties are rejected. An item is rejected unless it has the user evidence relation required by its status.
+
+Failure behavior: one call, no retry, no repair, no dropping of invalid items. Errors use a stable prefix:
+
+- `[memory-v3:adapter]` — adapter throw/reject
+- `[memory-v3:parse]` — malformed JSON
+- `[memory-v3:shape]` — invalid case, options, adapter, or response shape
+- `[memory-v3:contract]` — normalized extraction failed the epistemic contract
+
+Assistant and system messages are context only. They are never Memory V3 evidence for `supports`, `contradicts`, `corrects`, or `rejects`.
+
+This stage does not score semantic quality. Structural checks and the existing evaluator remain separate from paraphrase or psychological correctness.

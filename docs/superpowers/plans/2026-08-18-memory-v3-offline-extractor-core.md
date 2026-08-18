@@ -115,7 +115,7 @@ Report the first expected RED, exact test totals, changed paths, diff summary, a
 
 - [ ] **Step 1: Write failing core tests**
 
-Use async fake adapters, never mocks of contract functions. Cover a valid empty object, valid event as object and JSON string, exactly one adapter call, deterministic keys, derived scope/provenance/mention time, duplicate/unresolved `itemRef`, unknown fields, malformed JSON, adapter rejection without retry, unknown source ID, assistant support, one-episode recurrence, and hypothesis without alternative.
+Use async fake adapters, never mocks of contract functions. Cover a valid empty object, valid event as object and JSON string, exactly one adapter call, deterministic keys, derived scope/provenance/mention time, duplicate/unresolved `itemRef`, unknown fields, malformed JSON, adapter rejection without retry, unknown source ID, non-user evidence for every relation, evidence-free items, the complete status/relation matrix, one-episode recurrence, and hypothesis without alternative. Plain-object cases also cover accessors, symbols, non-enumerable fields, sparse/extended arrays, Proxy traps, cyclic values, and spoofed extractor error names.
 
 ```js
 const extraction = await extractCase(caseData, async () => ({
@@ -149,7 +149,7 @@ Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `extractor-core.mjs`.
 
 - [ ] **Step 3: Implement strict shape parsing and normalization**
 
-Call the adapter exactly once. Accept only a JSON string or plain object. Allowlist every top-level, item, and evidence field. Build all normalized items first, generate keys by output order, map `itemRef` to keys, then derive evidence role/time from the cited validated message. Wrap failures with the four stable prefixes without including message text. Run `validateExtraction(result, validatedCase)` last and return the result unchanged.
+Call the adapter exactly once. Accept only a JSON string or JSON-data-only plain object. Allowlist every top-level, item, and evidence field and reject accessors, symbols, non-enumerable properties, sparse/extended arrays, and non-primitive schema values. Build all normalized items first, generate keys by output order, map `itemRef` to keys, then derive evidence role/time from the cited validated user message. Require related user evidence and the status-specific relation in the central contract; active/candidate recurrences still require two distinct episode keys. Wrap failures with the four stable prefixes without including message text, and recognize internal errors through an unforgeable module-local identity rather than `error.name`. Run `validateExtraction(result, validatedCase)` last and return the result unchanged.
 
 - [ ] **Step 4: Verify GREEN and full suite**
 

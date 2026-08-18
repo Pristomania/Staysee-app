@@ -352,9 +352,9 @@ function validateEvidence(ev, index, itemByKey, caseData) {
 
   const item = itemByKey.get(ev.itemKey);
 
-  if (ev.relation === 'supports' && ev.provenanceRole !== 'user') {
+  if (ev.provenanceRole !== 'user') {
     fail(
-      `evidence[${index}]: ${ev.provenanceRole} cannot have relation=supports for ${item.kind}`,
+      `evidence[${index}]: ${ev.provenanceRole} cannot have relation=${ev.relation} for ${item.kind}`,
     );
   }
 
@@ -373,6 +373,26 @@ function validateEvidence(ev, index, itemByKey, caseData) {
   }
 }
 
+const REQUIRED_USER_RELATION_BY_KIND_STATUS = Object.freeze({
+  event: Object.freeze({
+    active: 'supports',
+    corrected: 'corrects',
+    rejected: 'rejects',
+  }),
+  recurrence: Object.freeze({
+    candidate: 'supports',
+    active: 'supports',
+    stale: 'contradicts',
+    rejected: 'rejects',
+  }),
+  hypothesis: Object.freeze({
+    candidate: 'supports',
+    supported: 'supports',
+    stale: 'contradicts',
+    rejected: 'rejects',
+  }),
+});
+
 function assertRecurrenceEvidence(item, evidenceForItem) {
   if (item.kind !== 'recurrence') return;
   if (item.status !== 'candidate' && item.status !== 'active') return;
@@ -383,9 +403,24 @@ function assertRecurrenceEvidence(item, evidenceForItem) {
   const episodeKeys = new Set(userSupports.map((e) => e.episodeKey));
   if (episodeKeys.size < 2) {
     fail(
-      `recurrence "${item.localItemKey}" with status=${item.status} requires supports from at least two distinct user episodeKeys`,
+      `items recurrence with status=${item.status} requires supports from at least two distinct user episodeKeys`,
     );
   }
+}
+
+function assertRequiredEvidence(item, index, evidenceForItem) {
+  if (evidenceForItem.length === 0) {
+    fail(`items[${index}] requires related evidence`);
+  }
+  const required = REQUIRED_USER_RELATION_BY_KIND_STATUS[item.kind]?.[item.status];
+  if (!required) return;
+  const hasRequired = evidenceForItem.some(
+    (entry) => entry.relation === required && entry.provenanceRole === 'user',
+  );
+  if (!hasRequired) {
+    fail(`items[${index}] requires user ${required} evidence`);
+  }
+  assertRecurrenceEvidence(item, evidenceForItem);
 }
 
 /**
@@ -430,10 +465,10 @@ export function validateExtraction(value, caseData) {
     seenEvidence.add(dupKey);
   });
 
-  for (const item of value.items) {
+  value.items.forEach((item, index) => {
     const related = value.evidence.filter((e) => e.itemKey === item.localItemKey);
-    assertRecurrenceEvidence(item, related);
-  }
+    assertRequiredEvidence(item, index, related);
+  });
 
   return value;
 }

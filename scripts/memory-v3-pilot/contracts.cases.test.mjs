@@ -994,3 +994,342 @@ describe('gold recurrence episodeKeys ↔ supportMessageIds', () => {
     assert.throws(() => validateCase(value), /supportMessageId|duplicate|unique/i);
   });
 });
+
+function userEvidence(itemKey, relation, overrides = {}) {
+  return {
+    itemKey,
+    sourceMessageId: 'm1',
+    episodeKey: 'ep-2019',
+    relation,
+    provenanceRole: 'user',
+    mentionTime: '2024-01-10T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function eventItem(status, overrides = {}) {
+  return {
+    ...minimalExtraction().items[0],
+    status,
+    ...overrides,
+  };
+}
+
+function recurrenceItem(status) {
+  return {
+    ...recurrenceExtraction().items[0],
+    status,
+  };
+}
+
+function hypothesisItem(status, overrides = {}) {
+  return {
+    localItemKey: 'h1',
+    kind: 'hypothesis',
+    claim: 'Возможна связь с поиском опоры',
+    scope: 'cross_conversation',
+    conversationId: null,
+    eventTimeStart: null,
+    eventTimeEnd: null,
+    status,
+    sensitivity: 'normal',
+    alternative: 'Может быть смена работы',
+    ...overrides,
+  };
+}
+
+describe('validateExtraction — status/relation evidence contract', () => {
+  it('rejects an active event without evidence', () => {
+    const value = minimalExtraction({ evidence: [] });
+    assert.throws(() => validateExtraction(value), /requires related evidence/);
+  });
+
+  it('rejects an active event that has only contradicts evidence', () => {
+    const value = minimalExtraction({
+      evidence: [userEvidence('item-event-1', 'contradicts')],
+    });
+    assert.throws(() => validateExtraction(value), /requires user supports evidence/);
+  });
+
+  it('accepts an active event with user supports', () => {
+    assert.doesNotThrow(() => validateExtraction(minimalExtraction()));
+  });
+
+  it('rejects a corrected event without corrects evidence', () => {
+    const value = minimalExtraction({
+      items: [eventItem('corrected')],
+      evidence: [userEvidence('item-event-1', 'supports')],
+    });
+    assert.throws(() => validateExtraction(value), /requires user corrects evidence/);
+  });
+
+  it('accepts a corrected event with user corrects', () => {
+    const value = minimalExtraction({
+      items: [eventItem('corrected')],
+      evidence: [userEvidence('item-event-1', 'corrects')],
+    });
+    assert.doesNotThrow(() => validateExtraction(value));
+  });
+
+  it('rejects a rejected event without rejects evidence', () => {
+    const value = minimalExtraction({
+      items: [eventItem('rejected')],
+      evidence: [userEvidence('item-event-1', 'supports')],
+    });
+    assert.throws(() => validateExtraction(value), /requires user rejects evidence/);
+  });
+
+  it('accepts a rejected event with user rejects', () => {
+    const value = minimalExtraction({
+      items: [eventItem('rejected')],
+      evidence: [userEvidence('item-event-1', 'rejects')],
+    });
+    assert.doesNotThrow(() => validateExtraction(value));
+  });
+
+  it('rejects a candidate hypothesis without supports', () => {
+    const value = {
+      run: { caseId: 'case-basic-001', extractorVersion: 'v1' },
+      items: [hypothesisItem('candidate')],
+      evidence: [],
+    };
+    assert.throws(() => validateExtraction(value), /requires related evidence/);
+  });
+
+  it('rejects a supported hypothesis without supports', () => {
+    const value = {
+      run: { caseId: 'case-basic-001', extractorVersion: 'v1' },
+      items: [hypothesisItem('supported')],
+      evidence: [userEvidence('h1', 'contradicts')],
+    };
+    assert.throws(() => validateExtraction(value), /requires user supports evidence/);
+  });
+
+  it('rejects a stale hypothesis without contradicts', () => {
+    const value = {
+      run: { caseId: 'case-basic-001', extractorVersion: 'v1' },
+      items: [hypothesisItem('stale')],
+      evidence: [userEvidence('h1', 'supports')],
+    };
+    assert.throws(() => validateExtraction(value), /requires user contradicts evidence/);
+  });
+
+  it('rejects a rejected hypothesis without rejects', () => {
+    const value = {
+      run: { caseId: 'case-basic-001', extractorVersion: 'v1' },
+      items: [hypothesisItem('rejected')],
+      evidence: [userEvidence('h1', 'supports')],
+    };
+    assert.throws(() => validateExtraction(value), /requires user rejects evidence/);
+  });
+
+  it('rejects a stale recurrence without contradicts', () => {
+    const value = {
+      ...recurrenceExtraction(),
+      items: [recurrenceItem('stale')],
+      evidence: recurrenceExtraction().evidence,
+    };
+    assert.throws(() => validateExtraction(value), /requires user contradicts evidence/);
+  });
+
+  it('rejects a rejected recurrence without rejects', () => {
+    const value = {
+      ...recurrenceExtraction(),
+      items: [recurrenceItem('rejected')],
+      evidence: recurrenceExtraction().evidence,
+    };
+    assert.throws(() => validateExtraction(value), /requires user rejects evidence/);
+  });
+
+  it('rejects any item without related evidence', () => {
+    for (const item of [
+      eventItem('active'),
+      recurrenceItem('active'),
+      hypothesisItem('candidate'),
+    ]) {
+      const value = {
+        run: { caseId: 'case-basic-001', extractorVersion: 'v1' },
+        items: [item],
+        evidence: [],
+      };
+      assert.throws(() => validateExtraction(value), /requires related evidence/);
+    }
+  });
+
+  for (const relation of EVIDENCE_RELATIONS) {
+    for (const { role, sourceMessageId, mentionTime } of [
+      { role: 'assistant', sourceMessageId: 'm2', mentionTime: '2024-01-10T10:00:05.000Z' },
+      { role: 'system', sourceMessageId: 'm-system', mentionTime: '2024-01-10T10:00:01.000Z' },
+    ]) {
+      it(`rejects ${role} ${relation} evidence`, () => {
+        const caseData = minimalCase({
+          messages: [
+            ...minimalCase().messages,
+            {
+              id: 'm-system',
+              role: 'system',
+              text: 'system note',
+              createdAt: '2024-01-10T10:00:01.000Z',
+            },
+          ],
+        });
+        const value = minimalExtraction({
+          evidence: [
+            userEvidence('item-event-1', 'supports'),
+            {
+              itemKey: 'item-event-1',
+              sourceMessageId,
+              episodeKey: 'ep-nonuser',
+              relation,
+              provenanceRole: role,
+              mentionTime,
+            },
+          ],
+        });
+        assert.throws(
+          () => validateExtraction(value, caseData),
+          /assistant|system|provenanceRole|user/,
+        );
+      });
+    }
+  }
+});
+
+describe('validateExtraction — positive status/relation matrix', () => {
+  const run = { caseId: 'case-basic-001', extractorVersion: 'v1' };
+  const secondSupport = userEvidence('item-rec-1', 'supports', {
+    sourceMessageId: 'm3',
+    episodeKey: 'ep-2021',
+    mentionTime: '2024-01-10T10:01:00.000Z',
+  });
+
+  const cases = [
+    {
+      name: 'event active + user supports',
+      value: minimalExtraction(),
+    },
+    {
+      name: 'event corrected + user corrects',
+      value: minimalExtraction({
+        items: [eventItem('corrected')],
+        evidence: [userEvidence('item-event-1', 'corrects')],
+      }),
+    },
+    {
+      name: 'event rejected + user rejects',
+      value: minimalExtraction({
+        items: [eventItem('rejected')],
+        evidence: [userEvidence('item-event-1', 'rejects')],
+      }),
+    },
+    {
+      name: 'recurrence candidate + two distinct user supports',
+      value: {
+        ...recurrenceExtraction(),
+        items: [recurrenceItem('candidate')],
+      },
+    },
+    {
+      name: 'recurrence active + two distinct user supports',
+      value: recurrenceExtraction(),
+    },
+    {
+      name: 'recurrence stale + user contradicts without two episodeKeys',
+      value: {
+        run,
+        items: [recurrenceItem('stale')],
+        evidence: [userEvidence('item-rec-1', 'contradicts')],
+      },
+    },
+    {
+      name: 'recurrence rejected + user rejects without two episodeKeys',
+      value: {
+        run,
+        items: [recurrenceItem('rejected')],
+        evidence: [userEvidence('item-rec-1', 'rejects')],
+      },
+    },
+    {
+      name: 'hypothesis candidate + user supports',
+      value: {
+        run,
+        items: [hypothesisItem('candidate')],
+        evidence: [userEvidence('h1', 'supports')],
+      },
+    },
+    {
+      name: 'hypothesis supported + user supports',
+      value: {
+        run,
+        items: [hypothesisItem('supported')],
+        evidence: [userEvidence('h1', 'supports')],
+      },
+    },
+    {
+      name: 'hypothesis stale + user contradicts',
+      value: {
+        run,
+        items: [hypothesisItem('stale')],
+        evidence: [userEvidence('h1', 'contradicts')],
+      },
+    },
+    {
+      name: 'hypothesis rejected + user rejects',
+      value: {
+        run,
+        items: [hypothesisItem('rejected')],
+        evidence: [userEvidence('h1', 'rejects')],
+      },
+    },
+  ];
+
+  for (const entry of cases) {
+    it(`accepts ${entry.name}`, () => {
+      assert.doesNotThrow(() => validateExtraction(entry.value));
+    });
+  }
+
+  it('accepts extra user relations when the required relation is present', () => {
+    const value = minimalExtraction({
+      evidence: [
+        userEvidence('item-event-1', 'supports'),
+        userEvidence('item-event-1', 'corrects', {
+          sourceMessageId: 'm3',
+          episodeKey: 'ep-2021',
+          mentionTime: '2024-01-10T10:01:00.000Z',
+        }),
+      ],
+    });
+    assert.doesNotThrow(() => validateExtraction(value));
+  });
+
+  it('accepts empty items and evidence as abstention', () => {
+    assert.doesNotThrow(() =>
+      validateExtraction({
+        run,
+        items: [],
+        evidence: [],
+      }),
+    );
+  });
+
+  it('still requires two distinct user episodeKeys for recurrence candidate and active', () => {
+    const oneEpisode = {
+      run,
+      items: [recurrenceItem('candidate')],
+      evidence: [userEvidence('item-rec-1', 'supports')],
+    };
+    assert.throws(() => validateExtraction(oneEpisode), /episodeKey|recurrence/);
+    const activeOneEpisode = {
+      run,
+      items: [recurrenceItem('active')],
+      evidence: [userEvidence('item-rec-1', 'supports'), secondSupport],
+    };
+    activeOneEpisode.evidence[1] = userEvidence('item-rec-1', 'supports', {
+      sourceMessageId: 'm3',
+      episodeKey: 'ep-2019',
+      mentionTime: '2024-01-10T10:01:00.000Z',
+    });
+    assert.throws(() => validateExtraction(activeOneEpisode), /episodeKey|recurrence/);
+  });
+});
