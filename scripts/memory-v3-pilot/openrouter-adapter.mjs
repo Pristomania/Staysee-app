@@ -23,10 +23,45 @@ const EVIDENCE_FIELDS = Object.freeze([
 ]);
 
 const OWN_ERRORS = new WeakSet();
+const OPENROUTER_DIAGNOSTIC_CODES = new Set([
+  'openrouter_http_400',
+  'openrouter_http_401',
+  'openrouter_http_402',
+  'openrouter_http_403',
+  'openrouter_http_404',
+  'openrouter_http_408',
+  'openrouter_http_409',
+  'openrouter_http_422',
+  'openrouter_http_429',
+  'openrouter_http_5xx',
+  'openrouter_http_other_non_2xx',
+  'openrouter_top_level_error',
+  'openrouter_choice_error',
+  'openrouter_finish_length',
+  'openrouter_finish_error',
+  'openrouter_finish_tool_calls',
+  'openrouter_finish_missing',
+  'openrouter_finish_other',
+  'openrouter_missing_content',
+  'openrouter_refusal',
+  'openrouter_tool_call',
+  'openrouter_function_call',
+  'openrouter_non_assistant_role',
+  'openrouter_response_invalid_shape',
+  'unknown_adapter_failure',
+]);
 
-function fail(stage, message) {
+function fail(stage, message, diagnosticCode) {
   const error = new Error(`[memory-v3:openrouter-${stage}] ${message}`);
   error.name = 'MemoryV3OpenRouterError';
+  if (OPENROUTER_DIAGNOSTIC_CODES.has(diagnosticCode)) {
+    Object.defineProperty(error, 'diagnosticCode', {
+      value: diagnosticCode,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    });
+  }
   OWN_ERRORS.add(error);
   return error;
 }
@@ -37,6 +72,36 @@ function isOwnError(error) {
     (typeof error === 'object' || typeof error === 'function') &&
     OWN_ERRORS.has(error)
   );
+}
+
+export function projectSafeOpenRouterDiagnostic(error) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) {
+    return null;
+  }
+  if (!OWN_ERRORS.has(error)) {
+    return null;
+  }
+  let desc;
+  try {
+    desc = Object.getOwnPropertyDescriptor(error, 'diagnosticCode');
+  } catch {
+    return null;
+  }
+  if (
+    !desc ||
+    typeof desc.get === 'function' ||
+    typeof desc.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+    desc.enumerable !== true ||
+    desc.writable !== false ||
+    desc.configurable !== false
+  ) {
+    return null;
+  }
+  if (!OPENROUTER_DIAGNOSTIC_CODES.has(desc.value)) {
+    return null;
+  }
+  return desc.value;
 }
 
 function isNonEmptyString(value) {
@@ -255,43 +320,133 @@ function isHttpsUrl(value) {
   }
 }
 
+function httpDiagnosticCode(status) {
+  switch (status) {
+    case 400:
+      return 'openrouter_http_400';
+    case 401:
+      return 'openrouter_http_401';
+    case 402:
+      return 'openrouter_http_402';
+    case 403:
+      return 'openrouter_http_403';
+    case 404:
+      return 'openrouter_http_404';
+    case 408:
+      return 'openrouter_http_408';
+    case 409:
+      return 'openrouter_http_409';
+    case 422:
+      return 'openrouter_http_422';
+    case 429:
+      return 'openrouter_http_429';
+    default:
+      if (Number.isInteger(status) && status >= 500 && status <= 599) {
+        return 'openrouter_http_5xx';
+      }
+      return 'openrouter_http_other_non_2xx';
+  }
+}
+
+function finishDiagnosticCode(value) {
+  if (value === undefined || value === null) {
+    return 'openrouter_finish_missing';
+  }
+  if (value === 'length') return 'openrouter_finish_length';
+  if (value === 'error') return 'openrouter_finish_error';
+  if (value === 'tool_calls') return 'openrouter_finish_tool_calls';
+  if (value === 'stop') return null;
+  return 'openrouter_finish_other';
+}
+
+function hasOwnDataKey(value, key, path) {
+  const keys = inspectPlainObject(value, path, 'response');
+  for (const ownKey of keys) {
+    if (typeof ownKey === 'symbol') {
+      throw fail('response', `${path} has an invalid field`, 'openrouter_response_invalid_shape');
+    }
+    const desc = dataDescriptor(value, ownKey, path, 'response');
+    if (ownKey === key) {
+      return true;
+    }
+    void desc;
+  }
+  return false;
+}
+
 function readContent(raw) {
   const envelope = projectRecord(raw, 'transport response', 'response', {
     required: ['status', 'body'],
-    forbidden: ['error'],
   });
-  if (
-    !Number.isInteger(envelope.status) ||
-    envelope.status < 200 ||
-    envelope.status > 299
-  ) {
-    throw fail('response', 'transport status is not 2xx');
+  if (!Number.isInteger(envelope.status)) {
+    throw fail('response', 'transport status is invalid', 'openrouter_response_invalid_shape');
   }
-  const body = projectRecord(envelope.body, 'transport response.body', 'response', {
-    required: ['choices'],
-    forbidden: ['error'],
-  });
+  if (envelope.status < 200 || envelope.status > 299) {
+    throw fail('response', 'transport status is not 2xx', httpDiagnosticCode(envelope.status));
+  }
+  if (
+    envelope.body === null ||
+    typeof envelope.body !== 'object' ||
+    Array.isArray(envelope.body)
+  ) {
+    throw fail('response', 'transport response.body is invalid', 'openrouter_response_invalid_shape');
+  }
+  if (hasOwnDataKey(envelope.body, 'error', 'transport response.body')) {
+    throw fail('response', 'transport response.body has an error', 'openrouter_top_level_error');
+  }
+  let body;
+  try {
+    body = projectRecord(envelope.body, 'transport response.body', 'response', {
+      required: ['choices'],
+    });
+  } catch (error) {
+    if (isOwnError(error)) throw error;
+    throw fail('response', 'transport response.body is invalid', 'openrouter_response_invalid_shape');
+  }
   const choices = inspectDenseArray(body.choices, 'choices', 'response');
   if (choices.length !== 1) {
-    throw fail('response', 'transport response must contain exactly one choice');
+    throw fail(
+      'response',
+      'transport response must contain exactly one choice',
+      'openrouter_response_invalid_shape',
+    );
+  }
+  if (hasOwnDataKey(choices[0], 'error', 'choices[0]')) {
+    throw fail('response', 'choices[0] has an error', 'openrouter_choice_error');
   }
   const choice = projectRecord(choices[0], 'choices[0]', 'response', {
-    required: ['message', 'finish_reason'],
-    forbidden: ['error'],
+    required: ['message'],
+    pick: ['finish_reason'],
   });
-  if (choice.finish_reason !== 'stop') {
-    throw fail('response', 'finish_reason must be stop');
+  const finishCode = finishDiagnosticCode(choice.finish_reason);
+  if (finishCode !== null) {
+    throw fail('response', 'finish_reason must be stop', finishCode);
+  }
+  if (
+    choice.message === null ||
+    typeof choice.message !== 'object' ||
+    Array.isArray(choice.message)
+  ) {
+    throw fail('response', 'choices[0].message is invalid', 'openrouter_response_invalid_shape');
+  }
+  if (hasOwnDataKey(choice.message, 'tool_calls', 'choices[0].message')) {
+    throw fail('response', 'message tool_calls are not allowed', 'openrouter_tool_call');
+  }
+  if (hasOwnDataKey(choice.message, 'function_call', 'choices[0].message')) {
+    throw fail('response', 'message function_call is not allowed', 'openrouter_function_call');
+  }
+  if (hasOwnDataKey(choice.message, 'refusal', 'choices[0].message')) {
+    throw fail('response', 'message refusal is not allowed', 'openrouter_refusal');
   }
   const message = projectRecord(choice.message, 'choices[0].message', 'response', {
-    required: ['content'],
-    pick: ['role'],
-    forbidden: ['tool_calls', 'function_call', 'refusal', 'error'],
+    required: [],
+    pick: ['role', 'content'],
   });
   if (message.role !== undefined && message.role !== 'assistant') {
-    throw fail('response', 'message role must be assistant');
+    throw fail('response', 'message role must be assistant', 'openrouter_non_assistant_role');
   }
   if (!isNonEmptyString(message.content)) {
-    throw fail('response', 'message content is missing');
+    throw fail('response', 'message content is missing', 'openrouter_missing_content');
   }
   return message.content;
 }
@@ -379,8 +534,8 @@ export function createOpenRouterAdapter(options) {
         },
       },
     };
-    if (reasoningEffort !== undefined) {
-      transportRequest.body.reasoning_effort = reasoningEffort;
+    if (reasoningEffort === 'low' || reasoningEffort === 'medium' || reasoningEffort === 'high') {
+      transportRequest.body.reasoning = { effort: reasoningEffort };
     }
 
     let raw;
@@ -388,14 +543,21 @@ export function createOpenRouterAdapter(options) {
       raw = await transport(transportRequest);
     } catch (error) {
       if (isOwnError(error)) throw error;
-      throw fail('transport', 'transport failed');
+      throw fail('transport', 'transport failed', 'unknown_adapter_failure');
     }
 
     try {
       return readContent(raw);
     } catch (error) {
-      if (isOwnError(error)) throw error;
-      throw fail('response', 'transport response is invalid');
+      if (isOwnError(error)) {
+        if (projectSafeOpenRouterDiagnostic(error) != null) throw error;
+        throw fail(
+          'response',
+          'transport response is invalid',
+          'openrouter_response_invalid_shape',
+        );
+      }
+      throw fail('response', 'transport response is invalid', 'openrouter_response_invalid_shape');
     }
   };
 }

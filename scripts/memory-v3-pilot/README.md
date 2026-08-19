@@ -153,10 +153,11 @@ Offline OpenRouter **boundary** only. The adapter is provider-neutral relative t
 - Transport is a **required injected dependency**. There is no `globalThis.fetch` fallback, so the network is technically impossible unless a caller supplies a transport.
 - One extractor case is **at most one** transport call. The adapter does not retry, heal responses, stream, select a model, or fall back to another provider.
 - The request uses strict structured output (`response_format.type = json_schema`, `strict: true`, `additionalProperties: false`). Provider routing is locked to `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
-- Optional `reasoningEffort` is allowlisted as `none | low | medium | high` and maps to OpenRouter `reasoning_effort`. The field is omitted when unset.
+- Optional `reasoningEffort` is allowlisted as `none | low | medium | high`. Unset and `"none"` omit both `reasoning` and `reasoning_effort`. `"low" | "medium" | "high"` send `reasoning: { effort }` only; `reasoning_effort` is never sent.
 - The adapter projects one trusted content path from a JSON-data-only response: `choices[0].message.content`. Official OpenRouter metadata (`id`, `usage`, `model`, and similar) is ignored, not copied. Only `finish_reason: "stop"` is accepted.
 - `calculateBudgetCeiling` / `assertBudgetGate` compute a **configured worst-case ceiling** from case count × token caps × dated USD/million prices. That is not a promise of actual billing.
-- The pricing snapshot used in tests is dated `2026-08-18` for `openai/gpt-5.6-luna` and must be refreshed before any future live run.
+- The pricing snapshot used in tests is dated `2026-08-19` for `openai/gpt-5.6-luna`: `$0.20/M` input and `$1.20/M` output. One-case conservative ceiling (16384 input + 1200 output) is `$0.0047168`. Live-smoke hard max is `$0.005`.
+- Three authorized live-smokes of `memv3-ru-counterexample-04` on `openai/gpt-5.6-luna` returned `openrouter_http_404`, including one after omitting `reasoning` / `reasoning_effort`. Official OpenRouter also describes 404 as no allowed providers after filtering. The leftover `reasoning_effort:"none"` hypothesis is **not** supported. Remaining provider-filter causes are unproven.
 - Live transport, `.env` loading, paid benchmark, and a results file are **not** part of this stage.
 
 ## HTTP fetch transport and offline runner (Task 3B)
@@ -166,7 +167,17 @@ Tested wiring only. Still **no** live OpenRouter call, `.env` loader, CLI, or re
 - `createOpenRouterFetchTransport({ fetchImpl, timeoutMs, maxResponseBytes, setTimeoutImpl?, clearTimeoutImpl? })` is the HTTP boundary. `fetchImpl` is required; there is no `globalThis.fetch` fallback. Timer helpers are optional **together**; omit both to use native `setTimeout` / `clearTimeout`.
 - One transport request becomes one `fetchImpl` call: `POST` to `https://openrouter.ai/api/v1/chat/completions`, JSON-serialized body, `AbortSignal` timeout covering `fetchImpl`, `response.text()`, the byte check, and JSON parse, and a byte cap on the HTTP text body. No retry. The timer is cleared once in an outer `finally`.
 - The fetch layer returns `{ status, body }` for the existing OpenRouter adapter. It does not parse Memory V3 items; `extractor-core` still owns that. Native Fetch `Response` status/`text` may live on the prototype; the transport does not treat the HTTP response as a JSON-data-only plain object.
-- `runOfflineBenchmark({ dataset, modelAdapter, budget, extractorVersion, maxPromptRequestBytesPerCase })` is extraction-only. The structural evaluator stays a **separate** layer. Live CLI, `.env`, and provider calls are not part of this stage; paid Task 3C remains later.
+- `runOfflineBenchmark({ dataset, modelAdapter, budget, extractorVersion, maxPromptRequestBytesPerCase })` is extraction-only. The structural evaluator stays a **separate** layer. Live CLI, `.env`, and provider calls are not part of this stage.
 - All preflight runs before the first adapter call: JSON-data-only options/dataset/cases, dense non-empty cases, `validateCase`, unique `caseId`, `budget.caseCount === dataset.cases.length`, `buildExtractorRequest` byte cap via `maxPromptRequestBytesPerCase`, then `assertBudgetGate`.
 - Cases run sequentially with concurrency **1**. A case failure is recorded as `{ caseId, stage }` and the runner continues without retry. Raw errors, dialogue, gold, title, category, and messages are not returned.
 - `budget.caseCount` must equal `dataset.cases.length`. The runner does not read the filesystem or provider env. Prompt request bytes are a size cap, not tokens and not actual billing.
+
+## One-case live smoke (Task 3C)
+
+Allowlisted CLI for one synthetic case. Fake-fetch unit tests cover the path; a live POST requires `--execute-one-paid-request`.
+
+- Case `memv3-ru-counterexample-04`, model `openai/gpt-5.6-luna`, `maxOutputTokens` 1200. Internal `reasoningEffort` is `"none"`; the HTTP body omits `reasoning` and `reasoning_effort`.
+- Provider lock is unchanged: `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, `zdr: true`. No retry, fallback, or repair.
+- Dated pricing `2026-08-19`: `$0.20/M` input, `$1.20/M` output. Configured one-case ceiling `$0.0047168`; CLI max budget `$0.005`.
+- Trusted `diagnosticCode` is projected from branded transport/adapter errors. `extractCase` still wraps adapter throws as stage `adapter`.
+- Three authorized live POSTs all returned `openrouter_http_404`. Omitting `reasoning_effort:"none"` did not clear it. That is not a green connectivity check.

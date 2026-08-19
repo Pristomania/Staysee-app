@@ -10,64 +10,105 @@ import { describe, it } from 'node:test';
 import { assertBudgetGate, calculateBudgetCeiling } from './benchmark-budget.mjs';
 
 const PRICING_SNAPSHOT = Object.freeze({
-  observedAt: '2026-08-18',
+  observedAt: '2026-08-19',
   model: 'openai/gpt-5.6-luna',
-  inputUsdPerMillion: 0.1,
-  outputUsdPerMillion: 0.6,
+  inputUsdPerMillion: 0.2,
+  outputUsdPerMillion: 1.2,
 });
 
 const FULL_SET = Object.freeze({
   caseCount: 24,
-  maxInputTokensPerCase: 4096,
+  maxInputTokensPerCase: 16384,
   maxOutputTokensPerCase: 1200,
   inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
   outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
   maxRequests: 24,
-  maxBudgetUsd: 0.03,
+  maxBudgetUsd: 0.1132032,
 });
 
 const SIX_CASES = Object.freeze({
   caseCount: 6,
-  maxInputTokensPerCase: 4096,
+  maxInputTokensPerCase: 16384,
   maxOutputTokensPerCase: 1200,
   inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
   outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
   maxRequests: 6,
-  maxBudgetUsd: 0.007,
+  maxBudgetUsd: 0.0283008,
 });
 
-describe('calculateBudgetCeiling dated pricing snapshot 2026-08-18', () => {
-  it('passes the 24-case worst-case ceiling under $0.03', () => {
+const ONE_CASE = Object.freeze({
+  caseCount: 1,
+  maxInputTokensPerCase: 16384,
+  maxOutputTokensPerCase: 1200,
+  inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
+  outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
+  maxRequests: 1,
+  maxBudgetUsd: 0.005,
+});
+
+describe('calculateBudgetCeiling dated pricing snapshot 2026-08-19', () => {
+  it('passes the 24-case conservative ceiling at the exact total', () => {
     const report = calculateBudgetCeiling(FULL_SET);
-    assert.equal(PRICING_SNAPSHOT.observedAt, '2026-08-18');
+    assert.equal(PRICING_SNAPSHOT.observedAt, '2026-08-19');
     assert.equal(PRICING_SNAPSHOT.model, 'openai/gpt-5.6-luna');
+    assert.equal(PRICING_SNAPSHOT.inputUsdPerMillion, 0.2);
+    assert.equal(PRICING_SNAPSHOT.outputUsdPerMillion, 1.2);
     assert.equal(report.absoluteMaxRequests, 24);
-    assert.equal(report.absoluteInputTokens, 98304);
+    assert.equal(report.absoluteInputTokens, 393216);
     assert.equal(report.absoluteOutputTokens, 28800);
-    assert.equal(report.inputCostUsd, '0.0098304');
-    assert.equal(report.outputCostUsd, '0.01728');
-    assert.equal(report.absoluteCostUsd, '0.0271104');
+    assert.equal(report.inputCostUsd, '0.0786432');
+    assert.equal(report.outputCostUsd, '0.03456');
+    assert.equal(report.absoluteCostUsd, '0.1132032');
     assert.equal(report.gate, 'PASS');
     assert.equal(report.costUnit, 'nanodollars');
-    assert.equal(report.absoluteCostNanodollars, '27110400');
+    assert.equal(report.absoluteCostNanodollars, '113203200');
     assert.doesNotThrow(() => assertBudgetGate(FULL_SET));
   });
 
-  it('passes the 6-case worst-case ceiling under $0.007', () => {
+  it('passes the 6-case conservative ceiling at the exact total', () => {
     const report = calculateBudgetCeiling(SIX_CASES);
     assert.equal(report.absoluteMaxRequests, 6);
-    assert.equal(report.absoluteInputTokens, 24576);
+    assert.equal(report.absoluteInputTokens, 98304);
     assert.equal(report.absoluteOutputTokens, 7200);
-    assert.equal(report.absoluteCostUsd, '0.0067776');
+    assert.equal(report.inputCostUsd, '0.0196608');
+    assert.equal(report.outputCostUsd, '0.00864');
+    assert.equal(report.absoluteCostUsd, '0.0283008');
     assert.equal(report.gate, 'PASS');
     assert.doesNotThrow(() => assertBudgetGate(SIX_CASES));
   });
 
-  it('fails the 24-case set when budget is $0.027 and does not round down to PASS', () => {
-    const report = calculateBudgetCeiling({ ...FULL_SET, maxBudgetUsd: 0.027 });
-    assert.equal(report.absoluteCostUsd, '0.0271104');
+  it('passes the one-case smoke ceiling under $0.005', () => {
+    const report = calculateBudgetCeiling(ONE_CASE);
+    assert.equal(report.absoluteMaxRequests, 1);
+    assert.equal(report.absoluteInputTokens, 16384);
+    assert.equal(report.absoluteOutputTokens, 1200);
+    assert.equal(report.inputCostUsd, '0.0032768');
+    assert.equal(report.outputCostUsd, '0.00144');
+    assert.equal(report.absoluteCostUsd, '0.0047168');
+    assert.equal(report.maxBudgetUsd, 0.005);
+    assert.equal(report.gate, 'PASS');
+    assert.doesNotThrow(() => assertBudgetGate(ONE_CASE));
+  });
+
+  it('fails the 24-case set one nanodollar-display unit below the exact total', () => {
+    const report = calculateBudgetCeiling({ ...FULL_SET, maxBudgetUsd: 0.1132031 });
+    assert.equal(report.absoluteCostUsd, '0.1132032');
     assert.equal(report.gate, 'FAIL');
-    assert.throws(() => assertBudgetGate({ ...FULL_SET, maxBudgetUsd: 0.027 }), /budget-gate/);
+    assert.throws(() => assertBudgetGate({ ...FULL_SET, maxBudgetUsd: 0.1132031 }), /budget-gate/);
+  });
+
+  it('fails the 6-case set one nanodollar-display unit below the exact total', () => {
+    const report = calculateBudgetCeiling({ ...SIX_CASES, maxBudgetUsd: 0.0283007 });
+    assert.equal(report.absoluteCostUsd, '0.0283008');
+    assert.equal(report.gate, 'FAIL');
+    assert.throws(() => assertBudgetGate({ ...SIX_CASES, maxBudgetUsd: 0.0283007 }), /budget-gate/);
+  });
+
+  it('fails the one-case smoke when budget is below the exact ceiling', () => {
+    const report = calculateBudgetCeiling({ ...ONE_CASE, maxBudgetUsd: 0.0047167 });
+    assert.equal(report.absoluteCostUsd, '0.0047168');
+    assert.equal(report.gate, 'FAIL');
+    assert.throws(() => assertBudgetGate({ ...ONE_CASE, maxBudgetUsd: 0.0047167 }), /budget-gate/);
   });
 
   it('fails when the request cap is below caseCount', () => {

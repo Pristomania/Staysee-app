@@ -6,7 +6,10 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createOpenRouterFetchTransport } from './openrouter-fetch-transport.mjs';
+import {
+  createOpenRouterFetchTransport,
+  projectSafeFetchDiagnostic,
+} from './openrouter-fetch-transport.mjs';
 import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
 import { buildExtractorRequest } from './extractor-prompt.mjs';
 import { extractCase } from './extractor-core.mjs';
@@ -424,5 +427,113 @@ describe('createOpenRouterFetchTransport composition', () => {
     const serialized = JSON.stringify(fetchImpl.calls[0].init.body);
     assert.equal(serialized.includes(API_KEY), false);
     assert.equal(buildExtractorRequest(caseData).system.includes(SENTINELS.dialogue), false);
+  });
+});
+
+describe('createOpenRouterFetchTransport safe diagnostics', () => {
+  async function rejectDiagnostic(run, code) {
+    let thrown;
+    try {
+      await run();
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(thrown != null, true);
+    assert.equal(projectSafeFetchDiagnostic(thrown), code);
+    assert.equal(thrown.diagnosticCode, code);
+    assert.equal(thrown.cause == null, true);
+    assertNoSecrets(thrown);
+  }
+
+  it('projects timeout, oversized, invalid JSON, and fetch rejection codes', async () => {
+    const clock = createFakeClock();
+    const hanging = createOpenRouterFetchTransport(
+      validOptions({
+        timeoutMs: 50,
+        setTimeoutImpl: clock.setTimeoutImpl,
+        clearTimeoutImpl: clock.clearTimeoutImpl,
+        fetchImpl: async (url, init) => ({
+          status: 200,
+          text() {
+            return new Promise((_, reject) => {
+              init.signal.addEventListener('abort', () => {
+                const error = new Error('Aborted');
+                error.name = 'AbortError';
+                reject(error);
+              });
+            });
+          },
+        }),
+      }),
+    );
+    const pending = hanging(validTransportRequest());
+    await Promise.resolve();
+    await Promise.resolve();
+    clock.fireAll();
+    await rejectDiagnostic(() => pending, 'transport_timeout');
+
+    await rejectDiagnostic(
+      () =>
+        createOpenRouterFetchTransport(
+          validOptions({
+            maxResponseBytes: 16,
+            fetchImpl: recordingFetch(jsonResponse('x'.repeat(64))),
+          }),
+        )(validTransportRequest()),
+      'transport_response_too_large',
+    );
+
+    await rejectDiagnostic(
+      () =>
+        createOpenRouterFetchTransport(
+          validOptions({
+            fetchImpl: recordingFetch(jsonResponse(`not-json ${SENTINELS.body}`)),
+          }),
+        )(validTransportRequest()),
+      'transport_response_invalid_json',
+    );
+
+    await rejectDiagnostic(
+      () =>
+        createOpenRouterFetchTransport(
+          validOptions({
+            fetchImpl: () => {
+              throw new Error(SENTINELS.body);
+            },
+          }),
+        )(validTransportRequest()),
+      'transport_request_failed',
+    );
+  });
+
+  it('does not trust a spoofed diagnosticCode from fetchImpl', async () => {
+    let getterCalls = 0;
+    const transport = createOpenRouterFetchTransport(
+      validOptions({
+        fetchImpl: () => {
+          const error = new Error(SENTINELS.fakeBrand);
+          error.name = 'MemoryV3FetchError';
+          Object.defineProperty(error, 'diagnosticCode', {
+            enumerable: true,
+            configurable: true,
+            get() {
+              getterCalls += 1;
+              return 'transport_timeout';
+            },
+          });
+          throw error;
+        },
+      }),
+    );
+    let thrown;
+    try {
+      await transport(validTransportRequest());
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(getterCalls, 0);
+    assert.equal(projectSafeFetchDiagnostic(thrown), 'transport_request_failed');
+    assert.equal(projectSafeFetchDiagnostic({ diagnosticCode: 'transport_timeout' }), null);
+    assertNoSecrets(thrown);
   });
 });

@@ -9,10 +9,25 @@ const HEADER_OPTIONAL = Object.freeze(['HTTP-Referer', 'X-Title']);
 const REQUEST_FIELDS = Object.freeze(['url', 'method', 'headers', 'body']);
 
 const OWN_ERRORS = new WeakSet();
+const FETCH_DIAGNOSTIC_CODES = new Set([
+  'transport_request_failed',
+  'transport_timeout',
+  'transport_response_too_large',
+  'transport_response_invalid_json',
+  'transport_response_invalid_shape',
+]);
 
-function fail(stage, message) {
+function fail(stage, message, diagnosticCode) {
   const error = new Error(`[memory-v3:fetch-${stage}] ${message}`);
   error.name = 'MemoryV3FetchError';
+  if (FETCH_DIAGNOSTIC_CODES.has(diagnosticCode)) {
+    Object.defineProperty(error, 'diagnosticCode', {
+      value: diagnosticCode,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    });
+  }
   OWN_ERRORS.add(error);
   return error;
 }
@@ -23,6 +38,36 @@ function isOwnError(error) {
     (typeof error === 'object' || typeof error === 'function') &&
     OWN_ERRORS.has(error)
   );
+}
+
+export function projectSafeFetchDiagnostic(error) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) {
+    return null;
+  }
+  if (!OWN_ERRORS.has(error)) {
+    return null;
+  }
+  let desc;
+  try {
+    desc = Object.getOwnPropertyDescriptor(error, 'diagnosticCode');
+  } catch {
+    return null;
+  }
+  if (
+    !desc ||
+    typeof desc.get === 'function' ||
+    typeof desc.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+    desc.enumerable !== true ||
+    desc.writable !== false ||
+    desc.configurable !== false
+  ) {
+    return null;
+  }
+  if (!FETCH_DIAGNOSTIC_CODES.has(desc.value)) {
+    return null;
+  }
+  return desc.value;
 }
 
 function isNonEmptyString(value) {
@@ -262,7 +307,7 @@ function inspectTransportRequest(request) {
 
 async function readFetchResponse(raw, maxResponseBytes, controller) {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw fail('response', 'fetch response is invalid');
+    throw fail('response', 'fetch response is invalid', 'transport_response_invalid_shape');
   }
   let status;
   let textFn;
@@ -270,13 +315,13 @@ async function readFetchResponse(raw, maxResponseBytes, controller) {
     status = raw.status;
     textFn = raw.text;
   } catch {
-    throw fail('response', 'fetch response is invalid');
+    throw fail('response', 'fetch response is invalid', 'transport_response_invalid_shape');
   }
   if (!Number.isInteger(status)) {
-    throw fail('response', 'fetch status is invalid');
+    throw fail('response', 'fetch status is invalid', 'transport_response_invalid_shape');
   }
   if (typeof textFn !== 'function') {
-    throw fail('response', 'fetch response text is missing');
+    throw fail('response', 'fetch response text is missing', 'transport_response_invalid_shape');
   }
   let text;
   try {
@@ -284,24 +329,24 @@ async function readFetchResponse(raw, maxResponseBytes, controller) {
   } catch (error) {
     if (isOwnError(error)) throw error;
     if (controller.signal.aborted) {
-      throw fail('timeout', 'fetch timed out');
+      throw fail('timeout', 'fetch timed out', 'transport_timeout');
     }
-    throw fail('response', 'fetch response text failed');
+    throw fail('response', 'fetch response text failed', 'transport_response_invalid_shape');
   }
   if (typeof text !== 'string') {
-    throw fail('response', 'fetch response text is invalid');
+    throw fail('response', 'fetch response text is invalid', 'transport_response_invalid_shape');
   }
   if (byteLength(text) > maxResponseBytes) {
-    throw fail('response', 'fetch response exceeds maxResponseBytes');
+    throw fail('response', 'fetch response exceeds maxResponseBytes', 'transport_response_too_large');
   }
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw fail('response', 'fetch response is not JSON');
+    throw fail('response', 'fetch response is not JSON', 'transport_response_invalid_json');
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw fail('response', 'fetch response JSON must be an object');
+    throw fail('response', 'fetch response JSON must be an object', 'transport_response_invalid_shape');
   }
   return { status, body: parsed };
 }
@@ -341,9 +386,9 @@ export function createOpenRouterFetchTransport(options) {
       } catch (error) {
         if (isOwnError(error)) throw error;
         if (controller.signal.aborted) {
-          throw fail('timeout', 'fetch timed out');
+          throw fail('timeout', 'fetch timed out', 'transport_timeout');
         }
-        throw fail('transport', 'fetch failed');
+        throw fail('transport', 'fetch failed', 'transport_request_failed');
       }
 
       try {
@@ -351,9 +396,9 @@ export function createOpenRouterFetchTransport(options) {
       } catch (error) {
         if (isOwnError(error)) throw error;
         if (controller.signal.aborted) {
-          throw fail('timeout', 'fetch timed out');
+          throw fail('timeout', 'fetch timed out', 'transport_timeout');
         }
-        throw fail('response', 'fetch response is invalid');
+        throw fail('response', 'fetch response is invalid', 'transport_response_invalid_shape');
       }
     } finally {
       clearTimeoutImpl(timer);

@@ -8,7 +8,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildExtractorRequest } from './extractor-prompt.mjs';
 import { extractCase } from './extractor-core.mjs';
-import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
+import {
+  createOpenRouterAdapter,
+  projectSafeOpenRouterDiagnostic,
+} from './openrouter-adapter.mjs';
 import { assertBudgetGate } from './benchmark-budget.mjs';
 
 const API_KEY = 'test-memory-v3-openrouter-key';
@@ -185,20 +188,36 @@ describe('createOpenRouterAdapter config', () => {
     );
   });
 
-  it('accepts allowlisted reasoningEffort values and rejects unknown ones', async () => {
-    for (const effort of ['none', 'low', 'medium', 'high']) {
+  it('omits reasoning fields when reasoningEffort is absent or none', async () => {
+    const omitted = recordingTransport();
+    await createOpenRouterAdapter(validOptions({ transport: omitted }))(
+      buildExtractorRequest(sampleCase()),
+    );
+    assert.equal(omitted.calls.length, 1);
+    assert.equal('reasoning' in omitted.calls[0].body, false);
+    assert.equal('reasoning_effort' in omitted.calls[0].body, false);
+
+    const noneTransport = recordingTransport();
+    await createOpenRouterAdapter(
+      validOptions({ transport: noneTransport, reasoningEffort: 'none' }),
+    )(buildExtractorRequest(sampleCase()));
+    assert.equal(noneTransport.calls.length, 1);
+    assert.equal('reasoning' in noneTransport.calls[0].body, false);
+    assert.equal('reasoning_effort' in noneTransport.calls[0].body, false);
+  });
+
+  it('sends reasoning.effort for low, medium, and high and never sends reasoning_effort', async () => {
+    for (const effort of ['low', 'medium', 'high']) {
       const transport = recordingTransport();
       const adapter = createOpenRouterAdapter(validOptions({ transport, reasoningEffort: effort }));
       await adapter(buildExtractorRequest(sampleCase()));
       assert.equal(transport.calls.length, 1);
-      assert.equal(transport.calls[0].body.reasoning_effort, effort);
-      assert.equal('reasoning' in transport.calls[0].body, false);
+      assert.deepEqual(transport.calls[0].body.reasoning, { effort });
+      assert.equal('reasoning_effort' in transport.calls[0].body, false);
     }
+  });
 
-    await assertRejectsStage(
-      () => createOpenRouterAdapter(validOptions({ reasoningEffort: 'extreme' })),
-      'config',
-    );
+  it('rejects invalid reasoningEffort values', async () => {
     await assertRejectsStage(
       () => createOpenRouterAdapter(validOptions({ reasoningEffort: '' })),
       'config',
@@ -729,5 +748,83 @@ describe('createOpenRouterAdapter composition with extractCase', () => {
     );
     assert.equal(calls, 0);
     assert.equal(typeof transport, 'function');
+  });
+});
+
+describe('createOpenRouterAdapter safe diagnostics', () => {
+  async function rejectDiagnostic(transportPayload, code) {
+    const request = buildExtractorRequest(sampleCase());
+    let thrown;
+    try {
+      await createOpenRouterAdapter(
+        validOptions({ transport: async () => transportPayload }),
+      )(request);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(thrown != null, true);
+    assert.equal(projectSafeOpenRouterDiagnostic(thrown), code);
+    assert.equal(thrown.diagnosticCode, code);
+    assert.equal(thrown.cause == null, true);
+    assertNoSecrets(thrown);
+  }
+
+  it('projects HTTP status codes from branded adapter errors only', async () => {
+    await rejectDiagnostic(
+      {
+        status: 400,
+        body: {
+          error: {
+            message: SENTINELS.bodyError,
+            code: 400,
+            metadata: { raw: SENTINELS.metadata },
+          },
+        },
+      },
+      'openrouter_http_400',
+    );
+    await rejectDiagnostic({ status: 401, body: { choices: [] } }, 'openrouter_http_401');
+    await rejectDiagnostic({ status: 402, body: { choices: [] } }, 'openrouter_http_402');
+    await rejectDiagnostic({ status: 403, body: { choices: [] } }, 'openrouter_http_403');
+    await rejectDiagnostic({ status: 404, body: { choices: [] } }, 'openrouter_http_404');
+    await rejectDiagnostic({ status: 408, body: { choices: [] } }, 'openrouter_http_408');
+    await rejectDiagnostic({ status: 409, body: { choices: [] } }, 'openrouter_http_409');
+    await rejectDiagnostic({ status: 422, body: { choices: [] } }, 'openrouter_http_422');
+    await rejectDiagnostic({ status: 429, body: { choices: [] } }, 'openrouter_http_429');
+    await rejectDiagnostic({ status: 500, body: { choices: [] } }, 'openrouter_http_5xx');
+    await rejectDiagnostic({ status: 418, body: { choices: [] } }, 'openrouter_http_other_non_2xx');
+  });
+
+  it('does not trust a spoofed diagnosticCode from injected transport', async () => {
+    let getterCalls = 0;
+    const request = buildExtractorRequest(sampleCase());
+    const adapter = createOpenRouterAdapter(
+      validOptions({
+        transport: () => {
+          const error = new Error(SENTINELS.fakeBrand);
+          error.name = 'MemoryV3OpenRouterError';
+          Object.defineProperty(error, 'diagnosticCode', {
+            enumerable: true,
+            configurable: true,
+            get() {
+              getterCalls += 1;
+              return 'openrouter_http_400';
+            },
+          });
+          throw error;
+        },
+      }),
+    );
+    let thrown;
+    try {
+      await adapter(request);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(getterCalls, 0);
+    assert.equal(projectSafeOpenRouterDiagnostic(thrown), 'unknown_adapter_failure');
+    assert.equal(thrown.diagnosticCode, 'unknown_adapter_failure');
+    assertNoSecrets(thrown);
+    assert.equal(projectSafeOpenRouterDiagnostic({ diagnosticCode: 'openrouter_http_400' }), null);
   });
 });
