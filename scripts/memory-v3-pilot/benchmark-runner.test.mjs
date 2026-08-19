@@ -72,10 +72,10 @@ function conservativeBudget(caseCount) {
     caseCount,
     maxInputTokensPerCase: 16384,
     maxOutputTokensPerCase: 1200,
-    inputUsdPerMillion: 0.2,
-    outputUsdPerMillion: 1.2,
+    inputUsdPerMillion: 0.22,
+    outputUsdPerMillion: 1.32,
     maxRequests: caseCount,
-    maxBudgetUsd: caseCount === 24 ? 0.1132032 : 0.0283008,
+    maxBudgetUsd: caseCount === 24 ? 0.12452352 : 0.03113088,
   };
 }
 
@@ -362,7 +362,7 @@ describe('runOfflineBenchmark execution', () => {
 });
 
 describe('runOfflineBenchmark conservative budget snapshot 2026-08-19', () => {
-  it('passes the 24-case ceiling at the exact total $0.1132032', async () => {
+  it('passes the 24-case ceiling at the exact total $0.12452352', async () => {
     const cases = Array.from({ length: 24 }, (_, index) =>
       sampleCase(`run-case-${String(index + 1).padStart(2, '0')}`),
     );
@@ -377,14 +377,14 @@ describe('runOfflineBenchmark conservative budget snapshot 2026-08-19', () => {
     assert.equal(adapter.calls.length, 24);
     assert.equal(report.budget.absoluteInputTokens, 393216);
     assert.equal(report.budget.absoluteOutputTokens, 28800);
-    assert.equal(report.budget.inputCostUsd, '0.0786432');
-    assert.equal(report.budget.outputCostUsd, '0.03456');
-    assert.equal(report.budget.absoluteCostUsd, '0.1132032');
+    assert.equal(report.budget.inputCostUsd, '0.08650752');
+    assert.equal(report.budget.outputCostUsd, '0.038016');
+    assert.equal(report.budget.absoluteCostUsd, '0.12452352');
     assert.equal(report.budget.gate, 'PASS');
     assert.equal(report.successCount, 24);
   });
 
-  it('passes the 6-case ceiling at the exact total $0.0283008', async () => {
+  it('passes the 6-case ceiling at the exact total $0.03113088', async () => {
     const cases = Array.from({ length: 6 }, (_, index) =>
       sampleCase(`run-case-${String(index + 1).padStart(2, '0')}`),
     );
@@ -397,7 +397,7 @@ describe('runOfflineBenchmark conservative budget snapshot 2026-08-19', () => {
       }),
     );
     assert.equal(adapter.calls.length, 6);
-    assert.equal(report.budget.absoluteCostUsd, '0.0283008');
+    assert.equal(report.budget.absoluteCostUsd, '0.03113088');
     assert.equal(report.budget.gate, 'PASS');
   });
 });

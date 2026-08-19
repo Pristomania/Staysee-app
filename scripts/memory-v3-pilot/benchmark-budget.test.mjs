@@ -12,8 +12,9 @@ import { assertBudgetGate, calculateBudgetCeiling } from './benchmark-budget.mjs
 const PRICING_SNAPSHOT = Object.freeze({
   observedAt: '2026-08-19',
   model: 'openai/gpt-5.6-luna',
-  inputUsdPerMillion: 0.2,
-  outputUsdPerMillion: 1.2,
+  pricingBasis: 'maximum observed across allowed ZDR endpoints',
+  inputUsdPerMillion: 0.22,
+  outputUsdPerMillion: 1.32,
 });
 
 const FULL_SET = Object.freeze({
@@ -23,7 +24,7 @@ const FULL_SET = Object.freeze({
   inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
   outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
   maxRequests: 24,
-  maxBudgetUsd: 0.1132032,
+  maxBudgetUsd: 0.12452352,
 });
 
 const SIX_CASES = Object.freeze({
@@ -33,7 +34,7 @@ const SIX_CASES = Object.freeze({
   inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
   outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
   maxRequests: 6,
-  maxBudgetUsd: 0.0283008,
+  maxBudgetUsd: 0.03113088,
 });
 
 const ONE_CASE = Object.freeze({
@@ -43,7 +44,7 @@ const ONE_CASE = Object.freeze({
   inputUsdPerMillion: PRICING_SNAPSHOT.inputUsdPerMillion,
   outputUsdPerMillion: PRICING_SNAPSHOT.outputUsdPerMillion,
   maxRequests: 1,
-  maxBudgetUsd: 0.005,
+  maxBudgetUsd: 0.0055,
 });
 
 describe('calculateBudgetCeiling dated pricing snapshot 2026-08-19', () => {
@@ -51,17 +52,18 @@ describe('calculateBudgetCeiling dated pricing snapshot 2026-08-19', () => {
     const report = calculateBudgetCeiling(FULL_SET);
     assert.equal(PRICING_SNAPSHOT.observedAt, '2026-08-19');
     assert.equal(PRICING_SNAPSHOT.model, 'openai/gpt-5.6-luna');
-    assert.equal(PRICING_SNAPSHOT.inputUsdPerMillion, 0.2);
-    assert.equal(PRICING_SNAPSHOT.outputUsdPerMillion, 1.2);
+    assert.equal(PRICING_SNAPSHOT.pricingBasis, 'maximum observed across allowed ZDR endpoints');
+    assert.equal(PRICING_SNAPSHOT.inputUsdPerMillion, 0.22);
+    assert.equal(PRICING_SNAPSHOT.outputUsdPerMillion, 1.32);
     assert.equal(report.absoluteMaxRequests, 24);
     assert.equal(report.absoluteInputTokens, 393216);
     assert.equal(report.absoluteOutputTokens, 28800);
-    assert.equal(report.inputCostUsd, '0.0786432');
-    assert.equal(report.outputCostUsd, '0.03456');
-    assert.equal(report.absoluteCostUsd, '0.1132032');
+    assert.equal(report.inputCostUsd, '0.08650752');
+    assert.equal(report.outputCostUsd, '0.038016');
+    assert.equal(report.absoluteCostUsd, '0.12452352');
     assert.equal(report.gate, 'PASS');
     assert.equal(report.costUnit, 'nanodollars');
-    assert.equal(report.absoluteCostNanodollars, '113203200');
+    assert.equal(report.absoluteCostNanodollars, '124523520');
     assert.doesNotThrow(() => assertBudgetGate(FULL_SET));
   });
 
@@ -70,45 +72,45 @@ describe('calculateBudgetCeiling dated pricing snapshot 2026-08-19', () => {
     assert.equal(report.absoluteMaxRequests, 6);
     assert.equal(report.absoluteInputTokens, 98304);
     assert.equal(report.absoluteOutputTokens, 7200);
-    assert.equal(report.inputCostUsd, '0.0196608');
-    assert.equal(report.outputCostUsd, '0.00864');
-    assert.equal(report.absoluteCostUsd, '0.0283008');
+    assert.equal(report.inputCostUsd, '0.02162688');
+    assert.equal(report.outputCostUsd, '0.009504');
+    assert.equal(report.absoluteCostUsd, '0.03113088');
     assert.equal(report.gate, 'PASS');
     assert.doesNotThrow(() => assertBudgetGate(SIX_CASES));
   });
 
-  it('passes the one-case smoke ceiling under $0.005', () => {
+  it('passes the one-case smoke ceiling under $0.0055', () => {
     const report = calculateBudgetCeiling(ONE_CASE);
     assert.equal(report.absoluteMaxRequests, 1);
     assert.equal(report.absoluteInputTokens, 16384);
     assert.equal(report.absoluteOutputTokens, 1200);
-    assert.equal(report.inputCostUsd, '0.0032768');
-    assert.equal(report.outputCostUsd, '0.00144');
-    assert.equal(report.absoluteCostUsd, '0.0047168');
-    assert.equal(report.maxBudgetUsd, 0.005);
+    assert.equal(report.inputCostUsd, '0.00360448');
+    assert.equal(report.outputCostUsd, '0.001584');
+    assert.equal(report.absoluteCostUsd, '0.00518848');
+    assert.equal(report.maxBudgetUsd, 0.0055);
     assert.equal(report.gate, 'PASS');
     assert.doesNotThrow(() => assertBudgetGate(ONE_CASE));
   });
 
   it('fails the 24-case set one nanodollar-display unit below the exact total', () => {
-    const report = calculateBudgetCeiling({ ...FULL_SET, maxBudgetUsd: 0.1132031 });
-    assert.equal(report.absoluteCostUsd, '0.1132032');
+    const report = calculateBudgetCeiling({ ...FULL_SET, maxBudgetUsd: 0.12452351 });
+    assert.equal(report.absoluteCostUsd, '0.12452352');
     assert.equal(report.gate, 'FAIL');
-    assert.throws(() => assertBudgetGate({ ...FULL_SET, maxBudgetUsd: 0.1132031 }), /budget-gate/);
+    assert.throws(() => assertBudgetGate({ ...FULL_SET, maxBudgetUsd: 0.12452351 }), /budget-gate/);
   });
 
   it('fails the 6-case set one nanodollar-display unit below the exact total', () => {
-    const report = calculateBudgetCeiling({ ...SIX_CASES, maxBudgetUsd: 0.0283007 });
-    assert.equal(report.absoluteCostUsd, '0.0283008');
+    const report = calculateBudgetCeiling({ ...SIX_CASES, maxBudgetUsd: 0.03113087 });
+    assert.equal(report.absoluteCostUsd, '0.03113088');
     assert.equal(report.gate, 'FAIL');
-    assert.throws(() => assertBudgetGate({ ...SIX_CASES, maxBudgetUsd: 0.0283007 }), /budget-gate/);
+    assert.throws(() => assertBudgetGate({ ...SIX_CASES, maxBudgetUsd: 0.03113087 }), /budget-gate/);
   });
 
   it('fails the one-case smoke when budget is below the exact ceiling', () => {
-    const report = calculateBudgetCeiling({ ...ONE_CASE, maxBudgetUsd: 0.0047167 });
-    assert.equal(report.absoluteCostUsd, '0.0047168');
+    const report = calculateBudgetCeiling({ ...ONE_CASE, maxBudgetUsd: 0.00518847 });
+    assert.equal(report.absoluteCostUsd, '0.00518848');
     assert.equal(report.gate, 'FAIL');
-    assert.throws(() => assertBudgetGate({ ...ONE_CASE, maxBudgetUsd: 0.0047167 }), /budget-gate/);
+    assert.throws(() => assertBudgetGate({ ...ONE_CASE, maxBudgetUsd: 0.00518847 }), /budget-gate/);
   });
 
   it('fails when the request cap is below caseCount', () => {

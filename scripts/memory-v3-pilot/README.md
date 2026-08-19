@@ -152,12 +152,12 @@ Offline OpenRouter **boundary** only. The adapter is provider-neutral relative t
 
 - Transport is a **required injected dependency**. There is no `globalThis.fetch` fallback, so the network is technically impossible unless a caller supplies a transport.
 - One extractor case is **at most one** transport call. The adapter does not retry, heal responses, stream, select a model, or fall back to another provider.
-- The request uses strict structured output (`response_format.type = json_schema`, `strict: true`, `additionalProperties: false`). Provider routing is locked to `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
+- The request uses strict structured output (`response_format.type = json_schema`, `strict: true`, `additionalProperties: false`). The option `maxOutputTokens` is provider-neutral; the OpenRouter body field is `max_completion_tokens`. `max_tokens` is not sent. Provider routing is locked to `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
 - Optional `reasoningEffort` is allowlisted as `none | low | medium | high`. Unset and `"none"` omit both `reasoning` and `reasoning_effort`. `"low" | "medium" | "high"` send `reasoning: { effort }` only; `reasoning_effort` is never sent.
 - The adapter projects one trusted content path from a JSON-data-only response: `choices[0].message.content`. Official OpenRouter metadata (`id`, `usage`, `model`, and similar) is ignored, not copied. Only `finish_reason: "stop"` is accepted.
 - `calculateBudgetCeiling` / `assertBudgetGate` compute a **configured worst-case ceiling** from case count × token caps × dated USD/million prices. That is not a promise of actual billing.
-- The pricing snapshot used in tests is dated `2026-08-19` for `openai/gpt-5.6-luna`: `$0.20/M` input and `$1.20/M` output. One-case conservative ceiling (16384 input + 1200 output) is `$0.0047168`. Live-smoke hard max is `$0.005`.
-- Three authorized live-smokes of `memv3-ru-counterexample-04` on `openai/gpt-5.6-luna` returned `openrouter_http_404`, including one after omitting `reasoning` / `reasoning_effort`. Official OpenRouter also describes 404 as no allowed providers after filtering. The leftover `reasoning_effort:"none"` hypothesis is **not** supported. Remaining provider-filter causes are unproven.
+- The pricing snapshot used in tests is dated `2026-08-19` for `openai/gpt-5.6-luna`, using the **maximum** observed price across the allowed ZDR endpoints: `$0.22/M` input and `$1.32/M` output. One-case conservative ceiling (16384 input + 1200 output) is `$0.00518848`. Live-smoke hard max is `$0.0055`.
+- Three authorized live-smokes returned `openrouter_http_404` while the adapter sent `max_tokens`. After switching to `max_completion_tokens`, one live POST reached HTTP 200 and stopped on `openrouter_refusal`. That code was **ambiguous**: the old adapter rejected the mere presence of a `refusal` key, including official `refusal: null`. Routing/404 is fixed. Privacy locks were not weakened. Actual usage/cost of those calls is unavailable.
 - Live transport, `.env` loading, paid benchmark, and a results file are **not** part of this stage.
 
 ## HTTP fetch transport and offline runner (Task 3B)
@@ -176,8 +176,9 @@ Tested wiring only. Still **no** live OpenRouter call, `.env` loader, CLI, or re
 
 Allowlisted CLI for one synthetic case. Fake-fetch unit tests cover the path; a live POST requires `--execute-one-paid-request`.
 
-- Case `memv3-ru-counterexample-04`, model `openai/gpt-5.6-luna`, `maxOutputTokens` 1200. Internal `reasoningEffort` is `"none"`; the HTTP body omits `reasoning` and `reasoning_effort`.
+- Case `memv3-ru-counterexample-04`, model `openai/gpt-5.6-luna`, option `maxOutputTokens` 1200 mapped to HTTP `max_completion_tokens`. Internal `reasoningEffort` is `"none"`; the HTTP body omits `reasoning`, `reasoning_effort`, and `max_tokens`.
 - Provider lock is unchanged: `allow_fallbacks: false`, `require_parameters: true`, `data_collection: "deny"`, `zdr: true`. No retry, fallback, or repair.
-- Dated pricing `2026-08-19`: `$0.20/M` input, `$1.20/M` output. Configured one-case ceiling `$0.0047168`; CLI max budget `$0.005`.
+- Dated pricing `2026-08-19`, maximum across allowed ZDR endpoints: `$0.22/M` input, `$1.32/M` output. Configured one-case ceiling `$0.00518848`; CLI max budget `$0.0055`.
 - Trusted `diagnosticCode` is projected from branded transport/adapter errors. `extractCase` still wraps adapter throws as stage `adapter`.
-- Three authorized live POSTs all returned `openrouter_http_404`. Omitting `reasoning_effort:"none"` did not clear it. That is not a green connectivity check.
+- The adapter projects `choices[0].message.content`. Absent `refusal` and `refusal: null` are accepted. A refusal string (including `""`) is `openrouter_refusal` without copying the value into the public error. Any other refusal type is `openrouter_response_invalid_shape`. Getters/accessors are not executed.
+- Three authorized live POSTs returned `openrouter_http_404` because the request used `max_tokens`. A later live POST after the `max_completion_tokens` fix reached HTTP 200 and reported `openrouter_refusal`; that did **not** prove a model refusal, because the adapter then rejected nullable `refusal`. After the nullable-refusal fix, one allowlisted live-smoke completed with exactly one provider HTTP call and no retry: one event and one user `supports` evidence matched the synthetic gold case with structural item/evidence F1 `1.0`. This proves the one-case pipeline, not semantic quality or full-dataset quality. Actual usage/cost is unavailable.

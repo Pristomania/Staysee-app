@@ -435,13 +435,24 @@ function readContent(raw) {
   if (hasOwnDataKey(choice.message, 'function_call', 'choices[0].message')) {
     throw fail('response', 'message function_call is not allowed', 'openrouter_function_call');
   }
-  if (hasOwnDataKey(choice.message, 'refusal', 'choices[0].message')) {
-    throw fail('response', 'message refusal is not allowed', 'openrouter_refusal');
-  }
   const message = projectRecord(choice.message, 'choices[0].message', 'response', {
     required: [],
-    pick: ['role', 'content'],
+    pick: ['role', 'content', 'refusal'],
   });
+  if (message.refusal !== undefined && message.refusal !== null) {
+    if (typeof message.refusal !== 'string') {
+      throw fail(
+        'response',
+        'message refusal is invalid',
+        'openrouter_response_invalid_shape',
+      );
+    }
+    throw fail(
+      'response',
+      'message refusal is not allowed',
+      'openrouter_refusal',
+    );
+  }
   if (message.role !== undefined && message.role !== 'assistant') {
     throw fail('response', 'message role must be assistant', 'openrouter_non_assistant_role');
   }
@@ -521,7 +532,7 @@ export function createOpenRouterAdapter(options) {
           { role: 'user', content: JSON.stringify(safeRequest.input) },
         ],
         stream: false,
-        max_tokens: maxOutputTokens,
+        max_completion_tokens: maxOutputTokens,
         response_format: {
           type: 'json_schema',
           json_schema: structuredClone(MEMORY_V3_OPENROUTER_JSON_SCHEMA),

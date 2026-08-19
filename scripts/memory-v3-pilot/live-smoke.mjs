@@ -22,13 +22,13 @@ const ALLOWED_MAX_OUTPUT_TOKENS = 1200;
 const ALLOWED_TIMEOUT_MS = 60000;
 const ALLOWED_MAX_RESPONSE_BYTES = 1_000_000;
 const ALLOWED_MAX_PROMPT_BYTES = 20000;
-const ALLOWED_MAX_BUDGET_USD = 0.005;
+const ALLOWED_MAX_BUDGET_USD = 0.0055;
 const ALLOWED_BUDGET_FIXED = Object.freeze({
   caseCount: 1,
   maxInputTokensPerCase: 16384,
   maxOutputTokensPerCase: 1200,
-  inputUsdPerMillion: 0.2,
-  outputUsdPerMillion: 1.2,
+  inputUsdPerMillion: 0.22,
+  outputUsdPerMillion: 1.32,
   maxRequests: 1,
 });
 
@@ -660,7 +660,7 @@ function parseArgv(argv) {
   if (parsed.model !== ALLOWED_MODEL) {
     throw fail('model is not allowed');
   }
-  if (parsed.maxBudgetUsd !== '0.005') {
+  if (parsed.maxBudgetUsd !== '0.0055') {
     throw fail('max-budget-usd is not allowed');
   }
   return parsed;

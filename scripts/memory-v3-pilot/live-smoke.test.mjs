@@ -68,10 +68,10 @@ function allowedBudget(overrides = {}) {
     caseCount: 1,
     maxInputTokensPerCase: 16384,
     maxOutputTokensPerCase: 1200,
-    inputUsdPerMillion: 0.2,
-    outputUsdPerMillion: 1.2,
+    inputUsdPerMillion: 0.22,
+    outputUsdPerMillion: 1.32,
     maxRequests: 1,
-    maxBudgetUsd: 0.005,
+    maxBudgetUsd: 0.0055,
     ...overrides,
   };
 }
@@ -86,7 +86,7 @@ function officialOpenRouterHttpBody(content = VALID_CONTENT) {
       {
         index: 0,
         finish_reason: 'stop',
-        message: { role: 'assistant', content },
+        message: { role: 'assistant', content, refusal: null },
       },
     ],
     usage: { prompt_tokens: 25, completion_tokens: 10, total_tokens: 35 },
@@ -160,8 +160,10 @@ describe('runOneCaseLiveSmoke gates', () => {
     assert.equal(result.providerHttpCalls, 0);
     assert.equal(result.caseId, CASE_ID);
     assert.equal(result.model, MODEL);
-    assert.equal(result.configuredBudget.absoluteCostUsd, '0.0047168');
-    assert.equal(result.configuredBudget.maxBudgetUsd, 0.005);
+    assert.equal(result.configuredBudget.inputCostUsd, '0.00360448');
+    assert.equal(result.configuredBudget.outputCostUsd, '0.001584');
+    assert.equal(result.configuredBudget.absoluteCostUsd, '0.00518848');
+    assert.equal(result.configuredBudget.maxBudgetUsd, 0.0055);
     assert.equal(result.configuredBudget.gate, 'PASS');
     assert.equal(result.promptRequestBytes.total < 20000, true);
     assert.equal(result.keyPresent, true);
@@ -201,7 +203,7 @@ describe('runOneCaseLiveSmoke gates', () => {
     );
   });
 
-  it('does not call fetch when budget exceeds $0.005 or mismatches', async () => {
+  it('does not call fetch when budget exceeds $0.0055 or mismatches', async () => {
     const fetchImpl = recordingFetch();
     await assertFetchZero(
       () =>
@@ -308,12 +310,15 @@ describe('runOneCaseLiveSmoke fake fetch', () => {
       assert.equal(fetchImpl.calls[0].url, OPENROUTER_URL);
       assert.equal(fetchImpl.calls[0].init.method, 'POST');
       const httpBody = JSON.parse(fetchImpl.calls[0].init.body);
+      assert.equal(httpBody.max_completion_tokens, 1200);
+      assert.equal('max_tokens' in httpBody, false);
       assert.equal('reasoning' in httpBody, false);
       assert.equal('reasoning_effort' in httpBody, false);
       assert.equal(httpBody.provider.allow_fallbacks, false);
       assert.equal(httpBody.provider.require_parameters, true);
       assert.equal(httpBody.provider.data_collection, 'deny');
       assert.equal(httpBody.provider.zdr, true);
+      assert.equal(result.ok, true);
       assert.equal(result.providerHttpCalls, 1);
       assert.equal(result.successCount, 1);
       assert.equal(result.failureCount, 0);
@@ -490,6 +495,24 @@ describe('runOneCaseLiveSmoke safe diagnostics', () => {
     });
     assertFailedDiagnostic(refusal.result, refusal.fetchImpl, 'openrouter_refusal');
 
+    const objectRefusal = await smokeStatus(200, {
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: VALID_CONTENT,
+            refusal: { raw: SENTINELS.providerMessage },
+          },
+        },
+      ],
+    });
+    assertFailedDiagnostic(
+      objectRefusal.result,
+      objectRefusal.fetchImpl,
+      'openrouter_response_invalid_shape',
+    );
+
     const toolCall = await smokeStatus(200, {
       choices: [
         {
@@ -626,7 +649,7 @@ describe('runLiveSmokeFromArgv', () => {
           '--model',
           MODEL,
           '--max-budget-usd',
-          '0.005',
+          '0.0055',
           '--env-file',
           'masked.env',
         ],
@@ -638,8 +661,11 @@ describe('runLiveSmokeFromArgv', () => {
         },
       );
       assert.equal(result.providerHttpCalls, 0);
-      assert.equal(result.configuredBudget.absoluteCostUsd, '0.0047168');
-      assert.equal(result.configuredBudget.maxBudgetUsd, 0.005);
+      assert.equal(result.configuredBudget.inputCostUsd, '0.00360448');
+      assert.equal(result.configuredBudget.outputCostUsd, '0.001584');
+      assert.equal(result.configuredBudget.absoluteCostUsd, '0.00518848');
+      assert.equal(result.configuredBudget.maxBudgetUsd, 0.0055);
+      assert.equal(result.configuredBudget.gate, 'PASS');
       assert.equal(fetchImpl.calls.length, 0);
       assert.equal(process.env.OPENROUTER_API_KEY, undefined);
       assert.equal(result.keyPresent, true);
@@ -650,7 +676,7 @@ describe('runLiveSmokeFromArgv', () => {
     }
   });
 
-  it('rejects the stale --max-budget-usd 0.003 allowlist value', async () => {
+  it('rejects the stale --max-budget-usd 0.005 allowlist value', async () => {
     const fetchImpl = recordingFetch();
     await assert.rejects(
       () =>
@@ -661,7 +687,7 @@ describe('runLiveSmokeFromArgv', () => {
             '--model',
             MODEL,
             '--max-budget-usd',
-            '0.003',
+            '0.005',
             '--env-file',
             'masked.env',
           ],

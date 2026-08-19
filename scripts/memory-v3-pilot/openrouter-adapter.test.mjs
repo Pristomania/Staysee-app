@@ -120,6 +120,43 @@ function officialOpenRouterResponse(content = EMPTY_CONTENT) {
   };
 }
 
+function officialNullableRefusalResponse(content = EMPTY_CONTENT) {
+  return {
+    status: 200,
+    body: {
+      id: 'safe-test-id',
+      object: 'chat.completion',
+      created: 1,
+      model: MODEL,
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content,
+            refusal: null,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function messageBoundaryResponse(message) {
+  return {
+    status: 200,
+    body: {
+      choices: [
+        {
+          finish_reason: 'stop',
+          message,
+        },
+      ],
+    },
+  };
+}
+
 function recordingTransport(payload = successResponse()) {
   const calls = [];
   const transport = async (request) => {
@@ -154,6 +191,25 @@ async function assertRejectsStage(fn, stage) {
     assertNoSecrets(error);
     return true;
   });
+}
+
+async function assertDiagnostic(transportPayload, code) {
+  const request = buildExtractorRequest(sampleCase());
+  const transport = recordingTransport(transportPayload);
+  let thrown;
+  try {
+    await createOpenRouterAdapter(validOptions({ transport }))(request);
+  } catch (error) {
+    thrown = error;
+  }
+  assert.equal(thrown != null, true);
+  assert.equal(projectSafeOpenRouterDiagnostic(thrown), code);
+  assert.equal(thrown.diagnosticCode, code);
+  assert.equal(thrown.cause == null, true);
+  assert.equal('cause' in thrown, false);
+  assert.equal(transport.calls.length, 1);
+  assert.equal(JSON.stringify(thrown).includes('I cannot comply'), false);
+  assertNoSecrets(thrown);
 }
 
 describe('createOpenRouterAdapter config', () => {
@@ -257,7 +313,8 @@ describe('createOpenRouterAdapter transport request', () => {
     assert.equal(call.body.model, MODEL);
     assert.equal(Array.isArray(call.body.model), false);
     assert.equal(call.body.stream, false);
-    assert.equal(call.body.max_tokens, 1200);
+    assert.equal(call.body.max_completion_tokens, 1200);
+    assert.equal('max_tokens' in call.body, false);
     assert.equal(call.body.response_format.type, 'json_schema');
     assert.equal(call.body.response_format.json_schema.strict, true);
     assert.deepEqual(call.body.response_format.json_schema.schema.required, [
@@ -377,6 +434,122 @@ describe('createOpenRouterAdapter response boundary', () => {
     assert.equal(JSON.stringify(content).includes(SENTINELS.metadata), false);
     assert.equal(transport.calls.length, 1);
     assert.deepEqual(response, snapshot);
+  });
+
+  it('accepts a realistic 200 envelope with refusal null and returns only content', async () => {
+    const response = officialNullableRefusalResponse();
+    const snapshot = structuredClone(response);
+    const request = buildExtractorRequest(sampleCase());
+    const requestSnapshot = structuredClone(request);
+    const transport = recordingTransport(response);
+    const adapter = createOpenRouterAdapter(validOptions({ transport }));
+    const content = await adapter(request);
+    assert.equal(content, EMPTY_CONTENT);
+    assert.equal(transport.calls.length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(content, 'diagnosticCode'), false);
+    assert.deepEqual(response, snapshot);
+    assert.deepEqual(request, requestSnapshot);
+  });
+
+  it('accepts absent and null refusal and rejects string or non-string refusal without leaking', async () => {
+    const request = buildExtractorRequest(sampleCase());
+    const requestSnapshot = structuredClone(request);
+
+    const absentTransport = recordingTransport(
+      messageBoundaryResponse({ role: 'assistant', content: EMPTY_CONTENT }),
+    );
+    assert.equal(
+      await createOpenRouterAdapter(validOptions({ transport: absentTransport }))(request),
+      EMPTY_CONTENT,
+    );
+    assert.equal(absentTransport.calls.length, 1);
+
+    const nullTransport = recordingTransport(
+      messageBoundaryResponse({ role: 'assistant', content: EMPTY_CONTENT, refusal: null }),
+    );
+    assert.equal(
+      await createOpenRouterAdapter(validOptions({ transport: nullTransport }))(request),
+      EMPTY_CONTENT,
+    );
+    assert.equal(nullTransport.calls.length, 1);
+
+    await assertDiagnostic(
+      messageBoundaryResponse({
+        role: 'assistant',
+        content: EMPTY_CONTENT,
+        refusal: '',
+      }),
+      'openrouter_refusal',
+    );
+    await assertDiagnostic(
+      messageBoundaryResponse({
+        role: 'assistant',
+        content: EMPTY_CONTENT,
+        refusal: 'I cannot comply',
+      }),
+      'openrouter_refusal',
+    );
+    {
+      let thrown;
+      try {
+        await createOpenRouterAdapter(
+          validOptions({
+            transport: async () =>
+              messageBoundaryResponse({
+                role: 'assistant',
+                content: EMPTY_CONTENT,
+                refusal: 'I cannot comply',
+              }),
+          }),
+        )(request);
+      } catch (error) {
+        thrown = error;
+      }
+      assert.equal(thrown != null, true);
+      assert.equal(String(thrown.message).includes('I cannot comply'), false);
+      assert.equal(JSON.stringify(thrown).includes('I cannot comply'), false);
+    }
+    await assertDiagnostic(
+      messageBoundaryResponse({
+        role: 'assistant',
+        content: EMPTY_CONTENT,
+        refusal: { raw: SENTINELS.bodyError },
+      }),
+      'openrouter_response_invalid_shape',
+    );
+    await assertDiagnostic(
+      messageBoundaryResponse({
+        role: 'assistant',
+        content: EMPTY_CONTENT,
+        refusal: [],
+      }),
+      'openrouter_response_invalid_shape',
+    );
+    await assertDiagnostic(
+      messageBoundaryResponse({
+        role: 'assistant',
+        content: EMPTY_CONTENT,
+        refusal: false,
+      }),
+      'openrouter_response_invalid_shape',
+    );
+
+    const getterResponse = messageBoundaryResponse({
+      role: 'assistant',
+      content: EMPTY_CONTENT,
+    });
+    let getterCalls = 0;
+    Object.defineProperty(getterResponse.body.choices[0].message, 'refusal', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error(SENTINELS.getter);
+      },
+    });
+    await assertDiagnostic(getterResponse, 'openrouter_response_invalid_shape');
+    assert.equal(getterCalls, 0);
+    assert.deepEqual(request, requestSnapshot);
   });
 
   it('rejects non-2xx, empty content, extra choices, and tool calls', async () => {
