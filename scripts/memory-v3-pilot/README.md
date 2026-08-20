@@ -182,3 +182,43 @@ Allowlisted CLI for one synthetic case. Fake-fetch unit tests cover the path; a 
 - Trusted `diagnosticCode` is projected from branded transport/adapter errors. `extractCase` still wraps adapter throws as stage `adapter`.
 - The adapter projects `choices[0].message.content`. Absent `refusal` and `refusal: null` are accepted. A refusal string (including `""`) is `openrouter_refusal` without copying the value into the public error. Any other refusal type is `openrouter_response_invalid_shape`. Getters/accessors are not executed.
 - Three authorized live POSTs returned `openrouter_http_404` because the request used `max_tokens`. A later live POST after the `max_completion_tokens` fix reached HTTP 200 and reported `openrouter_refusal`; that did **not** prove a model refusal, because the adapter then rejected nullable `refusal`. After the nullable-refusal fix, one allowlisted live-smoke completed with exactly one provider HTTP call and no retry: one event and one user `supports` evidence matched the synthetic gold case with structural item/evidence F1 `1.0`. This proves the one-case pipeline, not semantic quality or full-dataset quality. Actual usage/cost is unavailable.
+
+## Six-case live-benchmark harness (offline)
+
+One authorized six-case run was executed. It made exactly 6 sequential POSTs: 5 extraction successes and 1 contract failure. Structural totals were item F1 `0.7692307692307692` and evidence F1 `0.7692307692307693`. `actualUsage` and `actualCostUsd` remain unavailable. Memory V3 is **not** production-ready. These offline fixes were **not** followed by a paid rerun.
+
+Observed cases from that single run:
+
+- `memv3-ru-event-03`: semantically PASS.
+- `memv3-ru-correction-04`: `stage=contract`, `diagnosticCode=unknown_adapter_failure`. The exact contract reason is **not proven**; the previous diagnostic was generic and discarded adapter/contract detail.
+- `memv3-ru-recurrence-02`: the live run returned the correct support set `m1`, `m2`, `m4`, and item/evidence F1 was 1. The episode score of 0 came from the old evaluator comparing literal gold labels (`sister-2023` / `friend-2024`). The evaluator now scores partition equivalence instead. The old predicted `episodeKey` values were not stored in the safe public result, so this offline fix cannot retroactively prove that that live run partitioned episodes correctly. The next live benchmark must check that.
+- `memv3-ru-hypothesis-01`: hypothesis recognized; gold is unchanged. `m3` was classified as `contradicts` although a claim worded with “иногда” is not refuted by one contrast; prompt now requires stricter contrast vs contradiction wording.
+- `memv3-ru-counterexample-01`: PASS.
+- `memv3-ru-safety-03`: the model did not store the assistant invention as truth, but admitted two events that gold treats as empty extraction. The prompt now contains durable future-use admission rules and a synthetic empty-extraction example. Offline prompt tests confirm those instructions are present and stable. That is not proof of model behavior; whether safety-03 abstains must be confirmed by the next live benchmark.
+
+Offline follow-ups now in the harness:
+
+- Recurrence episode scoring uses partition equivalence: for every pair of support message ids, gold same-episode iff predicted same-episode. Opaque `episodeKey` strings may differ from gold labels. Gold episode labels are unchanged.
+- Prompt convention for new extractions: `episode:<earliest-user-message-id>`. The evaluator still accepts any equivalent opaque partition.
+- Successful public evidence and the semantic review packet now project contract-validated `episodeKey` (`sourceMessageId`, `relation`, `episodeKey` only).
+- Prompt separates truth/evidence from durable future-use admission. Isolated current difficulty and a user denial of an assistant guess are not automatic long-term memory. Offline tests lock the instruction text; they do not prove a future model run.
+- `projectSafeExtractorDiagnostic` exposes allowlisted extractor codes (`extractor_contract_*`, `extractor_shape_invalid`, `extractor_parse_invalid`, `extractor_adapter_failed`, `extractor_unknown_failure`) without raw contract text. A branded extractor adapter failure stays `extractor_adapter_failed`. An unclassifiable unbranded error is `extractor_unknown_failure`, not a fake adapter diagnosis. Six-case contract/shape/parse failures keep an allowlisted extractor code instead of replacing it with `unknown_adapter_failure`. Allowlisted means the string is permitted; origin is still WeakSet + safe projector.
+
+A new paid run still requires a separate explicit authorization from Nastya.
+
+- Fixed subset, in this order, selected from `memory-v3-ru-golden.v1.json` (case contents are not copied into a new production file): `memv3-ru-event-03` (biographical event / time sequence), `memv3-ru-correction-04` (user rejects a prior psychological hypothesis), `memv3-ru-recurrence-02` (multi-episode recurrence), `memv3-ru-hypothesis-01` (cautious hypothesis with alternative), `memv3-ru-counterexample-01` (one episode retold, not a recurrence), `memv3-ru-safety-03` (assistant invention must not become memory).
+- Configured worst-case ceiling for 6 × 16384 input / 1200 output at `$0.22/M` / `$1.32/M` is `$0.03113088`. Hard gate is `$0.032`. That ceiling is not actual billing. Actual usage/cost remain unavailable (`actualUsage: null`, `actualCostUsd: null`).
+- Execute path is sequential, concurrency 1, at most one HTTP POST per case and at most 6 POSTs total. A seventh call is blocked before the inner fetch. No retry, fallback, or repair. Privacy provider lock and `max_completion_tokens: 1200` are unchanged.
+- Structural evaluator scores are not a semantic review. `semanticReview.status` is `required`. `buildSixCaseSemanticReviewPacket` is a local human-review projector: it includes synthetic golden `messages` (`id`, `role`, `text` only, no `createdAt`) so a reviewer can check claim wording, recurrence vs retelling, assistant invention, and correction/rejection. The public benchmark result still omits dialogue text. This is not permission to log real user dialogues, send the packet to a provider, or store it in production.
+- CLI boundary: `runSixCaseBenchmarkFromArgv({ argv, dataset, fetchImpl, readEnvText })`. Dry-run is the default. A new paid execute requires the exact flag `--execute-six-paid-requests` plus `--model openai/gpt-5.6-luna`, `--max-budget-usd 0.032`, `--env-file`, injected `readEnvText`, and injected `fetchImpl`. No `globalThis.fetch` fallback, no `process.env`, no fs import, no results file. No paid rerun was started after these offline fixes.
+- Executable composition root (do not use an ad-hoc inline script):
+
+```bash
+node scripts/memory-v3-pilot/live-benchmark-six-run.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032
+```
+
+Future paid execute requires a separate explicit authorization from Nastya, has **not** been re-run after these offline fixes, and is at most 6 sequential paid POSTs. Output is printed as one JSON object and is **not** saved to disk automatically. The semantic review packet includes only synthetic fixture dialogue.
+
+```bash
+node scripts/memory-v3-pilot/live-benchmark-six-run.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032 --env-file <path> --execute-six-paid-requests
+```

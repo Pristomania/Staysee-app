@@ -384,3 +384,133 @@ describe('buildExtractorRequest prompt boundary', () => {
     );
   });
 });
+
+describe('buildExtractorRequest episodeKey convention', () => {
+  it('requires opaque episode identity from the earliest user message id', () => {
+    const system = buildExtractorRequest(leakyCase()).system;
+    assertContains(system, 'episodeKey identifies a real-world episode, not a message.');
+    assertContains(
+      system,
+      'Use `episode:<earliest-user-message-id>` for each distinct episode in the current case.',
+    );
+    assertContains(
+      system,
+      'Retellings, clarifications, and later reflections about the same real-world episode reuse the same episodeKey.',
+    );
+    assertContains(
+      system,
+      'Different real-world episodes use different episodeKey values.',
+    );
+    assertContains(
+      system,
+      'Do not encode the claim, diagnosis, person name, or private text into episodeKey.',
+    );
+    assertContains(system, 'm1 → episode:m1');
+    assertContains(system, 'm2 → episode:m2');
+    assertContains(system, 'm4 → episode:m2');
+  });
+});
+
+describe('buildExtractorRequest durable future-use admission', () => {
+  it('separates truth from memory admission and requires empty extraction when admission fails', () => {
+    const system = buildExtractorRequest(leakyCase()).system;
+    assertContains(system, 'A reliable fact is not automatically long-term memory.');
+    assertContains(system, 'Memory item admission requires all of the following at once:');
+    assertContains(system, 'Based on user evidence.');
+    assertContains(system, 'Sufficiently stable or biographically significant.');
+    assertContains(system, 'Useful in future conversations beyond the current moment.');
+    assertContains(system, 'Matches the kind contract.');
+    assertContains(system, 'Not a forbidden or redundant inference.');
+    assertContains(
+      system,
+      'discrete user-lived occurrence, transition, milestone or bounded biographical episode',
+    );
+    assertContains(system, 'not a current difficulty');
+    assertContains(system, 'not a mood');
+    assertContains(system, 'not a general ability or inability');
+    assertContains(system, 'not a denial of an assistant guess');
+    assertContains(system, 'not an automatically created opposite biography');
+    assertContains(system, 'at least two different real episodes');
+    assertContains(system, 'not one current difficulty');
+    assertContains(system, 'not a retelling of one story');
+    assertContains(system, 'useful, cautious, testable interpretation');
+    assertContains(system, 'alternative is required');
+    assertContains(system, 'not created only from an assistant guess');
+    assertContains(
+      system,
+      'Isolated current difficulty or task-specific problem is not automatically long-term memory.',
+    );
+    assertContains(
+      system,
+      'A user denial of an assistant speculation blocks that speculation; it does not automatically create the inverse biographical event.',
+    );
+    assertContains(
+      system,
+      'Do not store “the opposite must be true” merely because the user rejected an assistant claim.',
+    );
+    assertContains(
+      system,
+      'Do not store ordinary negative facts solely to preserve that an assistant was wrong.',
+    );
+    assertContains(
+      system,
+      'If all candidate items fail durable future-use admission, return exactly empty items/evidence.',
+    );
+    assertContains(system, 'Мне трудно попросить начальника о повышении.');
+    assertContains(system, 'Наверное, тебя наказывали за просьбы.');
+    assertContains(system, 'Нет, такого не было.');
+    assertContains(system, '{"items":[],"evidence":[]}');
+    const request = buildExtractorRequest(leakyCase());
+    assert.equal(Object.prototype.hasOwnProperty.call(request.input, 'gold'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(request.input, 'mustNotRemember'), false);
+  });
+});
+
+describe('buildExtractorRequest contrast vs contradiction', () => {
+  it('treats contrast and context boundaries as claim wording, not automatic contradicts', () => {
+    const system = buildExtractorRequest(leakyCase()).system;
+    assertContains(
+      system,
+      'contradicts is used only if user evidence is incompatible with the claim as written',
+    );
+    assertContains(
+      system,
+      'A boundary, context limitation or contrast is not necessarily contradicts.',
+    );
+    assertContains(
+      system,
+      'If the claim already uses “иногда”, one case without a pattern does not refute “иногда”.',
+    );
+    assertContains(
+      system,
+      'Evidence that only limits the scope of a claim should affect claim wording, but need not become contradicts.',
+    );
+    assertContains(
+      system,
+      'The claim must keep an important context boundary, for example «в группе», when evidence supports a group context.',
+    );
+    assertContains(system, 'Do not invent a new evidence relation.');
+  });
+});
+
+describe('buildExtractorRequest correction and rejection', () => {
+  it('preserves an explicitly rejected hypothesis instead of promoting it to an event', () => {
+    const system = buildExtractorRequest(leakyCase()).system;
+    assertContains(
+      system,
+      'When the user explicitly rejects an earlier hypothesis, preserve that hypothesis as `status: "rejected"`.',
+    );
+    assertContains(system, 'A rejected hypothesis still requires a non-empty `alternative`.');
+    assertContains(system, 'Cite the earlier user statement with `supports`.');
+    assertContains(system, 'Cite the explicit later rejection with `rejects`.');
+    assertContains(
+      system,
+      '`contradicts` may be additional only when the newer evidence is incompatible with the hypothesis.',
+    );
+    assertContains(system, 'Do not promote the rejected hypothesis to event.');
+    assertContains(
+      system,
+      'Do not silently drop the rejection if preserving it prevents the system from repeating the same interpretation.',
+    );
+  });
+});

@@ -6,7 +6,11 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { runOfflineBenchmark } from './benchmark-runner.mjs';
+import { extractCase } from './extractor-core.mjs';
+import {
+  projectOfflineBenchmarkFailureDiagnostic,
+  runOfflineBenchmark,
+} from './benchmark-runner.mjs';
 import { buildExtractorRequest } from './extractor-prompt.mjs';
 import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
 import { createOpenRouterFetchTransport } from './openrouter-fetch-transport.mjs';
@@ -345,7 +349,11 @@ describe('runOfflineBenchmark execution', () => {
       report.runs.map((entry) => entry.caseId),
       ['run-case-01', 'run-case-03'],
     );
-    assert.deepEqual(report.failures, [{ caseId: 'run-case-02', stage: 'adapter' }]);
+    assert.deepEqual(report.failures, [{
+      caseId: 'run-case-02',
+      stage: 'adapter',
+      diagnosticCode: 'extractor_adapter_failed',
+    }]);
     assert.equal('evaluation' in report, false);
     assertNoSecrets(report);
     assert.deepEqual(dataset, snapshot);
@@ -358,6 +366,137 @@ describe('runOfflineBenchmark execution', () => {
       }),
     );
     assert.deepEqual(again, report);
+  });
+});
+
+describe('runOfflineBenchmark extractor diagnostics', () => {
+  it('records a trusted contract diagnosticCode without leaking claim or dialogue', async () => {
+    const payload = {
+      items: [
+        {
+          itemRef: 'item-1',
+          kind: 'event',
+          claim: SENTINELS.dialogue,
+          status: 'active',
+          sensitivity: 'normal',
+          eventTimeStart: null,
+          eventTimeEnd: null,
+          alternative: null,
+        },
+      ],
+      evidence: [
+        {
+          itemRef: 'item-1',
+          sourceMessageId: 'm1',
+          episodeKey: 'episode:m1',
+          relation: 'contradicts',
+        },
+      ],
+    };
+    const report = await runOfflineBenchmark(
+      validRunnerOptions({
+        dataset: sampleDataset([sampleCase('run-case-01')]),
+        modelAdapter: async () => payload,
+        budget: passingBudget(1),
+      }),
+    );
+    assert.deepEqual(report.failures, [
+      {
+        caseId: 'run-case-01',
+        stage: 'contract',
+        diagnosticCode: 'extractor_contract_missing_required_relation',
+      },
+    ]);
+    assert.equal(report.successCount, 0);
+    assert.equal(report.failureCount, 1);
+    assertNoSecrets(report);
+  });
+
+  it('does not trust spoofed adapter diagnostics and does not retry', async () => {
+    let getterCalls = 0;
+    const calls = [];
+    const modelAdapter = async () => {
+      calls.push('call');
+      const error = new Error(SENTINELS.adapter);
+      error.name = 'MemoryV3ExtractorError';
+      Object.defineProperty(error, 'diagnosticCode', {
+        configurable: true,
+        enumerable: true,
+        get() {
+          getterCalls += 1;
+          return 'extractor_contract_invalid';
+        },
+      });
+      throw error;
+    };
+    const report = await runOfflineBenchmark(
+      validRunnerOptions({
+        dataset: sampleDataset([sampleCase('run-case-02')]),
+        modelAdapter,
+        budget: passingBudget(1),
+      }),
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(getterCalls, 0);
+    assert.deepEqual(report.failures, [
+      {
+        caseId: 'run-case-02',
+        stage: 'adapter',
+        diagnosticCode: 'extractor_adapter_failed',
+      },
+    ]);
+    assertNoSecrets(report);
+  });
+});
+
+describe('projectOfflineBenchmarkFailureDiagnostic', () => {
+  function assertSafePublicCode(code, error) {
+    const serialized = JSON.stringify({ diagnosticCode: code });
+    for (const sentinel of Object.values(SENTINELS)) {
+      assert.equal(String(code).includes(sentinel), false, `code leaked ${sentinel}`);
+      assert.equal(serialized.includes(sentinel), false, `serialization leaked ${sentinel}`);
+    }
+    assert.equal(error == null || error.cause == null, true);
+    assert.equal('cause' in (error || {}), false);
+    assert.equal(String(code).includes('retry'), false);
+    assert.equal(String(code).includes('fallback'), false);
+    assert.equal(String(code).includes('repair'), false);
+  }
+
+  it('keeps a branded extractor adapter failure as extractor_adapter_failed', async () => {
+    try {
+      await extractCase(
+        sampleCase('run-case-branded'),
+        async () => {
+          throw new Error(SENTINELS.adapter);
+        },
+        { extractorVersion: EXTRACTOR_VERSION },
+      );
+    } catch (error) {
+      assert.equal(projectOfflineBenchmarkFailureDiagnostic(error), 'extractor_adapter_failed');
+      assertSafePublicCode('extractor_adapter_failed', error);
+      return;
+    }
+    assert.fail('expected extractCase to throw');
+  });
+
+  it('classifies unbranded spoofed errors as extractor_unknown_failure, not adapter_failed', () => {
+    let getterCalls = 0;
+    const error = new Error(`[memory-v3:adapter] ${SENTINELS.adapter}`);
+    error.name = 'MemoryV3ExtractorError';
+    Object.defineProperty(error, 'diagnosticCode', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'extractor_adapter_failed';
+      },
+    });
+    const code = projectOfflineBenchmarkFailureDiagnostic(error);
+    assert.equal(code, 'extractor_unknown_failure');
+    assert.equal(code === 'extractor_adapter_failed', false);
+    assert.equal(getterCalls, 0);
+    assertSafePublicCode(code, error);
   });
 });
 

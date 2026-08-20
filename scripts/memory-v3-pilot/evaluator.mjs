@@ -249,6 +249,33 @@ function dateMetrics(gold, pairs) {
   return accuracyMetric(eligibleGold.length, exact);
 }
 
+function predictedSupportEpisodes(predicted, expected) {
+  const actual = new Map();
+  for (const sourceId of expected.keys()) {
+    const evidenceEntry = predicted.evidence.find(
+      (entry) => entry.relation === 'supports' && entry.sourceMessageId === sourceId,
+    );
+    if (!evidenceEntry || typeof evidenceEntry.episodeKey !== 'string') return null;
+    actual.set(sourceId, evidenceEntry.episodeKey);
+  }
+  return actual;
+}
+
+function episodePartitionsEquivalent(expected, actual) {
+  if (!actual || actual.size !== expected.size) return false;
+  const ids = [...expected.keys()];
+  for (let i = 0; i < ids.length; i += 1) {
+    for (let j = i + 1; j < ids.length; j += 1) {
+      const left = ids[i];
+      const right = ids[j];
+      const goldSame = expected.get(left) === expected.get(right);
+      const predictedSame = actual.get(left) === actual.get(right);
+      if (goldSame !== predictedSame) return false;
+    }
+  }
+  return true;
+}
+
 function recurrenceEpisodeMetrics(gold, pairs) {
   const recurrences = gold.filter((entry) => entry.kind === 'recurrence');
   const pairByGold = new Map(
@@ -267,17 +294,17 @@ function recurrenceEpisodeMetrics(gold, pairs) {
     );
     const actualSupports = predicted.relations.supports;
     if (actualSupports.size !== expected.size) continue;
-    let allMatch = true;
-    for (const sourceId of actualSupports) {
-      const evidenceEntry = predicted.evidence.find(
-        (entry) => entry.relation === 'supports' && entry.sourceMessageId === sourceId,
-      );
-      if (!evidenceEntry || expected.get(sourceId) !== evidenceEntry.episodeKey) {
-        allMatch = false;
+    let sameSupportSet = true;
+    for (const sourceId of expected.keys()) {
+      if (!actualSupports.has(sourceId)) {
+        sameSupportSet = false;
         break;
       }
     }
-    if (allMatch) exact += 1;
+    if (!sameSupportSet) continue;
+    if (episodePartitionsEquivalent(expected, predictedSupportEpisodes(predicted, expected))) {
+      exact += 1;
+    }
   }
   return accuracyMetric(recurrences.length, exact);
 }

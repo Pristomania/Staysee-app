@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { validateExtraction } from './contracts.mjs';
 import {
   evaluateCase,
   evaluateDataset,
@@ -189,10 +190,14 @@ describe('evaluateCase', () => {
   });
 
   it('separately catches wrong recurrence episode identities', () => {
-    const extraction = perfectExtraction();
-    extraction.evidence.find((entry) => entry.sourceMessageId === 'm5').episodeKey = 'wrong-episode';
-
-    const report = evaluateCase(fixtureCase(), extraction);
+    const report = evaluateCase(
+      recurrencePartitionCase(),
+      recurrencePartitionExtraction({
+        m1: 'episode:m1',
+        m2: 'episode:m2',
+        m4: 'episode:m4',
+      }),
+    );
 
     assert.equal(report.items.byKind.recurrence.f1, 1);
     assert.deepEqual(report.recurrenceEpisodes, { eligible: 1, exact: 0, accuracy: 0 });
@@ -222,6 +227,100 @@ describe('evaluateCase', () => {
     const report = evaluateCase(caseData, extraction);
 
     assert.deepEqual(report.abstention, { expected: true, passed: false, falsePositiveItems: 1 });
+  });
+});
+
+function recurrencePartitionCase() {
+  return {
+    caseId: 'eval-recurrence-partition-01',
+    title: 'Episode partition fixture',
+    category: 'recurrence',
+    messages: [
+      message('m1', 'После ссоры с сестрой я пропала на две недели.', 1),
+      message('m2', 'С подругой позже было то же: удалила чат и исчезла.', 2),
+      message('m4', 'Когда стыдно после конфликта, я правда исчезаю.', 4),
+    ],
+    gold: {
+      events: [],
+      recurrences: [
+        {
+          claim: 'После конфликтов, сопровождаемых стыдом, прерывает контакт',
+          supportMessageIds: ['m1', 'm2', 'm4'],
+          episodeKeys: ['sister-2023', 'friend-2024', 'friend-2024'],
+        },
+      ],
+      hypotheses: [],
+    },
+    mustNotRemember: [],
+  };
+}
+
+function recurrencePartitionExtraction(episodeBySource) {
+  return {
+    run: { caseId: 'eval-recurrence-partition-01', extractorVersion: 'fixture-extractor-v1' },
+    items: [
+      item('rec-avoid', 'recurrence', 'После стыда в конфликте прерывает контакт'),
+    ],
+    evidence: [
+      evidence('rec-avoid', 'm1', 'supports', episodeBySource.m1),
+      evidence('rec-avoid', 'm2', 'supports', episodeBySource.m2),
+      evidence('rec-avoid', 'm4', 'supports', episodeBySource.m4),
+    ],
+  };
+}
+
+describe('evaluateCase recurrence episode partition equivalence', () => {
+  it('scores equivalent opaque labels as exact when the support partition matches gold', () => {
+    const report = evaluateCase(
+      recurrencePartitionCase(),
+      recurrencePartitionExtraction({
+        m1: 'episode:m1',
+        m2: 'episode:m2',
+        m4: 'episode:m2',
+      }),
+    );
+
+    assert.equal(report.items.byKind.recurrence.f1, 1);
+    assert.equal(report.evidence.overall.f1, 1);
+    assert.deepEqual(report.recurrenceEpisodes, { eligible: 1, exact: 1, accuracy: 1 });
+  });
+
+  it('scores a split of the same gold episode as not exact', () => {
+    const report = evaluateCase(
+      recurrencePartitionCase(),
+      recurrencePartitionExtraction({
+        m1: 'episode:m1',
+        m2: 'episode:m2',
+        m4: 'episode:m4',
+      }),
+    );
+
+    assert.equal(report.items.byKind.recurrence.f1, 1);
+    assert.deepEqual(report.recurrenceEpisodes, { eligible: 1, exact: 0, accuracy: 0 });
+  });
+
+  it('still rejects merging distinct gold episodes into one active recurrence episodeKey', () => {
+    const extraction = recurrencePartitionExtraction({
+      m1: 'episode:m1',
+      m2: 'episode:m1',
+      m4: 'episode:m1',
+    });
+    assert.throws(
+      () => validateExtraction(extraction, recurrencePartitionCase()),
+      /episodeKey|recurrence/,
+    );
+    assert.throws(() => evaluateCase(recurrencePartitionCase(), extraction), /episodeKey|recurrence/);
+  });
+
+  it('does not change the score when opaque episodeKey names are renamed', () => {
+    const extraction = perfectExtraction();
+    extraction.evidence.find((entry) => entry.sourceMessageId === 'm4').episodeKey = 'alpha';
+    extraction.evidence.find((entry) => entry.sourceMessageId === 'm5').episodeKey = 'beta';
+
+    const report = evaluateCase(fixtureCase(), extraction);
+
+    assert.equal(report.items.byKind.recurrence.f1, 1);
+    assert.deepEqual(report.recurrenceEpisodes, { eligible: 1, exact: 1, accuracy: 1 });
   });
 });
 

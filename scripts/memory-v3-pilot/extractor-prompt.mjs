@@ -56,7 +56,13 @@ Epistemic rules:
 - Never cite an assistant or system message in any evidence relation, including supports, contradicts, corrects, and rejects.
 - assistant and system messages cannot confirm the user's biography.
 - Evidence must cite exact local message IDs.
+- episodeKey identifies a real-world episode, not a message.
+- Use \`episode:<earliest-user-message-id>\` for each distinct episode in the current case.
+- Retellings, clarifications, and later reflections about the same real-world episode reuse the same episodeKey.
+- Different real-world episodes use different episodeKey values.
+- Do not encode the claim, diagnosis, person name, or private text into episodeKey.
 - episodeKey is the same for retellings of one episode and differs only for truly different episodes.
+- Example partition, using local ids only: m1 → episode:m1; m2 → episode:m2; m4 → episode:m2 when m4 retells the same real-world episode as m2.
 - A recurrence requires at least two different real episodes.
 - Retelling one event is not a recurrence.
 - A hypothesis is not a fact.
@@ -65,12 +71,67 @@ Epistemic rules:
 - Write claims and hypothesis alternatives in the predominant user language.
 - A correction is a newer user correction.
 - contradicts is a user counterexample.
+- contradicts is used only if user evidence is incompatible with the claim as written.
+- A boundary, context limitation or contrast is not necessarily contradicts.
+- If the claim already uses “иногда”, one case without a pattern does not refute “иногда”.
+- Evidence that only limits the scope of a claim should affect claim wording, but need not become contradicts.
+- The claim must keep an important context boundary, for example «в группе», when evidence supports a group context.
+- Do not invent a new evidence relation.
 - rejects is an explicit user rejection of a claim or hypothesis.
+- When the user explicitly rejects an earlier hypothesis, preserve that hypothesis as \`status: "rejected"\`.
+- A rejected hypothesis still requires a non-empty \`alternative\`.
+- Cite the earlier user statement with \`supports\`.
+- Cite the explicit later rejection with \`rejects\`.
+- \`contradicts\` may be additional only when the newer evidence is incompatible with the hypothesis.
+- Do not promote the rejected hypothesis to event.
+- Do not silently drop the rejection if preserving it prevents the system from repeating the same interpretation.
 - Persist corrections and counterevidence with the corresponding relations.
 - If there is no reliable memory, return empty items and empty evidence.
 - Do not invent dates, biography, evidence, or episode identity.
 - Unknown dates remain null.
 - Do not create hidden reasoning or rationale.
+
+Memory admission is separate from truth or evidence.
+A reliable fact is not automatically long-term memory.
+Memory item admission requires all of the following at once:
+- Based on user evidence.
+- Sufficiently stable or biographically significant.
+- Useful in future conversations beyond the current moment.
+- Matches the kind contract.
+- Not a forbidden or redundant inference.
+
+Event:
+- discrete user-lived occurrence, transition, milestone or bounded biographical episode;
+- not a current difficulty;
+- not a mood;
+- not a general ability or inability;
+- not a denial of an assistant guess;
+- not an automatically created opposite biography.
+
+Recurrence:
+- at least two different real episodes;
+- not one current difficulty;
+- not a retelling of one story.
+
+Hypothesis:
+- useful, cautious, testable interpretation;
+- enough evidence to formulate uncertainty;
+- alternative is required;
+- not created only from an assistant guess.
+
+Abstention:
+- Isolated current difficulty or task-specific problem is not automatically long-term memory.
+- A user denial of an assistant speculation blocks that speculation; it does not automatically create the inverse biographical event.
+- Do not store “the opposite must be true” merely because the user rejected an assistant claim.
+- Do not store ordinary negative facts solely to preserve that an assistant was wrong.
+- If all candidate items fail durable future-use admission, return exactly empty items/evidence.
+
+Synthetic admission example. The values below are form examples, not case data.
+User: "Мне трудно попросить начальника о повышении."
+Assistant: "Наверное, тебя наказывали за просьбы."
+User: "Нет, такого не было."
+Expected extraction: {"items":[],"evidence":[]}
+Do not return this explanation in the model output.
 
 Date normalization:
 - Date values must be YYYY-MM-DD or null.

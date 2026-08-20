@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { makeLocalItemKey, validateCase, validateExtraction } from './contracts.mjs';
 import { buildExtractorRequest } from './extractor-prompt.mjs';
-import { extractCase } from './extractor-core.mjs';
+import * as extractorCore from './extractor-core.mjs';
+import { extractCase, projectSafeExtractorDiagnostic } from './extractor-core.mjs';
 
 const EXTRACTOR_VERSION = 'offline-core-v1';
 const OPTIONS = Object.freeze({ extractorVersion: EXTRACTOR_VERSION });
@@ -167,6 +168,87 @@ describe('extractCase valid empty abstention', () => {
       assert.equal(serializedRequest.includes(sentinel), false, `request leaked ${sentinel}`);
     }
     assert.deepEqual(caseData, snapshot);
+  });
+});
+
+describe('extractCase correction rejected-hypothesis fixture', () => {
+  function correctionCase() {
+    return {
+      caseId: 'core-correction-rejected-hypothesis-01',
+      title: 'Synthetic correction fixture',
+      category: 'correction',
+      messages: [
+        {
+          id: 'm1',
+          role: 'user',
+          text: 'Раньше мне казалось, что я остаюсь на этой работе из страха перемен.',
+          createdAt: '2024-04-23T17:00:00.000Z',
+        },
+        {
+          id: 'm2',
+          role: 'user',
+          text: 'После разговора с руководителем поняла: дело не в страхе. Я сознательно остаюсь до выплаты годового бонуса.',
+          createdAt: '2024-10-23T17:00:00.000Z',
+        },
+      ],
+      gold: { events: [], recurrences: [], hypotheses: [] },
+      mustNotRemember: [],
+    };
+  }
+
+  function correctionResponse() {
+    return {
+      items: [
+        {
+          itemRef: 'item-1',
+          kind: 'hypothesis',
+          claim: 'Решение остаться на работе могло быть связано со страхом перемен',
+          status: 'rejected',
+          sensitivity: 'normal',
+          eventTimeStart: null,
+          eventTimeEnd: null,
+          alternative: 'осознанное ожидание годового бонуса',
+        },
+      ],
+      evidence: [
+        {
+          itemRef: 'item-1',
+          sourceMessageId: 'm1',
+          episodeKey: 'episode:m1',
+          relation: 'supports',
+        },
+        {
+          itemRef: 'item-1',
+          sourceMessageId: 'm2',
+          episodeKey: 'episode:m1',
+          relation: 'rejects',
+        },
+      ],
+    };
+  }
+
+  it('accepts a rejected hypothesis with user supports and later rejects', async () => {
+    const caseData = correctionCase();
+    const extraction = await extractCase(caseData, async () => correctionResponse(), OPTIONS);
+    assert.doesNotThrow(() => validateExtraction(extraction, caseData));
+    assert.equal(extraction.items.length, 1);
+    assert.equal(extraction.items[0].kind, 'hypothesis');
+    assert.equal(extraction.items[0].status, 'rejected');
+    assert.equal(extraction.items[0].eventTimeStart, null);
+    assert.equal(extraction.items[0].eventTimeEnd, null);
+    assert.equal(extraction.items[0].sensitivity, 'normal');
+    assert.equal(extraction.items[0].alternative, 'осознанное ожидание годового бонуса');
+    assert.deepEqual(
+      extraction.evidence.map((entry) => ({
+        sourceMessageId: entry.sourceMessageId,
+        relation: entry.relation,
+        episodeKey: entry.episodeKey,
+      })),
+      [
+        { sourceMessageId: 'm1', relation: 'supports', episodeKey: 'episode:m1' },
+        { sourceMessageId: 'm2', relation: 'rejects', episodeKey: 'episode:m1' },
+      ],
+    );
   });
 });
 
@@ -960,5 +1042,169 @@ describe('extractCase JSON-data-only objects', () => {
       items,
       evidence: [],
     });
+  });
+});
+
+describe('projectSafeExtractorDiagnostic', () => {
+  async function thrownFrom(payloadOrAdapter) {
+    const adapter =
+      typeof payloadOrAdapter === 'function' ? payloadOrAdapter : async () => payloadOrAdapter;
+    try {
+      await extractCase(sampleCase(), adapter, OPTIONS);
+    } catch (error) {
+      return error;
+    }
+    throw new Error('expected extractCase to throw');
+  }
+
+  function assertSafeCode(error, code) {
+    assert.equal(projectSafeExtractorDiagnostic(error), code);
+    assert.equal(error.diagnosticCode, code);
+    assert.equal(error.cause == null, true);
+    assert.equal(String(error.message).includes('retry'), false);
+    assertNoSecrets(error);
+  }
+
+  it('projects allowlisted codes from branded extractor failures', async () => {
+    const table = [
+      {
+        name: 'missing required relation',
+        code: 'extractor_contract_missing_required_relation',
+        payload: validEventResponse({
+          evidence: [validEventEvidence({ relation: 'contradicts' })],
+        }),
+      },
+      {
+        name: 'insufficient recurrence episodes',
+        code: 'extractor_contract_insufficient_recurrence_episodes',
+        payload: {
+          items: [
+            validEventItem({
+              kind: 'recurrence',
+              status: 'active',
+              eventTimeStart: null,
+              eventTimeEnd: null,
+              claim: SENTINELS.claim,
+            }),
+          ],
+          evidence: [validEventEvidence()],
+        },
+      },
+      {
+        name: 'hypothesis alternative',
+        code: 'extractor_contract_hypothesis_alternative',
+        payload: {
+          items: [
+            validEventItem({
+              kind: 'hypothesis',
+              status: 'candidate',
+              alternative: null,
+              claim: SENTINELS.claim,
+            }),
+          ],
+          evidence: [validEventEvidence()],
+        },
+      },
+      {
+        name: 'invalid status',
+        code: 'extractor_contract_invalid_status',
+        payload: validEventResponse({
+          items: [validEventItem({ status: 'candidate', claim: SENTINELS.claim })],
+        }),
+      },
+      {
+        name: 'duplicate evidence',
+        code: 'extractor_contract_duplicate_evidence',
+        payload: validEventResponse({
+          evidence: [validEventEvidence(), validEventEvidence()],
+        }),
+      },
+      {
+        name: 'invalid date',
+        code: 'extractor_contract_invalid_date',
+        payload: validEventResponse({
+          items: [validEventItem({ eventTimeStart: '2023-02-29', eventTimeEnd: '2023-02-29' })],
+        }),
+      },
+      {
+        name: 'generic contract',
+        code: 'extractor_contract_invalid',
+        payload: validEventResponse({
+          evidence: [validEventEvidence({ sourceMessageId: 'm2', relation: 'supports' })],
+        }),
+      },
+      {
+        name: 'shape',
+        code: 'extractor_shape_invalid',
+        payload: validEventResponse({ extra: true }),
+      },
+      {
+        name: 'parse',
+        code: 'extractor_parse_invalid',
+        payload: '{',
+      },
+    ];
+
+    for (const entry of table) {
+      const error = await thrownFrom(entry.payload);
+      assertSafeCode(error, entry.code);
+    }
+
+    const adapterCalls = [];
+    const adapterError = await thrownFrom(async () => {
+      adapterCalls.push(1);
+      throw new Error(SENTINELS.adapter);
+    });
+    assertSafeCode(adapterError, 'extractor_adapter_failed');
+    assert.equal(adapterCalls.length, 1);
+  });
+
+  it('rejects spoofed diagnostics and does not execute getters', async () => {
+    let getterCalls = 0;
+    const spoof = {
+      name: 'MemoryV3ExtractorError',
+      message: '[memory-v3:contract] normalized extraction is contract-invalid',
+      diagnosticCode: 'extractor_contract_invalid',
+    };
+    Object.defineProperty(spoof, 'diagnosticCode', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error(SENTINELS.getter);
+      },
+    });
+    assert.equal(projectSafeExtractorDiagnostic(spoof), null);
+    assert.equal(projectSafeExtractorDiagnostic({ diagnosticCode: 'extractor_contract_invalid' }), null);
+    assert.equal(getterCalls, 0);
+
+    const branded = await thrownFrom(
+      validEventResponse({
+        items: [validEventItem({ status: 'candidate', claim: SENTINELS.claim })],
+      }),
+    );
+    Object.defineProperty(branded, 'name', { value: 'SpoofedName' });
+    assert.equal(projectSafeExtractorDiagnostic(branded), 'extractor_contract_invalid_status');
+  });
+});
+
+describe('extractor diagnostic allowlist naming', () => {
+  it('treats allowlisted as a value check, not a branding proof', () => {
+    assert.equal('isTrustedExtractorDiagnosticCode' in extractorCore, false);
+    assert.equal(typeof extractorCore.isAllowlistedExtractorDiagnosticCode, 'function');
+    assert.equal(
+      extractorCore.isAllowlistedExtractorDiagnosticCode('extractor_unknown_failure'),
+      true,
+    );
+    assert.equal(
+      extractorCore.isAllowlistedExtractorDiagnosticCode('extractor_adapter_failed'),
+      true,
+    );
+    const spoof = { diagnosticCode: 'extractor_adapter_failed' };
+    assert.equal(projectSafeExtractorDiagnostic(spoof), null);
+    assert.equal(
+      extractorCore.isAllowlistedExtractorDiagnosticCode(spoof.diagnosticCode),
+      true,
+    );
   });
 });

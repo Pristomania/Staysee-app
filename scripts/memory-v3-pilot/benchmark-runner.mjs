@@ -4,7 +4,7 @@
  */
 
 import { validateCase } from './contracts.mjs';
-import { extractCase } from './extractor-core.mjs';
+import { extractCase, projectSafeExtractorDiagnostic } from './extractor-core.mjs';
 import { buildExtractorRequest } from './extractor-prompt.mjs';
 import { assertBudgetGate } from './benchmark-budget.mjs';
 
@@ -236,6 +236,10 @@ function classifyFailureStage(error) {
   return 'unknown';
 }
 
+export function projectOfflineBenchmarkFailureDiagnostic(error) {
+  return projectSafeExtractorDiagnostic(error) ?? 'extractor_unknown_failure';
+}
+
 function inspectBudgetCaseCount(budget) {
   const copied = cloneJsonData(budget, 'budget', 'config');
   if (!Number.isInteger(copied.caseCount)) {
@@ -334,6 +338,7 @@ export async function runOfflineBenchmark(options) {
       failures.push({
         caseId: entry.validated.caseId,
         stage: classifyFailureStage(error),
+        diagnosticCode: projectOfflineBenchmarkFailureDiagnostic(error),
       });
     }
   }

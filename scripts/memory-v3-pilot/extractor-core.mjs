@@ -25,10 +25,40 @@ const EVIDENCE_FIELDS = Object.freeze([
 ]);
 
 const OWN_ERRORS = new WeakSet();
+const EXTRACTOR_DIAGNOSTIC_CODES = new Set([
+  'extractor_contract_missing_required_relation',
+  'extractor_contract_insufficient_recurrence_episodes',
+  'extractor_contract_hypothesis_alternative',
+  'extractor_contract_invalid_status',
+  'extractor_contract_duplicate_evidence',
+  'extractor_contract_invalid_date',
+  'extractor_contract_invalid',
+  'extractor_shape_invalid',
+  'extractor_parse_invalid',
+  'extractor_adapter_failed',
+  'extractor_unknown_failure',
+]);
+const DIAGNOSTIC_BY_STAGE = Object.freeze({
+  parse: 'extractor_parse_invalid',
+  shape: 'extractor_shape_invalid',
+  adapter: 'extractor_adapter_failed',
+  contract: 'extractor_contract_invalid',
+});
 
-function fail(stage, message) {
+function fail(stage, message, diagnosticCode) {
+  const code = EXTRACTOR_DIAGNOSTIC_CODES.has(diagnosticCode)
+    ? diagnosticCode
+    : DIAGNOSTIC_BY_STAGE[stage];
   const error = new Error(`[memory-v3:${stage}] ${message}`);
   error.name = 'MemoryV3ExtractorError';
+  if (EXTRACTOR_DIAGNOSTIC_CODES.has(code)) {
+    Object.defineProperty(error, 'diagnosticCode', {
+      value: code,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    });
+  }
   OWN_ERRORS.add(error);
   return error;
 }
@@ -39,6 +69,77 @@ function isMemoryV3Error(error) {
     (typeof error === 'object' || typeof error === 'function') &&
     OWN_ERRORS.has(error)
   );
+}
+
+export function projectSafeExtractorDiagnostic(error) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) {
+    return null;
+  }
+  if (!OWN_ERRORS.has(error)) {
+    return null;
+  }
+  let desc;
+  try {
+    desc = Object.getOwnPropertyDescriptor(error, 'diagnosticCode');
+  } catch {
+    return null;
+  }
+  if (
+    !desc ||
+    typeof desc.get === 'function' ||
+    typeof desc.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+    desc.enumerable !== true ||
+    desc.writable !== false ||
+    desc.configurable !== false
+  ) {
+    return null;
+  }
+  if (!EXTRACTOR_DIAGNOSTIC_CODES.has(desc.value)) {
+    return null;
+  }
+  return desc.value;
+}
+
+// Allowlisted means the string is a permitted diagnostic value only.
+// Provenance still requires the module-local WeakSet plus projectSafeExtractorDiagnostic.
+// Checking a string does not turn an external value into a branded extractor error.
+export function isAllowlistedExtractorDiagnosticCode(code) {
+  return typeof code === 'string' && EXTRACTOR_DIAGNOSTIC_CODES.has(code);
+}
+
+function classifyContractMessage(error) {
+  const message =
+    error !== null &&
+    (typeof error === 'object' || typeof error === 'function') &&
+    typeof error.message === 'string'
+      ? error.message
+      : '';
+  if (message.includes('requires user') && message.includes('evidence')) {
+    return 'extractor_contract_missing_required_relation';
+  }
+  if (message.includes('requires related evidence')) {
+    return 'extractor_contract_missing_required_relation';
+  }
+  if (message.includes('two distinct user episodeKeys')) {
+    return 'extractor_contract_insufficient_recurrence_episodes';
+  }
+  if (message.includes('alternative is required for hypothesis')) {
+    return 'extractor_contract_hypothesis_alternative';
+  }
+  if (message.includes('.status') && message.includes('is invalid')) {
+    return 'extractor_contract_invalid_status';
+  }
+  if (message.includes('duplicate evidence')) {
+    return 'extractor_contract_duplicate_evidence';
+  }
+  if (
+    message.includes('must be ISO date') ||
+    message.includes('must not be later than eventTimeEnd')
+  ) {
+    return 'extractor_contract_invalid_date';
+  }
+  return 'extractor_contract_invalid';
 }
 
 function isNonEmptyString(value) {
@@ -267,8 +368,13 @@ function finalizeExtraction(raw, validated, extractorVersion) {
   };
   try {
     return validateExtraction(extraction, validated);
-  } catch {
-    throw fail('contract', 'normalized extraction is contract-invalid');
+  } catch (error) {
+    if (isMemoryV3Error(error)) throw error;
+    throw fail(
+      'contract',
+      'normalized extraction is contract-invalid',
+      classifyContractMessage(error),
+    );
   }
 }
 
