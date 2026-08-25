@@ -479,8 +479,6 @@ function validateGoldItem(raw, kind, path, messageById) {
     if (Object.prototype.hasOwnProperty.call(entry, 'episodeKeys')) {
       fail(`${path}.episodeKeys is not allowed`);
     }
-    entry.supportTypes = [];
-    entry.episodeKeys = [];
     return entry;
   }
 

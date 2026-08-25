@@ -103,6 +103,31 @@ function goldRecurrence(goldItemId, extra = {}) {
   };
 }
 
+function goldEvent(goldItemId, extra = {}) {
+  return {
+    goldItemId,
+    claim: extra.claim ?? 'Синтетическое событие',
+    supportMessageIds: extra.supportMessageIds ?? ['m1'],
+    ...extra,
+  };
+}
+
+function goldHypothesis(goldItemId, extra = {}) {
+  return {
+    goldItemId,
+    claim: extra.claim ?? 'Синтетическая гипотеза',
+    supportMessageIds: extra.supportMessageIds ?? ['m1'],
+    alternative: extra.alternative ?? 'Синтетическая альтернатива',
+    mustNotBeFact: true,
+    ...extra,
+  };
+}
+
+function assertNoOwnTypedGoldFields(entry) {
+  assert.equal(Object.hasOwn(entry, 'supportTypes'), false);
+  assert.equal(Object.hasOwn(entry, 'episodeKeys'), false);
+}
+
 function withGold(tier, kindList, entries) {
   const gold = emptyGold();
   gold[tier][kindList] = entries;
@@ -884,6 +909,133 @@ describe('validateCaseV2 — gold tiers', () => {
       }),
     ];
     assert.doesNotThrow(() => validateCaseV2(v2Case({ gold: differentPartition })));
+  });
+});
+
+describe('validateCaseV2 — idempotence of normalized gold', () => {
+  it('A revalidates event gold without own supportTypes or episodeKeys', () => {
+    const raw = withGold('required', 'events', [goldEvent('required-event-01')]);
+    const snapshot = structuredClone(raw);
+    const first = validateCaseV2(raw);
+    const second = validateCaseV2(first);
+    assert.deepEqual(second, first);
+    assertNoOwnTypedGoldFields(first.gold.required.events[0]);
+    assertNoOwnTypedGoldFields(second.gold.required.events[0]);
+    assert.deepEqual(raw, snapshot);
+  });
+
+  it('B revalidates hypothesis gold without own supportTypes or episodeKeys', () => {
+    const raw = withGold('required', 'hypotheses', [goldHypothesis('required-hypothesis-01')]);
+    const snapshot = structuredClone(raw);
+    const first = validateCaseV2(raw);
+    const second = validateCaseV2(first);
+    assert.deepEqual(second, first);
+    assertNoOwnTypedGoldFields(first.gold.required.hypotheses[0]);
+    assertNoOwnTypedGoldFields(second.gold.required.hypotheses[0]);
+    assert.deepEqual(raw, snapshot);
+  });
+
+  it('C revalidates recurrence gold and keeps typed arrays unchanged', () => {
+    const typed = goldRecurrence('required-recurrence-01', {
+      supportMessageIds: ['m1', 'm2', 'm3', 'm4'],
+      supportTypes: [
+        'episode_observation',
+        'episode_observation',
+        'pattern_confirmation',
+        'scope_boundary',
+      ],
+      episodeKeys: ['episode:m1', 'episode:m2', null, null],
+    });
+    const raw = withGold('required', 'recurrences', [typed]);
+    const snapshot = structuredClone(raw);
+    const first = validateCaseV2(raw);
+    const second = validateCaseV2(first);
+    assert.deepEqual(second, first);
+    assert.deepEqual(first.gold.required.recurrences[0].supportTypes, typed.supportTypes);
+    assert.deepEqual(first.gold.required.recurrences[0].episodeKeys, typed.episodeKeys);
+    assert.deepEqual(raw, snapshot);
+    assertV2ContractError(() =>
+      validateCaseV2(
+        withGold('required', 'recurrences', [
+          goldRecurrence('required-recurrence-01', {
+            supportMessageIds: ['m1'],
+            supportTypes: ['episode_observation'],
+            episodeKeys: ['episode:m1'],
+          }),
+        ]),
+      ),
+    );
+  });
+
+  it('D revalidates a mixed required and acceptable case without mutating raw input', () => {
+    const gold = emptyGold();
+    gold.required.events = [goldEvent('required-event-01', { claim: 'Событие required' })];
+    gold.required.recurrences = [goldRecurrence('required-recurrence-01')];
+    gold.required.hypotheses = [
+      goldHypothesis('required-hypothesis-01', { claim: 'Гипотеза required' }),
+    ];
+    gold.acceptable.events = [
+      goldEvent('acceptable-event-01', { claim: 'Событие acceptable', supportMessageIds: ['m2'] }),
+    ];
+    gold.acceptable.hypotheses = [
+      goldHypothesis('acceptable-hypothesis-01', {
+        claim: 'Гипотеза acceptable',
+        supportMessageIds: ['m2'],
+      }),
+    ];
+    const raw = v2Case({ gold });
+    const snapshot = structuredClone(raw);
+    const first = validateCaseV2(raw);
+    const second = validateCaseV2(first);
+    assert.deepEqual(second, first);
+    assert.deepEqual(
+      goldItemsV2(first).map((item) => [item.tier, item.kind, item.goldItemId]),
+      [
+        ['required', 'event', 'required-event-01'],
+        ['required', 'recurrence', 'required-recurrence-01'],
+        ['required', 'hypothesis', 'required-hypothesis-01'],
+        ['acceptable', 'event', 'acceptable-event-01'],
+        ['acceptable', 'hypothesis', 'acceptable-hypothesis-01'],
+      ],
+    );
+    assertNoOwnTypedGoldFields(first.gold.required.events[0]);
+    assertNoOwnTypedGoldFields(first.gold.required.hypotheses[0]);
+    assert.deepEqual(first.gold.required.recurrences[0].supportTypes, [
+      'episode_observation',
+      'episode_observation',
+    ]);
+    assert.deepEqual(raw, snapshot);
+  });
+
+  it('still rejects raw non-recurrence gold that carries supportTypes or episodeKeys', () => {
+    assertV2ContractError(() =>
+      validateCaseV2(
+        withGold('required', 'events', [
+          goldEvent('required-event-01', { supportTypes: [] }),
+        ]),
+      ),
+    );
+    assertV2ContractError(() =>
+      validateCaseV2(
+        withGold('required', 'events', [
+          goldEvent('required-event-01', { episodeKeys: [] }),
+        ]),
+      ),
+    );
+    assertV2ContractError(() =>
+      validateCaseV2(
+        withGold('required', 'hypotheses', [
+          goldHypothesis('required-hypothesis-01', { supportTypes: [] }),
+        ]),
+      ),
+    );
+    assertV2ContractError(() =>
+      validateCaseV2(
+        withGold('required', 'hypotheses', [
+          goldHypothesis('required-hypothesis-01', { episodeKeys: [] }),
+        ]),
+      ),
+    );
   });
 });
 
