@@ -814,29 +814,108 @@ git commit -m "[agent] feat: add Memory V3 V2 extractor core"
   - `renderMarkdownReportV2(report) -> string`
   - `compareOverlapTotalsV2(left, right) -> -1|0|1` using exact rationals
 
-Report item metrics distinguish:
+Report item metrics schema:
 
 ```js
 items: {
-  required: { gold, predictedMatchedToRequired, matched, precision, recall, f1 },
-  acceptable: { gold, predictedMatchedToAcceptable, matched },
-  extraFalsePositives: number,
+  required: {
+    gold,
+    predictedMatchedToRequired,
+    matched,
+    precision,
+    recall,
+    f1
+  },
+  acceptable: {
+    gold,
+    predictedMatchedToAcceptable,
+    matched
+  },
+  extraFalsePositives,
   overall: {
-    gold: requiredGoldCount,
-    predicted: allPredictedCount,
-    matched: requiredMatchedCount,
-    precision: requiredMatchedCount / allPredictedCount when allPredictedCount > 0, else 1,
-    recall: requiredMatchedCount / requiredGoldCount when requiredGoldCount > 0, else 1,
-    f1: harmonic mean of that precision and recall, or 0 when both are 0
+    gold,
+    predicted,
+    matched,
+    precision,
+    recall,
+    f1
   }
 }
 ```
+
+Integer counts, computed after assignment:
+
+- `requiredGoldCount` = number of required gold items
+- `acceptableGoldCount` = number of acceptable gold items
+- `allPredictedCount` = number of predicted items
+- `requiredMatchedCount` = predictions assigned to required gold
+- `acceptableMatchedCount` = predictions assigned to acceptable gold
+- `validMatchedCount` = `requiredMatchedCount` + `acceptableMatchedCount`
+- `extraFalsePositives` = `allPredictedCount` - `validMatchedCount`
+
+Field mapping:
+
+- `required.gold` = `requiredGoldCount`
+- `required.predictedMatchedToRequired` = `requiredMatchedCount`
+- `required.matched` = `requiredMatchedCount`
+- `acceptable.gold` = `acceptableGoldCount`
+- `acceptable.predictedMatchedToAcceptable` = `acceptableMatchedCount`
+- `acceptable.matched` = `acceptableMatchedCount`
+- `overall.gold` = `requiredGoldCount`
+- `overall.predicted` = `allPredictedCount`
+- `overall.matched` = `validMatchedCount`
+
+Required-slice ratios (required gold for recall; required matches plus extra FPs for precision; acceptable matches are excluded from both required-precision numerator and denominator):
+
+```text
+requiredPrecisionDenominator = requiredMatchedCount + extraFalsePositives
+
+required.precision =
+  requiredPrecisionDenominator > 0
+    ? requiredMatchedCount / requiredPrecisionDenominator
+    : 1
+
+required.recall =
+  requiredGoldCount > 0
+    ? requiredMatchedCount / requiredGoldCount
+    : 1
+
+required.f1 =
+  required.precision === 0 && required.recall === 0
+    ? 0
+    : 2 * required.precision * required.recall
+      / (required.precision + required.recall)
+```
+
+- a prediction matched to acceptable is neutral for `required.precision`: it is in neither the numerator nor the denominator of the required slice
+- an unmatched prediction enters `extraFalsePositives` and lowers `required.precision`
+- a required match enters both the numerator and the denominator of `required.precision`
+- `required.recall` uses only required gold
+
+Overall ratios (closed against `required ∪ acceptable`):
+
+- `overall.precision`: if `allPredictedCount > 0` then `validMatchedCount / allPredictedCount`, else `1`
+- `overall.recall`: if `requiredGoldCount > 0` then `requiredMatchedCount / requiredGoldCount`, else `1`
+- `overall.f1`: harmonic mean of `overall.precision` and `overall.recall`; if `precision === 0` and `recall === 0`, `f1 = 0`
+
+Locked scoring semantics:
+
+- an acceptable match participates in the overall precision numerator as a valid prediction (`validMatchedCount`)
+- an acceptable match does not participate in the required recall numerator (`requiredMatchedCount` only)
+- an acceptable match is neutral for `required.precision` (not in numerator, not in `requiredPrecisionDenominator`)
+- omitting acceptable gold is not an FN and does not change the recall denominator or numerator
+- an unmatched prediction remains an FP (`extraFalsePositives`) and lowers `required.precision`
+- required and acceptable are not mixed in admission or matching priority
+- the required-first assignment objective is unchanged (keys (1)–(4) as already locked)
+
+Do not use `requiredMatchedCount / allPredictedCount` as overall precision. That formula treats a correct acceptable match as if it were an extra false positive.
 
 Scoring rules:
 
 - unmatched required gold → item FN
 - unmatched acceptable gold → not FN, not FP
-- unmatched prediction → item FP
+- unmatched prediction → item FP; enters `extraFalsePositives` and lowers `required.precision`
+- matched acceptable prediction → counts in `validMatchedCount` and overall precision numerator; does not count in required recall; does not enter `required.precision` numerator or `requiredPrecisionDenominator`
 - no candidate edge (including wrong `supportType` on recurrence supports) → that gold/prediction pair is not matchable
 - matched pair still scores evidence TP/FP/FN independently
 - `semanticClaims.status === 'not_evaluated'`
@@ -879,7 +958,23 @@ C2 matched item, incompatible typed support: gold `required-recurrence-01` suppo
 
 **Missing required → FN; missing acceptable → matched=0 but `abstention`/FN not counted for that gold; extra unmatched prediction → extraFalsePositives=1.**
 
-**correction-04 structural fixture:** required rejected hypothesis + optional acceptable event. Extraction with only the hypothesis: required matched 1, acceptable unmatched neutral, extraFalsePositives 0. Extraction with hypothesis + bonus event: both matched. Extraction with only bonus event (wrong kind vs required hypothesis): required FN, acceptable matched, extra 0.
+**correction-04 structural fixture:** required rejected hypothesis + optional acceptable event. Extraction with only the hypothesis: required matched 1, acceptable unmatched neutral, extraFalsePositives 0, overall precision 1, recall 1. Extraction with hypothesis + bonus event: both matched, extraFalsePositives 0, overall precision 1, recall 1, f1 1. Extraction with only bonus event (wrong kind vs required hypothesis): required FN, acceptable matched, extra 0, overall precision 1, recall 0, f1 0.
+
+**Mandatory scoring cases (A–G).** Use synthetic fixtures. Assignment priorities, exact rational overlap, pair-tuple tie-break, evidence scoring, and overall formulas stay as already locked.
+
+**A. One required matched + one acceptable matched, no extras.** `allPredictedCount = 2`, `validMatchedCount = 2`, `extraFalsePositives = 0`. `required.precision = 1`, `required.recall = 1`. `overall.precision = 1`, `overall.recall = 1`, `overall.f1 = 1`.
+
+**B. Required matched, acceptable omitted.** `allPredictedCount = 1`, `validMatchedCount = 1`, `extraFalsePositives = 0`, `overall.precision = 1`, `overall.recall = 1`. Omitting acceptable is not FN. `required.precision = 1`, `required.recall = 1`.
+
+**C. Required matched + acceptable matched + one unlisted extra.** `allPredictedCount = 3`, `validMatchedCount = 2`, `extraFalsePositives = 1`. `required.precision = 1/2`, `required.recall = 1`, `required.f1 = 2/3`. `overall.precision = 2/3`, `overall.recall = 1`, `overall.f1 = 0.8`.
+
+**D. Only acceptable matched, one required missing, no extras.** `allPredictedCount = 1`, `validMatchedCount = 1`, `extraFalsePositives = 0`. `required.precision = 1`, `required.recall = 0`, `required.f1 = 0`. `overall.precision = 1`, `overall.recall = 0`, `overall.f1 = 0`.
+
+**E. Acceptable omitted.** Not FN. Recall denominator stays `requiredGoldCount`. Recall numerator stays `requiredMatchedCount`. Do not add omitted acceptable gold to either.
+
+**F. Dataset aggregation.** `evaluateDatasetV2` first sums integer counts across cases: `requiredGoldCount`, `requiredMatchedCount`, `acceptableMatchedCount`, `validMatchedCount`, `allPredictedCount`, `extraFalsePositives`. Only after those totals exist, compute aggregate `required.precision`, `required.recall`, `required.f1`, `overall.precision`, `overall.recall`, and `overall.f1` from the summed integers. Do not average case-level ratios.
+
+**G. No predictions and one required missing.** `allPredictedCount = 0`, `requiredMatchedCount = 0`, `extraFalsePositives = 0`, `requiredPrecisionDenominator = 0`. `required.precision = 1`, `required.recall = 0`, `required.f1 = 0`.
 
 ```js
 import { evaluateCaseV2, assignPredictedToGoldV2 } from './evaluator-v2.mjs';
@@ -918,7 +1013,25 @@ Do not import `./evaluator.mjs`. Do not call `evaluateCase` or `evaluateDataset`
 3. `goldItems = goldItemsV2(caseData)` plus relation sets from gold arrays (`supportMessageIds` / `supportTypes` aligned by index for recurrence).
 4. Predicted nodes from `extraction.items` / `extraction.evidence`.
 5. `pairs = assignPredictedToGoldV2(...)`.
-6. Item scoring: unmatched required → FN; unmatched acceptable → neither FN nor FP; unmatched prediction → extraFalsePositive / item FP. Overall recall uses required gold only. Overall precision uses all predictions as the denominator (matched acceptable is not an extra FP).
+6. Item scoring from the assigned pairs:
+   - `requiredMatchedCount` = predictions assigned to required gold
+   - `acceptableMatchedCount` = predictions assigned to acceptable gold
+   - `validMatchedCount` = `requiredMatchedCount` + `acceptableMatchedCount`
+   - `extraFalsePositives` = `allPredictedCount` - `validMatchedCount`
+   - unmatched required → FN
+   - unmatched acceptable → neither FN nor FP
+   - unmatched prediction → extraFalsePositive / item FP
+   - overall.gold = `requiredGoldCount`
+   - overall.predicted = `allPredictedCount`
+   - overall.matched = `validMatchedCount`
+   - overall.precision = `validMatchedCount / allPredictedCount` when `allPredictedCount > 0`, else `1`
+   - overall.recall = `requiredMatchedCount / requiredGoldCount` when `requiredGoldCount > 0`, else `1`
+   - overall.f1 = harmonic mean of overall precision and recall; if both are `0`, `f1 = 0`
+   - `requiredPrecisionDenominator` = `requiredMatchedCount + extraFalsePositives`
+   - `required.precision` = `requiredMatchedCount / requiredPrecisionDenominator` when `requiredPrecisionDenominator > 0`, else `1`
+   - `required.recall` = `requiredMatchedCount / requiredGoldCount` when `requiredGoldCount > 0`, else `1`
+   - `required.f1` = `0` when `required.precision === 0` and `required.recall === 0`, else `2 * required.precision * required.recall / (required.precision + required.recall)`
+   - acceptable matches do not enter `required.recall` numerator or `requiredPrecisionDenominator`
 7. Evidence TP/FP/FN on assigned pairs using the typed token sets. Unmatched required gold evidence → FN. Unmatched acceptable gold evidence → not FN. Unmatched predicted evidence → FP.
 8. Recurrence partition accuracy uses only `episode_observation` supports. `pattern_confirmation`, `scope_boundary`, and `supportType: null` rows are ignored.
 9. `semanticClaims.status === 'not_evaluated'`. `forbiddenClaims.status === 'not_evaluated'`.
@@ -927,8 +1040,9 @@ Do not import `./evaluator.mjs`. Do not call `evaluateCase` or `evaluateDataset`
 `evaluateDatasetV2(dataset, extractions, options = {})`:
 1. Require dense unique `caseId`. `options` JSON-data-only.
 2. For each case, `evaluateCaseV2`.
-3. Aggregate item/evidence counts by summing integers, then recompute ratios as rationals converted to the same number fields V1 reports use only after integer totals exist. Assignment itself must not use those floats.
-4. Output `{ datasetId, datasetVersion, extractorVersion, cases, aggregate }`.
+3. Sum integer counts across cases first: `requiredGoldCount`, `requiredMatchedCount`, `acceptableMatchedCount`, `validMatchedCount`, `allPredictedCount`, `extraFalsePositives`. Evidence integer counts are also summed. Do not average case-level precision/recall/f1.
+4. Only after those integer totals exist, compute aggregate `required.precision`, `required.recall`, `required.f1`, `overall.precision`, `overall.recall`, and `overall.f1` from the summed counts with the same formulas as `evaluateCaseV2`. Convert finished ratios to the same number fields V1 reports use. Assignment itself must not use those floats.
+5. Output `{ datasetId, datasetVersion, extractorVersion, cases, aggregate }`.
 
 `renderMarkdownReportV2(report)`: render the V2 item/evidence sections; include `supportType` on predicted evidence rows; do not print dialogue text or secrets.
 
