@@ -357,4 +357,58 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.notEqual(goldManifestFingerprint(mutated), EXPECTED_GOLD_MANIFEST_SHA256);
     assert.deepEqual(v2, snapshot);
   });
+
+  it('documents V2 offline status, public identifiers, and later paid-authorization gate', async () => {
+    const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8');
+    const headingMatch = readme.match(/^#{1,3}[^\n]*Memory V3 V2[^\n]*$/m);
+    assert.equal(headingMatch !== null, true, 'README is missing a Memory V3 V2 section');
+
+    const headingStart = headingMatch.index;
+    const headingLevel = headingMatch[0].match(/^#+/)[0].length;
+    const afterHeading = readme.slice(headingStart + headingMatch[0].length);
+    const nextHeading = afterHeading.match(new RegExp(`\\n#{1,${headingLevel}} `));
+    const v2Raw = readme.slice(
+      headingStart,
+      headingStart + headingMatch[0].length + (nextHeading ? nextHeading.index : afterHeading.length),
+    );
+    const v2 = v2Raw.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1$2');
+
+    assert.equal(v2.includes('memory-v3-ru-golden-v2'), true);
+    assert.equal(v2.includes('2.0.0'), true);
+    assert.equal(v2.includes('live-benchmark-six-run-v2.mjs'), true);
+    assert.equal(v2.includes('memory-v3-openrouter-luna-six-v2'), true);
+    assert.equal(v2.includes('not production-ready'), true);
+    assert.equal(v2.includes('--execute-six-paid-requests'), true);
+    assert.equal(v2.includes('openai/gpt-5.6-luna'), true);
+    assert.equal(v2.includes('--max-budget-usd 0.032'), true);
+    assert.equal(
+      v2.includes(
+        'node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032',
+      ),
+      true,
+    );
+    assert.equal(v2.includes('node --test scripts/memory-v3-pilot/*.test.mjs'), true);
+    assert.match(v2, /V1 frozen/);
+    assert.match(v2, /V2 additive/);
+    assert.match(v2, /Nastya/);
+    assert.match(v2, /forbidden until a separate/);
+    assert.match(v2, /V2 six-case paid benchmark has not been run/);
+    assert.match(v2, /V1 six-case live (?:run|result) is not (?:a |the )?V2/);
+    assert.match(v2, /structural evaluation does not (?:judge|score|evaluate) semantic/i);
+    assert.match(v2, /forbidden remembered meaning/);
+    assert.match(v2, /0 provider HTTP calls/);
+    assert.match(v2, /does not require .{0,40}\.env|\.env is not required/i);
+    assert.match(v2, /does not read .{0,20}\.env|\.env is not read/i);
+    assert.match(v2, /not (?:saved|written|stored) (?:to |on )?disk automatically/i);
+    assert.match(v2, /(?:at most|no more than|not more than) 6 sequential POST/i);
+    assert.match(v2, /\$0\.032/);
+    assert.match(v2, /\$0\.03113088/);
+    assert.match(v2, /no retry/i);
+    assert.match(v2, /fallback/i);
+    assert.match(v2, /repair/i);
+    assert.match(v2, /actualUsage/);
+    assert.match(v2, /actualCostUsd/);
+    assert.match(v2, /not actual billing/i);
+    assert.match(readme, /live-benchmark-six-run\.mjs --model openai\/gpt-5\.6-luna --max-budget-usd 0\.032/);
+  });
 });

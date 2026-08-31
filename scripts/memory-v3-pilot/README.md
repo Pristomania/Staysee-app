@@ -222,3 +222,42 @@ Future paid execute requires a separate explicit authorization from Nastya, has 
 ```bash
 node scripts/memory-v3-pilot/live-benchmark-six-run.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032 --env-file <path> --execute-six-paid-requests
 ```
+
+## Memory V3 V2 (offline, not production-ready)
+
+V1 frozen. It remains a separate historical and regression contour, including the six-case live-run history above. That V1 six-case live result is not a V2 run and does not prove V2 quality.
+
+V2 additive: new `*-v2.mjs` modules and a separate Golden V2. Memory V3 V2 is not production-ready. It is not wired into the StaySEE app, Supabase, production, or staging.
+
+### Dataset and extractor
+
+- datasetId `memory-v3-ru-golden-v2`
+- version `2.0.0`
+- file `memory-v3-ru-golden.v2.json`
+- extractor version `memory-v3-openrouter-luna-six-v2`
+
+### What V2 changes
+
+Layered memory may store `event`, `recurrence`, and `hypothesis` together when each layer independently qualifies. Gold is authored as `required` plus `acceptable`. Omitting an acceptable prediction is not a false negative. An unlisted extra remains a false positive.
+
+Recurrence `supports` use typed `supportType`. Only `episode_observation` rows participate in the episode partition. `pattern_confirmation` and `scope_boundary` keep `episodeKey: null`.
+
+Structural evaluation does not judge semantic correctness or forbidden remembered meaning. `buildSixCaseSemanticReviewPacketV2` is a local human-review packet; `semanticVerdict`, `forbiddenMeaningVerdict`, and `reviewerNotes` stay `null` until a person reviews it. Offline tests do not prove model behavior.
+
+The V2 six-case paid benchmark has not been run.
+
+### Offline tests
+
+```bash
+node --test scripts/memory-v3-pilot/*.test.mjs
+```
+
+### V2 six-case dry-run
+
+```bash
+node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032
+```
+
+This V2 dry-run makes 0 provider HTTP calls. It does not require and does not read `.env`. Output is printed as one safe JSON object and is not saved to disk automatically.
+
+`--execute-six-paid-requests` on this V2 runner is forbidden until a separate Nastya authorization. A later authorized V2 execute would use Golden V2 and `memory-v3-openrouter-luna-six-v2`. It is not the V1 command `live-benchmark-six-run.mjs`. It would make at most 6 sequential POSTs, with no retry, fallback, or repair. Hard budget is `$0.032`. Configured worst-case ceiling is `$0.03113088`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` stay `null` / unknown until provider telemetry is intentionally projected and a real run produces a separate safe accounting.
