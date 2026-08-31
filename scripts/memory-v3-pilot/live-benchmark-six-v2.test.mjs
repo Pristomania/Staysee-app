@@ -479,6 +479,15 @@ describe('runSixCaseLiveBenchmarkV2 fake fetch execution', () => {
         assert.equal(httpBody.provider.require_parameters, true);
         assert.equal(httpBody.provider.data_collection, 'deny');
         assert.equal(httpBody.provider.zdr, true);
+        const jsonSchema = httpBody.response_format.json_schema;
+        const evidence = jsonSchema.schema.properties.evidence.items;
+        assert.equal(jsonSchema.name, 'memory_v3_v2_extractor_response');
+        assert.deepEqual(
+          [...evidence.required].sort(),
+          ['episodeKey', 'itemRef', 'relation', 'sourceMessageId', 'supportType'],
+        );
+        assert.deepEqual(evidence.properties.supportType, { type: ['string', 'null'] });
+        assert.deepEqual(evidence.properties.episodeKey, { type: ['string', 'null'] });
       }
       assert.deepEqual(dataset, snapshot);
       assertNoSecrets(result);

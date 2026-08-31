@@ -21,6 +21,14 @@ const EVIDENCE_FIELDS = Object.freeze([
   'episodeKey',
   'relation',
 ]);
+const V2_EVIDENCE_FIELDS = Object.freeze([
+  'itemRef',
+  'sourceMessageId',
+  'relation',
+  'supportType',
+  'episodeKey',
+]);
+const RESPONSE_CONTRACTS = new Set(['v1', 'v2']);
 
 const OWN_ERRORS = new WeakSet();
 const OPENROUTER_DIAGNOSTIC_CODES = new Set([
@@ -36,6 +44,10 @@ const OPENROUTER_DIAGNOSTIC_CODES = new Set([
   'openrouter_http_5xx',
   'openrouter_http_other_non_2xx',
   'openrouter_top_level_error',
+  'openrouter_error_invalid_request',
+  'openrouter_error_provider_unavailable',
+  'openrouter_error_provider_overloaded',
+  'openrouter_error_rate_limit_exceeded',
   'openrouter_choice_error',
   'openrouter_finish_length',
   'openrouter_finish_error',
@@ -310,6 +322,36 @@ const MEMORY_V3_OPENROUTER_JSON_SCHEMA = Object.freeze({
   }),
 });
 
+const MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA = Object.freeze({
+  name: 'memory_v3_v2_extractor_response',
+  strict: true,
+  schema: objectSchema(['items', 'evidence'], {
+    items: {
+      type: 'array',
+      items: objectSchema(ITEM_FIELDS, {
+        itemRef: { type: 'string' },
+        kind: { type: 'string' },
+        claim: { type: 'string' },
+        status: { type: 'string' },
+        sensitivity: { type: 'string' },
+        eventTimeStart: nullableStringSchema(),
+        eventTimeEnd: nullableStringSchema(),
+        alternative: nullableStringSchema(),
+      }),
+    },
+    evidence: {
+      type: 'array',
+      items: objectSchema(V2_EVIDENCE_FIELDS, {
+        itemRef: { type: 'string' },
+        sourceMessageId: { type: 'string' },
+        relation: { type: 'string' },
+        supportType: nullableStringSchema(),
+        episodeKey: nullableStringSchema(),
+      }),
+    },
+  }),
+});
+
 function isHttpsUrl(value) {
   if (!isNonEmptyString(value)) return false;
   try {
@@ -374,6 +416,36 @@ function hasOwnDataKey(value, key, path) {
   return false;
 }
 
+function topLevelErrorDiagnosticCode(body) {
+  const diagnostics = new Map([
+    ['invalid_request', 'openrouter_error_invalid_request'],
+    ['provider_unavailable', 'openrouter_error_provider_unavailable'],
+    ['provider_overloaded', 'openrouter_error_provider_overloaded'],
+    ['rate_limit_exceeded', 'openrouter_error_rate_limit_exceeded'],
+  ]);
+  try {
+    const projectedBody = projectRecord(body, 'transport response.body', 'response', {
+      required: ['error'],
+    });
+    const projectedError = projectRecord(
+      projectedBody.error,
+      'transport response.body.error',
+      'response',
+      { required: [], pick: ['metadata'] },
+    );
+    if (projectedError.metadata === undefined) return null;
+    const metadata = projectRecord(
+      projectedError.metadata,
+      'transport response.body.error.metadata',
+      'response',
+      { required: [], pick: ['error_type'] },
+    );
+    return diagnostics.get(metadata.error_type) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function readContent(raw) {
   const envelope = projectRecord(raw, 'transport response', 'response', {
     required: ['status', 'body'],
@@ -392,7 +464,11 @@ function readContent(raw) {
     throw fail('response', 'transport response.body is invalid', 'openrouter_response_invalid_shape');
   }
   if (hasOwnDataKey(envelope.body, 'error', 'transport response.body')) {
-    throw fail('response', 'transport response.body has an error', 'openrouter_top_level_error');
+    throw fail(
+      'response',
+      'transport response.body has an error',
+      topLevelErrorDiagnosticCode(envelope.body) ?? 'openrouter_top_level_error',
+    );
   }
   let body;
   try {
@@ -469,7 +545,7 @@ export function createOpenRouterAdapter(options) {
   const inspected = inspectRecordPartial(
     options,
     ['transport', 'apiKey', 'model', 'maxOutputTokens'],
-    ['appTitle', 'appUrl', 'reasoningEffort'],
+    ['appTitle', 'appUrl', 'reasoningEffort', 'responseContract'],
     'options',
     'config',
   );
@@ -500,6 +576,12 @@ export function createOpenRouterAdapter(options) {
   ) {
     throw fail('config', 'reasoningEffort is invalid');
   }
+  if (
+    inspected.responseContract !== undefined &&
+    !RESPONSE_CONTRACTS.has(inspected.responseContract)
+  ) {
+    throw fail('config', 'responseContract is invalid');
+  }
 
   const transport = inspected.transport;
   const apiKey = inspected.apiKey;
@@ -508,6 +590,11 @@ export function createOpenRouterAdapter(options) {
   const appTitle = inspected.appTitle;
   const appUrl = inspected.appUrl;
   const reasoningEffort = inspected.reasoningEffort;
+  const responseContract = inspected.responseContract ?? 'v1';
+  const responseSchema =
+    responseContract === 'v2'
+      ? MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA
+      : MEMORY_V3_OPENROUTER_JSON_SCHEMA;
 
   return async function openRouterModelAdapter(request) {
     const safeRequest = inspectRecord(request, ['system', 'input'], 'request', 'config');
@@ -535,7 +622,7 @@ export function createOpenRouterAdapter(options) {
         max_completion_tokens: maxOutputTokens,
         response_format: {
           type: 'json_schema',
-          json_schema: structuredClone(MEMORY_V3_OPENROUTER_JSON_SCHEMA),
+          json_schema: structuredClone(responseSchema),
         },
         provider: {
           allow_fallbacks: false,

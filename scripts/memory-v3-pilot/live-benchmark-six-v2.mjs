@@ -580,6 +580,7 @@ export async function runSixCaseLiveBenchmarkV2(options) {
       model: inspected.model,
       maxOutputTokens: ALLOWED_MAX_OUTPUT_TOKENS,
       reasoningEffort: ALLOWED_REASONING,
+      responseContract: 'v2',
     }),
     recorder,
   );

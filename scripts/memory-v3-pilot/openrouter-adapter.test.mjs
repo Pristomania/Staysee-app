@@ -287,6 +287,13 @@ describe('createOpenRouterAdapter config', () => {
       'config',
     );
   });
+
+  it('rejects an unsupported responseContract', async () => {
+    await assertRejectsStage(
+      () => createOpenRouterAdapter(validOptions({ responseContract: 'v3' })),
+      'config',
+    );
+  });
 });
 
 describe('createOpenRouterAdapter transport request', () => {
@@ -360,6 +367,33 @@ describe('createOpenRouterAdapter transport request', () => {
     assert.equal(serializedBody.includes(API_KEY), false);
     assert.equal(call.body.messages[0].content.includes(SENTINELS.dialogue), false);
     assert.deepEqual(request, snapshot);
+  });
+
+  it('sends the closed five-field typed evidence schema for responseContract v2', async () => {
+    const transport = recordingTransport();
+    const adapter = createOpenRouterAdapter(
+      validOptions({ transport, responseContract: 'v2' }),
+    );
+
+    await adapter(buildExtractorRequest(sampleCase()));
+
+    assert.equal(transport.calls.length, 1);
+    const jsonSchema = transport.calls[0].body.response_format.json_schema;
+    const evidence = jsonSchema.schema.properties.evidence.items;
+    assert.equal(jsonSchema.name, 'memory_v3_v2_extractor_response');
+    assert.deepEqual(
+      [...evidence.required].sort(),
+      ['episodeKey', 'itemRef', 'relation', 'sourceMessageId', 'supportType'],
+    );
+    assert.deepEqual(Object.keys(evidence.properties).sort(), [
+      'episodeKey',
+      'itemRef',
+      'relation',
+      'sourceMessageId',
+      'supportType',
+    ]);
+    assert.deepEqual(evidence.properties.supportType, { type: ['string', 'null'] });
+    assert.deepEqual(evidence.properties.episodeKey, { type: ['string', 'null'] });
   });
 
   it('adds Referer and Title only for valid https appUrl and appTitle', async () => {
@@ -966,6 +1000,63 @@ describe('createOpenRouterAdapter safe diagnostics', () => {
     await rejectDiagnostic({ status: 429, body: { choices: [] } }, 'openrouter_http_429');
     await rejectDiagnostic({ status: 500, body: { choices: [] } }, 'openrouter_http_5xx');
     await rejectDiagnostic({ status: 418, body: { choices: [] } }, 'openrouter_http_other_non_2xx');
+  });
+
+  it('projects allowlisted OpenRouter error_type without reading provider messages', async () => {
+    for (const [errorType, diagnosticCode] of [
+      ['invalid_request', 'openrouter_error_invalid_request'],
+      ['provider_unavailable', 'openrouter_error_provider_unavailable'],
+      ['provider_overloaded', 'openrouter_error_provider_overloaded'],
+      ['rate_limit_exceeded', 'openrouter_error_rate_limit_exceeded'],
+    ]) {
+      await rejectDiagnostic(
+        {
+          status: 200,
+          body: {
+            error: {
+              code: 400,
+              message: SENTINELS.bodyError,
+              metadata: { error_type: errorType, raw: SENTINELS.metadata },
+            },
+          },
+        },
+        diagnosticCode,
+      );
+    }
+  });
+
+  it('keeps unknown or accessor error_type generic and does not execute getters', async () => {
+    await rejectDiagnostic(
+      {
+        status: 200,
+        body: {
+          error: {
+            code: 500,
+            message: SENTINELS.bodyError,
+            metadata: { error_type: 'future_private_error', raw: SENTINELS.metadata },
+          },
+        },
+      },
+      'openrouter_top_level_error',
+    );
+
+    let getterCalls = 0;
+    const metadata = {};
+    Object.defineProperty(metadata, 'error_type', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        throw new Error(SENTINELS.getter);
+      },
+    });
+    await rejectDiagnostic(
+      {
+        status: 200,
+        body: { error: { code: 500, message: SENTINELS.bodyError, metadata } },
+      },
+      'openrouter_top_level_error',
+    );
+    assert.equal(getterCalls, 0);
   });
 
   it('does not trust a spoofed diagnosticCode from injected transport', async () => {
