@@ -1,10 +1,11 @@
 /**
  * Memory V3 V2 six-case live-benchmark composition root.
  * Injected IO in tests. Direct execution supplies production defaults.
- * No environment object, dotenv, extra fetch, or filesystem results file.
+ * No environment object, dotenv, extra fetch, or filesystem results file unless opted in.
  */
 
-import { readFile } from 'node:fs/promises';
+import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
+import { extname, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildSixCaseSemanticReviewPacketV2 } from './live-benchmark-six-v2.mjs';
 import { runSixCaseBenchmarkFromArgvV2 } from './live-benchmark-six-cli-v2.mjs';
@@ -17,6 +18,12 @@ const OPTION_REQUIRED = Object.freeze([
   'fetchImpl',
   'writeStdout',
   'writeStderr',
+]);
+const OPTION_OPTIONAL = Object.freeze([
+  'writeFileImpl',
+  'linkImpl',
+  'unlinkImpl',
+  'accessImpl',
 ]);
 
 function fail(message) {
@@ -146,11 +153,44 @@ function hasExecuteFlag(argv) {
   return entries.some((entry) => entry === '--execute-six-paid-requests');
 }
 
+function isAbsoluteJsonPath(value) {
+  return typeof value === 'string' && isAbsolute(value) && extname(value) === '.json';
+}
+
+function parseSafeOutputFile(argv) {
+  const entries = inspectDenseArray(argv, 'argv');
+  const forwarded = [];
+  let outputFile;
+  for (let index = 0; index < entries.length; index += 1) {
+    const arg = entries[index];
+    if (arg === '--safe-output-file') {
+      if (outputFile !== undefined) {
+        throw fail('argument is duplicated');
+      }
+      const value = entries[index + 1];
+      if (!isAbsoluteJsonPath(value)) {
+        throw fail('safe-output-file is invalid');
+      }
+      outputFile = value;
+      index += 1;
+      continue;
+    }
+    forwarded.push(arg);
+  }
+  return { forwarded, outputFile };
+}
+
+function serializePayload(payload) {
+  return `${JSON.stringify(payload)}\n`;
+}
+
 function writeSafe(writer, payload) {
   if (typeof writer !== 'function') {
     throw fail('writer must be a function');
   }
-  writer(`${JSON.stringify(payload)}\n`);
+  const text = serializePayload(payload);
+  writer(text);
+  return text;
 }
 
 function publicFailure(message) {
@@ -159,6 +199,77 @@ function publicFailure(message) {
     stage: 'config',
     error: message,
   };
+}
+
+function ownDataValue(value, key) {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+    return { ok: false };
+  }
+  let desc;
+  try {
+    desc = Object.getOwnPropertyDescriptor(value, key);
+  } catch {
+    return { ok: false };
+  }
+  if (
+    !desc ||
+    typeof desc.get === 'function' ||
+    typeof desc.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+    desc.enumerable !== true
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, value: desc.value };
+}
+
+function isEnoentError(error) {
+  const code = ownDataValue(error, 'code');
+  return code.ok && code.value === 'ENOENT';
+}
+
+async function assertSafeOutputAbsent(accessImpl, outputFile) {
+  if (typeof accessImpl !== 'function') {
+    throw fail('accessImpl must be a function');
+  }
+  try {
+    await accessImpl(outputFile);
+  } catch (error) {
+    if (isOwnError(error)) throw error;
+    if (isEnoentError(error)) return;
+    throw fail('output file cannot be used');
+  }
+  throw fail('output file already exists');
+}
+
+async function writeSafeOutputFile(inspected, outputFile, text) {
+  if (typeof inspected.writeFileImpl !== 'function') {
+    throw fail('writeFileImpl must be a function');
+  }
+  if (typeof inspected.linkImpl !== 'function') {
+    throw fail('linkImpl must be a function');
+  }
+  if (typeof inspected.unlinkImpl !== 'function') {
+    throw fail('unlinkImpl must be a function');
+  }
+  const temporaryPath = `${outputFile}.tmp`;
+  let tempCreated = false;
+  try {
+    await inspected.writeFileImpl(temporaryPath, text, { encoding: 'utf8', flag: 'wx' });
+    tempCreated = true;
+    await inspected.linkImpl(temporaryPath, outputFile);
+    await inspected.unlinkImpl(temporaryPath);
+  } catch (error) {
+    if (tempCreated) {
+      try {
+        await inspected.unlinkImpl(temporaryPath);
+      } catch {
+        // leftover temp cleanup must not leak the original error.
+      }
+    }
+    if (isOwnError(error)) throw error;
+    throw fail('output file cannot be written');
+  }
 }
 
 async function loadGoldenDataset(readFileImpl) {
@@ -183,7 +294,7 @@ export async function main(options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw fail('options must be a plain object');
   }
-  const inspected = inspectRecordPartial(options, OPTION_REQUIRED, [], 'options');
+  const inspected = inspectRecordPartial(options, OPTION_REQUIRED, OPTION_OPTIONAL, 'options');
   if (typeof inspected.readFileImpl !== 'function') {
     throw fail('readFileImpl must be a function');
   }
@@ -193,9 +304,42 @@ export async function main(options) {
   if (typeof inspected.writeStdout !== 'function' || typeof inspected.writeStderr !== 'function') {
     throw fail('stdio writers must be functions');
   }
+  if (inspected.writeFileImpl !== undefined && typeof inspected.writeFileImpl !== 'function') {
+    throw fail('writeFileImpl must be a function');
+  }
+  if (inspected.linkImpl !== undefined && typeof inspected.linkImpl !== 'function') {
+    throw fail('linkImpl must be a function');
+  }
+  if (inspected.unlinkImpl !== undefined && typeof inspected.unlinkImpl !== 'function') {
+    throw fail('unlinkImpl must be a function');
+  }
+  if (inspected.accessImpl !== undefined && typeof inspected.accessImpl !== 'function') {
+    throw fail('accessImpl must be a function');
+  }
 
   try {
-    const execute = hasExecuteFlag(inspected.argv);
+    const parsedArgv = parseSafeOutputFile(inspected.argv);
+    const execute = hasExecuteFlag(parsedArgv.forwarded);
+    if (parsedArgv.outputFile !== undefined && !execute) {
+      throw fail('safe-output-file requires execute');
+    }
+    if (parsedArgv.outputFile !== undefined) {
+      if (typeof inspected.accessImpl !== 'function') {
+        throw fail('accessImpl must be a function');
+      }
+      if (typeof inspected.writeFileImpl !== 'function') {
+        throw fail('writeFileImpl must be a function');
+      }
+      if (typeof inspected.linkImpl !== 'function') {
+        throw fail('linkImpl must be a function');
+      }
+      if (typeof inspected.unlinkImpl !== 'function') {
+        throw fail('unlinkImpl must be a function');
+      }
+      const temporaryPath = `${parsedArgv.outputFile}.tmp`;
+      await assertSafeOutputAbsent(inspected.accessImpl, parsedArgv.outputFile);
+      await assertSafeOutputAbsent(inspected.accessImpl, temporaryPath);
+    }
     const dataset = await loadGoldenDataset(inspected.readFileImpl);
     const readEnvText = async (path) => {
       try {
@@ -210,7 +354,7 @@ export async function main(options) {
       }
     };
     const benchmarkResult = await runSixCaseBenchmarkFromArgvV2({
-      argv: inspected.argv,
+      argv: parsedArgv.forwarded,
       dataset,
       fetchImpl: inspected.fetchImpl,
       readEnvText,
@@ -221,7 +365,10 @@ export async function main(options) {
         ? buildSixCaseSemanticReviewPacketV2({ dataset, benchmarkResult })
         : null,
     };
-    writeSafe(inspected.writeStdout, payload);
+    const text = writeSafe(inspected.writeStdout, payload);
+    if (parsedArgv.outputFile !== undefined) {
+      await writeSafeOutputFile(inspected, parsedArgv.outputFile, text);
+    }
     return payload;
   } catch (error) {
     const message = isOwnError(error)
@@ -259,6 +406,10 @@ async function runDirect() {
       fetchImpl: globalThis.fetch.bind(globalThis),
       writeStdout: (chunk) => writeProcessStream(process.stdout, chunk),
       writeStderr: (chunk) => writeProcessStream(process.stderr, chunk),
+      writeFileImpl: writeFile,
+      linkImpl: link,
+      unlinkImpl: unlink,
+      accessImpl: access,
     });
   } catch {
     process.exitCode = 1;

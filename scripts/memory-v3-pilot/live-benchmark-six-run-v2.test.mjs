@@ -16,6 +16,8 @@ const MODEL = 'google/gemini-3.7-flash';
 const API_KEY = 'test-key';
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
 const ENV_PATH = 'C:\\synthetic\\.env';
+const SAFE_OUTPUT_PATH = 'C:\\synthetic\\memory-v3-v2-safe-result.json';
+const SAFE_OUTPUT_TMP_PATH = `${SAFE_OUTPUT_PATH}.tmp`;
 const SAFETY_03_ASSISTANT_TEXT = 'Наверное, в детстве тебя наказывали за любые просьбы.';
 const GOLDEN_NAME = 'memory-v3-ru-golden.v2.json';
 const RUN_PREFIX = '[memory-v3:live-benchmark-six-run-v2]';
@@ -38,6 +40,10 @@ function dryArgv() {
 
 function executeArgv() {
   return [...dryArgv(), '--env-file', ENV_PATH, '--execute-six-paid-requests'];
+}
+
+function executeArgvWithSafeOutput() {
+  return [...executeArgv(), '--safe-output-file', SAFE_OUTPUT_PATH];
 }
 
 function officialOpenRouterHttpBody(content = EMPTY_CONTENT) {
@@ -94,6 +100,89 @@ function recordingReadFile(options = {}) {
   return readFileImpl;
 }
 
+function recordingSafeOutputFs(options = {}) {
+  const existing = new Set(options.existing ?? []);
+  const contents = new Map(options.contents ?? []);
+  const writes = [];
+  const links = [];
+  const unlinks = [];
+  const accesses = [];
+  const accessImpl = async (targetPath) => {
+    const key = String(targetPath);
+    accesses.push(key);
+    if (
+      options.accessError != null &&
+      (!options.accessErrorPath || options.accessErrorPath === key)
+    ) {
+      throw options.accessError;
+    }
+    if (existing.has(key)) return undefined;
+    const error = new Error('ENOENT');
+    error.code = 'ENOENT';
+    throw error;
+  };
+  const writeFileImpl = async (targetPath, data, writeOptions) => {
+    writes.push({ path: String(targetPath), data, options: writeOptions });
+    if (options.failWrite) throw new Error('WRITE_FAIL');
+    if (writeOptions && writeOptions.flag === 'wx' && existing.has(String(targetPath))) {
+      const error = new Error('EEXIST');
+      error.code = 'EEXIST';
+      throw error;
+    }
+    existing.add(String(targetPath));
+    contents.set(String(targetPath), data);
+    if (options.createTargetAfterTmp && String(targetPath) === SAFE_OUTPUT_TMP_PATH) {
+      existing.add(SAFE_OUTPUT_PATH);
+      if (!contents.has(SAFE_OUTPUT_PATH)) {
+        contents.set(SAFE_OUTPUT_PATH, options.foreignTarget ?? 'FOREIGN_TARGET');
+      }
+    }
+  };
+  const linkImpl = async (fromPath, toPath) => {
+    links.push({ from: String(fromPath), to: String(toPath) });
+    if (options.failLink) throw new Error('LINK_FAIL');
+    if (existing.has(String(toPath))) {
+      const error = new Error('EEXIST');
+      error.code = 'EEXIST';
+      throw error;
+    }
+    existing.add(String(toPath));
+    contents.set(String(toPath), contents.get(String(fromPath)));
+  };
+  const unlinkImpl = async (targetPath) => {
+    unlinks.push(String(targetPath));
+    existing.delete(String(targetPath));
+    contents.delete(String(targetPath));
+  };
+  return {
+    existing,
+    contents,
+    writes,
+    links,
+    unlinks,
+    accesses,
+    accessImpl,
+    writeFileImpl,
+    linkImpl,
+    unlinkImpl,
+  };
+}
+
+function safeOutputFsOptions(fsIo) {
+  return {
+    writeFileImpl: fsIo.writeFileImpl,
+    linkImpl: fsIo.linkImpl,
+    unlinkImpl: fsIo.unlinkImpl,
+    accessImpl: fsIo.accessImpl,
+  };
+}
+
+function fsOptionsWithout(fsIo, missing) {
+  const options = safeOutputFsOptions(fsIo);
+  delete options[missing];
+  return options;
+}
+
 function recordingWriter() {
   const calls = [];
   const write = (chunk) => {
@@ -140,10 +229,26 @@ async function assertSafeFailure(fn, { readFileImpl, fetchImpl, writeStdout, wri
     assert.equal(error.cause == null, true);
     assert.equal('cause' in error, false);
     assertNoSecrets(error);
+    assert.equal(String(error.message).includes(SAFE_OUTPUT_PATH), false);
+    assert.equal(String(error.message).includes(ENV_PATH), false);
+    assert.equal(String(error.message).includes('FOREIGN_TMP'), false);
+    assert.equal(String(error.message).includes('FOREIGN_TARGET'), false);
     return true;
   });
-  for (const chunk of writeStdout.calls) assertNoSecrets(chunk);
-  for (const chunk of writeStderr.calls) assertNoSecrets(chunk);
+  for (const chunk of writeStdout.calls) {
+    assertNoSecrets(chunk);
+    assert.equal(chunk.includes(SAFE_OUTPUT_PATH), false);
+    assert.equal(chunk.includes(ENV_PATH), false);
+    assert.equal(chunk.includes('FOREIGN_TMP'), false);
+    assert.equal(chunk.includes('FOREIGN_TARGET'), false);
+  }
+  for (const chunk of writeStderr.calls) {
+    assertNoSecrets(chunk);
+    assert.equal(chunk.includes(SAFE_OUTPUT_PATH), false);
+    assert.equal(chunk.includes(ENV_PATH), false);
+    assert.equal(chunk.includes('FOREIGN_TMP'), false);
+    assert.equal(chunk.includes('FOREIGN_TARGET'), false);
+  }
   if (fetchImpl) assert.equal(fetchImpl.calls.length, 0);
   if (readFileImpl) {
     for (const call of readFileImpl.calls) {
@@ -421,5 +526,329 @@ describe('live-benchmark-six-run-v2 direct dry-run command', () => {
     assertNoSecrets(parsed);
     assert.equal(result.stdout.includes(SAFETY_03_ASSISTANT_TEXT), false);
     assert.equal(result.stdout.includes(SENTINELS.key), false);
+  });
+});
+
+describe('live-benchmark-six-run-v2 --safe-output-file', () => {
+  it('does not write a result file during dry-run, even when the flag is present', async () => {
+    const fsIo = recordingSafeOutputFs();
+    const fetchImpl = recordingFetch();
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: [...dryArgv(), '--safe-output-file', SAFE_OUTPUT_PATH],
+          readFileImpl: recordingReadFile(),
+          fetchImpl,
+          writeStdout,
+          writeStderr,
+        }),
+      { fetchImpl, writeStdout, writeStderr },
+    );
+    assert.equal(fsIo.writes.length, 0);
+    assert.equal(fsIo.links.length, 0);
+    assert.equal(fsIo.unlinks.length, 0);
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('does not write when execute succeeds without --safe-output-file', async () => {
+    const fsIo = recordingSafeOutputFs();
+    const fetchImpl = recordingFetch();
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    const returned = await main({
+      argv: executeArgv(),
+      readFileImpl: recordingReadFile(),
+      fetchImpl,
+      writeStdout,
+      writeStderr,
+      ...safeOutputFsOptions(fsIo),
+    });
+    assert.equal(fetchImpl.calls.length, 6);
+    assert.equal(fsIo.writes.length, 0);
+    assert.equal(fsIo.links.length, 0);
+    assert.equal(fsIo.accesses.length, 0);
+    assert.equal(writeStderr.calls.length, 0);
+    assert.equal(returned.benchmarkResult.providerHttpCalls, 6);
+    assertNoSecrets(returned);
+  });
+
+  it('publishes stdout JSON via wx temp, exclusive link, then owned-tmp unlink', async () => {
+    const fsIo = recordingSafeOutputFs();
+    let active = 0;
+    let maxActive = 0;
+    const order = [];
+    const fetchImpl = recordingFetch(async (_url, init) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(caseIdFromRequest(init));
+      await Promise.resolve();
+      active -= 1;
+      return jsonResponse(officialOpenRouterHttpBody());
+    });
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    const returned = await main({
+      argv: executeArgvWithSafeOutput(),
+      readFileImpl: recordingReadFile(),
+      fetchImpl,
+      writeStdout,
+      writeStderr,
+      ...safeOutputFsOptions(fsIo),
+    });
+    assert.equal(fetchImpl.calls.length, 6);
+    assert.equal(maxActive, 1);
+    assert.deepEqual(order, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
+    assert.equal(writeStderr.calls.length, 0);
+    assert.deepEqual(fsIo.accesses, [SAFE_OUTPUT_PATH, SAFE_OUTPUT_TMP_PATH]);
+    assert.equal(fsIo.writes.length, 1);
+    assert.equal(fsIo.writes[0].path, SAFE_OUTPUT_TMP_PATH);
+    assert.equal(fsIo.writes[0].options.flag, 'wx');
+    assert.equal(fsIo.writes[0].data, writeStdout.calls[0]);
+    assert.equal(fsIo.links.length, 1);
+    assert.deepEqual(fsIo.links[0], { from: SAFE_OUTPUT_TMP_PATH, to: SAFE_OUTPUT_PATH });
+    assert.deepEqual(fsIo.unlinks, [SAFE_OUTPUT_TMP_PATH]);
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_PATH), true);
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_TMP_PATH), false);
+    assert.equal(fsIo.contents.get(SAFE_OUTPUT_PATH), writeStdout.calls[0]);
+    const parsedFile = JSON.parse(fsIo.contents.get(SAFE_OUTPUT_PATH));
+    assert.deepEqual(parsedFile, returned);
+    assert.equal(parsedFile.semanticReviewPacket.cases.length, 6);
+    assertNoSecrets(fsIo.contents.get(SAFE_OUTPUT_PATH));
+    assert.equal(String(fsIo.contents.get(SAFE_OUTPUT_PATH)).includes(API_KEY), false);
+    assert.equal(String(fsIo.contents.get(SAFE_OUTPUT_PATH)).includes(SENTINELS.response), false);
+    assert.equal(
+      String(fsIo.contents.get(SAFE_OUTPUT_PATH)).includes('You extract StaySEE Memory V3 V2 items'),
+      false,
+    );
+  });
+
+  it('rejects an existing result file before any HTTP or write', async () => {
+    const fsIo = recordingSafeOutputFs({ existing: [SAFE_OUTPUT_PATH] });
+    const fetchImpl = recordingFetch();
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: executeArgvWithSafeOutput(),
+          readFileImpl: recordingReadFile(),
+          fetchImpl,
+          writeStdout,
+          writeStderr,
+          ...safeOutputFsOptions(fsIo),
+        }),
+      { fetchImpl, writeStdout, writeStderr },
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+    assert.equal(fsIo.writes.length, 0);
+    assert.equal(fsIo.links.length, 0);
+    assert.deepEqual(fsIo.accesses, [SAFE_OUTPUT_PATH]);
+  });
+
+  it('rejects a pre-existing deterministic tmp before env or HTTP', async () => {
+    const fsIo = recordingSafeOutputFs({
+      existing: [SAFE_OUTPUT_TMP_PATH],
+      contents: [[SAFE_OUTPUT_TMP_PATH, 'FOREIGN_TMP']],
+    });
+    const readFileImpl = recordingReadFile();
+    const fetchImpl = recordingFetch();
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: executeArgvWithSafeOutput(),
+          readFileImpl,
+          fetchImpl,
+          writeStdout,
+          writeStderr,
+          ...safeOutputFsOptions(fsIo),
+        }),
+      { readFileImpl, fetchImpl, writeStdout, writeStderr },
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+    assert.equal(datasetReads(readFileImpl).length, 0);
+    assert.equal(envReads(readFileImpl).length, 0);
+    assert.equal(fsIo.writes.length, 0);
+    assert.equal(fsIo.links.length, 0);
+    assert.equal(fsIo.unlinks.length, 0);
+    assert.deepEqual(fsIo.accesses, [SAFE_OUTPUT_PATH, SAFE_OUTPUT_TMP_PATH]);
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_TMP_PATH), true);
+    assert.equal(fsIo.contents.get(SAFE_OUTPUT_TMP_PATH), 'FOREIGN_TMP');
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_PATH), false);
+  });
+
+  it('does not replace a target that appears after precheck and unlinks only owned tmp', async () => {
+    const fsIo = recordingSafeOutputFs({ createTargetAfterTmp: true, foreignTarget: 'FOREIGN_TARGET' });
+    const fetchImpl = recordingFetch();
+    const writeStdout = recordingWriter();
+    const writeStderr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: executeArgvWithSafeOutput(),
+          readFileImpl: recordingReadFile(),
+          fetchImpl,
+          writeStdout,
+          writeStderr,
+          ...safeOutputFsOptions(fsIo),
+        }),
+      { writeStdout, writeStderr },
+    );
+    assert.equal(fetchImpl.calls.length, 6);
+    assert.deepEqual(fsIo.accesses, [SAFE_OUTPUT_PATH, SAFE_OUTPUT_TMP_PATH]);
+    assert.equal(fsIo.writes.length, 1);
+    assert.equal(fsIo.writes[0].path, SAFE_OUTPUT_TMP_PATH);
+    assert.equal(fsIo.links.length, 1);
+    assert.deepEqual(fsIo.links[0], { from: SAFE_OUTPUT_TMP_PATH, to: SAFE_OUTPUT_PATH });
+    assert.deepEqual(fsIo.unlinks, [SAFE_OUTPUT_TMP_PATH]);
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_PATH), true);
+    assert.equal(fsIo.contents.get(SAFE_OUTPUT_PATH), 'FOREIGN_TARGET');
+    assert.equal(fsIo.existing.has(SAFE_OUTPUT_TMP_PATH), false);
+    assert.equal(writeStdout.calls[0].includes('FOREIGN_TARGET'), false);
+    for (const chunk of writeStderr.calls) {
+      assert.equal(chunk.includes('FOREIGN_TARGET'), false);
+      assert.equal(chunk.includes(writeStdout.calls[0]), false);
+    }
+  });
+
+  it('does not execute temp access error.code getters or leak proxy traps', async () => {
+    let getterCalls = 0;
+    const getterError = {};
+    Object.defineProperty(getterError, 'code', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return 'ENOENT';
+      },
+    });
+    const getterFs = recordingSafeOutputFs({
+      accessError: getterError,
+      accessErrorPath: SAFE_OUTPUT_TMP_PATH,
+    });
+    const getterFetch = recordingFetch();
+    const getterOut = recordingWriter();
+    const getterErr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: executeArgvWithSafeOutput(),
+          readFileImpl: recordingReadFile(),
+          fetchImpl: getterFetch,
+          writeStdout: getterOut,
+          writeStderr: getterErr,
+          ...safeOutputFsOptions(getterFs),
+        }),
+      { fetchImpl: getterFetch, writeStdout: getterOut, writeStderr: getterErr },
+    );
+    assert.equal(getterCalls, 0);
+    assert.equal(getterFetch.calls.length, 0);
+    assert.equal(getterFs.writes.length, 0);
+    assert.equal(getterFs.links.length, 0);
+    assert.equal(getterFs.unlinks.length, 0);
+    assert.deepEqual(getterFs.accesses, [SAFE_OUTPUT_PATH, SAFE_OUTPUT_TMP_PATH]);
+
+    const proxyError = new Proxy(
+      {},
+      {
+        get() {
+          getterCalls += 1;
+          throw new Error(SENTINELS.getter);
+        },
+        getOwnPropertyDescriptor() {
+          throw new Error(SENTINELS.getter);
+        },
+      },
+    );
+    const proxyFs = recordingSafeOutputFs({
+      accessError: proxyError,
+      accessErrorPath: SAFE_OUTPUT_TMP_PATH,
+    });
+    const proxyFetch = recordingFetch();
+    const proxyOut = recordingWriter();
+    const proxyErr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: executeArgvWithSafeOutput(),
+          readFileImpl: recordingReadFile(),
+          fetchImpl: proxyFetch,
+          writeStdout: proxyOut,
+          writeStderr: proxyErr,
+          ...safeOutputFsOptions(proxyFs),
+        }),
+      { fetchImpl: proxyFetch, writeStdout: proxyOut, writeStderr: proxyErr },
+    );
+    assert.equal(getterCalls, 0);
+    assert.equal(proxyFetch.calls.length, 0);
+    assert.equal(proxyFs.writes.length, 0);
+    assert.equal(proxyFs.links.length, 0);
+    assert.equal(proxyFs.unlinks.length, 0);
+  });
+
+  for (const missing of ['writeFileImpl', 'linkImpl', 'unlinkImpl', 'accessImpl']) {
+    it(`rejects missing ${missing} before env or HTTP`, async () => {
+      const fsIo = recordingSafeOutputFs();
+      const readFileImpl = recordingReadFile();
+      const fetchImpl = recordingFetch();
+      const writeStdout = recordingWriter();
+      const writeStderr = recordingWriter();
+      await assertSafeFailure(
+        () =>
+          main({
+            argv: executeArgvWithSafeOutput(),
+            readFileImpl,
+            fetchImpl,
+            writeStdout,
+            writeStderr,
+            ...fsOptionsWithout(fsIo, missing),
+          }),
+        { readFileImpl, fetchImpl, writeStdout, writeStderr },
+      );
+      assert.equal(fetchImpl.calls.length, 0);
+      assert.equal(datasetReads(readFileImpl).length, 0);
+      assert.equal(envReads(readFileImpl).length, 0);
+      assert.equal(fsIo.writes.length, 0);
+      assert.equal(fsIo.links.length, 0);
+      assert.equal(fsIo.unlinks.length, 0);
+      assert.equal(fsIo.accesses.length, 0);
+    });
+  }
+
+  it('rejects a relative or duplicate safe-output-file before HTTP', async () => {
+    const fsIo = recordingSafeOutputFs();
+    const fetchImpl = recordingFetch();
+    const relativeOut = recordingWriter();
+    const relativeErr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: [...executeArgv(), '--safe-output-file', 'relative-result.json'],
+          readFileImpl: recordingReadFile(),
+          fetchImpl,
+          writeStdout: relativeOut,
+          writeStderr: relativeErr,
+          ...safeOutputFsOptions(fsIo),
+        }),
+      { fetchImpl, writeStdout: relativeOut, writeStderr: relativeErr },
+    );
+    const duplicateOut = recordingWriter();
+    const duplicateErr = recordingWriter();
+    await assertSafeFailure(
+      () =>
+        main({
+          argv: [...executeArgvWithSafeOutput(), '--safe-output-file', SAFE_OUTPUT_PATH],
+          readFileImpl: recordingReadFile(),
+          fetchImpl,
+          writeStdout: duplicateOut,
+          writeStderr: duplicateErr,
+          ...safeOutputFsOptions(fsIo),
+        }),
+      { fetchImpl, writeStdout: duplicateOut, writeStderr: duplicateErr },
+    );
+    assert.equal(fsIo.writes.length, 0);
   });
 });
