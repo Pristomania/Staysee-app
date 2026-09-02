@@ -5,6 +5,7 @@
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high']);
+const MAX_TOKENS_PARAMETERS = new Set(['max_completion_tokens', 'max_tokens']);
 const ITEM_FIELDS = Object.freeze([
   'itemRef',
   'kind',
@@ -545,7 +546,14 @@ export function createOpenRouterAdapter(options) {
   const inspected = inspectRecordPartial(
     options,
     ['transport', 'apiKey', 'model', 'maxOutputTokens'],
-    ['appTitle', 'appUrl', 'reasoningEffort', 'responseContract'],
+    [
+      'appTitle',
+      'appUrl',
+      'reasoningEffort',
+      'responseContract',
+      'allowFallbacks',
+      'maxTokensParameter',
+    ],
     'options',
     'config',
   );
@@ -582,6 +590,18 @@ export function createOpenRouterAdapter(options) {
   ) {
     throw fail('config', 'responseContract is invalid');
   }
+  if (
+    inspected.allowFallbacks !== undefined &&
+    typeof inspected.allowFallbacks !== 'boolean'
+  ) {
+    throw fail('config', 'allowFallbacks is invalid');
+  }
+  if (
+    inspected.maxTokensParameter !== undefined &&
+    !MAX_TOKENS_PARAMETERS.has(inspected.maxTokensParameter)
+  ) {
+    throw fail('config', 'maxTokensParameter is invalid');
+  }
 
   const transport = inspected.transport;
   const apiKey = inspected.apiKey;
@@ -590,6 +610,9 @@ export function createOpenRouterAdapter(options) {
   const appTitle = inspected.appTitle;
   const appUrl = inspected.appUrl;
   const reasoningEffort = inspected.reasoningEffort;
+  const allowFallbacks = inspected.allowFallbacks ?? false;
+  const maxTokensParameter =
+    inspected.maxTokensParameter ?? 'max_completion_tokens';
   const responseContract = inspected.responseContract ?? 'v1';
   const responseSchema =
     responseContract === 'v2'
@@ -619,19 +642,19 @@ export function createOpenRouterAdapter(options) {
           { role: 'user', content: JSON.stringify(safeRequest.input) },
         ],
         stream: false,
-        max_completion_tokens: maxOutputTokens,
         response_format: {
           type: 'json_schema',
           json_schema: structuredClone(responseSchema),
         },
         provider: {
-          allow_fallbacks: false,
+          allow_fallbacks: allowFallbacks,
           require_parameters: true,
           data_collection: 'deny',
           zdr: true,
         },
       },
     };
+    transportRequest.body[maxTokensParameter] = maxOutputTokens;
     if (reasoningEffort === 'low' || reasoningEffort === 'medium' || reasoningEffort === 'high') {
       transportRequest.body.reasoning = { effort: reasoningEffort };
     }

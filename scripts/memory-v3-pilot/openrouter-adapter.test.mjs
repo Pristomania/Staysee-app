@@ -294,6 +294,20 @@ describe('createOpenRouterAdapter config', () => {
       'config',
     );
   });
+
+  it('rejects a non-boolean allowFallbacks option', async () => {
+    await assertRejectsStage(
+      () => createOpenRouterAdapter(validOptions({ allowFallbacks: 'yes' })),
+      'config',
+    );
+  });
+
+  it('rejects an unsupported maxTokensParameter option', async () => {
+    await assertRejectsStage(
+      () => createOpenRouterAdapter(validOptions({ maxTokensParameter: 'tokens' })),
+      'config',
+    );
+  });
 });
 
 describe('createOpenRouterAdapter transport request', () => {
@@ -394,6 +408,34 @@ describe('createOpenRouterAdapter transport request', () => {
     ]);
     assert.deepEqual(evidence.properties.supportType, { type: ['string', 'null'] });
     assert.deepEqual(evidence.properties.episodeKey, { type: ['string', 'null'] });
+  });
+
+  it('allows provider fallback only when explicitly enabled and keeps privacy locks', async () => {
+    const transport = recordingTransport();
+    const adapter = createOpenRouterAdapter(
+      validOptions({ transport, allowFallbacks: true }),
+    );
+
+    await adapter(buildExtractorRequest(sampleCase()));
+
+    const provider = transport.calls[0].body.provider;
+    assert.equal(provider.allow_fallbacks, true);
+    assert.equal(provider.require_parameters, true);
+    assert.equal(provider.data_collection, 'deny');
+    assert.equal(provider.zdr, true);
+  });
+
+  it('uses max_tokens when explicitly selected for a compatible model', async () => {
+    const transport = recordingTransport();
+    const adapter = createOpenRouterAdapter(
+      validOptions({ transport, maxTokensParameter: 'max_tokens' }),
+    );
+
+    await adapter(buildExtractorRequest(sampleCase()));
+
+    const body = transport.calls[0].body;
+    assert.equal(body.max_tokens, 1200);
+    assert.equal('max_completion_tokens' in body, false);
   });
 
   it('adds Referer and Title only for valid https appUrl and appTitle', async () => {

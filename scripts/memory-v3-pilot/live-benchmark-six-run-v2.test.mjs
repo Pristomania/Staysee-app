@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { SIX_CASE_BENCHMARK_V2_CASE_IDS } from './live-benchmark-six-v2.mjs';
 import { main } from './live-benchmark-six-run-v2.mjs';
 
-const MODEL = 'openai/gpt-5.6-luna';
+const MODEL = 'google/gemini-3.7-flash';
 const API_KEY = 'test-key';
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
 const ENV_PATH = 'C:\\synthetic\\.env';
@@ -33,7 +33,7 @@ const SENTINELS = Object.freeze({
 const REAL_GOLDEN_TEXT = readFileSync(new URL('./memory-v3-ru-golden.v2.json', import.meta.url), 'utf8');
 
 function dryArgv() {
-  return ['--model', MODEL, '--max-budget-usd', '0.032'];
+  return ['--model', MODEL, '--max-budget-usd', '0.11'];
 }
 
 function executeArgv() {
@@ -206,9 +206,9 @@ describe('live-benchmark-six-run-v2 dry-run', () => {
     assert.equal(parsed.semanticReviewPacket, null);
     assert.equal(parsed.benchmarkResult.providerHttpCalls, 0);
     assert.deepEqual(parsed.benchmarkResult.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
-    assert.equal(parsed.benchmarkResult.extractorVersion, 'memory-v3-openrouter-luna-six-v2');
-    assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.03113088');
-    assert.equal(parsed.benchmarkResult.configuredBudget.maxBudgetUsd, 0.032);
+    assert.equal(parsed.benchmarkResult.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-six-v2');
+    assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.100728');
+    assert.equal(parsed.benchmarkResult.configuredBudget.maxBudgetUsd, 0.11);
     assert.equal(returned.semanticReviewPacket, null);
     assertNoSecrets(returned);
   });
@@ -404,7 +404,7 @@ describe('live-benchmark-six-run-v2 direct dry-run command', () => {
     const script = fileURLToPath(new URL('./live-benchmark-six-run-v2.mjs', import.meta.url));
     const result = spawnSync(
       process.execPath,
-      [script, '--model', MODEL, '--max-budget-usd', '0.032'],
+      [script, '--model', MODEL, '--max-budget-usd', '0.11'],
       {
         encoding: 'utf8',
         env: { ...process.env, OPENROUTER_API_KEY: SENTINELS.key },
@@ -417,7 +417,7 @@ describe('live-benchmark-six-run-v2 direct dry-run command', () => {
     assert.equal(parsed.benchmarkResult.providerHttpCalls, 0);
     assert.equal(parsed.semanticReviewPacket, null);
     assert.deepEqual(parsed.benchmarkResult.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
-    assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.03113088');
+    assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.100728');
     assertNoSecrets(parsed);
     assert.equal(result.stdout.includes(SAFETY_03_ASSISTANT_TEXT), false);
     assert.equal(result.stdout.includes(SENTINELS.key), false);

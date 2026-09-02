@@ -234,7 +234,7 @@ V2 additive: new `*-v2.mjs` modules and a separate Golden V2. Memory V3 V2 is no
 - datasetId `memory-v3-ru-golden-v2`
 - version `2.0.0`
 - file `memory-v3-ru-golden.v2.json`
-- extractor version `memory-v3-openrouter-luna-six-v2`
+- extractor version `memory-v3-openrouter-gemini-3.7-flash-six-v2`
 
 ### What V2 changes
 
@@ -244,7 +244,9 @@ Recurrence `supports` use typed `supportType`. Only `episode_observation` rows p
 
 Structural evaluation does not judge semantic correctness or forbidden remembered meaning. `buildSixCaseSemanticReviewPacketV2` is a local human-review packet; `semanticVerdict`, `forbiddenMeaningVerdict`, and `reviewerNotes` stay `null` until a person reviews it. Offline tests do not prove model behavior.
 
-The V2 six-case paid benchmark has not been run.
+The first V2 paid audit used Luna and exposed an adapter schema mismatch, which is now covered by offline tests. A later Luna rerun was incomplete because the provider returned top-level generation errors. That result is not a V2 quality pass.
+
+The Gemini control run made 6 sequential POSTs and all 6 returned openrouter_http_404, so it produced no extraction or quality result. The root cause was another provider-parameter mismatch: Gemini supports max_tokens, not max_completion_tokens, while `require_parameters: true` was enforced. The adapter now selects the token-limit field explicitly per profile and preserves the Luna default. Gemini has not been rerun after this offline fix.
 
 ### Offline tests
 
@@ -255,9 +257,9 @@ node --test scripts/memory-v3-pilot/*.test.mjs
 ### V2 six-case dry-run
 
 ```bash
-node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model openai/gpt-5.6-luna --max-budget-usd 0.032
+node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model google/gemini-3.7-flash --max-budget-usd 0.11
 ```
 
 This V2 dry-run makes 0 provider HTTP calls. It does not require and does not read `.env`. Output is printed as one safe JSON object and is not saved to disk automatically.
 
-`--execute-six-paid-requests` on this V2 runner is forbidden until a separate Nastya authorization. A later authorized V2 execute would use Golden V2 and `memory-v3-openrouter-luna-six-v2`. It is not the V1 command `live-benchmark-six-run.mjs`. It would make at most 6 sequential POSTs, with no retry, fallback, or repair. Hard budget is `$0.032`. Configured worst-case ceiling is `$0.03113088`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` stay `null` / unknown until provider telemetry is intentionally projected and a real run produces a separate safe accounting.
+The authorized control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.

@@ -12,21 +12,21 @@ import { createOpenRouterAdapter, projectSafeOpenRouterDiagnostic } from './open
 import { createOpenRouterFetchTransport, projectSafeFetchDiagnostic } from './openrouter-fetch-transport.mjs';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const ALLOWED_MODEL = 'openai/gpt-5.6-luna';
-const ALLOWED_REASONING = 'none';
+const ALLOWED_MODEL = 'google/gemini-3.7-flash';
+const ALLOWED_REASONING = 'low';
 const ALLOWED_MAX_OUTPUT_TOKENS = 1200;
 const ALLOWED_TIMEOUT_MS = 60000;
 const ALLOWED_MAX_RESPONSE_BYTES = 1_000_000;
 const ALLOWED_MAX_HTTP_CALLS = 6;
-const ALLOWED_MAX_BUDGET_USD = 0.032;
+const ALLOWED_MAX_BUDGET_USD = 0.11;
 const REQUIRED_DATASET_ID = 'memory-v3-ru-golden-v2';
 const REQUIRED_DATASET_VERSION = '2.0.0';
 const ALLOWED_BUDGET_FIXED = Object.freeze({
   caseCount: 6,
   maxInputTokensPerCase: 16384,
   maxOutputTokensPerCase: 1200,
-  inputUsdPerMillion: 0.22,
-  outputUsdPerMillion: 1.32,
+  inputUsdPerMillion: 0.75,
+  outputUsdPerMillion: 3.75,
   maxRequests: 6,
 });
 const EXTRACTOR_V2_DIAGNOSTIC_CODES = Object.freeze(
@@ -51,7 +51,8 @@ export const SIX_CASE_BENCHMARK_V2_CASE_IDS = Object.freeze([
   'memv3-ru-safety-03',
 ]);
 
-export const SIX_CASE_BENCHMARK_V2_EXTRACTOR_VERSION = 'memory-v3-openrouter-luna-six-v2';
+export const SIX_CASE_BENCHMARK_V2_EXTRACTOR_VERSION =
+  'memory-v3-openrouter-gemini-3.7-flash-six-v2';
 
 const OWN_ERRORS = new WeakSet();
 const OPTION_REQUIRED = Object.freeze([
@@ -581,6 +582,8 @@ export async function runSixCaseLiveBenchmarkV2(options) {
       maxOutputTokens: ALLOWED_MAX_OUTPUT_TOKENS,
       reasoningEffort: ALLOWED_REASONING,
       responseContract: 'v2',
+      allowFallbacks: true,
+      maxTokensParameter: 'max_tokens',
     }),
     recorder,
   );

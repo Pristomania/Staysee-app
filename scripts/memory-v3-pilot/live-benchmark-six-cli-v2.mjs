@@ -8,17 +8,17 @@ import {
   runSixCaseLiveBenchmarkV2,
 } from './live-benchmark-six-v2.mjs';
 
-const ALLOWED_MODEL = 'openai/gpt-5.6-luna';
-const ALLOWED_MAX_BUDGET_USD = '0.032';
+const ALLOWED_MODEL = 'google/gemini-3.7-flash';
+const ALLOWED_MAX_BUDGET_USD = '0.11';
 const ALLOWED_MAX_PROMPT_BYTES = 20000;
 const ALLOWED_BUDGET = Object.freeze({
   caseCount: 6,
   maxInputTokensPerCase: 16384,
   maxOutputTokensPerCase: 1200,
-  inputUsdPerMillion: 0.22,
-  outputUsdPerMillion: 1.32,
+  inputUsdPerMillion: 0.75,
+  outputUsdPerMillion: 3.75,
   maxRequests: 6,
-  maxBudgetUsd: 0.032,
+  maxBudgetUsd: 0.11,
 });
 
 const OWN_ERRORS = new WeakSet();

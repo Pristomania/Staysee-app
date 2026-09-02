@@ -17,8 +17,8 @@ import {
   runSixCaseLiveBenchmarkV2,
 } from './live-benchmark-six-v2.mjs';
 
-const MODEL = 'openai/gpt-5.6-luna';
-const EXTRACTOR_VERSION = 'memory-v3-openrouter-luna-six-v2';
+const MODEL = 'google/gemini-3.7-flash';
+const EXTRACTOR_VERSION = 'memory-v3-openrouter-gemini-3.7-flash-six-v2';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = 'test-memory-v3-six-case-v2-key';
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
@@ -111,10 +111,10 @@ function allowedBudget(overrides = {}) {
     caseCount: 6,
     maxInputTokensPerCase: 16384,
     maxOutputTokensPerCase: 1200,
-    inputUsdPerMillion: 0.22,
-    outputUsdPerMillion: 1.32,
+    inputUsdPerMillion: 0.75,
+    outputUsdPerMillion: 3.75,
     maxRequests: 6,
-    maxBudgetUsd: 0.032,
+    maxBudgetUsd: 0.11,
     ...overrides,
   };
 }
@@ -319,28 +319,28 @@ describe('runSixCaseLiveBenchmarkV2 selection preflight', () => {
 });
 
 describe('runSixCaseLiveBenchmarkV2 budget preflight', () => {
-  it('passes the exact six-case ceiling and the $0.032 hard gate without HTTP', async () => {
+  it('passes the exact Gemini six-case ceiling and the $0.11 hard gate without HTTP', async () => {
     const exact = await runSixCaseLiveBenchmarkV2(
       validOptions({
         execute: false,
-        budget: allowedBudget({ maxBudgetUsd: 0.03113088 }),
+        budget: allowedBudget({ maxBudgetUsd: 0.100728 }),
       }),
     );
     assert.equal(exact.providerHttpCalls, 0);
     assert.equal(exact.configuredBudget.gate, 'PASS');
-    assert.equal(exact.configuredBudget.absoluteCostUsd, '0.03113088');
-    assert.equal(exact.configuredBudget.inputCostUsd, '0.02162688');
-    assert.equal(exact.configuredBudget.outputCostUsd, '0.009504');
+    assert.equal(exact.configuredBudget.absoluteCostUsd, '0.100728');
+    assert.equal(exact.configuredBudget.inputCostUsd, '0.073728');
+    assert.equal(exact.configuredBudget.outputCostUsd, '0.027');
     assert.equal(exact.configuredBudget.absoluteMaxRequests, 6);
-    assert.equal(exact.configuredBudget.maxBudgetUsd, 0.03113088);
+    assert.equal(exact.configuredBudget.maxBudgetUsd, 0.100728);
 
     const hard = await runSixCaseLiveBenchmarkV2(validOptions({ execute: false }));
     assert.equal(hard.configuredBudget.gate, 'PASS');
-    assert.equal(hard.configuredBudget.maxBudgetUsd, 0.032);
+    assert.equal(hard.configuredBudget.maxBudgetUsd, 0.11);
     assert.equal(hard.providerHttpCalls, 0);
   });
 
-  it('fails below $0.03113088 or mismatched counts with zero HTTP calls', async () => {
+  it('fails below $0.100728 or mismatched counts with zero HTTP calls', async () => {
     const fetchImpl = recordingFetch();
     await assertPreflightReject(
       () =>
@@ -349,7 +349,7 @@ describe('runSixCaseLiveBenchmarkV2 budget preflight', () => {
             execute: true,
             apiKey: API_KEY,
             fetchImpl,
-            budget: allowedBudget({ maxBudgetUsd: 0.03113087 }),
+            budget: allowedBudget({ maxBudgetUsd: 0.10072799 }),
           }),
         ),
       fetchImpl,
@@ -471,11 +471,11 @@ describe('runSixCaseLiveBenchmarkV2 fake fetch execution', () => {
         assert.equal(call.init.method, 'POST');
         const httpBody = JSON.parse(call.init.body);
         assert.equal(httpBody.model, MODEL);
-        assert.equal(httpBody.max_completion_tokens, 1200);
-        assert.equal('max_tokens' in httpBody, false);
-        assert.equal('reasoning' in httpBody, false);
+        assert.equal(httpBody.max_tokens, 1200);
+        assert.equal('max_completion_tokens' in httpBody, false);
+        assert.deepEqual(httpBody.reasoning, { effort: 'low' });
         assert.equal('reasoning_effort' in httpBody, false);
-        assert.equal(httpBody.provider.allow_fallbacks, false);
+        assert.equal(httpBody.provider.allow_fallbacks, true);
         assert.equal(httpBody.provider.require_parameters, true);
         assert.equal(httpBody.provider.data_collection, 'deny');
         assert.equal(httpBody.provider.zdr, true);

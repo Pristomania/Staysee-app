@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { SIX_CASE_BENCHMARK_V2_CASE_IDS } from './live-benchmark-six-v2.mjs';
 import { runSixCaseBenchmarkFromArgvV2 } from './live-benchmark-six-cli-v2.mjs';
 
-const MODEL = 'openai/gpt-5.6-luna';
+const MODEL = 'google/gemini-3.7-flash';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = 'test-key';
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
@@ -33,7 +33,7 @@ function loadGoldenDataset() {
 }
 
 function dryArgv() {
-  return ['--model', MODEL, '--max-budget-usd', '0.032'];
+  return ['--model', MODEL, '--max-budget-usd', '0.11'];
 }
 
 function executeArgv() {
@@ -140,9 +140,9 @@ describe('runSixCaseBenchmarkFromArgvV2 dry-run', () => {
       assert.equal(result.providerHttpCalls, 0);
       assert.equal(result.attemptedCount, 0);
       assert.deepEqual(result.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
-      assert.equal(result.extractorVersion, 'memory-v3-openrouter-luna-six-v2');
-      assert.equal(result.configuredBudget.absoluteCostUsd, '0.03113088');
-      assert.equal(result.configuredBudget.maxBudgetUsd, 0.032);
+      assert.equal(result.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-six-v2');
+      assert.equal(result.configuredBudget.absoluteCostUsd, '0.100728');
+      assert.equal(result.configuredBudget.maxBudgetUsd, 0.11);
       assert.equal(Object.prototype.hasOwnProperty.call(result, 'keyPresent'), false);
       assertNoSecrets(result);
     } finally {
@@ -183,7 +183,7 @@ describe('runSixCaseBenchmarkFromArgvV2 execute fake fetch', () => {
       assert.equal(maxActive, 1);
       assert.deepEqual(order, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
       assert.equal(result.successCount, 6);
-      assert.equal(result.extractorVersion, 'memory-v3-openrouter-luna-six-v2');
+      assert.equal(result.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-six-v2');
       assert.equal(process.env.OPENROUTER_API_KEY, undefined);
       assert.equal(JSON.stringify(result).includes(API_KEY), false);
       for (const call of fetchImpl.calls) {
@@ -191,9 +191,9 @@ describe('runSixCaseBenchmarkFromArgvV2 execute fake fetch', () => {
         assert.equal(call.init.method, 'POST');
         const httpBody = JSON.parse(call.init.body);
         assert.equal(httpBody.model, MODEL);
-        assert.equal(httpBody.max_completion_tokens, 1200);
-        assert.equal('max_tokens' in httpBody, false);
-        assert.equal(httpBody.provider.allow_fallbacks, false);
+        assert.equal(httpBody.max_tokens, 1200);
+        assert.equal('max_completion_tokens' in httpBody, false);
+        assert.equal(httpBody.provider.allow_fallbacks, true);
         assert.equal(httpBody.provider.require_parameters, true);
         assert.equal(httpBody.provider.data_collection, 'deny');
         assert.equal(httpBody.provider.zdr, true);
@@ -236,7 +236,7 @@ describe('runSixCaseBenchmarkFromArgvV2 argv rejection', () => {
       () =>
         runSixCaseBenchmarkFromArgvV2({
           ...io,
-          argv: ['--model', 'openai/gpt-5-mini', '--max-budget-usd', '0.032'],
+          argv: ['--model', 'openai/gpt-5.6-luna', '--max-budget-usd', '0.11'],
         }),
       { readEnvText, fetchImpl, expectedReads: 0 },
     );
@@ -244,7 +244,7 @@ describe('runSixCaseBenchmarkFromArgvV2 argv rejection', () => {
       () =>
         runSixCaseBenchmarkFromArgvV2({
           ...io,
-          argv: ['--model', MODEL, '--max-budget-usd', '0.03113088'],
+          argv: ['--model', MODEL, '--max-budget-usd', '0.100728'],
         }),
       { readEnvText, fetchImpl, expectedReads: 0 },
     );
@@ -252,7 +252,7 @@ describe('runSixCaseBenchmarkFromArgvV2 argv rejection', () => {
       () =>
         runSixCaseBenchmarkFromArgvV2({
           ...io,
-          argv: ['--model', MODEL, '--max-budget-usd', '0.033'],
+          argv: ['--model', MODEL, '--max-budget-usd', '0.12'],
         }),
       { readEnvText, fetchImpl, expectedReads: 0 },
     );
