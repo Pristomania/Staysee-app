@@ -165,7 +165,9 @@ A profile is a JSON-data-only plain object created in source and owned by the re
 
 There is no nested `budget` field on a profile. All budget numbers live as top-level own keys listed below. A key named `budget` on a profile is an unknown field and fails validation.
 
-Runtime `options.budget` on engine/CLI calls is a separate compatibility object. It is not stored on the profile. After `getLiveBenchmarkProfileV2(profileId)` returns the registry constant `canonical`, every own field of `options.budget` must be a data descriptor and must strictly equal the corresponding top-level canonical fields:
+Runtime `options.budget` on engine/CLI calls is a separate compatibility object. It is not stored on the profile. After `getLiveBenchmarkProfileV2(profileId)` returns the registry constant `canonical`, `options.budget` must be JSON-data-only with exactly seven own enumerable data fields. Extra keys fail. Missing keys fail.
+
+The six non-cap fields must strictly equal the corresponding top-level canonical fields:
 
 | `options.budget` key | Must equal |
 |----------------------|------------|
@@ -175,9 +177,16 @@ Runtime `options.budget` on engine/CLI calls is a separate compatibility object.
 | `inputUsdPerMillion` | `canonical.inputUsdPerMillion` |
 | `outputUsdPerMillion` | `canonical.outputUsdPerMillion` |
 | `maxRequests` | `canonical.maxRequests` |
-| `maxBudgetUsd` | `canonical.maxBudgetUsd` |
 
-`options.budget` allows exactly those seven keys. Extra keys fail. Missing keys fail. Callers cannot widen N or prices through `options.budget`.
+`options.budget.maxBudgetUsd` is a finite number. It is not required to strictly equal `canonical.maxBudgetUsd`. The engine accepts a caller cap in the closed range from the profile's computed `absoluteCostUsd` up to `canonical.maxBudgetUsd`:
+
+- `maxBudgetUsd <= canonical.maxBudgetUsd`; a value above the canonical hard maximum is rejected before HTTP.
+- `assertBudgetGate(options.budget)` must PASS, which requires `maxBudgetUsd >=` the calculated `absoluteCostUsd`; a value below the actual configured ceiling is rejected before HTTP.
+- the public `configuredBudget.maxBudgetUsd` keeps the caller value; the engine does not rewrite a sufficient smaller cap up to the hard maximum.
+- CLI still accepts only the exact string `canonical.maxBudgetUsdArg`.
+- callers cannot widen N, prices, or the canonical hard maximum through `options.budget`.
+
+A smaller sufficient caller cap is safe: it cannot increase spend relative to the canonical hard maximum.
 
 Required profile own keys, exactly these, no extras:
 
@@ -459,7 +468,7 @@ Also reject a `profile` field as unknown, including when the value is the regist
 
 Required RED tests for that rejection list live in `live-benchmark-engine-v2.test.mjs` (object APIs) and `live-benchmark-profiles-v2.test.mjs` (direct lookup).
 
-After resolve, `options.model === canonical.model`, `options.extractorVersion === canonical.extractorVersion`, `options.maxPromptRequestBytesPerCase === canonical.maxPromptRequestBytesPerCase`, and `options.budget` strictly equals the seven top-level budget fields as specified in Trusted profile schema. Callers cannot override N, caseIds, prices, model, branding, or HTTP error text.
+After resolve, `options.model === canonical.model`, `options.extractorVersion === canonical.extractorVersion`, `options.maxPromptRequestBytesPerCase === canonical.maxPromptRequestBytesPerCase`, and `options.budget` matches Trusted profile schema: the six non-cap fields strictly equal canonical, while `maxBudgetUsd` is a finite number `<= canonical.maxBudgetUsd` that still passes `assertBudgetGate`. Callers cannot override N, caseIds, prices, the canonical hard maximum, model, branding, or HTTP error text.
 
 `buildProfileSemanticReviewPacketV2` required keys, exactly: `profileId`, `dataset`, `benchmarkResult`. No `profile` object. `options.profileId` is an own enumerable string data descriptor. After that check, it passes the primitive string to `getLiveBenchmarkProfileV2` before aligning cases.
 
@@ -606,7 +615,7 @@ Dry-run composition path skips env, fetch, packet, and file write. Direct import
 
 ### Engine (always, including dry-run)
 
-13. Inspect options JSON-data-only. Require `options.profileId` to be an own enumerable string data descriptor. Then resolve `canonical = getLiveBenchmarkProfileV2` with that primitive string. Reject model/extractorVersion/`options.budget` mismatch against that canonical constant.
+13. Inspect options JSON-data-only. Require `options.profileId` to be an own enumerable string data descriptor. Then resolve `canonical = getLiveBenchmarkProfileV2` with that primitive string. Reject model/extractorVersion mismatch. Reject `options.budget` when any of the six non-cap fields differs from canonical, when `maxBudgetUsd` is not a finite number, when `maxBudgetUsd > canonical.maxBudgetUsd`, or when extra/missing budget keys are present.
 14. Inspect dataset identity `memory-v3-ru-golden-v2` / `2.0.0`. Dense `dataset.cases`. Each case `validateCaseV2`.
 15. Select profile cases: every `canonical.caseIds[i]` exists exactly once in the dataset; selection array is dense and in canonical order. Missing, extra-for-selection, or duplicate ids in the dataset for a requested id fail. Dataset may contain other cases; they are not executed.
 16. Measure `buildExtractorRequestV2` bytes per selected case against `canonical.maxPromptRequestBytesPerCase`.
@@ -832,7 +841,7 @@ None. Remaining choices are closed as follows:
 - Object APIs require `options.profileId` as an own enumerable string data descriptor and reject getters without executing them.
 - Spread copies, frozen clones, and structurally identical objects are not trusted.
 - Callers cannot pass `maxRequests` or `httpCapError` into the bounded-fetch helper.
-- Nested `profile.budget` is forbidden; runtime `options.budget` is a separate seven-field compatibility object.
+- Nested `profile.budget` is forbidden; runtime `options.budget` is a separate seven-field compatibility object whose six non-cap fields strictly equal canonical while `maxBudgetUsd` may be any finite cap from the computed ceiling through `canonical.maxBudgetUsd`.
 - Profile own-key schema matches both exact tables, including six branding keys.
 - Engine/CLI/run branding is fully defined per profile; `errorPrefix` / `errorName` are gone.
 - Dependency map has no `and/or`; shared modules never import wrappers.

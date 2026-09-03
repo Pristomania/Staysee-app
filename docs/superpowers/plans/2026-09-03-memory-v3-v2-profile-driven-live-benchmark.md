@@ -23,7 +23,7 @@
 - Direct lookup `getLiveBenchmarkProfileV2(profileId)` accepts only a primitive non-empty string (`typeof profileId === "string"`). That argument has no property descriptor.
 - Object APIs require `options.profileId` to be an own enumerable string data descriptor and must not execute getters.
 - Profile object, spread copy, frozen clone, structurally identical copy, argv JSON, and filesystem profile loaders are forbidden.
-- Budget numbers live as top-level profile fields. There is no nested `profile.budget`. Runtime `options.budget` is a separate seven-key object compared to those top-level values.
+- Budget numbers live as top-level profile fields. There is no nested `profile.budget`. Runtime `options.budget` is a separate seven-key object. The six non-cap fields strictly equal canonical. `maxBudgetUsd` is a finite number `<= canonical.maxBudgetUsd` that still passes `assertBudgetGate`; a smaller sufficient caller cap is accepted and is not rewritten. Callers cannot widen N, prices, or the canonical hard maximum. CLI still accepts only `canonical.maxBudgetUsdArg`.
 - HTTP cap helper is `createProfileBoundedOpenRouterFetch(fetchImpl, profileId)`. It reads `maxRequests` and `httpCapError` only from the registry. There is no public `createAtMostNOpenRouterFetch`.
 - Bounded-fetch order is: if `callCount >= canonical.maxRequests` throw the canonical cap error; then `callCount += 1`; then call inner `fetchImpl` once. Inner throw/reject still counts as an attempt. The rejected extra call does not invoke inner fetch.
 - Engine, CLI, and run branding come only from the canonical profile. Callers cannot pass prefix, name, or `httpCapError`.
@@ -93,7 +93,7 @@ Do not edit these files in this plan:
 
 Expected SHA256 for the spec, checked on every Frozen reprint:
 
-`29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE`
+`69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A`
 
 Expected SHA256 for the artifact, checked on every Frozen reprint:
 
@@ -601,7 +601,7 @@ for n in names:
 spec=Path('docs/superpowers/specs/2026-09-03-memory-v3-v2-profile-driven-live-benchmark-design.md')
 spec_hash=hashlib.sha256(spec.read_bytes()).hexdigest().upper()
 print('SPEC', spec_hash)
-if spec_hash != '29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE':
+if spec_hash != '69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A':
     sys.exit(1)
 art_hash=hashlib.sha256((root/'_tmp-live-benchmark-six-v2-gemini-20260902.json').read_bytes()).hexdigest().upper()
 if art_hash != '4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB':
@@ -609,7 +609,7 @@ if art_hash != '4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB
 "
 ```
 
-Copy the printed table into the task report. Tasks 2-8 must rerun this exact command. Spec hash must remain `29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE`. Artifact hash must remain `4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB`. Other Frozen hashes must match the Task 1 printout.
+Copy the printed table into the task report. Tasks 2-8 must rerun this exact command. Spec hash must remain `69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A`. Artifact hash must remain `4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB`. Other Frozen hashes must match the Task 1 printout.
 
 - [ ] **Step 4: Confirm working tree**
 
@@ -812,7 +812,7 @@ Expected: pass. fail 0.
 
 - [ ] **Step 5: Characterization plus full regression**
 
-Run the Task 1 characterization command and `node --test scripts/memory-v3-pilot/*.test.mjs`. Expected: fail 0; six-case totals not lower than Task 1. Rerun the Task 1 Frozen SHA256 command, including the spec hash `29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE`.
+Run the Task 1 characterization command and `node --test scripts/memory-v3-pilot/*.test.mjs`. Expected: fail 0; six-case totals not lower than Task 1. Rerun the Task 1 Frozen SHA256 command, including the spec hash `69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A`.
 
 - [ ] **Step 6: STOP for Codex review**
 
@@ -1501,7 +1501,7 @@ Must:
 - Import only profiles-v2 plus frozen V2 modules listed in the dependency map.
 - Inspect options as JSON-data-only. Required keys exactly: `dataset`, `profileId`, `model`, `extractorVersion`, `budget`, `maxPromptRequestBytesPerCase`, `execute`. Optional: `apiKey`, `fetchImpl`. Unknown keys fail. Getters fail.
 - Read `options.profileId` only as an own enumerable string data descriptor. Do not execute getters. Then call `getLiveBenchmarkProfileV2` with that primitive string.
-- Compare `options.model`, `options.extractorVersion`, `options.maxPromptRequestBytesPerCase`, and each of the seven `options.budget` keys to the canonical profile.
+- Compare `options.model`, `options.extractorVersion`, and `options.maxPromptRequestBytesPerCase` to the canonical profile. Compare the six non-cap `options.budget` keys with strict equality. Accept `maxBudgetUsd` as a finite number `<= canonical.maxBudgetUsd` that still passes `assertBudgetGate` (rejects below the computed ceiling and above the canonical hard maximum before HTTP).
 - Select Golden cases in canonical `caseIds` order. Dataset may contain other cases.
 - Measure `buildExtractorRequestV2` bytes against `canonical.maxPromptRequestBytesPerCase`.
 - `assertBudgetGate(options.budget)` and `configuredBudget.absoluteMaxRequests === canonical.maxRequests`.
@@ -2105,7 +2105,7 @@ node --input-type=module -e "import { readFileSync } from 'node:fs'; const files
 
 Expected: exit 0. Shared files must not import wrappers.
 
-Rerun the Task 1 Frozen SHA256 command. Spec hash must remain `29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE`. Artifact hash must remain `4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB`.
+Rerun the Task 1 Frozen SHA256 command. Spec hash must remain `69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A`. Artifact hash must remain `4C853A7FF2DEDDB2AE544DCE767B039F9E7A5DBC16B437CBDD1AB9DE76DD93FB`.
 
 - [ ] **Step 4: STOP for Codex review**
 
@@ -2150,7 +2150,7 @@ The report must include:
 - six-case characterization still GREEN
 - new tests GREEN
 - full glob fail 0
-- Frozen SHA256 unchanged, including spec `29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE`
+- Frozen SHA256 unchanged, including spec `69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A`
 - artifact SHA256 unchanged
 - no paid run
 - no claim that hypothesis-four was executed live
@@ -2200,7 +2200,7 @@ Do not add a paid step to Tasks 1-8.
 | HTTP cap: check `callCount >= N` before increment; inner throw counts | Task 3 |
 | Engine preflight negatives (dataset, model, budget, bytes) with 0 HTTP | Task 3 |
 | Hypothesis-four packet alignment and packet case-set rejects | Task 3 |
-| Spec SHA256 lock `29F44AA0D1E5FFD40B427445482E83BD3086F5DBF26B663E663F74A3BA8B5FAE` | Task 1, rechecked Tasks 2-8 |
+| Spec SHA256 lock `69CE05EFF0508DF7098F06C0AEA263AF3049992039B214CE39C0EEB1C907424A` | Task 1, rechecked Tasks 2-8 |
 | README claims scoped to `### V2 hypothesis-four dry-run` | Task 7
 | `createProfileBoundedOpenRouterFetch(fetchImpl, profileId)` reads N and error text from registry | Task 3 |
 | Keep `createAtMostSixOpenRouterFetch(fetchImpl)` as six wrapper | Task 4 |
@@ -2225,7 +2225,7 @@ Do not add a paid step to Tasks 1-8.
 
 - Shared signatures in Locked signatures match the spec.
 - Profile own-key list has 29 keys and matches both exact tables.
-- `options.budget` has the seven keys compared to top-level profile fields.
+- `options.budget` has seven keys. Six non-cap fields strictly equal canonical. `maxBudgetUsd` is a finite caller cap from the computed ceiling through `canonical.maxBudgetUsd`.
 - Six flags remain `--model`, `--max-budget-usd`, `--env-file`, `--execute-six-paid-requests`, plus composition-root `--safe-output-file`.
 - Hypothesis-four flags remain `--model`, `--max-budget-usd 0.075`, `--env-file`, `--execute-hypothesis-four-paid-requests`, plus composition-root `--safe-output-file`.
 - Six ceiling `0.100728` / hard `0.11`; hypothesis ceiling `0.067152` / hard `0.075`.
