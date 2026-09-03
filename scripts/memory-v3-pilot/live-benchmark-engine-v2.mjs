@@ -274,6 +274,124 @@ function cloneJsonData(value, path, canonical, active = new WeakSet()) {
   }
 }
 
+function ownEnumerableData(object, key, canonical) {
+  if (object === null || typeof object !== 'object') {
+    return { present: false };
+  }
+  const desc = guardedGetOwnPropertyDescriptor(
+    object,
+    key,
+    canonical,
+    'benchmarkResult has an invalid field',
+  );
+  if (
+    !desc ||
+    typeof desc.get === 'function' ||
+    typeof desc.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+    desc.enumerable !== true
+  ) {
+    return { present: false };
+  }
+  return { present: true, value: desc.value };
+}
+
+function projectPublicJson(value, canonical, active = new WeakSet()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw fail('evaluation is invalid', canonical);
+    return value;
+  }
+  if (typeof value !== 'object') {
+    throw fail('evaluation is invalid', canonical);
+  }
+  if (active.has(value)) {
+    throw fail('evaluation has an invalid shape', canonical);
+  }
+  active.add(value);
+  try {
+    if (guardedIsArray(value, canonical, 'evaluation has an invalid shape')) {
+      const entries = inspectDenseArray(value, 'evaluation', canonical);
+      const copy = [];
+      for (let index = 0; index < entries.length; index += 1) {
+        defineOwnData(copy, String(index), projectPublicJson(entries[index], canonical, active));
+      }
+      copy.length = entries.length;
+      return copy;
+    }
+    const keys = inspectPlainObject(value, 'evaluation', canonical);
+    const copy = {};
+    for (const key of keys) {
+      if (typeof key === 'symbol') continue;
+      const own = ownEnumerableData(value, key, canonical);
+      if (!own.present) continue;
+      defineOwnData(copy, key, projectPublicJson(own.value, canonical, active));
+    }
+    return copy;
+  } catch (error) {
+    if (isOwnError(error)) throw error;
+    throw fail('evaluation has an invalid shape', canonical);
+  } finally {
+    active.delete(value);
+  }
+}
+
+function projectPredictedItem(item, canonical) {
+  if (
+    item === null ||
+    typeof item !== 'object' ||
+    guardedIsArray(item, canonical, 'benchmarkResult.cases item is invalid')
+  ) {
+    throw fail('benchmarkResult.cases item is invalid', canonical);
+  }
+  const out = {};
+  const kind = ownEnumerableData(item, 'kind', canonical);
+  if (kind.present) defineOwnData(out, 'kind', kind.value);
+  const status = ownEnumerableData(item, 'status', canonical);
+  defineOwnData(out, 'status', status.present ? status.value ?? null : null);
+  const claim = ownEnumerableData(item, 'claim', canonical);
+  if (claim.present) defineOwnData(out, 'claim', claim.value);
+  const alternative = ownEnumerableData(item, 'alternative', canonical);
+  defineOwnData(out, 'alternative', alternative.present ? alternative.value ?? null : null);
+  return out;
+}
+
+function projectPredictedEvidenceRow(entry, canonical) {
+  if (
+    entry === null ||
+    typeof entry !== 'object' ||
+    guardedIsArray(entry, canonical, 'benchmarkResult.cases evidence is invalid')
+  ) {
+    throw fail('benchmarkResult.cases evidence is invalid', canonical);
+  }
+  const out = {};
+  const sourceMessageId = ownEnumerableData(entry, 'sourceMessageId', canonical);
+  if (sourceMessageId.present) defineOwnData(out, 'sourceMessageId', sourceMessageId.value);
+  const relation = ownEnumerableData(entry, 'relation', canonical);
+  if (relation.present) defineOwnData(out, 'relation', relation.value);
+  const supportType = ownEnumerableData(entry, 'supportType', canonical);
+  defineOwnData(out, 'supportType', supportType.present ? supportType.value ?? null : null);
+  const episodeKey = ownEnumerableData(entry, 'episodeKey', canonical);
+  if (episodeKey.present) defineOwnData(out, 'episodeKey', episodeKey.value);
+  return out;
+}
+
+function projectOwnArray(resultCase, key, projectRow, canonical) {
+  const own = ownEnumerableData(resultCase, key, canonical);
+  if (!own.present || !guardedIsArray(own.value, canonical, 'benchmarkResult.cases has an invalid field')) {
+    return [];
+  }
+  const entries = inspectDenseArray(own.value, 'benchmarkResult.cases', canonical);
+  const copy = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    defineOwnData(copy, String(index), projectRow(entries[index], canonical));
+  }
+  copy.length = entries.length;
+  return copy;
+}
+
 function inspectDataset(dataset, canonical) {
   const keys = inspectPlainObject(dataset, 'dataset', canonical);
   const copy = Object.create(null);
@@ -422,9 +540,18 @@ function inspectBudget(budget, canonical) {
     }
   }
   for (const field of BUDGET_KEYS) {
+    if (field === 'maxBudgetUsd') continue;
     if (!Object.prototype.hasOwnProperty.call(copied, field) || copied[field] !== canonical[field]) {
       throw fail('budget does not match the allowed profile contract', canonical);
     }
+  }
+  if (
+    typeof copied.maxBudgetUsd !== 'number' ||
+    !Number.isFinite(copied.maxBudgetUsd) ||
+    copied.maxBudgetUsd < 0 ||
+    copied.maxBudgetUsd > canonical.maxBudgetUsd
+  ) {
+    throw fail('budget does not match the allowed profile contract', canonical);
   }
   return copied;
 }
@@ -951,40 +1078,42 @@ export function buildProfileSemanticReviewPacketV2(options) {
     if (!resultCase) {
       throw fail('benchmarkResult is missing a required case', canonical);
     }
-    const predicted = Array.isArray(resultCase.items)
-      ? resultCase.items.map((item) => ({
-          kind: item.kind,
-          status: item.status ?? null,
-          claim: item.claim,
-          alternative: item.alternative ?? null,
-        }))
-      : [];
-    const predictedEvidence = Array.isArray(resultCase.evidence)
-      ? resultCase.evidence.map((entry) => ({
-          sourceMessageId: entry.sourceMessageId,
-          relation: entry.relation,
-          supportType: entry.supportType ?? null,
-          episodeKey: entry.episodeKey,
-        }))
-      : [];
-    packetCases.push({
-      caseId,
-      category: validated.category,
-      title: validated.title,
-      gold: projectGold(validated),
-      predicted,
-      predictedEvidence,
-      messages: projectSyntheticMessages(validated),
-      evaluation: resultCase.evaluation ?? null,
-      semanticVerdict: null,
-      forbiddenMeaningVerdict: null,
-      reviewerNotes: null,
-    });
+    const predicted = projectOwnArray(resultCase, 'items', projectPredictedItem, canonical);
+    const predictedEvidence = projectOwnArray(
+      resultCase,
+      'evidence',
+      projectPredictedEvidenceRow,
+      canonical,
+    );
+    const evaluationOwn = ownEnumerableData(resultCase, 'evaluation', canonical);
+    const packetCase = {};
+    defineOwnData(packetCase, 'caseId', caseId);
+    defineOwnData(packetCase, 'category', validated.category);
+    defineOwnData(packetCase, 'title', validated.title);
+    defineOwnData(packetCase, 'gold', projectGold(validated));
+    defineOwnData(packetCase, 'predicted', predicted);
+    defineOwnData(packetCase, 'predictedEvidence', predictedEvidence);
+    defineOwnData(packetCase, 'messages', projectSyntheticMessages(validated));
+    defineOwnData(
+      packetCase,
+      'evaluation',
+      evaluationOwn.present ? projectPublicJson(evaluationOwn.value, canonical) : null,
+    );
+    defineOwnData(packetCase, 'semanticVerdict', null);
+    defineOwnData(packetCase, 'forbiddenMeaningVerdict', null);
+    defineOwnData(packetCase, 'reviewerNotes', null);
+    packetCases.push(packetCase);
   }
 
-  return {
-    model: result.model ?? null,
-    extractorVersion: result.extractorVersion ?? null,
-    cases: packetCases,
-  };
+  const packet = {};
+  const model = ownEnumerableData(result, 'model', canonical);
+  defineOwnData(packet, 'model', model.present ? model.value ?? null : null);
+  const extractorVersion = ownEnumerableData(result, 'extractorVersion', canonical);
+  defineOwnData(
+    packet,
+    'extractorVersion',
+    extractorVersion.present ? extractorVersion.value ?? null : null,
+  );
+  defineOwnData(packet, 'cases', packetCases);
+  return packet;
 }

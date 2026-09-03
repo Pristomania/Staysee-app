@@ -19,6 +19,9 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'google/gemini-3.7-flash';
 const API_KEY = 'test-memory-v3-profile-v2-key';
 const SENTINEL = 'RAW_ENGINE_GETTER_SENTINEL';
+const AMBIENT_SECRET_SENTINEL = 'AMBIENT_SECRET_SENTINEL';
+const ATTACKER_INHERITED_KIND = 'attacker-inherited-kind';
+const ATTACKER_INHERITED_SOURCE = 'attacker-inherited-source-message-id';
 const LENGTH_SENTINEL = 'RAW_LENGTH_SENTINEL';
 const SECRET_CYCLE_KEY = 'SUPER_SECRET_PROPERTY_NAME';
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
@@ -312,6 +315,50 @@ function attachOwnProto(target, value) {
     configurable: true,
   });
   return target;
+}
+
+function withObjectPrototypeOwn(key, descriptor, run) {
+  const had = Object.prototype.hasOwnProperty.call(Object.prototype, key);
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, key);
+  Object.defineProperty(Object.prototype, key, {
+    configurable: true,
+    enumerable: false,
+    ...descriptor,
+  });
+  try {
+    return run();
+  } finally {
+    if (had) Object.defineProperty(Object.prototype, key, previous);
+    else delete Object.prototype[key];
+  }
+}
+
+function resultWithCaseItems(dry, caseId, items, evidence) {
+  return {
+    ...dry,
+    cases: dry.cases.map((entry) => {
+      if (entry.caseId !== caseId) return { ...entry };
+      const next = { ...entry, items };
+      if (evidence !== undefined) next.evidence = evidence;
+      return next;
+    }),
+  };
+}
+
+function assertSentinelAbsent(value) {
+  const message = value && typeof value === 'object' && 'message' in value ? String(value.message) : '';
+  const serialized = typeof value === 'string' ? value : stringifyError(value);
+  const blob = `${message}\n${serialized}`;
+  assert.equal(blob.includes(AMBIENT_SECRET_SENTINEL), false);
+  assert.equal(blob.includes(ATTACKER_INHERITED_KIND), false);
+  assert.equal(blob.includes(ATTACKER_INHERITED_SOURCE), false);
+}
+
+function assertBrandedOrUndefined(error) {
+  if (error === undefined) return;
+  assert.equal(error instanceof TypeError && error.name === 'TypeError', false);
+  assertProfileEngineError(error, SIX_PREFIX, SIX_NAME);
+  assertSentinelAbsent(error);
 }
 
 function hypothesisEngineOptions(overrides = {}) {
@@ -1863,5 +1910,324 @@ describe('review blockers: proxy traps, cycle names, credential order', () => {
         return assertProfileEngineError(error, SIX_PREFIX, SIX_NAME);
       },
     );
+  });
+});
+
+describe('review fix: options.budget maxBudgetUsd range', () => {
+  it('accepts six-category-v2 canonical maxBudgetUsd 0.11', async () => {
+    const fetchImpl = recordingFetch();
+    const result = await runProfileLiveBenchmarkV2(
+      sixEngineOptions({ budget: { ...SIX_BUDGET, maxBudgetUsd: 0.11 }, fetchImpl }),
+    );
+    assert.equal(result.configuredBudget.maxBudgetUsd, 0.11);
+    assert.equal(result.configuredBudget.absoluteCostUsd, '0.100728');
+    assert.equal(result.configuredBudget.gate, 'PASS');
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('accepts six-category-v2 exact ceiling 0.100728 without rewriting it', async () => {
+    const fetchImpl = recordingFetch();
+    const result = await runProfileLiveBenchmarkV2(
+      sixEngineOptions({ budget: { ...SIX_BUDGET, maxBudgetUsd: 0.100728 }, fetchImpl }),
+    );
+    assert.equal(result.configuredBudget.maxBudgetUsd, 0.100728);
+    assert.equal(result.configuredBudget.absoluteCostUsd, '0.100728');
+    assert.equal(result.configuredBudget.gate, 'PASS');
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('rejects six-category-v2 maxBudgetUsd below the configured ceiling before HTTP', async () => {
+    const fetchImpl = recordingFetch();
+    await assert.rejects(
+      () =>
+        runProfileLiveBenchmarkV2(
+          sixEngineOptions({
+            budget: { ...SIX_BUDGET, maxBudgetUsd: 0.10072799 },
+            fetchImpl,
+            execute: true,
+            apiKey: API_KEY,
+          }),
+        ),
+      (error) => assertProfileEngineError(error, SIX_PREFIX, SIX_NAME),
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('rejects six-category-v2 maxBudgetUsd above the canonical hard maximum before HTTP', async () => {
+    const fetchImpl = recordingFetch();
+    await assert.rejects(
+      () =>
+        runProfileLiveBenchmarkV2(
+          sixEngineOptions({
+            budget: { ...SIX_BUDGET, maxBudgetUsd: 0.11000001 },
+            fetchImpl,
+            execute: true,
+            apiKey: API_KEY,
+          }),
+        ),
+      (error) => assertProfileEngineError(error, SIX_PREFIX, SIX_NAME),
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('accepts hypothesis-four-v2 exact ceiling 0.067152', async () => {
+    const fetchImpl = recordingFetch();
+    const result = await runProfileLiveBenchmarkV2(
+      hypothesisEngineOptions({
+        budget: { ...HYPOTHESIS_BUDGET, maxBudgetUsd: 0.067152 },
+        fetchImpl,
+      }),
+    );
+    assert.equal(result.configuredBudget.maxBudgetUsd, 0.067152);
+    assert.equal(result.configuredBudget.absoluteCostUsd, '0.067152');
+    assert.equal(result.configuredBudget.gate, 'PASS');
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('rejects hypothesis-four-v2 maxBudgetUsd below 0.067152 before HTTP', async () => {
+    const fetchImpl = recordingFetch();
+    await assert.rejects(
+      () =>
+        runProfileLiveBenchmarkV2(
+          hypothesisEngineOptions({
+            budget: { ...HYPOTHESIS_BUDGET, maxBudgetUsd: 0.067151 },
+            fetchImpl,
+            execute: true,
+            apiKey: API_KEY,
+          }),
+        ),
+      (error) => assertProfileEngineError(error, HYPOTHESIS_PREFIX, HYPOTHESIS_NAME),
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('rejects hypothesis-four-v2 maxBudgetUsd above 0.075 before HTTP', async () => {
+    const fetchImpl = recordingFetch();
+    await assert.rejects(
+      () =>
+        runProfileLiveBenchmarkV2(
+          hypothesisEngineOptions({
+            budget: { ...HYPOTHESIS_BUDGET, maxBudgetUsd: 0.07500001 },
+            fetchImpl,
+            execute: true,
+            apiKey: API_KEY,
+          }),
+        ),
+      (error) => assertProfileEngineError(error, HYPOTHESIS_PREFIX, HYPOTHESIS_NAME),
+    );
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
+  it('still rejects a mismatch of any of the other six budget fields before HTTP', async () => {
+    const fetchImpl = recordingFetch();
+    const mismatches = [
+      { caseCount: 5 },
+      { maxInputTokensPerCase: 16383 },
+      { maxOutputTokensPerCase: 1199 },
+      { inputUsdPerMillion: 0.74 },
+      { outputUsdPerMillion: 3.74 },
+      { maxRequests: 5 },
+    ];
+    for (const patch of mismatches) {
+      await assert.rejects(
+        () =>
+          runProfileLiveBenchmarkV2(
+            sixEngineOptions({
+              budget: { ...SIX_BUDGET, ...patch },
+              fetchImpl,
+              execute: true,
+              apiKey: API_KEY,
+            }),
+          ),
+        (error) => assertProfileEngineError(error, SIX_PREFIX, SIX_NAME),
+      );
+    }
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+});
+
+describe('review fix: Object.prototype inheritance privacy', () => {
+  it('does not execute an Object.prototype.kind getter on a malformed predicted item', async () => {
+    const dataset = loadGoldenDataset();
+    const datasetSnapshot = structuredClone(dataset);
+    const dry = await runProfileLiveBenchmarkV2(sixEngineOptions({ dataset }));
+    const malformedItem = { claim: 'malformed-predicted-claim' };
+    const benchmarkResult = resultWithCaseItems(dry, 'memv3-ru-event-03', [malformedItem]);
+    const resultSnapshot = structuredClone(benchmarkResult);
+    const probe = { getterCalls: 0 };
+    let packet;
+    let thrown;
+    withObjectPrototypeOwn(
+      'kind',
+      {
+        get() {
+          probe.getterCalls += 1;
+          return AMBIENT_SECRET_SENTINEL;
+        },
+      },
+      () => {
+        try {
+          packet = buildProfileSemanticReviewPacketV2({
+            profileId: 'six-category-v2',
+            dataset,
+            benchmarkResult,
+          });
+        } catch (error) {
+          thrown = error;
+        }
+      },
+    );
+    assert.equal(probe.getterCalls, 0);
+    assertBrandedOrUndefined(thrown);
+    if (packet !== undefined) {
+      assertSentinelAbsent(packet);
+      assert.equal(JSON.stringify(packet).includes(AMBIENT_SECRET_SENTINEL), false);
+      for (const entry of packet.cases) {
+        for (const item of entry.predicted) {
+          const desc = Object.getOwnPropertyDescriptor(item, 'kind');
+          assert.notEqual(desc?.value, AMBIENT_SECRET_SENTINEL);
+        }
+      }
+    }
+    assert.deepEqual(dataset, datasetSnapshot);
+    assert.deepEqual(benchmarkResult, resultSnapshot);
+    assert.deepEqual(malformedItem, { claim: 'malformed-predicted-claim' });
+  });
+
+  it('does not copy an inherited Object.prototype.kind data value into the packet', async () => {
+    const dataset = loadGoldenDataset();
+    const datasetSnapshot = structuredClone(dataset);
+    const dry = await runProfileLiveBenchmarkV2(sixEngineOptions({ dataset }));
+    const malformedItem = { claim: 'malformed-predicted-claim' };
+    const benchmarkResult = resultWithCaseItems(dry, 'memv3-ru-event-03', [malformedItem]);
+    const resultSnapshot = structuredClone(benchmarkResult);
+    let packet;
+    let thrown;
+    withObjectPrototypeOwn(
+      'kind',
+      {
+        enumerable: false,
+        writable: true,
+        value: ATTACKER_INHERITED_KIND,
+      },
+      () => {
+        try {
+          packet = buildProfileSemanticReviewPacketV2({
+            profileId: 'six-category-v2',
+            dataset,
+            benchmarkResult,
+          });
+        } catch (error) {
+          thrown = error;
+        }
+      },
+    );
+    assertBrandedOrUndefined(thrown);
+    if (packet !== undefined) {
+      assertSentinelAbsent(packet);
+      for (const entry of packet.cases) {
+        for (const item of entry.predicted) {
+          const desc = Object.getOwnPropertyDescriptor(item, 'kind');
+          assert.notEqual(desc?.value, ATTACKER_INHERITED_KIND);
+        }
+      }
+    }
+    assert.deepEqual(dataset, datasetSnapshot);
+    assert.deepEqual(benchmarkResult, resultSnapshot);
+  });
+
+  it('does not read an inherited Object.prototype.sourceMessageId getter or value', async () => {
+    const dataset = loadGoldenDataset();
+    const datasetSnapshot = structuredClone(dataset);
+    const dry = await runProfileLiveBenchmarkV2(sixEngineOptions({ dataset }));
+    const malformedEvidence = { relation: 'supports', episodeKey: null };
+    const benchmarkResult = resultWithCaseItems(dry, 'memv3-ru-event-03', [], [malformedEvidence]);
+    const resultSnapshot = structuredClone(benchmarkResult);
+    const probe = { getterCalls: 0 };
+    let packet;
+    let thrown;
+    withObjectPrototypeOwn(
+      'sourceMessageId',
+      {
+        get() {
+          probe.getterCalls += 1;
+          return AMBIENT_SECRET_SENTINEL;
+        },
+      },
+      () => {
+        try {
+          packet = buildProfileSemanticReviewPacketV2({
+            profileId: 'six-category-v2',
+            dataset,
+            benchmarkResult,
+          });
+        } catch (error) {
+          thrown = error;
+        }
+      },
+    );
+    assert.equal(probe.getterCalls, 0);
+    assertBrandedOrUndefined(thrown);
+    if (packet !== undefined) {
+      assertSentinelAbsent(packet);
+      assert.equal(JSON.stringify(packet).includes(AMBIENT_SECRET_SENTINEL), false);
+      for (const entry of packet.cases) {
+        for (const row of entry.predictedEvidence) {
+          const desc = Object.getOwnPropertyDescriptor(row, 'sourceMessageId');
+          assert.notEqual(desc?.value, AMBIENT_SECRET_SENTINEL);
+        }
+      }
+    }
+    assert.deepEqual(dataset, datasetSnapshot);
+    assert.deepEqual(benchmarkResult, resultSnapshot);
+
+    let valuePacket;
+    let valueThrown;
+    withObjectPrototypeOwn(
+      'sourceMessageId',
+      {
+        enumerable: false,
+        writable: true,
+        value: ATTACKER_INHERITED_SOURCE,
+      },
+      () => {
+        try {
+          valuePacket = buildProfileSemanticReviewPacketV2({
+            profileId: 'six-category-v2',
+            dataset,
+            benchmarkResult,
+          });
+        } catch (error) {
+          valueThrown = error;
+        }
+      },
+    );
+    assertBrandedOrUndefined(valueThrown);
+    if (valuePacket !== undefined) {
+      for (const entry of valuePacket.cases) {
+        for (const row of entry.predictedEvidence) {
+          const desc = Object.getOwnPropertyDescriptor(row, 'sourceMessageId');
+          assert.notEqual(desc?.value, ATTACKER_INHERITED_SOURCE);
+        }
+      }
+    }
+  });
+
+  it('emits a semantic packet that JSON-roundtrips as ordinary public JSON', async () => {
+    const fetchImpl = recordingFetch(async (url, init) => {
+      const caseId = caseIdFromRequest(init);
+      const content = caseId === 'memv3-ru-recurrence-02' ? REC_02_CONTENT : EMPTY_CONTENT;
+      return jsonResponse(officialOpenRouterHttpBody(content));
+    });
+    const dataset = loadGoldenDataset();
+    const result = await runProfileLiveBenchmarkV2(
+      sixEngineOptions({ dataset, execute: true, apiKey: API_KEY, fetchImpl }),
+    );
+    const packet = buildProfileSemanticReviewPacketV2({
+      profileId: 'six-category-v2',
+      dataset,
+      benchmarkResult: result,
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(packet)), packet);
   });
 });
