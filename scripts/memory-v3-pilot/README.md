@@ -263,3 +263,15 @@ node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model google/gemini
 This V2 dry-run makes 0 provider HTTP calls. It does not require and does not read `.env`. Output is printed as one safe JSON object and is not saved to disk automatically.
 
 The authorized control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.
+
+### V2 hypothesis-four dry-run
+
+```bash
+node scripts/memory-v3-pilot/live-benchmark-hypothesis-four-run-v2.mjs --model google/gemini-3.7-flash --max-budget-usd 0.075
+```
+
+This profile selects `memv3-ru-hypothesis-01`, `memv3-ru-hypothesis-02`, `memv3-ru-hypothesis-03`, and `memv3-ru-hypothesis-04` in that fixed order. Its extractor version is `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2`.
+
+The dry-run makes 0 provider HTTP calls and does not read .env. Its configured worst-case ceiling is `$0.067152` under a hard maximum of `$0.075`.
+
+Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only and does not establish live quality or actual provider cost.

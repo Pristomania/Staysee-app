@@ -1,22 +1,11 @@
-/**
- * Memory V3 V2 six-case composition-root compatibility wrapper.
- * Shared run loads memory-v3-ru-golden.v2.json and owns safe-output behavior.
- */
+/** Memory V3 V2 hypothesis-four composition-root wrapper. */
 
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { getLiveBenchmarkProfileV2 } from './live-benchmark-profiles-v2.mjs';
-import {
-  buildProfileSemanticReviewPacketV2,
-  main as runProfileMain,
-  runProfileBenchmarkFromArgvV2,
-} from './live-benchmark-run-v2.mjs';
+import { main as runProfileMain } from './live-benchmark-run-v2.mjs';
 
-const CANONICAL = getLiveBenchmarkProfileV2('six-category-v2');
-const runSixCaseBenchmarkFromArgvV2 = (options) =>
-  runProfileBenchmarkFromArgvV2({ ...options, profileId: CANONICAL.profileId });
-const buildSixCaseSemanticReviewPacketV2 = (options) =>
-  buildProfileSemanticReviewPacketV2({ ...options, profileId: CANONICAL.profileId });
+const CANONICAL = getLiveBenchmarkProfileV2('hypothesis-four-v2');
 const REQUIRED = Object.freeze([
   'argv',
   'readFileImpl',
@@ -76,8 +65,6 @@ function inspectOptions(options) {
 
 export async function main(options) {
   const inspected = inspectOptions(options);
-  void runSixCaseBenchmarkFromArgvV2;
-  void buildSixCaseSemanticReviewPacketV2;
   return runProfileMain({ ...inspected, profileId: CANONICAL.profileId });
 }
 
