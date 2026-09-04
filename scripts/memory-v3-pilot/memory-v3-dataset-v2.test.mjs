@@ -400,7 +400,11 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.match(v2, /all 6 returned openrouter_http_404/);
     assert.match(v2, /Gemini supports max_tokens, not max_completion_tokens/);
     assert.match(v2, /matched 0\/4 required hypotheses/);
-    assert.match(v2, /No paid run has been made with `hypothesis-admission-r3`/);
+    assert.match(v2, /hypothesis-admission-r3.*matched all 4\/4 required hypotheses/i);
+    assert.match(v2, /six-category.*matched all 6\/6 required items/i);
+    assert.match(v2, /recurrence-02.*extra hypothesis/i);
+    assert.match(v2, /safety-03.*empty/i);
+    assert.match(v2, /actualUsage.*actualCostUsd.*null.*unknown/i);
     assert.match(v2, /not the V1 command/);
     assert.match(v2, /structural evaluation does not (?:judge|score|evaluate) semantic/i);
     assert.match(v2, /forbidden remembered meaning/);
