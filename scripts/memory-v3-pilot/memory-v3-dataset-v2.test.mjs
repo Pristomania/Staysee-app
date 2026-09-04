@@ -377,7 +377,7 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.equal(v2.includes('2.0.0'), true);
     assert.equal(v2.includes('live-benchmark-six-run-v2.mjs'), true);
     assert.equal(
-      v2.includes('memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1'),
+      v2.includes('memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2'),
       true,
     );
     assert.equal(v2.includes('not production-ready'), true);

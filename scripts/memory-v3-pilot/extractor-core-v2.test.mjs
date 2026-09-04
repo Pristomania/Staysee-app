@@ -15,6 +15,10 @@ import { buildExtractorRequestV2 } from './extractor-prompt-v2.mjs';
 
 const EXTRACTOR_VERSION = 'memory-v3-v2-test';
 const OPTIONS = Object.freeze({ extractorVersion: EXTRACTOR_VERSION });
+const LAYERED_OPTIONS = Object.freeze({
+  extractorVersion: EXTRACTOR_VERSION,
+  responseContract: 'v2-layered',
+});
 const RELATIONS = Object.freeze(['supports', 'contradicts', 'corrects', 'rejects']);
 const ITEM_ADAPTER_FIELDS = Object.freeze([
   'itemRef',
@@ -160,6 +164,30 @@ function validEventResponse(overrides = {}) {
   };
 }
 
+function layerDecisions(eventRefs = [], recurrenceRefs = [], hypothesisRefs = []) {
+  return [
+    { kind: 'event', decision: eventRefs.length > 0 ? 'emit' : 'omit', itemRefs: eventRefs },
+    {
+      kind: 'recurrence',
+      decision: recurrenceRefs.length > 0 ? 'emit' : 'omit',
+      itemRefs: recurrenceRefs,
+    },
+    {
+      kind: 'hypothesis',
+      decision: hypothesisRefs.length > 0 ? 'emit' : 'omit',
+      itemRefs: hypothesisRefs,
+    },
+  ];
+}
+
+function validLayeredEventResponse(overrides = {}) {
+  return {
+    layerDecisions: layerDecisions(['item-1']),
+    ...validEventResponse(),
+    ...overrides,
+  };
+}
+
 function expectedNormalizedEventItem() {
   return {
     kind: 'event',
@@ -300,6 +328,108 @@ describe('extractCaseV2 valid empty abstention', () => {
       assert.equal(serializedRequest.includes(sentinel), false, `request leaked ${sentinel}`);
     }
     assert.deepEqual(caseData, snapshot);
+  });
+});
+
+describe('extractCaseV2 layered admission decisions', () => {
+  it('requires an explicit canonical decision for every memory layer', async () => {
+    const extraction = await extractCaseV2(
+      v2Case(),
+      recordingAdapter(validLayeredEventResponse()),
+      LAYERED_OPTIONS,
+    );
+    const core = await import('./extractor-core-v2.mjs');
+
+    assert.deepEqual(core.projectSafeLayerDecisionsV2(extraction), [
+      { kind: 'event', decision: 'emit', itemCount: 1 },
+      { kind: 'recurrence', decision: 'omit', itemCount: 0 },
+      { kind: 'hypothesis', decision: 'omit', itemCount: 0 },
+    ]);
+    assert.deepEqual(Object.keys(extraction).sort(), ['evidence', 'items', 'run']);
+    assert.equal(core.projectSafeLayerDecisionsV2(structuredClone(extraction)), null);
+  });
+
+  it('accepts a fully considered empty abstention without persisting decisions', async () => {
+    const extraction = await extractCaseV2(
+      twoEpisodeCase(),
+      recordingAdapter({
+        layerDecisions: layerDecisions(),
+        items: [],
+        evidence: [],
+      }),
+      LAYERED_OPTIONS,
+    );
+    const core = await import('./extractor-core-v2.mjs');
+
+    assert.deepEqual(extraction.items, []);
+    assert.deepEqual(core.projectSafeLayerDecisionsV2(extraction), [
+      { kind: 'event', decision: 'omit', itemCount: 0 },
+      { kind: 'recurrence', decision: 'omit', itemCount: 0 },
+      { kind: 'hypothesis', decision: 'omit', itemCount: 0 },
+    ]);
+  });
+
+  it('rejects missing, reordered, duplicate, unresolved, or cross-kind decisions', async () => {
+    const valid = validLayeredEventResponse();
+    const cases = [
+      { ...validEventResponse() },
+      { ...valid, layerDecisions: [valid.layerDecisions[1], valid.layerDecisions[0], valid.layerDecisions[2]] },
+      { ...valid, layerDecisions: [valid.layerDecisions[0], valid.layerDecisions[0], valid.layerDecisions[2]] },
+      { ...valid, layerDecisions: layerDecisions(['missing']) },
+      { ...valid, layerDecisions: layerDecisions([], ['item-1']) },
+      { ...valid, layerDecisions: layerDecisions() },
+    ];
+
+    for (const payload of cases) {
+      await assertRejectsStage(
+        () => extractCaseV2(v2Case(), recordingAdapter(payload), LAYERED_OPTIONS),
+        'shape',
+      );
+    }
+  });
+
+  it('rejects unknown decision fields and does not execute accessors', async () => {
+    let getterCalls = 0;
+    const decision = { kind: 'event', decision: 'emit', itemRefs: ['item-1'] };
+    Object.defineProperty(decision, 'secret', {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return SENTINELS.getter;
+      },
+    });
+    const payload = validLayeredEventResponse({
+      layerDecisions: [decision, ...layerDecisions().slice(1)],
+    });
+
+    await assertRejectsStage(
+      () => extractCaseV2(v2Case(), recordingAdapter(payload), LAYERED_OPTIONS),
+      'shape',
+    );
+    assert.equal(getterCalls, 0);
+  });
+
+  it('uses the array length data descriptor without reading a Proxy length getter', async () => {
+    let getterCalls = 0;
+    const decisions = new Proxy(layerDecisions(['item-1']), {
+      get(target, key, receiver) {
+        if (key === 'length') {
+          getterCalls += 1;
+          throw new Error(SENTINELS.getter);
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const payload = validLayeredEventResponse({ layerDecisions: decisions });
+
+    const extraction = await extractCaseV2(
+      v2Case(),
+      recordingAdapter(payload),
+      LAYERED_OPTIONS,
+    );
+    assert.equal(getterCalls, 0);
+    const core = await import('./extractor-core-v2.mjs');
+    assert.equal(core.projectSafeLayerDecisionsV2(extraction)[0].decision, 'emit');
   });
 });
 

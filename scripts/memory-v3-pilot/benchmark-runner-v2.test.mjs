@@ -17,6 +17,15 @@ import {
 } from './benchmark-runner-v2.mjs';
 
 const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
+const LAYERED_EMPTY_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'omit', itemRefs: [] },
+    { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
+  items: [],
+  evidence: [],
+});
 const EXTRACTOR_VERSION = 'memory-v3-v2-runner-test';
 const DATASET_ID = 'memory-v3-ru-golden-v2';
 const DATASET_VERSION = '2.0.0';
@@ -127,13 +136,17 @@ function requestBytes(caseData) {
 function validRunnerOptions(overrides = {}) {
   const cases = overrides.cases ?? [sampleCase()];
   const adapter = overrides.modelAdapter ?? abstainingAdapter();
-  return {
+  const options = {
     dataset: overrides.dataset ?? sampleDataset(cases),
     modelAdapter: adapter,
     budget: overrides.budget ?? passingBudget(cases.length),
     extractorVersion: overrides.extractorVersion ?? EXTRACTOR_VERSION,
     maxPromptRequestBytesPerCase: overrides.maxPromptRequestBytesPerCase ?? 1_000_000,
   };
+  if (overrides.responseContract !== undefined) {
+    options.responseContract = overrides.responseContract;
+  }
+  return options;
 }
 
 function validEventItem(overrides = {}) {
@@ -552,6 +565,33 @@ describe('runOfflineBenchmarkV2 sequential success', () => {
     );
     assert.deepEqual(result.failures, []);
     assertResultSchema(result);
+  });
+});
+
+describe('runOfflineBenchmarkV2 layered admission summary', () => {
+  it('passes the layered contract to the core and exposes only safe decision counts', async () => {
+    const modelAdapter = async () => LAYERED_EMPTY_CONTENT;
+    const result = await runOfflineBenchmarkV2(
+      validRunnerOptions({ modelAdapter, responseContract: 'v2-layered' }),
+    );
+
+    assert.deepEqual(result.runs[0].layerDecisions, [
+      { kind: 'event', decision: 'omit', itemCount: 0 },
+      { kind: 'recurrence', decision: 'omit', itemCount: 0 },
+      { kind: 'hypothesis', decision: 'omit', itemCount: 0 },
+    ]);
+    assert.equal(JSON.stringify(result.runs[0]).includes('itemRefs'), false);
+  });
+
+  it('rejects an unsupported response contract before any adapter call', async () => {
+    const adapter = abstainingAdapter();
+    await assertPreflightReject(
+      () =>
+        runOfflineBenchmarkV2(
+          validRunnerOptions({ modelAdapter: adapter, responseContract: 'future-contract' }),
+        ),
+      adapter,
+    );
   });
 });
 

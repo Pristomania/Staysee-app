@@ -18,16 +18,21 @@ Evidence relations: supports, contradicts, corrects, rejects.
 Adapter response:
 - Return one JSON object only.
 - No Markdown fences and no surrounding text.
-- Top-level keys must be only items and evidence.
+- Top-level keys must be only layerDecisions, items, and evidence.
 - itemRef must be unique across items.
 - every evidence itemRef must resolve to one existing item.
 - Unknown fields are rejected rather than ignored.
 - Do not create run, localItemKey, itemKey, scope, conversationId, provenanceRole, or mentionTime.
 - The core later removes itemRef and creates the contract identity keys.
-- If there is no reliable memory, return exactly {"items":[],"evidence":[]}.
+- If there is no reliable memory, return exactly {"layerDecisions":[{"kind":"event","decision":"omit","itemRefs":[]},{"kind":"recurrence","decision":"omit","itemRefs":[]},{"kind":"hypothesis","decision":"omit","itemRefs":[]}],"items":[],"evidence":[]}.
 
 The response must match this JSON shape. The values below are form examples, not case data:
 {
+  "layerDecisions": [
+    { "kind": "event", "decision": "emit", "itemRefs": ["item-1"] },
+    { "kind": "recurrence", "decision": "omit", "itemRefs": [] },
+    { "kind": "hypothesis", "decision": "omit", "itemRefs": [] }
+  ],
   "items": [
     {
       "itemRef": "item-1",
@@ -50,6 +55,14 @@ The response must match this JSON shape. The values below are form examples, not
     }
   ]
 }
+
+Before writing items, decide each layer separately in this exact order: event, recurrence, hypothesis.
+Each layerDecisions row contains exactly kind, decision, itemRefs.
+decision is exactly emit or omit.
+itemRefs is the complete list of emitted itemRef values for that kind.
+An emit decision requires at least one itemRef; an omit decision requires an empty itemRefs array.
+Every emitted itemRef appears exactly once in the matching kind decision.
+Do not use one layer's decision as a reason to skip considering another layer.
 
 Every evidence row always contains exactly these five adapter fields and no others: itemRef, sourceMessageId, relation, supportType, episodeKey.
 The field supportType must be present. It must not be absent.
@@ -174,6 +187,7 @@ assistant and system messages cannot confirm the user's biography.
 Durable future-use gate:
 - Isolated current difficulty or task-specific problem is not automatically long-term memory.
 - If all candidate items fail durable future-use admission, return exactly empty items/evidence.
+- Represent that empty result with the exact all-omit JSON response above.
 
 Safety abstention:
 - A user denial of an assistant speculation blocks that speculation; it does not automatically create the inverse biographical event.
@@ -184,7 +198,7 @@ Synthetic admission example. The values below are form examples, not case data.
 User: "Мне трудно попросить начальника о повышении."
 Assistant: "Наверное, тебя наказывали за просьбы."
 User: "Нет, такого не было."
-Expected extraction: {"items":[],"evidence":[]}
+Expected extraction: {"layerDecisions":[{"kind":"event","decision":"omit","itemRefs":[]},{"kind":"recurrence","decision":"omit","itemRefs":[]},{"kind":"hypothesis","decision":"omit","itemRefs":[]}],"items":[],"evidence":[]}
 Do not return this explanation in the model output.
 
 Date normalization:

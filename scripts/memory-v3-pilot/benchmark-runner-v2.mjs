@@ -4,7 +4,11 @@
  */
 
 import { validateCaseV2 } from './contracts-v2.mjs';
-import { extractCaseV2, projectSafeExtractorDiagnosticV2 } from './extractor-core-v2.mjs';
+import {
+  extractCaseV2,
+  projectSafeExtractorDiagnosticV2,
+  projectSafeLayerDecisionsV2,
+} from './extractor-core-v2.mjs';
 import { buildExtractorRequestV2 } from './extractor-prompt-v2.mjs';
 import { assertBudgetGate } from './benchmark-budget.mjs';
 
@@ -16,6 +20,8 @@ const OPTION_REQUIRED = Object.freeze([
   'extractorVersion',
   'maxPromptRequestBytesPerCase',
 ]);
+const OPTION_OPTIONAL = Object.freeze(['responseContract']);
+const RESPONSE_CONTRACTS = new Set(['v2', 'v2-layered']);
 const DATASET_REQUIRED = Object.freeze(['datasetId', 'version', 'cases']);
 const DATASET_OPTIONAL = Object.freeze(['language', 'privacy']);
 const REQUIRED_DATASET_ID = 'memory-v3-ru-golden-v2';
@@ -252,12 +258,16 @@ export async function runOfflineBenchmarkV2(options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw fail('options must be a plain object');
   }
-  const inspected = inspectRecordPartial(options, OPTION_REQUIRED, [], 'options');
+  const inspected = inspectRecordPartial(options, OPTION_REQUIRED, OPTION_OPTIONAL, 'options');
   if (typeof inspected.modelAdapter !== 'function') {
     throw fail('modelAdapter must be a function');
   }
   if (!isNonEmptyString(inspected.extractorVersion)) {
     throw fail('extractorVersion is required');
+  }
+  const responseContract = inspected.responseContract ?? 'v2';
+  if (!RESPONSE_CONTRACTS.has(responseContract)) {
+    throw fail('responseContract is invalid');
   }
   if (
     !Number.isInteger(inspected.maxPromptRequestBytesPerCase) ||
@@ -315,11 +325,15 @@ export async function runOfflineBenchmarkV2(options) {
     try {
       const extraction = await extractCaseV2(entry.raw, inspected.modelAdapter, {
         extractorVersion: inspected.extractorVersion,
+        responseContract,
       });
-      runs.push({
+      const run = {
         caseId: entry.validated.caseId,
         extraction,
-      });
+      };
+      const layerDecisions = projectSafeLayerDecisionsV2(extraction);
+      if (layerDecisions !== null) run.layerDecisions = layerDecisions;
+      runs.push(run);
     } catch (error) {
       if (isOwnError(error)) throw error;
       const classified = classifyFailure(error);

@@ -24,7 +24,15 @@ const ATTACKER_INHERITED_KIND = 'attacker-inherited-kind';
 const ATTACKER_INHERITED_SOURCE = 'attacker-inherited-source-message-id';
 const LENGTH_SENTINEL = 'RAW_LENGTH_SENTINEL';
 const SECRET_CYCLE_KEY = 'SUPER_SECRET_PROPERTY_NAME';
-const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
+const EMPTY_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'omit', itemRefs: [] },
+    { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
+  items: [],
+  evidence: [],
+});
 const SIX_PREFIX = '[memory-v3:live-benchmark-six-v2]';
 const SIX_NAME = 'MemoryV3SixCaseBenchmarkV2Error';
 const HYPOTHESIS_PREFIX = '[memory-v3:live-benchmark-hypothesis-four-v2]';
@@ -111,6 +119,11 @@ const HYPOTHESIS_CASE_IDS = Object.freeze([
 ]);
 
 const REC_02_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'omit', itemRefs: [] },
+    { kind: 'recurrence', decision: 'emit', itemRefs: ['item-1'] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
   items: [
     {
       itemRef: 'item-1',
@@ -266,7 +279,7 @@ function sixEngineOptions(overrides = {}) {
     dataset: loadGoldenDataset(),
     profileId: 'six-category-v2',
     model: MODEL,
-    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
+    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
     budget: { ...SIX_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -367,7 +380,7 @@ function hypothesisEngineOptions(overrides = {}) {
     profileId: 'hypothesis-four-v2',
     model: MODEL,
     extractorVersion:
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
     budget: { ...HYPOTHESIS_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -516,6 +529,14 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
     assert.equal(result.maxActive, 1);
     assert.equal(result.actualUsage, null);
     assert.equal(result.actualCostUsd, null);
+    for (const entry of result.cases) {
+      assert.deepEqual(entry.layerDecisions, [
+        { kind: 'event', decision: 'omit', itemCount: 0 },
+        { kind: 'recurrence', decision: 'omit', itemCount: 0 },
+        { kind: 'hypothesis', decision: 'omit', itemCount: 0 },
+      ]);
+      assert.equal(JSON.stringify(entry.layerDecisions).includes('itemRefs'), false);
+    }
     for (const call of fetchImpl.calls) {
       assert.equal(call.url, OPENROUTER_URL);
       assert.equal(call.init.method, 'POST');
@@ -578,7 +599,7 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
       profileId: 'hypothesis-four-v2',
       model: MODEL,
       extractorVersion:
-        'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+        'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
       budget: { ...HYPOTHESIS_BUDGET },
       maxPromptRequestBytesPerCase: 20000,
       execute: true,
@@ -591,7 +612,7 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       result.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
     );
     assert.equal(result.configuredBudget.absoluteInputTokens, 65536);
     assert.equal(result.configuredBudget.absoluteOutputTokens, 4800);
@@ -681,6 +702,11 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
         return jsonResponse(
           officialOpenRouterHttpBody(
             JSON.stringify({
+              layerDecisions: [
+                { kind: 'event', decision: 'emit', itemRefs: ['item-1'] },
+                { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+                { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+              ],
               items: [
                 {
                   itemRef: 'item-1',
@@ -800,7 +826,7 @@ describe('buildProfileSemanticReviewPacketV2', () => {
     );
     assert.equal(
       packet.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
     );
     for (const entry of packet.cases) {
       assert.equal(entry.semanticVerdict, null);
@@ -882,7 +908,7 @@ describe('buildProfileSemanticReviewPacketV2', () => {
         benchmarkResult: {
           ...dry,
           extractorVersion:
-            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
         },
       }),
     );
@@ -1038,7 +1064,7 @@ describe('runProfileLiveBenchmarkV2 preflight negatives', () => {
       runProfileLiveBenchmarkV2(
         sixEngineOptions({
           extractorVersion:
-            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
           fetchImpl,
           execute: true,
           apiKey: API_KEY,

@@ -410,6 +410,38 @@ describe('createOpenRouterAdapter transport request', () => {
     assert.deepEqual(evidence.properties.episodeKey, { type: ['string', 'null'] });
   });
 
+  it('requires three closed layer decisions for responseContract v2-layered', async () => {
+    const transport = recordingTransport();
+    const adapter = createOpenRouterAdapter(
+      validOptions({ transport, responseContract: 'v2-layered' }),
+    );
+
+    await adapter(buildExtractorRequest(sampleCase()));
+
+    assert.equal(transport.calls.length, 1);
+    const jsonSchema = transport.calls[0].body.response_format.json_schema;
+    const root = jsonSchema.schema;
+    const decisions = root.properties.layerDecisions;
+    assert.equal(jsonSchema.name, 'memory_v3_v2_layered_extractor_response');
+    assert.deepEqual(root.required, ['layerDecisions', 'items', 'evidence']);
+    assert.equal(root.additionalProperties, false);
+    assert.equal(decisions.type, 'array');
+    assert.equal(decisions.minItems, 3);
+    assert.equal(decisions.maxItems, 3);
+    assert.deepEqual(decisions.items.required, ['kind', 'decision', 'itemRefs']);
+    assert.equal(decisions.items.additionalProperties, false);
+    assert.deepEqual(decisions.items.properties.kind.enum, [
+      'event',
+      'recurrence',
+      'hypothesis',
+    ]);
+    assert.deepEqual(decisions.items.properties.decision.enum, ['emit', 'omit']);
+    assert.deepEqual(decisions.items.properties.itemRefs, {
+      type: 'array',
+      items: { type: 'string' },
+    });
+  });
+
   it('allows provider fallback only when explicitly enabled and keeps privacy locks', async () => {
     const transport = recordingTransport();
     const adapter = createOpenRouterAdapter(

@@ -129,7 +129,7 @@ describe('getLiveBenchmarkProfileV2 six-category-v2', () => {
     assert.deepEqual([...profile.caseIds], [...SIX_CASE_IDS]);
     assert.equal(
       profile.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
     );
     assert.equal(profile.executeFlag, '--execute-six-paid-requests');
     assert.equal(profile.engineErrorPrefix, '[memory-v3:live-benchmark-six-v2]');
@@ -149,7 +149,7 @@ describe('getLiveBenchmarkProfileV2 six-category-v2', () => {
     assert.equal(profile.reasoningEffort, 'low');
     assert.equal(profile.maxTokensParameter, 'max_tokens');
     assert.equal(profile.allowFallbacks, true);
-    assert.equal(profile.responseContract, 'v2');
+    assert.equal(profile.responseContract, 'v2-layered');
     assert.equal(profile.timeoutMs, 60000);
     assert.equal(profile.maxResponseBytes, 1000000);
     assert.equal(profile.maxPromptRequestBytesPerCase, 20000);
@@ -204,7 +204,7 @@ describe('getLiveBenchmarkProfileV2 hypothesis-four-v2', () => {
     assert.deepEqual([...profile.caseIds], [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       profile.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
     );
     assert.equal(profile.executeFlag, '--execute-hypothesis-four-paid-requests');
     assert.equal(profile.engineErrorPrefix, '[memory-v3:live-benchmark-hypothesis-four-v2]');
@@ -224,7 +224,7 @@ describe('getLiveBenchmarkProfileV2 hypothesis-four-v2', () => {
     assert.equal(profile.reasoningEffort, 'low');
     assert.equal(profile.maxTokensParameter, 'max_tokens');
     assert.equal(profile.allowFallbacks, true);
-    assert.equal(profile.responseContract, 'v2');
+    assert.equal(profile.responseContract, 'v2-layered');
     assert.equal(profile.timeoutMs, 60000);
     assert.equal(profile.maxResponseBytes, 1000000);
     assert.equal(profile.maxPromptRequestBytesPerCase, 20000);

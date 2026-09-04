@@ -29,7 +29,7 @@ const V2_EVIDENCE_FIELDS = Object.freeze([
   'supportType',
   'episodeKey',
 ]);
-const RESPONSE_CONTRACTS = new Set(['v1', 'v2']);
+const RESPONSE_CONTRACTS = new Set(['v1', 'v2', 'v2-layered']);
 
 const OWN_ERRORS = new WeakSet();
 const OPENROUTER_DIAGNOSTIC_CODES = new Set([
@@ -353,6 +353,25 @@ const MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA = Object.freeze({
   }),
 });
 
+const MEMORY_V3_V2_LAYERED_OPENROUTER_JSON_SCHEMA = Object.freeze({
+  name: 'memory_v3_v2_layered_extractor_response',
+  strict: true,
+  schema: objectSchema(['layerDecisions', 'items', 'evidence'], {
+    layerDecisions: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 3,
+      items: objectSchema(['kind', 'decision', 'itemRefs'], {
+        kind: { type: 'string', enum: ['event', 'recurrence', 'hypothesis'] },
+        decision: { type: 'string', enum: ['emit', 'omit'] },
+        itemRefs: { type: 'array', items: { type: 'string' } },
+      }),
+    },
+    items: MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA.schema.properties.items,
+    evidence: MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA.schema.properties.evidence,
+  }),
+});
+
 function isHttpsUrl(value) {
   if (!isNonEmptyString(value)) return false;
   try {
@@ -615,9 +634,11 @@ export function createOpenRouterAdapter(options) {
     inspected.maxTokensParameter ?? 'max_completion_tokens';
   const responseContract = inspected.responseContract ?? 'v1';
   const responseSchema =
-    responseContract === 'v2'
-      ? MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA
-      : MEMORY_V3_OPENROUTER_JSON_SCHEMA;
+    responseContract === 'v2-layered'
+      ? MEMORY_V3_V2_LAYERED_OPENROUTER_JSON_SCHEMA
+      : responseContract === 'v2'
+        ? MEMORY_V3_V2_OPENROUTER_JSON_SCHEMA
+        : MEMORY_V3_OPENROUTER_JSON_SCHEMA;
 
   return async function openRouterModelAdapter(request) {
     const safeRequest = inspectRecord(request, ['system', 'input'], 'request', 'config');

@@ -14,7 +14,7 @@ import { main } from './live-benchmark-six-run-v2.mjs';
 
 const MODEL = 'google/gemini-3.7-flash';
 const API_KEY = 'test-key';
-const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
+const EMPTY_CONTENT = '{"layerDecisions":[{"kind":"event","decision":"omit","itemRefs":[]},{"kind":"recurrence","decision":"omit","itemRefs":[]},{"kind":"hypothesis","decision":"omit","itemRefs":[]}],"items":[],"evidence":[]}';
 const ENV_PATH = 'C:\\synthetic\\.env';
 const SAFE_OUTPUT_PATH = 'C:\\synthetic\\memory-v3-v2-safe-result.json';
 const SAFE_OUTPUT_TMP_PATH = `${SAFE_OUTPUT_PATH}.tmp`;
@@ -313,7 +313,7 @@ describe('live-benchmark-six-run-v2 dry-run', () => {
     assert.deepEqual(parsed.benchmarkResult.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
     assert.equal(
       parsed.benchmarkResult.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
     );
     assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.100728');
     assert.equal(parsed.benchmarkResult.configuredBudget.maxBudgetUsd, 0.11);

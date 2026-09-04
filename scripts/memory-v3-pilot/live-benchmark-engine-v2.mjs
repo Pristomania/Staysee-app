@@ -874,6 +874,7 @@ export async function runProfileLiveBenchmarkV2(options) {
       modelAdapter,
       budget,
       extractorVersion: canonical.extractorVersion,
+      responseContract: canonical.responseContract,
       maxPromptRequestBytesPerCase: canonical.maxPromptRequestBytesPerCase,
     });
   } catch (error) {
@@ -917,14 +918,18 @@ export async function runProfileLiveBenchmarkV2(options) {
       continue;
     }
     extractions.push(run.extraction);
-    cases.push({
+    const publicCase = {
       caseId: entry.caseId,
       itemCount: run.extraction.items.length,
       evidenceCount: run.extraction.evidence.length,
       items: projectSafeItems(run.extraction.items),
       evidence: projectSafeEvidence(run.extraction.evidence),
       evaluation,
-    });
+    };
+    if (run.layerDecisions !== undefined) {
+      publicCase.layerDecisions = projectPublicJson(run.layerDecisions, canonical);
+    }
+    cases.push(publicCase);
   }
 
   let aggregate = null;

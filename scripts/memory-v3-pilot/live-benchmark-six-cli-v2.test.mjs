@@ -14,7 +14,7 @@ import { runSixCaseBenchmarkFromArgvV2 } from './live-benchmark-six-cli-v2.mjs';
 const MODEL = 'google/gemini-3.7-flash';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = 'test-key';
-const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
+const EMPTY_CONTENT = '{"layerDecisions":[{"kind":"event","decision":"omit","itemRefs":[]},{"kind":"recurrence","decision":"omit","itemRefs":[]},{"kind":"hypothesis","decision":"omit","itemRefs":[]}],"items":[],"evidence":[]}';
 const ENV_PATH = 'masked-six-v2.env';
 const CLI_PREFIX = '[memory-v3:live-benchmark-six-cli-v2]';
 
@@ -142,7 +142,7 @@ describe('runSixCaseBenchmarkFromArgvV2 dry-run', () => {
       assert.deepEqual(result.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
       assert.equal(
         result.extractorVersion,
-        'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
+        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
       );
       assert.equal(result.configuredBudget.absoluteCostUsd, '0.100728');
       assert.equal(result.configuredBudget.maxBudgetUsd, 0.11);
@@ -188,7 +188,7 @@ describe('runSixCaseBenchmarkFromArgvV2 execute fake fetch', () => {
       assert.equal(result.successCount, 6);
       assert.equal(
         result.extractorVersion,
-        'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
+        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
       );
       assert.equal(process.env.OPENROUTER_API_KEY, undefined);
       assert.equal(JSON.stringify(result).includes(API_KEY), false);

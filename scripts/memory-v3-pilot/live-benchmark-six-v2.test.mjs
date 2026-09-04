@@ -19,10 +19,18 @@ import {
 
 const MODEL = 'google/gemini-3.7-flash';
 const EXTRACTOR_VERSION =
-  'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1';
+  'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = 'test-memory-v3-six-case-v2-key';
-const EMPTY_CONTENT = '{"items":[],"evidence":[]}';
+const EMPTY_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'omit', itemRefs: [] },
+    { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
+  items: [],
+  evidence: [],
+});
 const EVENT_03_CLAIM = 'Сын родился 14 февраля 2018 года';
 const EVENT_03_MESSAGE_TEXT =
   'На работу я вернулась не через год, а в сентябре 2020, когда ему было два с половиной.';
@@ -41,6 +49,11 @@ const SENTINELS = Object.freeze({
 });
 
 const EVENT_03_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'emit', itemRefs: ['item-1'] },
+    { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
   items: [
     {
       itemRef: 'item-1',
@@ -65,6 +78,11 @@ const EVENT_03_CONTENT = JSON.stringify({
 });
 
 const REC_02_CONTENT = JSON.stringify({
+  layerDecisions: [
+    { kind: 'event', decision: 'omit', itemRefs: [] },
+    { kind: 'recurrence', decision: 'emit', itemRefs: ['item-1'] },
+    { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+  ],
   items: [
     {
       itemRef: 'item-1',
@@ -482,7 +500,7 @@ describe('runSixCaseLiveBenchmarkV2 fake fetch execution', () => {
         assert.equal(httpBody.provider.zdr, true);
         const jsonSchema = httpBody.response_format.json_schema;
         const evidence = jsonSchema.schema.properties.evidence.items;
-        assert.equal(jsonSchema.name, 'memory_v3_v2_extractor_response');
+        assert.equal(jsonSchema.name, 'memory_v3_v2_layered_extractor_response');
         assert.deepEqual(
           [...evidence.required].sort(),
           ['episodeKey', 'itemRef', 'relation', 'sourceMessageId', 'supportType'],
@@ -569,6 +587,11 @@ describe('runSixCaseLiveBenchmarkV2 fake fetch execution', () => {
         return jsonResponse(
           officialOpenRouterHttpBody(
             JSON.stringify({
+              layerDecisions: [
+                { kind: 'event', decision: 'emit', itemRefs: ['item-1'] },
+                { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+                { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+              ],
               items: [
                 {
                   itemRef: 'item-1',

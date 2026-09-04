@@ -12,6 +12,10 @@ import {
 import { buildExtractorRequestV2 } from './extractor-prompt-v2.mjs';
 
 const TOP_LEVEL_FIELDS = Object.freeze(['items', 'evidence']);
+const LAYERED_TOP_LEVEL_FIELDS = Object.freeze(['layerDecisions', 'items', 'evidence']);
+const LAYER_DECISION_FIELDS = Object.freeze(['kind', 'decision', 'itemRefs']);
+const LAYER_KINDS = Object.freeze(['event', 'recurrence', 'hypothesis']);
+const RESPONSE_CONTRACTS = new Set(['v2', 'v2-layered']);
 const ITEM_FIELDS = Object.freeze([
   'itemRef',
   'kind',
@@ -25,6 +29,7 @@ const ITEM_FIELDS = Object.freeze([
 const EVIDENCE_FIELDS = V2_ADAPTER_EVIDENCE_FIELDS;
 
 const OWN_ERRORS = new WeakSet();
+const LAYER_DECISIONS_BY_EXTRACTION = new WeakMap();
 const EXTRACTOR_DIAGNOSTIC_CODES = new Set([
   'extractor_v2_adapter_failed',
   'extractor_v2_parse_invalid',
@@ -96,6 +101,18 @@ export function projectSafeExtractorDiagnosticV2(error) {
     return null;
   }
   return desc.value;
+}
+
+export function projectSafeLayerDecisionsV2(extraction) {
+  if (extraction === null || typeof extraction !== 'object') return null;
+  let decisions;
+  try {
+    decisions = LAYER_DECISIONS_BY_EXTRACTION.get(extraction);
+  } catch {
+    return null;
+  }
+  if (!decisions) return null;
+  return decisions.map((entry) => ({ ...entry }));
 }
 
 function classifyContractMessage(error) {
@@ -182,6 +199,59 @@ function inspectRecord(value, allowed, path) {
   return copy;
 }
 
+function inspectRecordPartial(value, required, optional, path) {
+  let proto;
+  try {
+    proto = Object.getPrototypeOf(value);
+  } catch {
+    throw fail('shape', `${path} must be a plain object`);
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw fail('shape', `${path} must be a plain object`);
+  }
+  if (proto !== Object.prototype && proto !== null) {
+    throw fail('shape', `${path} must be a plain object`);
+  }
+
+  let keys;
+  try {
+    keys = Reflect.ownKeys(value);
+  } catch {
+    throw fail('shape', `${path} has an invalid shape`);
+  }
+
+  const allowed = new Set([...required, ...optional]);
+  const copy = {};
+  for (const key of keys) {
+    if (typeof key === 'symbol' || !allowed.has(key)) {
+      throw fail('shape', `${path} has an unknown field`);
+    }
+    let desc;
+    try {
+      desc = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw fail('shape', `${path} has an invalid shape`);
+    }
+    if (
+      !desc ||
+      typeof desc.get === 'function' ||
+      typeof desc.set === 'function' ||
+      !Object.prototype.hasOwnProperty.call(desc, 'value') ||
+      desc.enumerable !== true ||
+      desc.value === undefined
+    ) {
+      throw fail('shape', `${path} has an invalid field`);
+    }
+    copy[key] = desc.value;
+  }
+  for (const field of required) {
+    if (!Object.prototype.hasOwnProperty.call(copy, field)) {
+      throw fail('shape', `${path} is missing a required field`);
+    }
+  }
+  return copy;
+}
+
 function inspectDenseArray(value, path) {
   if (!Array.isArray(value)) {
     throw fail('shape', `${path} must be a dense array`);
@@ -194,7 +264,23 @@ function inspectDenseArray(value, path) {
     throw fail('shape', `${path} must be a dense array`);
   }
 
-  const length = value.length;
+  let lengthDescriptor;
+  try {
+    lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  } catch {
+    throw fail('shape', `${path} has an invalid shape`);
+  }
+  if (
+    !lengthDescriptor ||
+    typeof lengthDescriptor.get === 'function' ||
+    typeof lengthDescriptor.set === 'function' ||
+    !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value') ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0
+  ) {
+    throw fail('shape', `${path} has an invalid field`);
+  }
+  const length = lengthDescriptor.value;
   const allowed = new Set(['length']);
   for (let i = 0; i < length; i += 1) {
     allowed.add(String(i));
@@ -268,6 +354,7 @@ function assertStringOrNull(value, path) {
 function normalizeItems(items) {
   const list = inspectDenseArray(items, 'items');
   const refToKey = new Map();
+  const refToKind = new Map();
   const normalized = list.map((rawItem, index) => {
     const path = `items[${index}]`;
     const item = inspectRecord(rawItem, ITEM_FIELDS, path);
@@ -300,9 +387,57 @@ function normalizeItems(items) {
       throw fail('shape', `${path} is invalid`);
     }
     refToKey.set(item.itemRef, localItemKey);
+    refToKind.set(item.itemRef, item.kind);
     return { ...normalizedItem, localItemKey };
   });
-  return { items: normalized, refToKey };
+  return { items: normalized, refToKey, refToKind };
+}
+
+function normalizeLayerDecisions(value, refToKey, refToKind) {
+  const list = inspectDenseArray(value, 'layerDecisions');
+  if (list.length !== LAYER_KINDS.length) {
+    throw fail('shape', 'layerDecisions must contain exactly three rows');
+  }
+
+  const seenRefs = new Set();
+  const summary = [];
+  for (let index = 0; index < LAYER_KINDS.length; index += 1) {
+    const path = `layerDecisions[${index}]`;
+    const entry = inspectRecord(list[index], LAYER_DECISION_FIELDS, path);
+    const expectedKind = LAYER_KINDS[index];
+    if (entry.kind !== expectedKind) {
+      throw fail('shape', `${path}.kind is not in canonical order`);
+    }
+    if (entry.decision !== 'emit' && entry.decision !== 'omit') {
+      throw fail('shape', `${path}.decision is invalid`);
+    }
+    const itemRefs = inspectDenseArray(entry.itemRefs, `${path}.itemRefs`);
+    if ((entry.decision === 'emit') !== (itemRefs.length > 0)) {
+      throw fail('shape', `${path}.decision does not match itemRefs`);
+    }
+    for (const itemRef of itemRefs) {
+      assertNonEmptyString(itemRef, `${path}.itemRefs`);
+      if (seenRefs.has(itemRef)) {
+        throw fail('shape', `${path}.itemRefs contains a duplicate`);
+      }
+      if (!refToKey.has(itemRef)) {
+        throw fail('shape', `${path}.itemRefs contains an unknown itemRef`);
+      }
+      if (refToKind.get(itemRef) !== expectedKind) {
+        throw fail('shape', `${path}.itemRefs contains a different kind`);
+      }
+      seenRefs.add(itemRef);
+    }
+    summary.push(Object.freeze({
+      kind: expectedKind,
+      decision: entry.decision,
+      itemCount: itemRefs.length,
+    }));
+  }
+  if (seenRefs.size !== refToKey.size) {
+    throw fail('shape', 'layerDecisions must account for every itemRef');
+  }
+  return Object.freeze(summary);
 }
 
 function normalizeEvidence(evidence, refToKey, caseData) {
@@ -341,10 +476,16 @@ function normalizeEvidence(evidence, refToKey, caseData) {
   });
 }
 
-function finalizeExtraction(raw, validated, extractorVersion) {
+function finalizeExtraction(raw, validated, extractorVersion, responseContract) {
   const parsed = parseAdapterOutput(raw);
-  const response = inspectRecord(parsed, TOP_LEVEL_FIELDS, 'adapter response');
-  const { items, refToKey } = normalizeItems(response.items);
+  const topLevelFields =
+    responseContract === 'v2-layered' ? LAYERED_TOP_LEVEL_FIELDS : TOP_LEVEL_FIELDS;
+  const response = inspectRecord(parsed, topLevelFields, 'adapter response');
+  const { items, refToKey, refToKind } = normalizeItems(response.items);
+  const layerDecisions =
+    responseContract === 'v2-layered'
+      ? normalizeLayerDecisions(response.layerDecisions, refToKey, refToKind)
+      : null;
   const evidence = normalizeEvidence(response.evidence, refToKey, validated);
   const extraction = {
     run: {
@@ -355,7 +496,11 @@ function finalizeExtraction(raw, validated, extractorVersion) {
     evidence,
   };
   try {
-    return validateExtractionV2(extraction, validated);
+    const result = validateExtractionV2(extraction, validated);
+    if (layerDecisions) {
+      LAYER_DECISIONS_BY_EXTRACTION.set(result, layerDecisions);
+    }
+    return result;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw fail(
@@ -373,9 +518,18 @@ export async function extractCaseV2(caseData, modelAdapter, options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw fail('shape', 'options must be a plain object');
   }
-  const inspectedOptions = inspectRecord(options, ['extractorVersion'], 'options');
+  const inspectedOptions = inspectRecordPartial(
+    options,
+    ['extractorVersion'],
+    ['responseContract'],
+    'options',
+  );
   if (!isNonEmptyString(inspectedOptions.extractorVersion)) {
     throw fail('shape', 'options.extractorVersion is required');
+  }
+  const responseContract = inspectedOptions.responseContract ?? 'v2';
+  if (!RESPONSE_CONTRACTS.has(responseContract)) {
+    throw fail('shape', 'options.responseContract is invalid');
   }
 
   let validated;
@@ -409,7 +563,12 @@ export async function extractCaseV2(caseData, modelAdapter, options) {
   }
 
   try {
-    return finalizeExtraction(raw, validated, inspectedOptions.extractorVersion);
+    return finalizeExtraction(
+      raw,
+      validated,
+      inspectedOptions.extractorVersion,
+      responseContract,
+    );
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw fail('shape', 'adapter response is invalid');

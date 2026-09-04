@@ -50,7 +50,11 @@ function jsonResponse() {
           {
             index: 0,
             finish_reason: 'stop',
-            message: { role: 'assistant', content: '{"items":[],"evidence":[]}', refusal: null },
+            message: {
+              role: 'assistant',
+              content: '{"layerDecisions":[{"kind":"event","decision":"omit","itemRefs":[]},{"kind":"recurrence","decision":"omit","itemRefs":[]},{"kind":"hypothesis","decision":"omit","itemRefs":[]}],"items":[],"evidence":[]}',
+              refusal: null,
+            },
           },
         ],
       });
@@ -95,7 +99,7 @@ describe('runHypothesisFourBenchmarkFromArgvV2 dry-run', () => {
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       result.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
     );
     assert.equal(JSON.stringify(result).includes(API_KEY), false);
   });
