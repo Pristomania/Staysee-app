@@ -313,7 +313,7 @@ describe('live-benchmark-six-run-v2 dry-run', () => {
     assert.deepEqual(parsed.benchmarkResult.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
     assert.equal(
       parsed.benchmarkResult.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
     );
     assert.equal(parsed.benchmarkResult.configuredBudget.absoluteCostUsd, '0.100728');
     assert.equal(parsed.benchmarkResult.configuredBudget.maxBudgetUsd, 0.11);

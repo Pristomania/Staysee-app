@@ -279,7 +279,8 @@ function sixEngineOptions(overrides = {}) {
     dataset: loadGoldenDataset(),
     profileId: 'six-category-v2',
     model: MODEL,
-    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
+    extractorVersion:
+      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
     budget: { ...SIX_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -380,7 +381,7 @@ function hypothesisEngineOptions(overrides = {}) {
     profileId: 'hypothesis-four-v2',
     model: MODEL,
     extractorVersion:
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
     budget: { ...HYPOTHESIS_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -599,7 +600,7 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
       profileId: 'hypothesis-four-v2',
       model: MODEL,
       extractorVersion:
-        'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+        'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
       budget: { ...HYPOTHESIS_BUDGET },
       maxPromptRequestBytesPerCase: 20000,
       execute: true,
@@ -612,7 +613,7 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       result.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
     );
     assert.equal(result.configuredBudget.absoluteInputTokens, 65536);
     assert.equal(result.configuredBudget.absoluteOutputTokens, 4800);
@@ -826,7 +827,7 @@ describe('buildProfileSemanticReviewPacketV2', () => {
     );
     assert.equal(
       packet.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
     );
     for (const entry of packet.cases) {
       assert.equal(entry.semanticVerdict, null);
@@ -908,7 +909,7 @@ describe('buildProfileSemanticReviewPacketV2', () => {
         benchmarkResult: {
           ...dry,
           extractorVersion:
-            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
         },
       }),
     );
@@ -1064,7 +1065,7 @@ describe('runProfileLiveBenchmarkV2 preflight negatives', () => {
       runProfileLiveBenchmarkV2(
         sixEngineOptions({
           extractorVersion:
-            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
           fetchImpl,
           execute: true,
           apiKey: API_KEY,

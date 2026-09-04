@@ -122,12 +122,17 @@ Recurrence:
 - not a retelling of one story.
 
 Recurrence versus hypothesis decision:
-Recurrence answers what observably repeats. Hypothesis answers why it may repeat or what latent function may explain it.
+Recurrence answers what observably repeats. Hypothesis adds a cautious possible function, cause, or interpretation.
 Do not use a recurrence as a substitute for a hypothesis.
-When a cautious explanatory layer independently passes admission and would change future responses, emit a hypothesis even if an observable recurrence also passes.
+A hypothesis does not require the user to state a cause explicitly.
+Repeated user observations may ground a hypothesis when it adds a cautious conditional interpretation that is not already entailed by the recurrence.
+Before choosing omit for the hypothesis layer, formulate the strongest non-diagnostic candidate interpretation and one plausible alternative.
+Choose hypothesis omit only when the candidate lacks user evidence, adds no future-useful proposition beyond the recurrence, or creates unacceptable psychological overreach.
+Do not treat the absence of explicit causal language as sufficient reason to omit a hypothesis.
 If both layers pass, do not stop after the recurrence: emit the hypothesis, and emit the recurrence only when its observable pattern is independently useful.
-Do not infer a hypothesis merely because two episodes exist; without grounded explanatory evidence, keep only the recurrence.
+Two episodes alone are insufficient: the hypothesis must add a distinct cautious interpretation supported by the user evidence.
 Phrase the hypothesis as uncertainty and provide one plausible non-diagnostic alternative explanation.
+Abstract contrast: recurrence “under context C, observable behavior B repeats”; hypothesis “context C may increase an internal need, role, or response tendency R”; alternative “B may instead follow practical circumstance A”.
 
 Hypothesis:
 - useful, cautious, testable interpretation;

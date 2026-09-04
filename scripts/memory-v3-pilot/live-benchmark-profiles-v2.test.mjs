@@ -129,7 +129,7 @@ describe('getLiveBenchmarkProfileV2 six-category-v2', () => {
     assert.deepEqual([...profile.caseIds], [...SIX_CASE_IDS]);
     assert.equal(
       profile.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
     );
     assert.equal(profile.executeFlag, '--execute-six-paid-requests');
     assert.equal(profile.engineErrorPrefix, '[memory-v3:live-benchmark-six-v2]');
@@ -204,7 +204,7 @@ describe('getLiveBenchmarkProfileV2 hypothesis-four-v2', () => {
     assert.deepEqual([...profile.caseIds], [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       profile.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
     );
     assert.equal(profile.executeFlag, '--execute-hypothesis-four-paid-requests');
     assert.equal(profile.engineErrorPrefix, '[memory-v3:live-benchmark-hypothesis-four-v2]');

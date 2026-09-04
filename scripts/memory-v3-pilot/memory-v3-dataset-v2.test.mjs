@@ -377,7 +377,9 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.equal(v2.includes('2.0.0'), true);
     assert.equal(v2.includes('live-benchmark-six-run-v2.mjs'), true);
     assert.equal(
-      v2.includes('memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2'),
+      v2.includes(
+        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
+      ),
       true,
     );
     assert.equal(v2.includes('not production-ready'), true);
@@ -398,7 +400,7 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.match(v2, /all 6 returned openrouter_http_404/);
     assert.match(v2, /Gemini supports max_tokens, not max_completion_tokens/);
     assert.match(v2, /matched 0\/4 required hypotheses/);
-    assert.match(v2, /No paid run has been made with the new extractor version/);
+    assert.match(v2, /No paid run has been made with `hypothesis-admission-r3`/);
     assert.match(v2, /not the V1 command/);
     assert.match(v2, /structural evaluation does not (?:judge|score|evaluate) semantic/i);
     assert.match(v2, /forbidden remembered meaning/);

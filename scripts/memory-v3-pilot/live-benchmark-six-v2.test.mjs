@@ -19,7 +19,7 @@ import {
 
 const MODEL = 'google/gemini-3.7-flash';
 const EXTRACTOR_VERSION =
-  'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2';
+  'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = 'test-memory-v3-six-case-v2-key';
 const EMPTY_CONTENT = JSON.stringify({

@@ -234,7 +234,7 @@ V2 additive: new `*-v2.mjs` modules and a separate Golden V2. Memory V3 V2 is no
 - datasetId `memory-v3-ru-golden-v2`
 - version `2.0.0`
 - file `memory-v3-ru-golden.v2.json`
-- current six-category extractor version `memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2`
+- current six-category extractor version `memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3`
 
 ### What V2 changes
 
@@ -264,7 +264,7 @@ node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model google/gemini
 
 This V2 dry-run makes 0 provider HTTP calls. It does not require and does not read `.env`. Output is printed as one safe JSON object and is not saved to disk automatically.
 
-The current control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.
+The current control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.
 
 ### V2 hypothesis-four dry-run
 
@@ -272,10 +272,10 @@ The current control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-
 node scripts/memory-v3-pilot/live-benchmark-hypothesis-four-run-v2.mjs --model google/gemini-3.7-flash --max-budget-usd 0.075
 ```
 
-This profile selects `memv3-ru-hypothesis-01`, `memv3-ru-hypothesis-02`, `memv3-ru-hypothesis-03`, and `memv3-ru-hypothesis-04` in that fixed order. Its current extractor version is `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2`.
+This profile selects `memv3-ru-hypothesis-01`, `memv3-ru-hypothesis-02`, `memv3-ru-hypothesis-03`, and `memv3-ru-hypothesis-04` in that fixed order. Its current extractor version is `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3`.
 
 The dry-run makes 0 provider HTTP calls and does not read .env. Its configured worst-case ceiling is `$0.067152` under a hard maximum of `$0.075`.
 
-An earlier paid hypothesis-four run under extractor version `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2` completed 4/4 requests but emitted recurrence for all four cases and matched 0/4 required hypotheses. A second paid run with `hypothesis-admission-r1` also completed 4/4 requests and still emitted recurrence in all four cases, again matching 0/4 required hypotheses. That evidence showed that wording alone was insufficient and motivated the structural `v2-layered` response contract. No paid run has been made with the new extractor version `layer-decision-r2`, so its live quality and actual provider cost remain unknown.
+An earlier paid hypothesis-four run under extractor version `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2` completed 4/4 requests but emitted recurrence for all four cases and matched 0/4 required hypotheses. A second paid run with `hypothesis-admission-r1` also completed 4/4 requests and still emitted recurrence in all four cases, again matching 0/4 required hypotheses. That evidence showed that wording alone was insufficient and motivated the structural `v2-layered` response contract. A third paid run with `layer-decision-r2` completed 4/4 requests and improved required hypothesis matching to 1/4; its explicit decisions showed `hypothesis: omit` for the other three cases. The current `hypothesis-admission-r3` prompt aligns admission with the V2 specification by accepting a cautious possible function, cause, or conditional interpretation without requiring explicit causal language. No paid run has been made with `hypothesis-admission-r3`, so its live quality and actual provider cost remain unknown.
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.

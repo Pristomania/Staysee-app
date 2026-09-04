@@ -99,7 +99,7 @@ describe('runHypothesisFourBenchmarkFromArgvV2 dry-run', () => {
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
     assert.equal(
       result.extractorVersion,
-      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-r2',
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-layer-decision-hypothesis-admission-r3',
     );
     assert.equal(JSON.stringify(result).includes(API_KEY), false);
   });

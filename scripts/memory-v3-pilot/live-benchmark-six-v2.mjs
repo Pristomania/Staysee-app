@@ -29,7 +29,7 @@ const PACKET_REQUIRED = Object.freeze(['dataset', 'benchmarkResult']);
 export const SIX_CASE_BENCHMARK_V2_CASE_IDS = CANONICAL.caseIds;
 
 export const SIX_CASE_BENCHMARK_V2_EXTRACTOR_VERSION =
-  'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2';
+  'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3';
 
 function fail(message) {
   const error = new Error(`[memory-v3:live-benchmark-six-v2] ${message}`);

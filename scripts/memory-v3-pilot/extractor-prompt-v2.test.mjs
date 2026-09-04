@@ -465,16 +465,32 @@ describe('V2 extractor layered admission', () => {
     );
   });
 
-  it('distinguishes an observable recurrence from a future-useful explanatory hypothesis', () => {
+  it('admits a future-useful causal, functional, or conditional hypothesis without requiring explicit causal language', () => {
     const system = buildExtractorRequestV2(v2CaseWithSentinels()).system;
     assertContains(
       system,
-      'Recurrence answers what observably repeats. Hypothesis answers why it may repeat or what latent function may explain it.',
+      'Recurrence answers what observably repeats. Hypothesis adds a cautious possible function, cause, or interpretation.',
     );
     assertContains(system, 'Do not use a recurrence as a substitute for a hypothesis.');
     assertContains(
       system,
-      'When a cautious explanatory layer independently passes admission and would change future responses, emit a hypothesis even if an observable recurrence also passes.',
+      'A hypothesis does not require the user to state a cause explicitly.',
+    );
+    assertContains(
+      system,
+      'Repeated user observations may ground a hypothesis when it adds a cautious conditional interpretation that is not already entailed by the recurrence.',
+    );
+    assertContains(
+      system,
+      'Before choosing omit for the hypothesis layer, formulate the strongest non-diagnostic candidate interpretation and one plausible alternative.',
+    );
+    assertContains(
+      system,
+      'Choose hypothesis omit only when the candidate lacks user evidence, adds no future-useful proposition beyond the recurrence, or creates unacceptable psychological overreach.',
+    );
+    assertContains(
+      system,
+      'Do not treat the absence of explicit causal language as sufficient reason to omit a hypothesis.',
     );
     assertContains(
       system,
@@ -482,12 +498,19 @@ describe('V2 extractor layered admission', () => {
     );
     assertContains(
       system,
-      'Do not infer a hypothesis merely because two episodes exist; without grounded explanatory evidence, keep only the recurrence.',
+      'Two episodes alone are insufficient: the hypothesis must add a distinct cautious interpretation supported by the user evidence.',
     );
     assertContains(
       system,
       'Phrase the hypothesis as uncertainty and provide one plausible non-diagnostic alternative explanation.',
     );
+    assertContains(
+      system,
+      'Abstract contrast: recurrence “under context C, observable behavior B repeats”; hypothesis “context C may increase an internal need, role, or response tendency R”; alternative “B may instead follow practical circumstance A”.',
+    );
+    assert.equal(system.includes('uncertain trips'), false);
+    assert.equal(system.includes('demanding social weekends'), false);
+    assert.equal(system.includes('without grounded explanatory evidence, keep only the recurrence'), false);
 
     for (const paidCaseText of [
       'В группе юмор может помогать ей дозировать уязвимость',

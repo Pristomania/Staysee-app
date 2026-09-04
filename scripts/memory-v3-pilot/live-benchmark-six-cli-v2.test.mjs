@@ -142,7 +142,7 @@ describe('runSixCaseBenchmarkFromArgvV2 dry-run', () => {
       assert.deepEqual(result.caseIds, [...SIX_CASE_BENCHMARK_V2_CASE_IDS]);
       assert.equal(
         result.extractorVersion,
-        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
+        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
       );
       assert.equal(result.configuredBudget.absoluteCostUsd, '0.100728');
       assert.equal(result.configuredBudget.maxBudgetUsd, 0.11);
@@ -188,7 +188,7 @@ describe('runSixCaseBenchmarkFromArgvV2 execute fake fetch', () => {
       assert.equal(result.successCount, 6);
       assert.equal(
         result.extractorVersion,
-        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-r2',
+        'memory-v3-openrouter-gemini-3.7-flash-six-v2-layer-decision-hypothesis-admission-r3',
       );
       assert.equal(process.env.OPENROUTER_API_KEY, undefined);
       assert.equal(JSON.stringify(result).includes(API_KEY), false);
