@@ -26,7 +26,7 @@ const REQUIRED_PHRASES = [
   'pattern_confirmation',
   'scope_boundary',
   'Do not apply: every episode → one event + one recurrence + one hypothesis',
-  'omitting a valid extra layer is allowed',
+  'omitting a merely duplicative or optional extra layer is allowed',
   'do not invent layers for completeness',
   'if this layer were deleted, what would a future conversation lose',
   'A recurrence requires at least two different real episode_observation supports',
@@ -405,9 +405,19 @@ describe('V2 extractor layered admission', () => {
     assertContains(system, 'Two episode stories can justify a recurrence without also minting events.');
     assertContains(system, 'Two observations can justify a recurrence without also minting a hypothesis.');
     assertContains(system, 'An explicit decision can justify an event without also minting a recurrence.');
-    assertContains(system, 'omitting a valid extra layer is allowed; do not invent layers for completeness');
+    assertContains(
+      system,
+      'omitting a merely duplicative or optional extra layer is allowed; do not invent layers for completeness',
+    );
     assertContains(system, 'if this layer were deleted, what would a future conversation lose');
-    assertContains(system, 'Passing the deletion test does not force emission of every remaining layer.');
+    assertContains(
+      system,
+      'Passing the deletion test does not force emission of every remaining optional layer.',
+    );
+    assertContains(
+      system,
+      'It does not permit replacing an independently admitted hypothesis with a recurrence.',
+    );
     assertContains(
       system,
       'A separate event is permitted when the user explicitly reports a new biographical fact or decision that itself passes event admission.',
@@ -421,6 +431,40 @@ describe('V2 extractor layered admission', () => {
       system,
       'A boundary, context limitation or contrast is not necessarily contradicts.',
     );
+  });
+
+  it('distinguishes an observable recurrence from a future-useful explanatory hypothesis', () => {
+    const system = buildExtractorRequestV2(v2CaseWithSentinels()).system;
+    assertContains(
+      system,
+      'Recurrence answers what observably repeats. Hypothesis answers why it may repeat or what latent function may explain it.',
+    );
+    assertContains(system, 'Do not use a recurrence as a substitute for a hypothesis.');
+    assertContains(
+      system,
+      'When a cautious explanatory layer independently passes admission and would change future responses, emit a hypothesis even if an observable recurrence also passes.',
+    );
+    assertContains(
+      system,
+      'If both layers pass, do not stop after the recurrence: emit the hypothesis, and emit the recurrence only when its observable pattern is independently useful.',
+    );
+    assertContains(
+      system,
+      'Do not infer a hypothesis merely because two episodes exist; without grounded explanatory evidence, keep only the recurrence.',
+    );
+    assertContains(
+      system,
+      'Phrase the hypothesis as uncertainty and provide one plausible non-diagnostic alternative explanation.',
+    );
+
+    for (const paidCaseText of [
+      'В группе юмор может помогать ей дозировать уязвимость',
+      'Потребность детально контролировать усиливается',
+      'В семейных кризисах она может автоматически занимать роль',
+      'После усиления близости у неё иногда появляется импульс',
+    ]) {
+      assert.equal(system.includes(paidCaseText), false);
+    }
   });
 });
 

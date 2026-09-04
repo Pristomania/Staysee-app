@@ -122,7 +122,7 @@ const SIX_CATEGORY_V2 = freezeProfile({
     'memv3-ru-safety-03',
   ],
   model: 'google/gemini-3.7-flash',
-  extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2',
+  extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
   datasetId: 'memory-v3-ru-golden-v2',
   datasetVersion: '2.0.0',
   reasoningEffort: 'low',
@@ -159,7 +159,8 @@ const HYPOTHESIS_FOUR_V2 = freezeProfile({
     'memv3-ru-hypothesis-04',
   ],
   model: 'google/gemini-3.7-flash',
-  extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2',
+  extractorVersion:
+    'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
   datasetId: 'memory-v3-ru-golden-v2',
   datasetVersion: '2.0.0',
   reasoningEffort: 'low',

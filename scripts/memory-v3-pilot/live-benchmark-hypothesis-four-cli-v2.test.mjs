@@ -93,7 +93,10 @@ describe('runHypothesisFourBenchmarkFromArgvV2 dry-run', () => {
     assert.equal(fetchImpl.calls.length, 0);
     assert.equal(result.providerHttpCalls, 0);
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
-    assert.equal(result.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2');
+    assert.equal(
+      result.extractorVersion,
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+    );
     assert.equal(JSON.stringify(result).includes(API_KEY), false);
   });
 });

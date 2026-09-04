@@ -234,7 +234,7 @@ V2 additive: new `*-v2.mjs` modules and a separate Golden V2. Memory V3 V2 is no
 - datasetId `memory-v3-ru-golden-v2`
 - version `2.0.0`
 - file `memory-v3-ru-golden.v2.json`
-- extractor version `memory-v3-openrouter-gemini-3.7-flash-six-v2`
+- current six-category extractor version `memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1`
 
 ### What V2 changes
 
@@ -246,7 +246,7 @@ Structural evaluation does not judge semantic correctness or forbidden remembere
 
 The first V2 paid audit used Luna and exposed an adapter schema mismatch, which is now covered by offline tests. A later Luna rerun was incomplete because the provider returned top-level generation errors. That result is not a V2 quality pass.
 
-The Gemini control run made 6 sequential POSTs and all 6 returned openrouter_http_404, so it produced no extraction or quality result. The root cause was another provider-parameter mismatch: Gemini supports max_tokens, not max_completion_tokens, while `require_parameters: true` was enforced. The adapter now selects the token-limit field explicitly per profile and preserves the Luna default. Gemini has not been rerun after this offline fix.
+The first Gemini control attempt made 6 sequential POSTs and all 6 returned openrouter_http_404. The root cause was a provider-parameter mismatch: Gemini supports max_tokens, not max_completion_tokens, while `require_parameters: true` was enforced. After that offline fix, a six-case Gemini run completed 6/6 cases and exposed the hypothesis-admission gap described below.
 
 ### Offline tests
 
@@ -262,7 +262,7 @@ node scripts/memory-v3-pilot/live-benchmark-six-run-v2.mjs --model google/gemini
 
 This V2 dry-run makes 0 provider HTTP calls. It does not require and does not read `.env`. Output is printed as one safe JSON object and is not saved to disk automatically.
 
-The authorized control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.
+The current control profile uses Golden V2 and `memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1`. Execution still requires the explicit `--execute-six-paid-requests` flag. It is not the V1 command `live-benchmark-six-run.mjs`. It makes at most 6 sequential POSTs, with no retry or repair at the application level. OpenRouter provider fallback is allowed only between compatible endpoints while `require_parameters: true`, `data_collection: "deny"`, and `zdr: true` remain enforced. Hard budget is `$0.11`. Configured worst-case ceiling is `$0.100728`. That ceiling is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` remain `null` / unknown until provider telemetry is intentionally projected.
 
 ### V2 hypothesis-four dry-run
 
@@ -270,8 +270,10 @@ The authorized control profile uses Golden V2 and `memory-v3-openrouter-gemini-3
 node scripts/memory-v3-pilot/live-benchmark-hypothesis-four-run-v2.mjs --model google/gemini-3.7-flash --max-budget-usd 0.075
 ```
 
-This profile selects `memv3-ru-hypothesis-01`, `memv3-ru-hypothesis-02`, `memv3-ru-hypothesis-03`, and `memv3-ru-hypothesis-04` in that fixed order. Its extractor version is `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2`.
+This profile selects `memv3-ru-hypothesis-01`, `memv3-ru-hypothesis-02`, `memv3-ru-hypothesis-03`, and `memv3-ru-hypothesis-04` in that fixed order. Its current extractor version is `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1`.
 
 The dry-run makes 0 provider HTTP calls and does not read .env. Its configured worst-case ceiling is `$0.067152` under a hard maximum of `$0.075`.
 
-Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only and does not establish live quality or actual provider cost.
+An earlier paid hypothesis-four run under extractor version `memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2` completed 4/4 requests but emitted recurrence for all four cases and matched 0/4 required hypotheses. That evidence motivated the hypothesis-admission-r1 prompt change. No paid run has been made with the new extractor version, so its live quality and actual provider cost remain unknown.
+
+Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.

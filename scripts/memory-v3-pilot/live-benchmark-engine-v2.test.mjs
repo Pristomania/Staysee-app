@@ -266,7 +266,7 @@ function sixEngineOptions(overrides = {}) {
     dataset: loadGoldenDataset(),
     profileId: 'six-category-v2',
     model: MODEL,
-    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2',
+    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-six-v2-hypothesis-admission-r1',
     budget: { ...SIX_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -366,7 +366,8 @@ function hypothesisEngineOptions(overrides = {}) {
     dataset: loadGoldenDataset(),
     profileId: 'hypothesis-four-v2',
     model: MODEL,
-    extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2',
+    extractorVersion:
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
     budget: { ...HYPOTHESIS_BUDGET },
     maxPromptRequestBytesPerCase: 20000,
     execute: false,
@@ -576,7 +577,8 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
       dataset: loadGoldenDataset(),
       profileId: 'hypothesis-four-v2',
       model: MODEL,
-      extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2',
+      extractorVersion:
+        'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
       budget: { ...HYPOTHESIS_BUDGET },
       maxPromptRequestBytesPerCase: 20000,
       execute: true,
@@ -587,7 +589,10 @@ describe('runProfileLiveBenchmarkV2 identity', () => {
     assert.equal(result.providerHttpCalls, 4);
     assert.equal(result.maxActive, 1);
     assert.deepEqual(result.caseIds, [...HYPOTHESIS_CASE_IDS]);
-    assert.equal(result.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2');
+    assert.equal(
+      result.extractorVersion,
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+    );
     assert.equal(result.configuredBudget.absoluteInputTokens, 65536);
     assert.equal(result.configuredBudget.absoluteOutputTokens, 4800);
     assert.equal(result.configuredBudget.inputCostUsd, '0.049152');
@@ -793,7 +798,10 @@ describe('buildProfileSemanticReviewPacketV2', () => {
       packet.cases.map((entry) => entry.caseId),
       [...HYPOTHESIS_CASE_IDS],
     );
-    assert.equal(packet.extractorVersion, 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2');
+    assert.equal(
+      packet.extractorVersion,
+      'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
+    );
     for (const entry of packet.cases) {
       assert.equal(entry.semanticVerdict, null);
       assert.equal(entry.forbiddenMeaningVerdict, null);
@@ -873,7 +881,8 @@ describe('buildProfileSemanticReviewPacketV2', () => {
         dataset,
         benchmarkResult: {
           ...dry,
-          extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2',
+          extractorVersion:
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
         },
       }),
     );
@@ -1028,7 +1037,8 @@ describe('runProfileLiveBenchmarkV2 preflight negatives', () => {
     await assert.rejects(() =>
       runProfileLiveBenchmarkV2(
         sixEngineOptions({
-          extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2',
+          extractorVersion:
+            'memory-v3-openrouter-gemini-3.7-flash-hypothesis-four-v2-hypothesis-admission-r1',
           fetchImpl,
           execute: true,
           apiKey: API_KEY,

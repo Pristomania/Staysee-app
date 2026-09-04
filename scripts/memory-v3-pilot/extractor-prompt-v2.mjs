@@ -81,7 +81,7 @@ Do not apply: every episode → one event + one recurrence + one hypothesis
 Two episode stories can justify a recurrence without also minting events.
 Two observations can justify a recurrence without also minting a hypothesis.
 An explicit decision can justify an event without also minting a recurrence.
-omitting a valid extra layer is allowed; do not invent layers for completeness
+omitting a merely duplicative or optional extra layer is allowed; do not invent layers for completeness
 
 Memory admission is separate from truth or evidence.
 A reliable fact is not automatically long-term memory.
@@ -108,6 +108,14 @@ Recurrence:
 - not one current difficulty;
 - not a retelling of one story.
 
+Recurrence versus hypothesis decision:
+Recurrence answers what observably repeats. Hypothesis answers why it may repeat or what latent function may explain it.
+Do not use a recurrence as a substitute for a hypothesis.
+When a cautious explanatory layer independently passes admission and would change future responses, emit a hypothesis even if an observable recurrence also passes.
+If both layers pass, do not stop after the recurrence: emit the hypothesis, and emit the recurrence only when its observable pattern is independently useful.
+Do not infer a hypothesis merely because two episodes exist; without grounded explanatory evidence, keep only the recurrence.
+Phrase the hypothesis as uncertainty and provide one plausible non-diagnostic alternative explanation.
+
 Hypothesis:
 - useful, cautious, testable interpretation;
 - enough evidence to formulate uncertainty;
@@ -122,7 +130,8 @@ Before keeping two items, ask: if this layer were deleted, what would a future c
 - If deleting the recurrence loses that this happened more than once in distinct episodes, the recurrence may be kept.
 - If deleting the hypothesis loses a cautious why plus a live alternative, the hypothesis may be kept.
 - If deleting a layer loses nothing material, drop it.
-Passing the deletion test does not force emission of every remaining layer.
+Passing the deletion test does not force emission of every remaining optional layer.
+It does not permit replacing an independently admitted hypothesis with a recurrence.
 
 Correction lifecycle:
 - A correction is a newer user correction.
