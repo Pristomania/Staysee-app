@@ -1,15 +1,12 @@
 /**
- * Memory V3 V2 six-case live-benchmark CLI compatibility wrapper.
- * Injects profileId six-category-v2. No fs, env object, or global fetch.
- *
- * Dry-run and execute delegate to runProfileBenchmarkFromArgvV2; the engine path is
- * runProfileLiveBenchmarkV2, not a direct runSixCaseLiveBenchmarkV2 call.
+ * Memory V3 V2 hypothesis-four live-benchmark CLI compatibility wrapper.
+ * Injects profileId hypothesis-four-v2. No fs, env object, or global fetch.
  */
 
 import { getLiveBenchmarkProfileV2 } from './live-benchmark-profiles-v2.mjs';
 import { runProfileBenchmarkFromArgvV2 } from './live-benchmark-cli-v2.mjs';
 
-const CANONICAL = getLiveBenchmarkProfileV2('six-category-v2');
+const CANONICAL = getLiveBenchmarkProfileV2('hypothesis-four-v2');
 const OWN_ERRORS = new WeakSet();
 const OPTION_REQUIRED = Object.freeze(['argv', 'dataset']);
 const OPTION_OPTIONAL = Object.freeze(['fetchImpl', 'readEnvText']);
@@ -82,7 +79,7 @@ function inspectRecordPartial(value, required, optional, path) {
   return copy;
 }
 
-export async function runSixCaseBenchmarkFromArgvV2(options) {
+export async function runHypothesisFourBenchmarkFromArgvV2(options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw fail('options must be a plain object');
   }
