@@ -8,7 +8,7 @@
 
 Adopt a production shadow pilot for Memory V3 on exactly one explicitly allowlisted StaySEE account.
 
-The pilot observes bounded real conversation history, runs the validated Memory V3 V2 extractor in the background, and stores its normalized output in a dedicated service-only table. It does not change replies, prompt context, the current memory system, the UI, or any user-visible behavior.
+The pilot observes bounded real conversation history, runs the validated Memory V3 V2 extractor in the background, and stores its normalized output in a dedicated service-only run table. A second service-only non-content ledger preserves at-most-once input identity. Neither table changes replies, prompt context, the current memory system, the UI, or any user-visible behavior.
 
 The first pilot account is Nastya's account with the most useful conversation history. The son's account and the other account are outside the pilot. Adding any account requires a separate configuration change and authorization.
 
@@ -165,14 +165,15 @@ reserve_memory_v3_shadow_run(
 )
 ```
 
-The function is `SECURITY DEFINER` with a fixed safe `search_path`. It executes in one transaction and:
+The function is `SECURITY DEFINER` with `SET search_path = ''`; every database object reference is schema-qualified. It executes in one transaction and:
 
 1. verifies that the conversation belongs to `p_user_id`;
 2. takes a transaction-scoped advisory lock derived from `p_user_id` and the UTC date;
-3. returns `duplicate` if the unique input identity already exists;
-4. counts that user's rows created in the current UTC day;
-5. returns `daily_cap` when the count is already 4;
-6. inserts one `reserved` row and returns its ID otherwise.
+3. deletes expired shadow-run payload rows older than 30 days as best-effort cleanup;
+4. returns `duplicate` if the durable input identity already exists;
+5. counts that user's rows created in the current UTC day;
+6. returns `daily_cap` when the count is already 4;
+7. claims the identity with conflict-safe insert semantics, returning `duplicate` if a cross-date race already claimed it, then inserts one matching `reserved` run row in the same transaction and returns the run ID otherwise.
 
 The hard pilot cap is four reservations per UTC day for the one allowed account. Failed and abandoned reservations count toward the cap. The cap is not configurable from the client and cannot be raised through request input.
 
@@ -185,6 +186,8 @@ Create migration:
 ```text
 supabase/migrations/20260905120000_032_memory_v3_shadow_pilot.sql
 ```
+
+Create table `public.memory_v3_shadow_identities` with only `user_id`, `conversation_id`, `extractor_version`, `input_hash`, and `created_at`. Its primary key is `(user_id, conversation_id, extractor_version, input_hash)`; `user_id` and `conversation_id` are required cascade-delete foreign keys, and `input_hash` is constrained to lowercase 64-character SHA-256 hex. It contains no dialogue, claims, evidence, model output, or diagnostics and remains until the owning account or conversation is deleted. This non-content ledger preserves at-most-once execution after the 30-day result payload expires.
 
 Create table `public.memory_v3_shadow_runs`:
 
@@ -213,8 +216,9 @@ Create table `public.memory_v3_shadow_runs`:
 
 Constraints and indexes:
 
-- unique `(user_id, conversation_id, extractor_version, input_hash)`;
-- status check constraint;
+- required foreign key to the matching row in `memory_v3_shadow_identities`;
+- status/terminal-shape check: `reserved` has no completion payload, `succeeded` has `completed_at`, normalized extraction and counts but no diagnostic, and `failed` has `completed_at` plus one allowlisted diagnostic but no extraction, item/evidence counts, or usage;
+- database diagnostic allowlist matching the runner's closed set;
 - nonnegative counts and costs;
 - `message_count <= 60` and `user_message_count <= message_count`;
 - index on `(user_id, created_at DESC)`;
@@ -227,13 +231,15 @@ It must not contain the provider envelope, raw model string, system prompt, dial
 
 ## Database access and retention
 
-Row Level Security is enabled. No `anon` or `authenticated` policy is created. Table privileges and reservation/completion functions are revoked from `public`, `anon`, and `authenticated` and granted only to `service_role`.
+Row Level Security is enabled on both tables. No `anon` or `authenticated` policy is created. Table privileges and all shadow functions, including reservation, completion, and purge, are revoked from `PUBLIC`, `anon`, and `authenticated` and granted only to `service_role`.
 
 The browser and ordinary authenticated clients cannot select, insert, update, or delete shadow rows.
 
-Rows are retained for at most 30 days during the pilot. The migration creates a service-only function that deletes rows older than 30 days. A daily scheduled invocation is a deployment prerequisite before `STAYSEE_MEMORY_V3_MODE=shadow` may be enabled. Reservation also performs best-effort expired-row cleanup, but that is not the retention guarantee.
+Rows in `memory_v3_shadow_runs` are retained for at most 30 days during the pilot. The migration creates a service-only function that deletes run rows older than 30 days. A daily scheduled invocation is a deployment prerequisite before `STAYSEE_MEMORY_V3_MODE=shadow` may be enabled. Reservation also performs best-effort expired-run cleanup, but that is not the retention guarantee.
 
-Account deletion and conversation deletion remove related rows through foreign-key cascades. The existing room-deletion SQL must be checked in implementation tests so its user-data deletion contract remains complete.
+Rows in `memory_v3_shadow_identities` contain no content payload and remain only to preserve the at-most-once invariant.
+
+Account deletion and conversation deletion remove related rows from both shadow tables through foreign-key cascades. The existing room-deletion SQL must be checked in implementation tests so its user-data deletion contract remains complete.
 
 ## V2 contract port
 
@@ -268,10 +274,13 @@ The request uses the validated production profile:
 ```text
 model: google/gemini-3.7-flash
 extractorVersion: memory-v3-openrouter-gemini-3.7-flash-shadow-v2
-max input: 16384 tokens, enforced additionally by request-byte preflight
+maximum request: 20,000 UTF-8 bytes
+configured budget reservation: 32,768 input tokens per run
 max output: 1200 tokens
 response contract: Memory V3 V2 layered items and typed evidence
 ```
+
+The byte limit is the enforceable pre-call input gate. The runner does not have the provider's exact tokenizer and must not report the 32,768-token reservation as measured usage. At the reviewed profile prices of $0.75 per million input tokens and $3.75 per million output tokens, the configured ceiling is $0.029076 per run and $0.116304 for four runs. These are planning ceilings, not actual billing guarantees; trusted provider usage remains nullable.
 
 OpenRouter provider controls remain:
 
@@ -291,9 +300,9 @@ The response projector accepts only the content path needed by the extractor. Te
 
 `runMemoryV3Shadow` performs these steps in order:
 
-1. Validate the injected dependencies and safe scalar options.
-2. Evaluate mode and exact user allowlist.
-3. Confirm a valid user ID and conversation ID.
+1. Inspect the top-level options as JSON-data-only fields without executing accessors or trusting prototypes.
+2. Evaluate mode and exact user allowlist from the copied primitive fields; return a normal skip immediately when disabled or nonmatching.
+3. Only for an eligible account, validate user/conversation IDs, API-key presence, and injected dependency shapes.
 4. Load and validate the bounded message slice.
 5. Build the V2 request and enforce the byte ceiling.
 6. Compute the canonical input hash.
@@ -414,7 +423,7 @@ Required test groups:
 - getters, symbols, non-enumerable fields, sparse arrays, cycles, revoked proxies, and spoofed errors do not leak data;
 - `staysee-chat` wiring runs only in the background summary cadence and never feeds shadow output into replies or existing memory writers;
 - non-allowlisted users have zero reservation and fetch calls;
-- the migration enables RLS, creates no client policy, grants service-role-only execution, enforces uniqueness/caps, and includes retention cleanup;
+- the migration enables RLS on both tables, creates no client policy, grants service-role-only execution, enforces the durable identity and daily cap, cleans expired run payloads without deleting identities, and uses empty function `search_path` with schema-qualified objects;
 - existing Memory V1/V2 tests and application typecheck/lint/build remain green where dependencies are available.
 
 Tests must use synthetic UUIDs, dialogue, API keys, provider responses, and database rows. They must not read `.env`, call OpenRouter, deploy migrations, or access production/staging.
@@ -459,7 +468,7 @@ The pilot is successful when:
 - every provider call maps to one reservation;
 - stored successful outputs pass the V2 contract;
 - stored failures contain only allowlisted diagnostics;
-- no raw dialogue snapshot, prompt, provider body, credential, or arbitrary error reaches the shadow table or logs;
+- no raw dialogue snapshot, prompt, provider body, credential, or arbitrary error reaches either shadow table or logs;
 - retention and account/conversation deletion remove pilot data as designed;
 - manual review yields enough evidence for a separate integration decision.
 
