@@ -113,8 +113,8 @@ test("createMemoryV3MessageLoader verifies ownership before loading bounded mess
     { method: "from", args: ["messages"] },
     { method: "select", args: ["messages", "id, sender, content, created_at"] },
     { method: "eq", args: ["messages", "conversation_id", CONVERSATION_ID] },
-    { method: "order", args: ["messages", "created_at", { ascending: true }] },
-    { method: "order", args: ["messages", "id", { ascending: true }] },
+    { method: "order", args: ["messages", "created_at", { ascending: false }] },
+    { method: "order", args: ["messages", "id", { ascending: false }] },
     { method: "limit", args: ["messages", 60] },
   ]);
 });
@@ -167,8 +167,7 @@ test("createMemoryV3MessageLoader rejects invalid ids and clients before databas
 
 test("createMemoryV3MessageLoader stops a cyclic Proxy prototype chain", () => {
   let prototypeCalls = 0;
-  let client: object;
-  client = new Proxy({}, {
+  const client: object = new Proxy({}, {
     getOwnPropertyDescriptor() {
       return undefined;
     },

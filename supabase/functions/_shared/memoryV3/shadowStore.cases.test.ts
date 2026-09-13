@@ -195,6 +195,33 @@ describe("Memory V3 shadow migration", () => {
 });
 
 describe("Memory V3 shadow store reservation", () => {
+  it("accepts a PromiseLike rpc boundary used by Supabase query builders", async () => {
+    const source = readFileSync(new URL("./shadowStore.ts", import.meta.url), "utf8");
+    assert.match(source, /rpc\(name: string, args: Record<string, unknown>\): PromiseLike<\{ data: unknown; error: unknown \}>/);
+
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const client = {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        return {
+          then<TResult1 = { data: unknown; error: unknown }, TResult2 = never>(
+            onfulfilled?: ((value: { data: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+          ): PromiseLike<TResult1 | TResult2> {
+            return Promise.resolve({
+              data: [{ result: "reserved", run_id: RUN_ID }],
+              error: null,
+            }).then(onfulfilled, onrejected);
+          },
+        };
+      },
+    };
+    const result = await createMemoryV3ShadowStore(client).reserve(reservationInput());
+    assert.deepEqual(result, { status: "reserved", runId: RUN_ID });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].name, "reserve_memory_v3_shadow_run");
+  });
+
   it("accepts the Supabase-style rpc method from a client prototype", async () => {
     class SupabaseStyleClient {
       calls: Array<{ name: string; args: Record<string, unknown> }> = [];

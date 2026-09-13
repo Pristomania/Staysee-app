@@ -211,8 +211,8 @@ function inspectDenseArray(value: unknown): unknown[] {
   let keys: PropertyKey[];
   try {
     isArray = Array.isArray(value);
-    lengthDescriptor = isArray ? Object.getOwnPropertyDescriptor(value, "length") : undefined;
-    keys = isArray ? Reflect.ownKeys(value) : [];
+    lengthDescriptor = isArray ? Object.getOwnPropertyDescriptor(value as object, "length") : undefined;
+    keys = isArray ? Reflect.ownKeys(value as object) : [];
   } catch { throw fail("provider response is invalid", "provider_response_invalid"); }
   if (!isArray || !lengthDescriptor || !("value" in lengthDescriptor) || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0) throw fail("provider response is invalid", "provider_response_invalid");
   const length = lengthDescriptor.value as number;
@@ -241,7 +241,12 @@ function projectRequest(request: unknown): MemoryV3ExtractorRequest {
     if (typeof message.id !== "string" ||
       (message.role !== "user" && message.role !== "assistant") ||
       typeof message.text !== "string" || typeof message.createdAt !== "string") throw fail("invalid request");
-    return { id: message.id, role: message.role, text: message.text, createdAt: message.createdAt };
+    return {
+      id: message.id,
+      role: message.role as "user" | "assistant",
+      text: message.text,
+      createdAt: message.createdAt,
+    };
   });
   return { system: outer.system, input: { caseId: input.caseId, messages } };
 }
@@ -252,8 +257,8 @@ function inspectDenseRequestArray(value: unknown): unknown[] {
   let keys: PropertyKey[];
   try {
     isArray = Array.isArray(value);
-    descriptor = isArray ? Object.getOwnPropertyDescriptor(value, "length") : undefined;
-    keys = isArray ? Reflect.ownKeys(value) : [];
+    descriptor = isArray ? Object.getOwnPropertyDescriptor(value as object, "length") : undefined;
+    keys = isArray ? Reflect.ownKeys(value as object) : [];
   } catch { throw fail("invalid request"); }
   if (!isArray || !descriptor || !("value" in descriptor) || !Number.isSafeInteger(descriptor.value) || descriptor.value < 0) throw fail("invalid request");
   const length = descriptor.value as number;
@@ -276,8 +281,9 @@ function responseParts(value: unknown): { status: number; text: () => Promise<st
   try {
     isResponse = value instanceof Response;
     if (!isResponse) throw new TypeError();
-    status = value.status;
-    text = value.text.bind(value);
+    const response = value as Response;
+    status = response.status;
+    text = response.text.bind(response);
   } catch {
     throw fail("provider response is invalid", "provider_response_invalid");
   }

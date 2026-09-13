@@ -198,8 +198,8 @@ export function createMemoryV3MessageLoader(
       let messagesQuery = call(client, "from", "messages");
       messagesQuery = call(messagesQuery, "select", "id, sender, content, created_at");
       messagesQuery = call(messagesQuery, "eq", "conversation_id", conversationId);
-      messagesQuery = call(messagesQuery, "order", "created_at", { ascending: true });
-      messagesQuery = call(messagesQuery, "order", "id", { ascending: true });
+      messagesQuery = call(messagesQuery, "order", "created_at", { ascending: false });
+      messagesQuery = call(messagesQuery, "order", "id", { ascending: false });
       const response = inspectResponse(await call(messagesQuery, "limit", 60));
       if (response.error !== null) throw fail("message query failed");
       return projectMemoryV3SourceRows(response.data);
