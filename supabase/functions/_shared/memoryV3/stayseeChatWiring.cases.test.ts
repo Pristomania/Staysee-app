@@ -9,6 +9,10 @@ import {
 } from "./shadowRunner.ts";
 
 const INDEX_URL = new URL("../../staysee-chat/index.ts", import.meta.url);
+const MEMORY_V3_README_URL = new URL(
+  "../../../../scripts/memory-v3-pilot/README.md",
+  import.meta.url,
+);
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_USER_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const CONVERSATION_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -230,5 +234,48 @@ describe("staysee-chat Memory V3 behavior isolation", () => {
       (code) => logs.push(code),
     );
     assert.deepEqual(logs, []);
+  });
+});
+
+describe("Memory V3 production shadow documentation", () => {
+  it("documents the inactive pilot and deployment stop", () => {
+    const readme = readFileSync(MEMORY_V3_README_URL, "utf8");
+    const heading = "## Memory V3 production shadow pilot (inactive)";
+    const start = readme.indexOf(heading);
+    assert.notEqual(start, -1, "README is missing the production shadow pilot section");
+    const nextHeading = readme.indexOf("\n## ", start + heading.length);
+    const section = readme.slice(start, nextHeading === -1 ? undefined : nextHeading);
+
+    for (const required of [
+      "default off",
+      "one exact account UUID",
+      "four reservations per UTC day",
+      "20,000 UTF-8 bytes",
+      "32,768 input-token accounting reservation",
+      "$0.029076",
+      "$0.116304",
+      "planning ceiling, not actual billing",
+      "30 days",
+      "identity ledger remains until account or conversation deletion",
+      "does not affect replies",
+      "does not write conversation_summary or user_memory",
+      "not deployed",
+      "no production shadow call has been authorized",
+      "STAYSEE_MEMORY_V3_MODE",
+      "STAYSEE_MEMORY_V3_SHADOW_USER_ID",
+      "google/gemini-3.7-flash",
+      "memory-v3-openrouter-gemini-3.7-flash-shadow-v2",
+      "60 source messages",
+      "1,200 output tokens",
+      "safe source-boundary metadata",
+    ]) {
+      assert.ok(section.includes(required), `README missing: ${required}`);
+    }
+
+    assert.doesNotMatch(section, /run payload holds the bounded input/i);
+    assert.doesNotMatch(section, /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i);
+    assert.doesNotMatch(section, /STAYSEE_MEMORY_V3_MODE\s*=\s*shadow/);
+    assert.doesNotMatch(section, /supabase functions deploy/);
+    assert.doesNotMatch(section, /--execute/);
   });
 });

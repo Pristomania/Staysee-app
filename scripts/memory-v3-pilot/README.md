@@ -283,3 +283,21 @@ An earlier paid hypothesis-four run under extractor version `memory-v3-openroute
 The paid `hypothesis-admission-r3` run completed 4/4 sequential requests without retry and matched all 4/4 required hypotheses plus 3 acceptable recurrences. Structural overall precision/recall/F1 were `0.875 / 1 / 0.9333`; evidence precision/recall/F1 were `0.6087 / 1 / 0.7568`. Human review found all four hypotheses close to their gold meanings and cautiously phrased. `hypothesis-03` also emitted one redundant recurrence, and `hypothesis-01` slightly strengthened “dose vulnerability” into “hide vulnerability”; neither changes the structural 4/4 result. `actualUsage` and `actualCostUsd` remain `null` / unknown.
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.
+
+## Memory V3 production shadow pilot (inactive)
+
+The production-shaped shadow path is implemented but inactive, not deployed, and default off. Its future scope is one exact account UUID selected with `STAYSEE_MEMORY_V3_MODE` and `STAYSEE_MEMORY_V3_SHADOW_USER_ID`; no account value is included here, and no production shadow call has been authorized.
+
+The fixed boundary uses model `google/gemini-3.7-flash` and extractor version `memory-v3-openrouter-gemini-3.7-flash-shadow-v2`. A run accepts at most 60 source messages and enforces a limit of 20,000 UTF-8 bytes. Budget accounting uses a 32,768 input-token accounting reservation and at most 1,200 output tokens. The atomic daily limit is four reservations per UTC day. The values `$0.029076` per run and `$0.116304` for four runs are a planning ceiling, not actual billing or measured usage.
+
+Storage is service-role-only and separated into a durable identity ledger and a run-payload table retained for 30 days. The run payload table holds safe source-boundary metadata, normalized extraction on success, nullable trusted usage, and an allowlisted diagnostic on failure; it never stores raw dialogue or a raw prompt. The identity ledger contains no dialogue, claims, evidence, model output, or diagnostics; the identity ledger remains until account or conversation deletion so payload expiry cannot weaken at-most-once identity.
+
+The shadow path does not affect replies, current memory, or the UI, and does not write conversation_summary or user_memory. Implementation performed no migration deployment, function deployment, environment change, production data read, or provider call.
+
+Future activation order is deliberately non-executable:
+
+1. Deploy the migration and function while mode remains off.
+2. Verify RLS, service-role isolation, 30-day retention, and zero provider calls.
+3. Configure one account UUID while mode remains off.
+4. Obtain separate paid activation approval from Nastya.
+5. Enable shadow only after that approval.
