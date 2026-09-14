@@ -181,7 +181,7 @@ One row per durable item, keyed by `(user_id, memory_key)`. It stores only valid
 
 ### `memory_v3_lifecycle_shadow_evidence`
 
-Typed user evidence keyed by the durable evidence identity. It references the owning item, source message, and source conversation. Assistant evidence is impossible by contract. Deleting an account cascades all lifecycle data. Deleting a source message or conversation conservatively deletes every lifecycle item that cites that source, including its remaining evidence; this favors privacy over retention.
+Typed user evidence keyed by the durable evidence identity. It references the owning item, source message, and source conversation. Assistant evidence is impossible by contract. Deleting an account cascades all lifecycle data. Migration 034 installs schema-owned deletion triggers: before a source message or conversation is deleted, they delete every lifecycle item that cites the removed source; item deletion then cascades all remaining evidence. This favors privacy over retention and does not rely on application code.
 
 ### `memory_v3_lifecycle_shadow_identities`
 
