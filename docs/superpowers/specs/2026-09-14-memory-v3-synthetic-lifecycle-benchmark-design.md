@@ -1,7 +1,7 @@
 # Memory V3 Synthetic Lifecycle Benchmark Design
 
-**Date:** 2026-09-14  
-**Status:** Proposed design; implementation, paid execution, and production activation are separate gates  
+**Date:** 2026-09-14
+**Status:** Proposed design; implementation, paid execution, and production activation are separate gates
 **Branch:** `codex/memory-v3-lifecycle-benchmark`
 
 ## Decision
