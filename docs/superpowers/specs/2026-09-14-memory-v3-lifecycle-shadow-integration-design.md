@@ -272,7 +272,7 @@ Rules:
 - every candidate appears exactly once;
 - `create` and `ignore` require `targetMemoryRef: null`;
 - `confirm`, `revise`, `mark_stale`, and `reject` require one existing compatible target;
-- two target-changing operations cannot address the same target in one run;
+- multiple `confirm` operations may address the same target so their evidence can be merged; any `revise`, `mark_stale`, or `reject` operation must be the target's only operation in that run;
 - kind conversion is forbidden;
 - proposal order cannot change the reducer result;
 - unknown, sparse, accessor, symbolic, inherited, cyclic, or non-data fields are rejected;
@@ -322,6 +322,8 @@ Hard implementation limits:
 ```text
 model for both calls: google/gemini-3.7-flash
 source messages per run: 1..60
+extraction candidates per run: 0..100
+extraction evidence rows per run: 0..500
 current lifecycle items: 0..100
 current lifecycle evidence rows: 0..500
 extractor request: at most 20,000 UTF-8 bytes
@@ -341,11 +343,14 @@ Both provider requests preserve the reviewed privacy controls:
 
 ```json
 {
+  "allow_fallbacks": true,
   "require_parameters": true,
   "data_collection": "deny",
   "zdr": true
 }
 ```
+
+Both requests use the reviewed Gemini reasoning shape `"reasoning": { "effort": "low" }`. Neither request uses the legacy `reasoning_effort` field.
 
 Provider fallback is allowed only between endpoints satisfying every required parameter and privacy control. It is not an application retry: the application sends one POST for extraction and one POST for reconciliation at most.
 
