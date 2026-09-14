@@ -409,4 +409,35 @@ describe('lifecycle hard gates and scenario aggregation', () => {
       'semanticClaims', 'transitionAccuracy',
     ]);
   });
+
+  it('wraps revoked and stateful proxies without leaking trap messages', () => {
+    const { proxy, revoke } = Proxy.revocable({
+      expectedState: expectedState([]),
+      actualState: actualState([]),
+      transitions: transitionContext(),
+    }, {});
+    revoke();
+    assert.throws(
+      () => evaluateLifecycleStep(proxy),
+      (error) => error.name === 'MemoryV3LifecycleEvaluatorError' &&
+        !JSON.stringify(error).includes('TypeError'),
+    );
+
+    let descriptorCalls = 0;
+    const stateful = new Proxy({
+      expectedItems: [],
+      actualItems: [],
+    }, {
+      getOwnPropertyDescriptor(target, key) {
+        descriptorCalls += 1;
+        if (descriptorCalls > 1) throw new Error('RAW_EVALUATOR_TRAP_SENTINEL');
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    assert.throws(
+      () => assignLifecycleItems(stateful),
+      (error) => error.name === 'MemoryV3LifecycleEvaluatorError' &&
+        !JSON.stringify(error).includes('RAW_EVALUATOR_TRAP_SENTINEL'),
+    );
+  });
 });

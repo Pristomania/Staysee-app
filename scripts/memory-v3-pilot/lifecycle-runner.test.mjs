@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
+import { canonicalStringify } from './contracts.mjs';
+
 import {
   createScriptedLifecycleAdapter,
   runSyntheticLifecycleBenchmark,
@@ -122,6 +124,42 @@ describe('synthetic lifecycle runner preflight', () => {
       assert.equal(getterCalls(), 0);
     }
   });
+
+  test('rejects setter-only, non-enumerable, inherited, revoked, and stateful inputs before calls', async () => {
+    const hostile = [];
+    const setterOnly = clone(dataset);
+    let setterCalls = 0;
+    Object.defineProperty(setterOnly, 'datasetId', { enumerable: true, set() { setterCalls += 1; } });
+    hostile.push(setterOnly);
+    const nonEnumerable = clone(dataset);
+    Object.defineProperty(nonEnumerable, 'datasetId', { value: dataset.datasetId, enumerable: false });
+    hostile.push(nonEnumerable);
+    hostile.push(Object.assign(Object.create({ inherited: true }), clone(dataset)));
+    const revoked = Proxy.revocable(clone(dataset), {});
+    revoked.revoke();
+    hostile.push(revoked.proxy);
+    let descriptorCalls = 0;
+    hostile.push(new Proxy(clone(dataset), {
+      getOwnPropertyDescriptor(target, key) {
+        descriptorCalls += 1;
+        if (descriptorCalls > 1) throw new Error('RAW_RUNNER_TRAP_SENTINEL');
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    }));
+    for (const value of hostile) {
+      let calls = 0;
+      await assert.rejects(
+        () => runSyntheticLifecycleBenchmark({
+          dataset: value,
+          reconciliationAdapter: async () => { calls += 1; return []; },
+        }),
+        (error) => error.name === 'MemoryV3LifecycleRunnerError' &&
+          !JSON.stringify(error).match(/RAW_RUNNER_TRAP_SENTINEL|TypeError/),
+      );
+      assert.equal(calls, 0);
+    }
+    assert.equal(setterCalls, 0);
+  });
 });
 
 describe('synthetic lifecycle runner execution', () => {
@@ -175,5 +213,72 @@ describe('synthetic lifecycle runner execution', () => {
       diagnosticCode: 'lifecycle_runner_adapter_failed',
     }]);
     assert.doesNotMatch(JSON.stringify(result), /RAW_ADAPTER_SECRET|cause/);
+  });
+
+  test('does not evaluate or expose a partial step when the last proposal row is invalid', async () => {
+    const input = clone(dataset);
+    const base = routedScriptedAdapter(input);
+    const targetScenario = input.scenarios.find((scenario) => scenario.scenarioId === 'deterministic-equal-time');
+    const targetStep = targetScenario.steps[0].stepId;
+    const adapter = async (request) => {
+      const proposal = await base(request);
+      if (request.session.stepId !== targetStep) return proposal;
+      return [proposal[0], { ...proposal[1], candidateLocalItemKey: 'missing-candidate' }];
+    };
+    const result = await runSyntheticLifecycleBenchmark({ dataset: input, reconciliationAdapter: adapter });
+    const row = result.scenarios.find((scenario) => scenario.scenarioId === targetScenario.scenarioId);
+    assert.equal(row.stepCount, 0);
+    assert.equal(row.counts.exactStateStepCount, 0);
+    assert.equal(row.failures.length, 1);
+    assert.equal(result.failureCount, 1);
+    assert.equal(result.successfulStepCount, 76);
+    assert.equal(result.attemptedStepCount, 77);
+  });
+
+  test('is deterministic under proposal, expected-state, and evidence reordering without localeCompare', async () => {
+    const reordered = JSON.parse(JSON.stringify(dataset));
+    for (const scenario of reordered.scenarios) {
+      for (const step of scenario.steps) {
+        step.scriptedProposal.reverse();
+        step.validatedExtraction.items.reverse();
+        step.validatedExtraction.evidence.reverse();
+        step.expectedState.items.reverse();
+        for (const item of step.expectedState.items) item.evidence.reverse();
+      }
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(String.prototype, 'localeCompare');
+    let localeCalls = 0;
+    Object.defineProperty(String.prototype, 'localeCompare', {
+      configurable: true,
+      value() { localeCalls += 1; throw new Error('localeCompare is forbidden'); },
+    });
+    try {
+      const firstAdapter = routedScriptedAdapter(dataset);
+      const secondAdapter = routedScriptedAdapter(reordered);
+      const first = await runSyntheticLifecycleBenchmark({ dataset, reconciliationAdapter: firstAdapter });
+      const second = await runSyntheticLifecycleBenchmark({ dataset: reordered, reconciliationAdapter: secondAdapter });
+      assert.equal(canonicalStringify(second), canonicalStringify(first));
+      assert.equal(localeCalls, 0);
+    } finally {
+      Object.defineProperty(String.prototype, 'localeCompare', descriptor);
+    }
+  });
+});
+
+describe('lifecycle runner external-call source locks', () => {
+  test('keeps every new lifecycle production module offline and non-executable', () => {
+    for (const file of [
+      'lifecycle-contract.mjs',
+      'lifecycle-reducer.mjs',
+      'lifecycle-evaluator.mjs',
+      'lifecycle-runner.mjs',
+    ]) {
+      const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
+      assert.doesNotMatch(
+        source,
+        /(?:\bfetch\b|node:(?:fs|http|https|net)|process\.env|Deno\.env|\.env\b|OpenRouter|Supabase|production|staging|import\.meta\.main|process\.argv)/i,
+        file,
+      );
+    }
   });
 });

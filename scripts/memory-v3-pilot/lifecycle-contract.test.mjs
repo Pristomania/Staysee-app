@@ -745,4 +745,32 @@ describe('JSON-data-only and public diagnostic boundary', () => {
     assert.equal(projectSafeLifecycleContractDiagnostic(spoof), null);
     assert.equal(getterCalls, 0);
   });
+
+  test('rejects setter-only, inherited, and stateful descriptor inputs without leaking traps', () => {
+    let setterCalls = 0;
+    const setterOnly = {};
+    Object.defineProperty(setterOnly, 'scenarioId', {
+      enumerable: true,
+      set() { setterCalls += 1; },
+    });
+    assertContractError(() => validateLifecycleSession(setterOnly), 'lifecycle_contract_invalid_shape');
+    assert.equal(setterCalls, 0);
+
+    const inherited = Object.create(sessionFixture());
+    assertContractError(() => validateLifecycleSession(inherited), 'lifecycle_contract_invalid_shape');
+
+    let descriptorCalls = 0;
+    const stateful = new Proxy(sessionFixture(), {
+      getOwnPropertyDescriptor(target, key) {
+        descriptorCalls += 1;
+        if (descriptorCalls > 1) throw new Error('RAW_STATEFUL_DESCRIPTOR_SENTINEL');
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    const error = assertContractError(
+      () => validateLifecycleSession(stateful),
+      'lifecycle_contract_invalid_shape',
+    );
+    assert.doesNotMatch(JSON.stringify(error), /RAW_STATEFUL_DESCRIPTOR_SENTINEL/);
+  });
 });

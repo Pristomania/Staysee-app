@@ -588,4 +588,23 @@ describe('forgetting, determinism, and atomic failure', () => {
     assert.equal(result.state.items.length, 1);
     assert.equal(JSON.stringify(result).includes('RAW_POST_VALIDATION_SECRET'), false);
   });
+
+  test('does not publish the first create when a later proposal row is invalid', () => {
+    const state = createEmptyLifecycleState({ scenarioId: 'scenario-01' });
+    const first = candidate({ localItemKey: 'candidate-01' });
+    const second = candidate({ localItemKey: 'candidate-02', claim: 'Второй синтетический факт' });
+    const input = {
+      state,
+      session: session(),
+      extraction: extraction([first, second]),
+      proposal: [
+        { type: 'create', candidateLocalItemKey: 'candidate-01', targetMemoryKey: null },
+        { type: 'create', candidateLocalItemKey: 'missing-candidate', targetMemoryKey: null },
+      ],
+      forgetMemoryKeys: [],
+    };
+    assertReducerError(() => applyLifecycleStep(input), 'lifecycle_reducer_invalid_input');
+    assert.deepEqual(state.items, []);
+    assert.equal(state.nextMemoryOrdinal, 1);
+  });
 });
