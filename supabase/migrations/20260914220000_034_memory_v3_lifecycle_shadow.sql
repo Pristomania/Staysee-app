@@ -272,6 +272,7 @@ DECLARE
   v_current_items jsonb;
   v_current_state jsonb;
   v_actual_changed boolean;
+  v_resulting_state_revision bigint;
 BEGIN
   IF pg_catalog.jsonb_typeof(p_state) <> 'object'
     OR p_state->>'schemaVersion' <> 'memory-v3-lifecycle-state-v1'
@@ -345,7 +346,9 @@ BEGIN
   IF p_changed IS DISTINCT FROM v_actual_changed THEN
     RAISE EXCEPTION 'invalid lifecycle changed flag';
   END IF;
-  IF (p_state->>'stateRevision')::bigint <> p_expected_state_revision + CASE WHEN v_actual_changed THEN 1 ELSE 0 END THEN
+  v_resulting_state_revision := p_expected_state_revision
+    + CASE WHEN v_actual_changed THEN 1 ELSE 0 END;
+  IF (p_state->>'stateRevision')::bigint <> v_resulting_state_revision THEN
     RAISE EXCEPTION 'invalid lifecycle revision';
   END IF;
 
@@ -374,10 +377,10 @@ BEGIN
       updated_at = pg_catalog.now()
     WHERE user_id = p_user_id;
   END IF;
-  resulting_state_revision := p_expected_state_revision + CASE WHEN v_actual_changed THEN 1 ELSE 0 END;
+  resulting_state_revision := v_resulting_state_revision;
   UPDATE public.memory_v3_lifecycle_shadow_runs SET
     status = 'succeeded',
-    resulting_state_revision = p_expected_state_revision + CASE WHEN v_actual_changed THEN 1 ELSE 0 END,
+    resulting_state_revision = v_resulting_state_revision,
     extraction = p_extraction, operations = p_operations, transitions = p_transitions,
     item_count = v_item_count, evidence_count = v_evidence_count, transition_count = v_transition_count,
     extractor_prompt_tokens = (p_extractor_usage->>'promptTokens')::integer,
