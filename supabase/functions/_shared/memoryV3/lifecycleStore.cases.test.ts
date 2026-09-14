@@ -139,6 +139,20 @@ describe("Memory V3 lifecycle migration", () => {
     for (const diagnostic of DIAGNOSTICS) assert.ok(sql.includes(`'${diagnostic}'`), diagnostic);
   });
 
+  it("computes the resulting revision before the PL/pgSQL IF condition", () => {
+    const sql = readFileSync(migrationUrl, "utf8");
+    assert.match(sql, /v_resulting_state_revision bigint;/i);
+    assert.match(
+      sql,
+      /v_resulting_state_revision\s*:=\s*p_expected_state_revision\s*\+\s*CASE WHEN v_actual_changed THEN 1 ELSE 0 END;/i,
+    );
+    assert.match(
+      sql,
+      /IF \(p_state->>'stateRevision'\)::bigint <> v_resulting_state_revision THEN/i,
+    );
+    assert.doesNotMatch(sql, /CASE WHEN v_actual_changed THEN 1 ELSE 0 END THEN/i);
+  });
+
   it("uses four empty-search-path RPCs, an atomic UTC cap of one, and durable duplicate identity", () => {
     const sql = readFileSync(migrationUrl, "utf8");
     for (const fn of [
