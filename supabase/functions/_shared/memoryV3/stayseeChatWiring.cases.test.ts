@@ -154,7 +154,8 @@ describe("staysee-chat Memory V3 source wiring", () => {
       'path: "background"',
     ]) assert.ok(summaryCall.includes(required), required);
     assert.match(source, /console\.error\("\[staysee-chat\] summary update failed:", sumErr\)/);
-    assert.match(source, /rawMode: Deno\.env\.get\("STAYSEE_MEMORY_V3_MODE"\)/);
+    assert.equal((source.match(/rawMode: memoryV3Mode/g) ?? []).length, 2);
+    assert.doesNotMatch(source, /rawMode: Deno\.env\.get\("STAYSEE_MEMORY_V3_MODE"\)/);
     assert.match(source, /rawAllowedUserId: Deno\.env\.get\("STAYSEE_MEMORY_V3_SHADOW_USER_ID"\)/);
     assert.match(source, /apiKey: Deno\.env\.get\("OPENROUTER_API_KEY"\)/);
     assert.match(source, /fetchImpl: globalThis\.fetch\.bind\(globalThis\)/);

@@ -279,6 +279,9 @@ export async function runMemoryV3Shadow(
       reason: eligibility.reason === "disabled" ? "disabled" : "user_not_allowlisted",
     };
   }
+  if (eligibility.mode !== "shadow") {
+    return { status: "skipped", reason: "disabled" };
+  }
 
   const userId = eligibility.userId;
   const conversationId = projected.conversationId;
