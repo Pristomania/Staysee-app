@@ -284,6 +284,22 @@ The paid `hypothesis-admission-r3` run completed 4/4 sequential requests without
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.
 
+## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)
+
+This benchmark is a scripted reference reconciler. It does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+
+It exercises all seven lifecycle operations: `create`, `confirm`, `revise`, `mark_stale`, `reject`, `ignore`, and `forget`. This includes explicit forgetting. There is no time-based deletion in the lifecycle benchmark; memory changes only through the scripted operations.
+
+The benchmark enforces hard gates for deterministic reconciliation, invariants, privacy, sequential execution, and aggregate quality. It performs zero external calls: no HTTP, provider, OpenRouter, Supabase, production, or staging calls. It uses no paid model, and no paid lifecycle benchmark has been run. Production mode remains off. Passing this offline benchmark does not authorize production integration.
+
+The existing 30-day shadow purge applies only to temporary shadow-run payloads. The 30-day shadow purge does not delete future primary memory.
+
+Run the complete lifecycle gate offline:
+
+```bash
+node --test scripts/memory-v3-pilot/lifecycle-contract.test.mjs scripts/memory-v3-pilot/lifecycle-reducer.test.mjs scripts/memory-v3-pilot/lifecycle-evaluator.test.mjs scripts/memory-v3-pilot/memory-v3-synthetic-lifecycle.test.mjs scripts/memory-v3-pilot/lifecycle-runner.test.mjs
+```
+
 ## Memory V3 production shadow pilot (inactive)
 
 The production-shaped shadow path is implemented but inactive, not deployed, and default off. Its future scope is one exact account UUID selected with `STAYSEE_MEMORY_V3_MODE` and `STAYSEE_MEMORY_V3_SHADOW_USER_ID`; no account value is included here, and no production shadow call has been authorized.

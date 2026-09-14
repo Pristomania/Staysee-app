@@ -15,6 +15,7 @@ import {
 
 const DATASET_URL = new URL('./memory-v3-synthetic-lifecycle.v1.json', import.meta.url);
 const dataset = JSON.parse(readFileSync(DATASET_URL, 'utf8'));
+const README = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
 
 const EXPECTED_SCENARIOS = Object.freeze([
   ['paraphrase-event-dedup', ['create', 'confirm', 'ignore', 'confirm']],
@@ -433,5 +434,37 @@ describe('synthetic lifecycle canonical manifest lock', () => {
       .toUpperCase();
     assert.notEqual(fingerprint(mutated), fingerprint(dataset));
     assert.deepEqual(dataset, before);
+  });
+});
+
+describe('synthetic lifecycle documentation contract', () => {
+  test('documents the offline benchmark without implying production or paid execution', () => {
+    const heading = '## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)';
+    const start = README.indexOf(heading);
+    assert.notEqual(start, -1, 'README is missing the synthetic lifecycle section');
+    const rest = README.slice(start + heading.length);
+    const nextHeading = rest.search(/\n## /);
+    const section = nextHeading === -1 ? rest : rest.slice(0, nextHeading);
+
+    for (const pattern of [
+      /memory-v3-synthetic-lifecycle-v1/,
+      /20 scenarios/i,
+      /80 steps/i,
+      /240 synthetic messages/i,
+      /create.*confirm.*revise.*mark_stale.*reject.*ignore.*forget/is,
+      /explicit forgetting/i,
+      /no time-based deletion/i,
+      /hard gates/i,
+      /zero external calls/i,
+      /no paid model/i,
+      /production mode remains off/i,
+      /30-day shadow purge.*does not delete.*primary memory/is,
+      /scripted reference reconciler/i,
+      /does not measure model quality/i,
+      /passing.*does not authorize production integration/is,
+      /node --test scripts\/memory-v3-pilot\/lifecycle-contract\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-reducer\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-evaluator\.test\.mjs scripts\/memory-v3-pilot\/memory-v3-synthetic-lifecycle\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-runner\.test\.mjs/,
+    ]) {
+      assert.match(section, pattern);
+    }
   });
 });
