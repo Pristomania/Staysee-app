@@ -105,6 +105,7 @@ async function captureStoreError(action: () => Promise<unknown>) {
 
 describe("Memory V3 shadow migration", () => {
   const migrationUrl = new URL("../../../migrations/20260905120000_032_memory_v3_shadow_pilot.sql", import.meta.url);
+  const retentionScheduleUrl = new URL("../../../migrations/20260914193000_033_memory_v3_shadow_retention_schedule.sql", import.meta.url);
 
   it("creates the durable identity ledger and protected 30-day run store", () => {
     const sql = readFileSync(migrationUrl, "utf8");
@@ -191,6 +192,16 @@ describe("Memory V3 shadow migration", () => {
       const source = readFileSync(new URL(path, import.meta.url), "utf8");
       assert.doesNotMatch(source, /memory_v3_shadow_(runs|identities)/i, path);
     }
+  });
+
+  it("schedules one daily payload purge without deleting durable identities", () => {
+    const sql = readFileSync(retentionScheduleUrl, "utf8");
+    assert.match(sql, /CREATE EXTENSION IF NOT EXISTS pg_cron/i);
+    assert.match(sql, /cron\.unschedule\('memory-v3-shadow-purge-daily'\)/i);
+    assert.match(sql, /cron\.schedule\(\s*'memory-v3-shadow-purge-daily',\s*'17 3 \* \* \*'/i);
+    assert.match(sql, /SELECT public\.purge_memory_v3_shadow_runs\(\);/i);
+    assert.doesNotMatch(sql, /memory_v3_shadow_identities/i);
+    assert.doesNotMatch(sql, /http|net\.|STAYSEE_MEMORY_V3_MODE|STAYSEE_MEMORY_V3_SHADOW_USER_ID/i);
   });
 });
 
