@@ -317,3 +317,20 @@ Future activation order is deliberately non-executable:
 3. Configure one account UUID while mode remains off.
 4. Obtain separate paid activation approval from Nastya.
 5. Enable shadow only after that approval.
+
+## Memory V3 lifecycle shadow (inactive)
+
+The lifecycle shadow is **experimental and write-only**. It is **default off**, is **not deployed or activated**, and can run only for **one exact allowlisted account**. Current product memory remains unchanged: lifecycle output is not read into replies, conversation context, summaries, `user_memory`, analytics, or the UI.
+
+The inactive pipeline has two sequential model boundaries: an extractor proposes evidence-bound candidates, then a reconciler proposes lifecycle operations. A deterministic reducer, not either model, decides the stored state transition. The server permits one atomic reservation per UTC day and at most two provider calls for that reservation, with no retry or repair.
+
+The 30-day retention applies only to run payloads. Durable lifecycle state is not time-purged. Source-message, conversation, or account deletion removes the corresponding lifecycle data. The model cannot forget memory: model-authored forget operations are never trusted, and this integration passes no trusted forget keys.
+
+Migration 034 remains unapplied. No paid reconciler benchmark has been run. Migration application, function deployment, choosing the single account, activation, and any paid provider use require separate future approvals.
+
+Offline verification:
+
+```bash
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleWiring.cases.test.ts
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts
+```

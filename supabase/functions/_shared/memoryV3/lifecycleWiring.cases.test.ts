@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const INDEX_URL = new URL("../../staysee-chat/index.ts", import.meta.url);
+const README_URL = new URL("../../../../scripts/memory-v3-pilot/README.md", import.meta.url);
 
 function source(): string {
   return readFileSync(INDEX_URL, "utf8");
@@ -86,5 +87,35 @@ describe("staysee-chat lifecycle shadow composition", () => {
     assert.equal(legacy > responseStage, true);
     assert.equal(lifecycle > responseStage, true);
     assert.match(text, /Promise\.allSettled\(\[summaryRefreshPromise, memoryV3ShadowPromise\]\)/);
+  });
+});
+
+describe("Memory V3 lifecycle shadow documentation", () => {
+  it("documents the exact inactive write-only safety boundary", () => {
+    const readme = readFileSync(README_URL, "utf8");
+    const start = readme.indexOf("## Memory V3 lifecycle shadow");
+    assert.notEqual(start, -1, "README is missing the lifecycle shadow section");
+    const rest = readme.slice(start);
+    const next = rest.slice(3).search(/^## /m);
+    const section = (next === -1 ? rest : rest.slice(0, next + 3)).toLowerCase();
+    for (const statement of [
+      "experimental and write-only",
+      "default off",
+      "one exact allowlisted account",
+      "current product memory remains unchanged",
+      "two sequential model boundaries",
+      "deterministic reducer",
+      "one atomic reservation per utc day",
+      "at most two provider calls",
+      "no retry or repair",
+      "30-day retention applies only to run payloads",
+      "durable lifecycle state is not time-purged",
+      "source-message, conversation, or account deletion",
+      "the model cannot forget memory",
+      "migration 034 remains unapplied",
+      "no paid reconciler benchmark has been run",
+      "not deployed or activated",
+      "separate future approvals",
+    ]) assert.ok(section.includes(statement), statement);
   });
 });
