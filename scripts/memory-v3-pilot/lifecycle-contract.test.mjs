@@ -367,6 +367,62 @@ describe('lifecycle proposal reference and consumption validation', () => {
     ], { state: stateFixture(), extraction }));
   });
 
+  test('allows recurrence confirmation evidence without inventing new episodes', () => {
+    const recurrenceState = stateFixture({
+      items: [itemFixture({
+        kind: 'recurrence',
+        status: 'active',
+        eventTimeStart: null,
+        eventTimeEnd: null,
+        evidence: [
+          evidenceFixture({ sourceMessageId: 'm1', supportType: 'episode_observation', episodeKey: 'episode:one' }),
+          evidenceFixture({ sourceMessageId: 'm2', supportType: 'episode_observation', episodeKey: 'episode:two' }),
+        ],
+      })],
+    });
+    const recurrence = {
+      ...extractionFixture().items[0],
+      kind: 'recurrence',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    };
+    const recurrenceExtraction = extractionFixture([recurrence]);
+    recurrenceExtraction.evidence = [{
+      ...recurrenceExtraction.evidence[0],
+      supportType: 'pattern_confirmation',
+      episodeKey: null,
+    }];
+
+    assert.doesNotThrow(() => validateLifecycleProposal([{
+      type: 'confirm',
+      candidateLocalItemKey: 'candidate-01',
+      targetMemoryKey: MEMORY_KEY_A,
+    }], { state: recurrenceState, extraction: recurrenceExtraction }));
+  });
+
+  test('still requires two recurrence observations when creating durable state', () => {
+    const recurrence = {
+      ...extractionFixture().items[0],
+      kind: 'recurrence',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    };
+    const recurrenceExtraction = extractionFixture([recurrence]);
+    recurrenceExtraction.evidence = [{
+      ...recurrenceExtraction.evidence[0],
+      supportType: 'pattern_confirmation',
+      episodeKey: null,
+    }];
+    assertContractError(
+      () => validateLifecycleProposal([{
+        type: 'create',
+        candidateLocalItemKey: 'candidate-01',
+        targetMemoryKey: null,
+      }], { state: { scenarioId: 'scenario-01', nextMemoryOrdinal: 1, items: [] }, extraction: recurrenceExtraction }),
+      'lifecycle_contract_invalid_proposal',
+    );
+  });
+
   test('rejects a semantically invalid extraction context', () => {
     const badClaim = extractionFixture();
     badClaim.items[0].claim = { raw: 'RAW_CLAIM_SECRET' };

@@ -188,6 +188,102 @@ describe('applyLifecycleStep operation effects', () => {
     assert.equal(result.state.items[0].evidence[1].conversationId, 'synthetic-scenario-01-c02');
   });
 
+  test('confirm adds pattern evidence to a recurrence without adding an episode', () => {
+    const recurrence = candidate({
+      kind: 'recurrence',
+      claim: 'Заранее планирует маршруты',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    });
+    const observations = [
+      {
+        itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: 'episode:one',
+        relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+        mentionTime: '2026-01-10T10:00:00Z',
+      },
+      {
+        itemKey: 'candidate-01', sourceMessageId: 'm2', episodeKey: 'episode:two',
+        relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+        mentionTime: '2026-01-10T10:00:01Z',
+      },
+    ];
+    const first = applyCreate({ extraction: extraction([recurrence], observations) }).state;
+    const confirmation = extraction([recurrence], [{
+      itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: null,
+      relation: 'supports', supportType: 'pattern_confirmation', provenanceRole: 'user',
+      mentionTime: '2026-02-10T10:00:00Z',
+    }], { caseId: 'scenario-01-s02' });
+
+    const result = applyLifecycleStep({
+      state: first,
+      session: session({
+        stepId: 'scenario-01-s02',
+        at: '2026-02-10T10:00:00Z',
+        conversationId: 'synthetic-scenario-01-c02',
+      }),
+      extraction: confirmation,
+      proposal: [{ type: 'confirm', candidateLocalItemKey: 'candidate-01', targetMemoryKey: MEMORY_KEY_1 }],
+      forgetMemoryKeys: [],
+    });
+
+    const rows = result.state.items[0].evidence;
+    assert.equal(rows.filter((row) => row.supportType === 'episode_observation').length, 2);
+    assert.equal(rows.filter((row) => row.supportType === 'pattern_confirmation').length, 1);
+    assert.equal(rows.at(-1).episodeKey, null);
+  });
+
+  test('revise adds a scope boundary without inventing a recurrence episode', () => {
+    const recurrence = candidate({
+      kind: 'recurrence',
+      claim: 'Обычно избегает незнакомых звонков',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    });
+    const observations = [
+      {
+        itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: 'episode:one',
+        relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+        mentionTime: '2026-01-10T10:00:00Z',
+      },
+      {
+        itemKey: 'candidate-01', sourceMessageId: 'm2', episodeKey: 'episode:two',
+        relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+        mentionTime: '2026-01-10T10:00:01Z',
+      },
+    ];
+    const first = applyCreate({ extraction: extraction([recurrence], observations) }).state;
+    const narrowed = candidate({
+      kind: 'recurrence',
+      claim: 'Обычно избегает только звонков с незнакомых номеров',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    });
+    const boundary = extraction([narrowed], [{
+      itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: null,
+      relation: 'supports', supportType: 'scope_boundary', provenanceRole: 'user',
+      mentionTime: '2026-02-10T10:00:00Z',
+    }], { caseId: 'scenario-01-s02' });
+
+    const result = applyLifecycleStep({
+      state: first,
+      session: session({
+        stepId: 'scenario-01-s02',
+        at: '2026-02-10T10:00:00Z',
+        conversationId: 'synthetic-scenario-01-c02',
+      }),
+      extraction: boundary,
+      proposal: [{ type: 'revise', candidateLocalItemKey: 'candidate-01', targetMemoryKey: MEMORY_KEY_1 }],
+      forgetMemoryKeys: [],
+    });
+
+    const item = result.state.items[0];
+    assert.equal(item.claim, narrowed.claim);
+    assert.equal(item.revision, 2);
+    assert.equal(item.evidence.filter((row) => row.supportType === 'episode_observation').length, 2);
+    assert.equal(item.evidence.filter((row) => row.supportType === 'scope_boundary').length, 1);
+    assert.equal(item.evidence.at(-1).episodeKey, null);
+  });
+
   test('repeating identical confirm is byte-for-byte idempotent', () => {
     const first = applyCreate().state;
     const result = applyLifecycleStep({

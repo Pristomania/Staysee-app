@@ -510,12 +510,6 @@ function inspectExtraction(token, value) {
     if (!related.some((row) => row.relation === STATUS_RELATION[item.status])) {
       fail(token, 'candidate is missing its status evidence', code);
     }
-    if (item.kind === 'recurrence' && (item.status === 'candidate' || item.status === 'active')) {
-      const episodes = new Set(related
-        .filter((row) => row.relation === 'supports' && row.supportType === 'episode_observation')
-        .map((row) => row.episodeKey));
-      if (episodes.size < 2) fail(token, 'candidate recurrence needs two observations', code);
-    }
   }
   return { run: { ...run }, items, evidence };
 }
@@ -555,9 +549,25 @@ export function validateLifecycleProposal(value, context) {
         fail(token, 'proposal candidate reference is invalid', code);
       }
       consumed.add(operation.candidateLocalItemKey);
+      const candidate = candidateByKey.get(operation.candidateLocalItemKey);
       if (operation.type === 'create' || operation.type === 'ignore') {
         if (operation.targetMemoryKey !== null) {
           fail(token, 'proposal target must be null', code);
+        }
+        if (
+          operation.type === 'create' &&
+          candidate.kind === 'recurrence' &&
+          LIFECYCLE_CURRENT_STATUS_BY_KIND.recurrence.includes(candidate.status)
+        ) {
+          const episodes = new Set(extraction.evidence
+            .filter((row) =>
+              row.itemKey === candidate.localItemKey &&
+              row.relation === 'supports' &&
+              row.supportType === 'episode_observation')
+            .map((row) => row.episodeKey));
+          if (episodes.size < 2) {
+            fail(token, 'created recurrence needs two observations', code);
+          }
         }
       } else {
         if (!isMemoryKey(operation.targetMemoryKey) || !stateKeys.has(operation.targetMemoryKey)) {
@@ -569,7 +579,6 @@ export function validateLifecycleProposal(value, context) {
           fail(token, 'proposal target is changed more than once', code);
         }
         targeted.set(operation.targetMemoryKey, operation.type);
-        const candidate = candidateByKey.get(operation.candidateLocalItemKey);
         const target = targetByKey.get(operation.targetMemoryKey);
         if (!LIFECYCLE_CURRENT_STATUS_BY_KIND[target.kind].includes(target.status)) {
           fail(token, 'proposal target is already closed', code);
