@@ -19,6 +19,13 @@ import {
   shouldUpdateConversationSummary,
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
+import { createMemoryV3MessageLoader } from "../_shared/memoryV3/messages.ts";
+import { createMemoryV3ShadowStore } from "../_shared/memoryV3/shadowStore.ts";
+import { createMemoryV3OpenRouterAdapter } from "../_shared/memoryV3/transport.ts";
+import {
+  runMemoryV3Shadow,
+  runMemoryV3ShadowBackgroundSafely,
+} from "../_shared/memoryV3/shadowRunner.ts";
 import {
   explainSummaryRefreshDecision,
   isMemoryDiagConversation,
@@ -1579,53 +1586,78 @@ Deno.serve(async (req: Request) => {
                     return;
                   }
 
-                  const apiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey);
-                  if (!apiKey) return;
+                  const summaryRefreshPromise = (async () => {
+                    try {
+                      const summaryApiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey);
+                      if (!summaryApiKey) return;
 
-                  const previousSummary = getConversationSummary(
-                    packetForSummary.conversationMeta
+                      const previousSummary = getConversationSummary(
+                        packetForSummary.conversationMeta
+                      );
+                      await runConversationSummaryRefresh({
+                        supabase: svc,
+                        conversationId,
+                        userId,
+                        previousSummary,
+                        transcript: transcriptForSummary,
+                        memoryHints,
+                        extraDurableCorrections: sameTurnDurableCorrection
+                          ? [sameTurnDurableCorrection]
+                          : undefined,
+                        model: {
+                          baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
+                          model: PROVIDERS[ACTIVE_PROVIDER].model,
+                          apiKey: summaryApiKey,
+                          extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
+                        },
+                        diag: isMemoryDiagConversation(
+                          packetForSummary.conversationMeta?.title ?? null
+                        ) || isSummaryDiagConversation(
+                          packetForSummary.conversationMeta?.title ?? null
+                        )
+                          ? {
+                              enabled: isMemoryDiagConversation(
+                                packetForSummary.conversationMeta?.title ?? null
+                              ),
+                              conversationId,
+                              summaryDiag: isSummaryDiagConversation(
+                                packetForSummary.conversationMeta?.title ?? null
+                              )
+                                ? {
+                                    enabled: true,
+                                    clientType: "service",
+                                    path: "background",
+                                    title:
+                                      packetForSummary.conversationMeta?.title ??
+                                      null,
+                                  }
+                                : undefined,
+                            }
+                          : undefined,
+                      });
+                    } catch (sumErr) {
+                      console.error("[staysee-chat] summary update failed:", sumErr);
+                    }
+                  })();
+
+                  const memoryV3ShadowPromise = runMemoryV3ShadowBackgroundSafely(
+                    () => runMemoryV3Shadow({
+                      rawMode: Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
+                      rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                      userId,
+                      conversationId,
+                      apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                      loadMessages: createMemoryV3MessageLoader(svc),
+                      store: createMemoryV3ShadowStore(svc),
+                      modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                        apiKey,
+                        fetchImpl: globalThis.fetch.bind(globalThis),
+                      }),
+                    }),
+                    (code) => console.error("[memory-v3-shadow]", code),
                   );
-                  await runConversationSummaryRefresh({
-                    supabase: svc,
-                    conversationId,
-                    userId,
-                    previousSummary,
-                    transcript: transcriptForSummary,
-                    memoryHints,
-                    extraDurableCorrections: sameTurnDurableCorrection
-                      ? [sameTurnDurableCorrection]
-                      : undefined,
-                    model: {
-                      baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
-                      model: PROVIDERS[ACTIVE_PROVIDER].model,
-                      apiKey,
-                      extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
-                    },
-                    diag: isMemoryDiagConversation(
-                      packetForSummary.conversationMeta?.title ?? null
-                    ) || isSummaryDiagConversation(
-                      packetForSummary.conversationMeta?.title ?? null
-                    )
-                      ? {
-                          enabled: isMemoryDiagConversation(
-                            packetForSummary.conversationMeta?.title ?? null
-                          ),
-                          conversationId,
-                          summaryDiag: isSummaryDiagConversation(
-                            packetForSummary.conversationMeta?.title ?? null
-                          )
-                            ? {
-                                enabled: true,
-                                clientType: "service",
-                                path: "background",
-                                title:
-                                  packetForSummary.conversationMeta?.title ??
-                                  null,
-                              }
-                            : undefined,
-                        }
-                      : undefined,
-                  });
+
+                  await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise]);
                 } catch (sumErr) {
                   console.error("[staysee-chat] summary update failed:", sumErr);
                 }
