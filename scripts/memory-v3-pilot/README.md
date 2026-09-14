@@ -284,6 +284,22 @@ The paid `hypothesis-admission-r3` run completed 4/4 sequential requests without
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.
 
+## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)
+
+This benchmark is a scripted reference reconciler. It does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+
+It exercises all seven lifecycle operations: `create`, `confirm`, `revise`, `mark_stale`, `reject`, `ignore`, and `forget`. This includes explicit forgetting. There is no time-based deletion in the lifecycle benchmark; memory changes only through the scripted operations.
+
+The benchmark enforces hard gates for deterministic reconciliation, invariants, privacy, sequential execution, and aggregate quality. It performs zero external calls: no HTTP, provider, OpenRouter, Supabase, production, or staging calls. It uses no paid model, and no paid lifecycle benchmark has been run. Production mode remains off. Passing this offline benchmark does not authorize production integration.
+
+The existing 30-day shadow purge applies only to temporary shadow-run payloads. The 30-day shadow purge does not delete future primary memory.
+
+Run the complete lifecycle gate offline:
+
+```bash
+node --test scripts/memory-v3-pilot/lifecycle-contract.test.mjs scripts/memory-v3-pilot/lifecycle-reducer.test.mjs scripts/memory-v3-pilot/lifecycle-evaluator.test.mjs scripts/memory-v3-pilot/memory-v3-synthetic-lifecycle.test.mjs scripts/memory-v3-pilot/lifecycle-runner.test.mjs
+```
+
 ## Memory V3 production shadow pilot (inactive)
 
 The production-shaped shadow path is implemented but inactive, not deployed, and default off. Its future scope is one exact account UUID selected with `STAYSEE_MEMORY_V3_MODE` and `STAYSEE_MEMORY_V3_SHADOW_USER_ID`; no account value is included here, and no production shadow call has been authorized.
@@ -301,3 +317,20 @@ Future activation order is deliberately non-executable:
 3. Configure one account UUID while mode remains off.
 4. Obtain separate paid activation approval from Nastya.
 5. Enable shadow only after that approval.
+
+## Memory V3 lifecycle shadow (inactive)
+
+The lifecycle shadow is **experimental and write-only**. It is **default off**, is **not deployed or activated**, and can run only for **one exact allowlisted account**. Current product memory remains unchanged: lifecycle output is not read into replies, conversation context, summaries, `user_memory`, analytics, or the UI.
+
+The inactive pipeline has two sequential model boundaries: an extractor proposes evidence-bound candidates, then a reconciler proposes lifecycle operations. A deterministic reducer, not either model, decides the stored state transition. The server permits one atomic reservation per UTC day and at most two provider calls for that reservation, with no retry or repair.
+
+The 30-day retention applies only to run payloads. Durable lifecycle state is not time-purged. Source-message, conversation, or account deletion removes the corresponding lifecycle data. The model cannot forget memory: model-authored forget operations are never trusted, and this integration passes no trusted forget keys.
+
+Migration 034 remains unapplied. No paid reconciler benchmark has been run. Migration application, function deployment, choosing the single account, activation, and any paid provider use require separate future approvals.
+
+Offline verification:
+
+```bash
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleWiring.cases.test.ts
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts
+```

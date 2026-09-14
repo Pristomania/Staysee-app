@@ -10,14 +10,22 @@ const NASTYA = "11111111-1111-4111-8111-111111111111";
 const SON = "22222222-2222-4222-8222-222222222222";
 const ALPHA_USER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-test("parseMemoryV3ShadowMode accepts only the exact shadow value", () => {
+test("parseMemoryV3ShadowMode accepts only the exact shadow and lifecycle_shadow values", () => {
   assert.equal(parseMemoryV3ShadowMode(undefined), "off");
   assert.equal(parseMemoryV3ShadowMode(null), "off");
   assert.equal(parseMemoryV3ShadowMode("shadow"), "shadow");
-  for (const raw of ["", "off", "off ", " shadow", "SHADOW", "on", "response", "shadow,off"]) {
+  assert.equal(parseMemoryV3ShadowMode("lifecycle_shadow"), "lifecycle_shadow");
+  for (const raw of ["", "off", "off ", " shadow", "SHADOW", "on", "response", "shadow,off",
+    "lifecycle-shadow", " lifecycle_shadow", "lifecycle_shadow ", "LIFECYCLE_SHADOW"]) {
     assert.equal(parseMemoryV3ShadowMode(raw), "off");
   }
   assert.equal(parseMemoryV3ShadowMode(new String("shadow") as unknown as string), "off");
+});
+
+test("resolveMemoryV3ShadowEligibility allows the lifecycle mode for the same exact account", () => {
+  assert.deepEqual(resolveMemoryV3ShadowEligibility({
+    rawMode: "lifecycle_shadow", rawAllowedUserId: NASTYA, userId: NASTYA,
+  }), { eligible: true, mode: "lifecycle_shadow", userId: NASTYA });
 });
 
 test("resolveMemoryV3ShadowEligibility allows one exact canonical UUID", () => {

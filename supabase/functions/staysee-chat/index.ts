@@ -20,12 +20,19 @@ import {
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
 import { createMemoryV3MessageLoader } from "../_shared/memoryV3/messages.ts";
+import { parseMemoryV3ShadowMode } from "../_shared/memoryV3/mode.ts";
 import { createMemoryV3ShadowStore } from "../_shared/memoryV3/shadowStore.ts";
+import { createMemoryV3LifecycleStore } from "../_shared/memoryV3/lifecycleStore.ts";
 import { createMemoryV3OpenRouterAdapter } from "../_shared/memoryV3/transport.ts";
+import { createMemoryV3LifecycleOpenRouterAdapter } from "../_shared/memoryV3/lifecycleTransport.ts";
 import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
 } from "../_shared/memoryV3/shadowRunner.ts";
+import {
+  runMemoryV3LifecycleShadow,
+  runMemoryV3LifecycleShadowBackgroundSafely,
+} from "../_shared/memoryV3/lifecycleShadowRunner.ts";
 import {
   explainSummaryRefreshDecision,
   isMemoryDiagConversation,
@@ -1640,22 +1647,48 @@ Deno.serve(async (req: Request) => {
                     }
                   })();
 
-                  const memoryV3ShadowPromise = runMemoryV3ShadowBackgroundSafely(
-                    () => runMemoryV3Shadow({
-                      rawMode: Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
-                      rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
-                      userId,
-                      conversationId,
-                      apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-                      loadMessages: createMemoryV3MessageLoader(svc),
-                      store: createMemoryV3ShadowStore(svc),
-                      modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                        apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
-                      }),
-                    }),
-                    (code) => console.error("[memory-v3-shadow]", code),
+                  const memoryV3Mode = parseMemoryV3ShadowMode(
+                    Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
                   );
+                  const memoryV3ShadowPromise = memoryV3Mode === "lifecycle_shadow"
+                    ? runMemoryV3LifecycleShadowBackgroundSafely(
+                        () => runMemoryV3LifecycleShadow({
+                          rawMode: memoryV3Mode,
+                          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                          userId,
+                          conversationId,
+                          apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                          loadMessages: createMemoryV3MessageLoader(svc),
+                          store: createMemoryV3LifecycleStore(svc),
+                          extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                            apiKey,
+                            fetchImpl: globalThis.fetch.bind(globalThis),
+                          }),
+                          reconcilerAdapterFactory: (apiKey) => createMemoryV3LifecycleOpenRouterAdapter({
+                            apiKey,
+                            fetchImpl: globalThis.fetch.bind(globalThis),
+                          }),
+                        }),
+                        (code) => console.error("[memory-v3-lifecycle-shadow]", code),
+                      )
+                    : memoryV3Mode === "shadow"
+                    ? runMemoryV3ShadowBackgroundSafely(
+                        () => runMemoryV3Shadow({
+                          rawMode: memoryV3Mode,
+                          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                          userId,
+                          conversationId,
+                          apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                          loadMessages: createMemoryV3MessageLoader(svc),
+                          store: createMemoryV3ShadowStore(svc),
+                          modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                            apiKey,
+                            fetchImpl: globalThis.fetch.bind(globalThis),
+                          }),
+                        }),
+                        (code) => console.error("[memory-v3-shadow]", code),
+                      )
+                    : Promise.resolve();
 
                   await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise]);
                 } catch (sumErr) {

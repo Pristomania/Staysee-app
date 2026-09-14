@@ -187,6 +187,7 @@ describe("Memory V3 shadow runner ordered preflight", () => {
   it("skips disabled and non-allowlisted users before inspecting credentials or dependencies", async () => {
     for (const [overrides, expected] of [
       [{ rawMode: "off" }, { status: "skipped", reason: "disabled" }],
+      [{ rawMode: "lifecycle_shadow" }, { status: "skipped", reason: "disabled" }],
       [{ userId: OTHER_USER_ID }, { status: "skipped", reason: "user_not_allowlisted" }],
       [{ rawAllowedUserId: "invalid" }, { status: "skipped", reason: "user_not_allowlisted" }],
     ] as const) {
