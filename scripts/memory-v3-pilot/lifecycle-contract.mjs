@@ -395,7 +395,10 @@ function validateItemInternal(token, value) {
     const episodes = new Set(evidence
       .filter((row) => row.relation === 'supports' && row.supportType === 'episode_observation')
       .map((row) => row.episodeKey));
-    if (episodes.size < 2) fail(token, 'recurrence needs two observations', stateCode);
+    const minimumEpisodes = entry.status === 'active' ? 2 : 1;
+    if (episodes.size < minimumEpisodes) {
+      fail(token, 'recurrence has insufficient observations', stateCode);
+    }
   }
   return { ...entry, evidence };
 }
@@ -565,8 +568,9 @@ export function validateLifecycleProposal(value, context) {
               row.relation === 'supports' &&
               row.supportType === 'episode_observation')
             .map((row) => row.episodeKey));
-          if (episodes.size < 2) {
-            fail(token, 'created recurrence needs two observations', code);
+          const minimumEpisodes = candidate.status === 'active' ? 2 : 1;
+          if (episodes.size < minimumEpisodes) {
+            fail(token, 'created recurrence has insufficient observations', code);
           }
         }
       } else {

@@ -232,6 +232,44 @@ describe('applyLifecycleStep operation effects', () => {
     assert.equal(rows.at(-1).episodeKey, null);
   });
 
+  test('grows a candidate recurrence from one observation to two across sessions', () => {
+    const recurrence = candidate({
+      kind: 'recurrence',
+      claim: 'Проверяет дверь перед поездкой',
+      status: 'candidate',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    });
+    const firstObservation = [{
+      itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: 'episode:one',
+      relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+      mentionTime: '2026-01-10T10:00:00Z',
+    }];
+    const first = applyCreate({ extraction: extraction([recurrence], firstObservation) }).state;
+    const secondObservation = extraction([recurrence], [{
+      itemKey: 'candidate-01', sourceMessageId: 'm1', episodeKey: 'episode:two',
+      relation: 'supports', supportType: 'episode_observation', provenanceRole: 'user',
+      mentionTime: '2026-02-10T10:00:00Z',
+    }], { caseId: 'scenario-01-s02' });
+
+    const result = applyLifecycleStep({
+      state: first,
+      session: session({
+        stepId: 'scenario-01-s02',
+        at: '2026-02-10T10:00:00Z',
+        conversationId: 'synthetic-scenario-01-c02',
+      }),
+      extraction: secondObservation,
+      proposal: [{ type: 'confirm', candidateLocalItemKey: 'candidate-01', targetMemoryKey: MEMORY_KEY_1 }],
+      forgetMemoryKeys: [],
+    });
+
+    assert.equal(result.state.items[0].status, 'candidate');
+    assert.equal(result.state.items[0].revision, 1);
+    assert.equal(result.state.items[0].evidence.length, 2);
+    assert.equal(new Set(result.state.items[0].evidence.map((row) => row.episodeKey)).size, 2);
+  });
+
   test('revise adds a scope boundary without inventing a recurrence episode', () => {
     const recurrence = candidate({
       kind: 'recurrence',

@@ -224,6 +224,34 @@ describe('lifecycle contract constants and valid projections', () => {
 });
 
 describe('lifecycle state semantic validation', () => {
+  test('allows a candidate recurrence after one observation but not an active recurrence', () => {
+    const oneObservation = [evidenceFixture({
+      supportType: 'episode_observation',
+      episodeKey: 'episode:one',
+    })];
+    assert.doesNotThrow(() => validateLifecycleState(stateFixture({
+      items: [itemFixture({
+        kind: 'recurrence',
+        status: 'candidate',
+        eventTimeStart: null,
+        eventTimeEnd: null,
+        evidence: oneObservation,
+      })],
+    })));
+    assertContractError(
+      () => validateLifecycleState(stateFixture({
+        items: [itemFixture({
+          kind: 'recurrence',
+          status: 'active',
+          eventTimeStart: null,
+          eventTimeEnd: null,
+          evidence: oneObservation,
+        })],
+      })),
+      'lifecycle_contract_invalid_state',
+    );
+  });
+
   test('rejects status from another kind', () => {
     assertContractError(
       () => validateLifecycleState(stateFixture({ items: [itemFixture({ status: 'supported' })] })),
@@ -421,6 +449,27 @@ describe('lifecycle proposal reference and consumption validation', () => {
       }], { state: { scenarioId: 'scenario-01', nextMemoryOrdinal: 1, items: [] }, extraction: recurrenceExtraction }),
       'lifecycle_contract_invalid_proposal',
     );
+  });
+
+  test('allows creating a candidate recurrence from its first observed episode', () => {
+    const recurrence = {
+      ...extractionFixture().items[0],
+      kind: 'recurrence',
+      status: 'candidate',
+      eventTimeStart: null,
+      eventTimeEnd: null,
+    };
+    const recurrenceExtraction = extractionFixture([recurrence]);
+    recurrenceExtraction.evidence[0].supportType = 'episode_observation';
+
+    assert.doesNotThrow(() => validateLifecycleProposal([{
+      type: 'create',
+      candidateLocalItemKey: 'candidate-01',
+      targetMemoryKey: null,
+    }], {
+      state: { scenarioId: 'scenario-01', nextMemoryOrdinal: 1, items: [] },
+      extraction: recurrenceExtraction,
+    }));
   });
 
   test('rejects a semantically invalid extraction context', () => {
