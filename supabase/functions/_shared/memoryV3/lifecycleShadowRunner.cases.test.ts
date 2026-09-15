@@ -8,6 +8,7 @@ import {
   runMemoryV3LifecycleShadow,
   runMemoryV3LifecycleShadowBackgroundSafely,
 } from "./lifecycleShadowRunner.ts";
+import { buildMemoryV3ExtractorRequest } from "./prompt.ts";
 
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -192,6 +193,58 @@ describe("Memory V3 lifecycle shadow runner gates", () => {
 });
 
 describe("Memory V3 lifecycle shadow ordered orchestration", () => {
+  it("uses the largest recent contiguous dialogue suffix that fits the extractor byte cap", async () => {
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      id: index === 59
+        ? MESSAGE_ID
+        : `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+      role: index % 2 === 1 ? "user" as const : "assistant" as const,
+      text: `${index % 2 === 1 ? "Пользователь" : "Ассистент"} ${index} ${"я".repeat(600)}`,
+      createdAt: `2026-09-15T10:${String(index).padStart(2, "0")}:00Z`,
+    }));
+    messages[59].text = `Я люблю утренние прогулки ${"я".repeat(600)}`;
+    const original = structuredClone(messages);
+    const caseId = `memory-v3-shadow:${USER_ID}:${CONVERSATION_ID}`;
+    assert.equal(
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages }))).byteLength > 20_000,
+      true,
+    );
+
+    let extractorRequest: unknown;
+    const test = harness({
+      async loadMessages() {
+        test.calls.push("messages");
+        return messages;
+      },
+      extractorAdapterFactory() {
+        test.calls.push("extractorFactory");
+        return async (request: unknown) => {
+          test.calls.push("extractor");
+          extractorRequest = request;
+          return { content: extractorContent(), usage: null };
+        };
+      },
+    });
+
+    const result = await runMemoryV3LifecycleShadow(test.options);
+    assert.equal(result.status, "succeeded");
+    assert.ok(extractorRequest && typeof extractorRequest === "object");
+    const input = (extractorRequest as { input: { messages: typeof messages } }).input;
+    assert.equal(input.messages.length < messages.length, true);
+    assert.equal(input.messages.at(-1)?.id, MESSAGE_ID);
+    assert.equal(input.messages.some((message) => message.role === "user"), true);
+    assert.deepEqual(input.messages, messages.slice(messages.length - input.messages.length));
+    assert.equal(new TextEncoder().encode(JSON.stringify(extractorRequest)).byteLength <= 20_000, true);
+
+    const oneMore = messages.slice(messages.length - input.messages.length - 1);
+    assert.equal(
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages: oneMore }))).byteLength > 20_000,
+      true,
+    );
+    assert.equal((test.reserveInputs[0] as { messageCount: number }).messageCount, input.messages.length);
+    assert.deepEqual(messages, original);
+  });
+
   it("reserves before exactly one sequential extractor and reconciler call, then CAS", async () => {
     const test = harness();
     const result = await runMemoryV3LifecycleShadow(test.options);
