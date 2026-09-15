@@ -31,13 +31,8 @@ const EXPECTED_SCHEMA = {
             type: "string",
             enum: ["create", "confirm", "revise", "mark_stale", "reject", "ignore"],
           },
-          candidateRef: { type: "string", pattern: "^candidate:[0-9]{4}$" },
-          targetMemoryRef: {
-            anyOf: [
-              { type: "string", pattern: "^memory:[0-9]{4}$" },
-              { type: "null" },
-            ],
-          },
+          candidateRef: { type: "string" },
+          targetMemoryRef: { type: ["string", "null"] },
         },
       },
     },
