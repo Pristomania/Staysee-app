@@ -111,7 +111,7 @@ describe("staysee-chat Memory V3 source wiring", () => {
     }
   });
 
-  it("starts the shadow branch only after bgShould and in parallel with summary refresh", () => {
+  it("starts the shadow branch after the response stage but independently of summary refresh", () => {
     const source = indexSource();
     assertSingleShadowPlacement(source);
     const background = source.slice(source.indexOf("const bgShould = shouldUpdateConversationSummary"));
@@ -120,9 +120,13 @@ describe("staysee-chat Memory V3 source wiring", () => {
     const shadow = background.indexOf("const memoryV3ShadowPromise");
     const settle = background.indexOf("await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise])");
     assert.equal(stop >= 0, true);
+    assert.equal(shadow > 0 && shadow < stop, true);
     assert.equal(summary > stop, true);
-    assert.equal(shadow > summary, true);
-    assert.equal(settle > shadow, true);
+    assert.equal(settle > summary, true);
+    assert.match(
+      background.slice(stop, summary),
+      /await Promise\.allSettled\(\[memoryV3ShadowPromise\]\)/,
+    );
     const earlyMutation = source.replace(
       "const bgShould = shouldUpdateConversationSummary",
       "runMemoryV3Shadow({});\n                  const bgShould = shouldUpdateConversationSummary",
@@ -133,7 +137,7 @@ describe("staysee-chat Memory V3 source wiring", () => {
   it("keeps the existing summary arguments and catch log while isolating API keys", () => {
     const source = indexSource();
     const summaryStart = source.indexOf("await runConversationSummaryRefresh({");
-    const summaryEnd = source.indexOf("const memoryV3ShadowPromise", summaryStart);
+    const summaryEnd = source.indexOf("await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise])", summaryStart);
     assert.equal(summaryStart >= 0 && summaryEnd > summaryStart, true);
     const summaryCall = source.slice(summaryStart, summaryEnd);
     assert.match(source, /const summaryApiKey = Deno\.env\.get\(PROVIDERS\[ACTIVE_PROVIDER\]\.envKey\)/);
