@@ -24,15 +24,15 @@ describe("staysee-chat lifecycle shadow composition", () => {
     }
   });
 
-  it("dispatches exactly one mutually exclusive runner after the background gate", () => {
+  it("dispatches exactly one mutually exclusive runner independently of the summary refresh gate", () => {
     const text = source();
     const gate = text.indexOf("if (!bgShould)");
-    const mode = text.indexOf("parseMemoryV3ShadowMode", gate);
-    const legacy = text.indexOf("runMemoryV3Shadow({", gate);
-    const lifecycle = text.indexOf("runMemoryV3LifecycleShadow({", gate);
-    const settle = text.indexOf("await Promise.allSettled", gate);
+    const mode = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode");
+    const legacy = text.indexOf("runMemoryV3Shadow({", mode);
+    const lifecycle = text.indexOf("runMemoryV3LifecycleShadow({", mode);
+    const settle = text.indexOf("await Promise.allSettled", mode);
     assert.equal(gate >= 0, true);
-    assert.equal(mode > gate, true);
+    assert.equal(mode > 0 && mode < gate, true);
     assert.equal(legacy > mode, true);
     assert.equal(lifecycle > mode, true);
     assert.equal(settle > legacy && settle > lifecycle, true);
@@ -43,6 +43,8 @@ describe("staysee-chat lifecycle shadow composition", () => {
       dispatch,
       /const memoryV3ShadowPromise = memoryV3Mode === "lifecycle_shadow"[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
     );
+    const skippedSummaryBranch = text.slice(gate, text.indexOf("const summaryRefreshPromise", gate));
+    assert.match(skippedSummaryBranch, /await Promise\.allSettled\(\[memoryV3ShadowPromise\]\)/);
   });
 
   it("reuses the bounded loader and exact server-only environment names", () => {
