@@ -25,15 +25,12 @@ function indexSource(): string {
 }
 
 function assertSingleShadowPlacement(source: string): void {
-  const bgShould = source.indexOf("const bgShould = shouldUpdateConversationSummary");
+  const responseStage = source.indexOf('recordReplyPipelineStage("before_http_response"');
+  const packetGate = source.indexOf("packetForSummary &&", responseStage);
   const shadowCalls = [...source.matchAll(/\brunMemoryV3Shadow\s*\(/g)];
   assert.equal(shadowCalls.length, 1);
-  assert.equal(bgShould >= 0, true);
-  assert.equal(shadowCalls[0].index > bgShould, true);
-  assert.equal(
-    shadowCalls[0].index > source.indexOf('recordReplyPipelineStage("before_http_response"'),
-    true,
-  );
+  assert.equal(responseStage >= 0 && packetGate > responseStage, true);
+  assert.equal(shadowCalls[0].index > responseStage && shadowCalls[0].index < packetGate, true);
 }
 
 function successfulResponseSource(source: string): string {
@@ -114,19 +111,17 @@ describe("staysee-chat Memory V3 source wiring", () => {
   it("starts the shadow branch after the response stage but independently of summary refresh", () => {
     const source = indexSource();
     assertSingleShadowPlacement(source);
-    const background = source.slice(source.indexOf("const bgShould = shouldUpdateConversationSummary"));
+    const background = source.slice(source.indexOf('recordReplyPipelineStage("before_http_response"'));
     const stop = background.indexOf("if (!bgShould)");
     const summary = background.indexOf("const summaryRefreshPromise");
     const shadow = background.indexOf("const memoryV3ShadowPromise");
-    const settle = background.indexOf("await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise])");
+    const backgroundSettlement = background.indexOf("EdgeRuntime.waitUntil(");
+    const summarySettlement = background.indexOf("await Promise.allSettled([summaryRefreshPromise])");
     assert.equal(stop >= 0, true);
-    assert.equal(shadow > 0 && shadow < stop, true);
+    assert.equal(shadow > 0 && shadow < backgroundSettlement, true);
     assert.equal(summary > stop, true);
-    assert.equal(settle > summary, true);
-    assert.match(
-      background.slice(stop, summary),
-      /await Promise\.allSettled\(\[memoryV3ShadowPromise\]\)/,
-    );
+    assert.equal(summarySettlement > summary, true);
+    assert.match(background.slice(backgroundSettlement), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
     const earlyMutation = source.replace(
       "const bgShould = shouldUpdateConversationSummary",
       "runMemoryV3Shadow({});\n                  const bgShould = shouldUpdateConversationSummary",
@@ -137,7 +132,7 @@ describe("staysee-chat Memory V3 source wiring", () => {
   it("keeps the existing summary arguments and catch log while isolating API keys", () => {
     const source = indexSource();
     const summaryStart = source.indexOf("await runConversationSummaryRefresh({");
-    const summaryEnd = source.indexOf("await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise])", summaryStart);
+    const summaryEnd = source.indexOf("await Promise.allSettled([summaryRefreshPromise])", summaryStart);
     assert.equal(summaryStart >= 0 && summaryEnd > summaryStart, true);
     const summaryCall = source.slice(summaryStart, summaryEnd);
     assert.match(source, /const summaryApiKey = Deno\.env\.get\(PROVIDERS\[ACTIVE_PROVIDER\]\.envKey\)/);

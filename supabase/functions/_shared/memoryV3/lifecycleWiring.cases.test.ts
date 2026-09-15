@@ -27,11 +27,13 @@ describe("staysee-chat lifecycle shadow composition", () => {
   it("dispatches exactly one mutually exclusive runner independently of the summary refresh gate", () => {
     const text = source();
     const gate = text.indexOf("if (!bgShould)");
+    const promise = text.indexOf("const memoryV3ShadowPromise = conversationId &&");
     const mode = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode");
     const legacy = text.indexOf("runMemoryV3Shadow({", mode);
     const lifecycle = text.indexOf("runMemoryV3LifecycleShadow({", mode);
-    const settle = text.indexOf("await Promise.allSettled", mode);
+    const settle = text.indexOf("EdgeRuntime.waitUntil(", mode);
     assert.equal(gate >= 0, true);
+    assert.equal(promise > 0 && promise < mode, true);
     assert.equal(mode > 0 && mode < gate, true);
     assert.equal(legacy > mode, true);
     assert.equal(lifecycle > mode, true);
@@ -41,16 +43,35 @@ describe("staysee-chat lifecycle shadow composition", () => {
     const dispatch = text.slice(mode, settle);
     assert.match(
       dispatch,
-      /const memoryV3ShadowPromise = memoryV3Mode === "lifecycle_shadow"[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
+      /return memoryV3Mode === "lifecycle_shadow"[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
     );
-    const skippedSummaryBranch = text.slice(gate, text.indexOf("const summaryRefreshPromise", gate));
-    assert.match(skippedSummaryBranch, /await Promise\.allSettled\(\[memoryV3ShadowPromise\]\)/);
+    assert.match(text.slice(settle), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+  });
+
+  it("does not require the summary context packet before dispatching lifecycle shadow", () => {
+    const text = source();
+    const responseStage = text.indexOf('recordReplyPipelineStage("before_http_response"');
+    const promise = text.indexOf("const memoryV3ShadowPromise = conversationId &&", responseStage);
+    const mode = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode", responseStage);
+    const backgroundSettlement = text.indexOf("EdgeRuntime.waitUntil(", responseStage);
+    const packetGate = text.indexOf("packetForSummary &&", backgroundSettlement);
+    assert.equal(responseStage >= 0, true);
+    assert.equal(promise > responseStage && promise < mode && mode < packetGate, true);
+    assert.equal(backgroundSettlement > mode, true);
+    const dispatch = text.slice(promise, backgroundSettlement);
+    assert.doesNotMatch(dispatch, /packetForSummary/);
+    assert.match(
+      dispatch,
+      /const memoryV3ShadowPromise = conversationId &&[\s\S]*?result\.content &&[\s\S]*?!isCalmFallbackContent[\s\S]*?parseMemoryV3ShadowMode/,
+    );
+    const settlement = text.slice(backgroundSettlement, text.indexOf("} else if (userId && !clientConnected)", backgroundSettlement));
+    assert.match(settlement, /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
   });
 
   it("reuses the bounded loader and exact server-only environment names", () => {
     const text = source();
     const start = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode");
-    const end = text.indexOf("await Promise.allSettled", start);
+    const end = text.indexOf("EdgeRuntime.waitUntil(", start);
     const block = text.slice(start, end);
     assert.match(block, /Deno\.env\.get\("STAYSEE_MEMORY_V3_MODE"\)/);
     assert.match(block, /Deno\.env\.get\("STAYSEE_MEMORY_V3_SHADOW_USER_ID"\)/);
@@ -88,7 +109,7 @@ describe("staysee-chat lifecycle shadow composition", () => {
     const lifecycle = text.indexOf("runMemoryV3LifecycleShadow({");
     assert.equal(legacy > responseStage, true);
     assert.equal(lifecycle > responseStage, true);
-    assert.match(text, /Promise\.allSettled\(\[summaryRefreshPromise, memoryV3ShadowPromise\]\)/);
+    assert.match(text, /EdgeRuntime\.waitUntil\(\s*Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
   });
 });
 

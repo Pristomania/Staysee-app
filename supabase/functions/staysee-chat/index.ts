@@ -1499,6 +1499,54 @@ Deno.serve(async (req: Request) => {
 
     if (userId && clientConnected) {
       const svc = makeServiceClient();
+      const memoryV3ShadowPromise = conversationId &&
+          result.content &&
+          !isCalmFallbackContent
+        ? (() => {
+            const memoryV3Mode = parseMemoryV3ShadowMode(
+              Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
+            );
+            return memoryV3Mode === "lifecycle_shadow"
+              ? runMemoryV3LifecycleShadowBackgroundSafely(
+                  () => runMemoryV3LifecycleShadow({
+                    rawMode: memoryV3Mode,
+                    rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                    userId,
+                    conversationId,
+                    apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                    loadMessages: createMemoryV3MessageLoader(svc),
+                    store: createMemoryV3LifecycleStore(svc),
+                    extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                    reconcilerAdapterFactory: (apiKey) => createMemoryV3LifecycleOpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                  }),
+                  (code) => console.error("[memory-v3-lifecycle-shadow]", code),
+                )
+              : memoryV3Mode === "shadow"
+              ? runMemoryV3ShadowBackgroundSafely(
+                  () => runMemoryV3Shadow({
+                    rawMode: memoryV3Mode,
+                    rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                    userId,
+                    conversationId,
+                    apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                    loadMessages: createMemoryV3MessageLoader(svc),
+                    store: createMemoryV3ShadowStore(svc),
+                    modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                  }),
+                  (code) => console.error("[memory-v3-shadow]", code),
+                )
+              : Promise.resolve();
+          })()
+        : Promise.resolve();
 
       EdgeRuntime.waitUntil(
         Promise.all([
@@ -1589,51 +1637,7 @@ Deno.serve(async (req: Request) => {
                     clientConnected,
                   });
 
-                  const memoryV3Mode = parseMemoryV3ShadowMode(
-                    Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
-                  );
-                  const memoryV3ShadowPromise = memoryV3Mode === "lifecycle_shadow"
-                    ? runMemoryV3LifecycleShadowBackgroundSafely(
-                        () => runMemoryV3LifecycleShadow({
-                          rawMode: memoryV3Mode,
-                          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
-                          userId,
-                          conversationId,
-                          apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-                          loadMessages: createMemoryV3MessageLoader(svc),
-                          store: createMemoryV3LifecycleStore(svc),
-                          extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                            apiKey,
-                            fetchImpl: globalThis.fetch.bind(globalThis),
-                          }),
-                          reconcilerAdapterFactory: (apiKey) => createMemoryV3LifecycleOpenRouterAdapter({
-                            apiKey,
-                            fetchImpl: globalThis.fetch.bind(globalThis),
-                          }),
-                        }),
-                        (code) => console.error("[memory-v3-lifecycle-shadow]", code),
-                      )
-                    : memoryV3Mode === "shadow"
-                    ? runMemoryV3ShadowBackgroundSafely(
-                        () => runMemoryV3Shadow({
-                          rawMode: memoryV3Mode,
-                          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
-                          userId,
-                          conversationId,
-                          apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-                          loadMessages: createMemoryV3MessageLoader(svc),
-                          store: createMemoryV3ShadowStore(svc),
-                          modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                            apiKey,
-                            fetchImpl: globalThis.fetch.bind(globalThis),
-                          }),
-                        }),
-                        (code) => console.error("[memory-v3-shadow]", code),
-                      )
-                    : Promise.resolve();
-
                   if (!bgShould) {
-                    await Promise.allSettled([memoryV3ShadowPromise]);
                     return;
                   }
 
@@ -1691,12 +1695,14 @@ Deno.serve(async (req: Request) => {
                     }
                   })();
 
-                  await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise]);
+                  await Promise.allSettled([summaryRefreshPromise]);
                 } catch (sumErr) {
                   console.error("[staysee-chat] summary update failed:", sumErr);
                 }
               })()
             : Promise.resolve(),
+
+          memoryV3ShadowPromise,
 
           // PR3c-1 — session processState_N (metadata column only; summary untouched)
           conversationId &&
