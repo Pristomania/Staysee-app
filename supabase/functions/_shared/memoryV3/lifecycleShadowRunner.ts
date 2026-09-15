@@ -97,6 +97,24 @@ function ownDiagnostic(error: unknown): MemoryV3LifecycleShadowDiagnostic | null
   }
 }
 
+function fitExtractorDialogueToByteCap(
+  dialogue: MemoryV3DialogueInput,
+): { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3ExtractorRequest> } {
+  const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES);
+  for (let start = 0; start < dialogue.messages.length; start += 1) {
+    const messages = dialogue.messages.slice(start);
+    if (!messages.some((message) => message.role === "user")) continue;
+    const candidate = start === 0
+      ? dialogue
+      : validateMemoryV3Dialogue({ caseId: dialogue.caseId, messages });
+    const request = buildMemoryV3ExtractorRequest(candidate);
+    if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
+      return { dialogue: candidate, request };
+    }
+  }
+  throw fail("invalid_source");
+}
+
 function inspectExactRecord(value: unknown, fields: readonly string[], code: MemoryV3LifecycleShadowDiagnostic): JsonRecord {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw fail(code);
@@ -284,10 +302,10 @@ export async function runMemoryV3LifecycleShadow(
   let extractorRequest;
   try {
     const source = await (projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"])(userId, conversationId);
-    dialogue = validateMemoryV3Dialogue({ caseId: `memory-v3-shadow:${userId}:${conversationId}`, messages: source });
-    extractorRequest = buildMemoryV3ExtractorRequest(dialogue);
-    const bytes = new TextEncoder().encode(JSON.stringify(extractorRequest)).byteLength;
-    if (bytes > Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES)) throw fail("invalid_source");
+    const validated = validateMemoryV3Dialogue({ caseId: `memory-v3-shadow:${userId}:${conversationId}`, messages: source });
+    const fitted = fitExtractorDialogueToByteCap(validated);
+    dialogue = fitted.dialogue;
+    extractorRequest = fitted.request;
   } catch {
     return failed(null, "invalid_source");
   }
