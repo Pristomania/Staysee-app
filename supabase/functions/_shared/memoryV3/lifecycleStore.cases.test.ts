@@ -101,6 +101,10 @@ async function captureStoreError(action: () => Promise<unknown>) {
 
 describe("Memory V3 lifecycle migration", () => {
   const migrationUrl = new URL("../../../migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql", import.meta.url);
+  const developmentCapMigrationUrl = new URL(
+    "../../../migrations/20260915010000_035_memory_v3_lifecycle_shadow_development_cap.sql",
+    import.meta.url,
+  );
   const priorScheduleUrl = new URL("../../../migrations/20260914193000_033_memory_v3_shadow_retention_schedule.sql", import.meta.url);
 
   it("creates all five normalized service-role-only tables", () => {
@@ -168,6 +172,28 @@ describe("Memory V3 lifecycle migration", () => {
     assert.match(sql, /AT TIME ZONE 'UTC'/i);
     assert.match(sql, /IF v_daily_count >= 1/i);
     assert.match(sql, /ON CONFLICT \(user_id, conversation_id, pipeline_version, input_hash\) DO NOTHING/i);
+  });
+
+  it("temporarily raises only the lifecycle reservation cap to five without weakening RPC access", () => {
+    const sql = readFileSync(developmentCapMigrationUrl, "utf8");
+    assert.match(sql, /CREATE OR REPLACE FUNCTION public\.reserve_memory_v3_lifecycle_shadow_run/i);
+    assert.match(sql, /LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''/i);
+    assert.match(sql, /pg_catalog\.pg_advisory_xact_lock/i);
+    assert.match(sql, /AT TIME ZONE 'UTC'/i);
+    assert.match(sql, /IF v_daily_count >= 5/i);
+    assert.doesNotMatch(sql, /IF v_daily_count >= 1/i);
+    assert.ok(
+      sql.indexOf("memory_v3_lifecycle_shadow_identities") < sql.indexOf("SELECT pg_catalog.count(*)::integer INTO v_daily_count"),
+    );
+    assert.match(
+      sql,
+      /REVOKE ALL ON FUNCTION public\.reserve_memory_v3_lifecycle_shadow_run\([^)]+\) FROM PUBLIC, anon, authenticated/i,
+    );
+    assert.match(
+      sql,
+      /GRANT EXECUTE ON FUNCTION public\.reserve_memory_v3_lifecycle_shadow_run\([^)]+\) TO service_role/i,
+    );
+    assert.doesNotMatch(sql, /CREATE TABLE|ALTER TABLE|DROP TABLE|DROP FUNCTION|CREATE POLICY/i);
   });
 
   it("purges only old run payloads and schedules a separate daily lifecycle job", () => {
