@@ -1524,7 +1524,7 @@ Deno.serve(async (req: Request) => {
                       apiKey,
                       fetchImpl: globalThis.fetch.bind(globalThis),
                     }),
-                  }),
+                  }, (code) => console.error("[memory-v3-lifecycle-transport]", code)),
                   (code) => console.error("[memory-v3-lifecycle-shadow]", code),
                 )
               : memoryV3Mode === "shadow"

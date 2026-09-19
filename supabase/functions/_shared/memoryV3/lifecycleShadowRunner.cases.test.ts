@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import { createEmptyMemoryV3LifecycleState } from "./lifecycleReducer.ts";
 import type { MemoryV3LifecycleStore } from "./lifecycleStore.ts";
+import { createMemoryV3LifecycleOpenRouterAdapter } from "./lifecycleTransport.ts";
 import {
   runMemoryV3LifecycleShadow,
   runMemoryV3LifecycleShadowBackgroundSafely,
@@ -336,6 +337,27 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "extractor_transport_failed" });
     assert.deepEqual(test.calls, ["messages", "reserve", "extractor", "fail:extractor_transport_failed"]);
     assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
+  });
+
+  it("reports only a branded safe reconciler transport diagnostic while persisting the generic failure", async () => {
+    const reported: string[] = [];
+    const test = harness({
+      reconcilerAdapterFactory: () => createMemoryV3LifecycleOpenRouterAdapter({
+        apiKey: "test-key",
+        fetchImpl: async () => new Response(RAW_SECRET, { status: 400 }),
+      }),
+    });
+
+    const result = await runMemoryV3LifecycleShadow(test.options, (code) => reported.push(code));
+
+    assert.deepEqual(result, {
+      status: "failed",
+      runId: RUN_ID,
+      diagnosticCode: "reconciler_transport_failed",
+    });
+    assert.deepEqual(reported, ["provider_http_400"]);
+    assert.equal(JSON.stringify({ result, reported }).includes(RAW_SECRET), false);
+    assert.equal(test.calls.at(-1), "fail:reconciler_transport_failed");
   });
 
   it("maps extractor parse, shape, and contract failures without retry", async () => {

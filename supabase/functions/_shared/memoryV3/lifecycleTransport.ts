@@ -27,6 +27,8 @@ export interface MemoryV3LifecycleOpenRouterAdapterOptions {
 type DiagnosticCode =
   | "transport_failed"
   | "transport_timeout"
+  | "provider_http_400"
+  | "provider_http_429"
   | "provider_http_4xx"
   | "provider_http_5xx"
   | "provider_response_invalid";
@@ -45,6 +47,8 @@ const ERROR_TOKENS = new WeakMap<object, object>();
 const DIAGNOSTICS = new Set<DiagnosticCode>([
   "transport_failed",
   "transport_timeout",
+  "provider_http_400",
+  "provider_http_429",
   "provider_http_4xx",
   "provider_http_5xx",
   "provider_response_invalid",
@@ -523,8 +527,12 @@ export function createMemoryV3LifecycleOpenRouterAdapter(
         phase = "response";
         const response = responseParts(token, responseValue);
         if (response.status < 200 || response.status > 299) {
-          const diagnostic = response.status >= 400 && response.status <= 499
-            ? "provider_http_4xx"
+          const diagnostic = response.status === 400
+            ? "provider_http_400"
+            : response.status === 429
+              ? "provider_http_429"
+              : response.status >= 400 && response.status <= 499
+                ? "provider_http_4xx"
             : response.status >= 500 && response.status <= 599
               ? "provider_http_5xx"
               : "provider_response_invalid";
