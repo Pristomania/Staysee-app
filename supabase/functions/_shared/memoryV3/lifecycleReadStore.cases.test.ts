@@ -366,6 +366,12 @@ describe("Memory V3 lifecycle read migration", () => {
     assert.match(sql, /SET search_path = ''/);
     assert.match(sql, /REVOKE ALL ON FUNCTION public\.load_memory_v3_lifecycle_read_context\(uuid\) FROM PUBLIC, anon, authenticated/);
     assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.load_memory_v3_lifecycle_read_context\(uuid\) TO service_role/);
+    assert.doesNotMatch(
+      sql,
+      /pg_catalog\.coalesce/i,
+      "COALESCE is PostgreSQL special syntax and must not be schema-qualified",
+    );
+    assert.match(sql, /COALESCE\(projected\.items, '\[\]'::jsonb\)/i);
     assert.doesNotMatch(sql, /GRANT[^;]+(?:anon|authenticated)/);
     assert.doesNotMatch(sql, /CREATE\s+(?:OR REPLACE\s+)?(?:TABLE|POLICY|TRIGGER)/i);
   });
