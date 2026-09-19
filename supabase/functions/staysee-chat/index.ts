@@ -82,7 +82,6 @@ import {
 } from "../_shared/surgery1Prompt.ts";
 import {
   TIER_CONFIG,
-  FALLBACK_CHAIN,
   findFallbackProvider,
   isDuplicateRequest,
   makeRequestKey,
@@ -187,9 +186,7 @@ const corsHeaders = {
 
 type AiProvider = "openrouter" | "openai" | "gemini" | "deepseek" | "mistral";
 
-interface FullProviderConfig extends ProviderConfig {
-  // intentionally empty — ProviderConfig already has all fields
-}
+type FullProviderConfig = ProviderConfig;
 
 /** Legacy single-model override; per-depth routing: see _shared/modelRouter.ts */
 const CHAT_MODEL = (() => {
@@ -388,7 +385,6 @@ async function callModel(
         meta: { rawKind: contentInspect.rawKind },
       });
     }
-    const usage = data.usage ?? {};
     const parsed = parseOpenRouterUsage(data);
     console.log(
       `[staysee-chat] ${provider} ok, tokens: ${parsed.totalTokens}` +
@@ -1080,7 +1076,7 @@ Deno.serve(async (req: Request) => {
       userTier,
       { flatOrdinary },
     );
-    let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
+    const { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
 
     const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
       depthReason: responseBudget.depthReason,
@@ -1219,19 +1215,19 @@ Deno.serve(async (req: Request) => {
       finishReason: recovery.finishReason ?? result.finishReason,
     };
 
-    let autoContinueCount = recovery.autoContinueCount;
-    let finalizeCount = recovery.finalizeCount;
-    let wasAutoContinued = recovery.wasAutoContinued;
-    let wasFinalizeUsed = recovery.wasFinalizeUsed;
-    let wasTruncated = recovery.wasTruncated;
+    const autoContinueCount = recovery.autoContinueCount;
+    const finalizeCount = recovery.finalizeCount;
+    const wasAutoContinued = recovery.wasAutoContinued;
+    const wasFinalizeUsed = recovery.wasFinalizeUsed;
+    const wasTruncated = recovery.wasTruncated;
     let replyPublishable = false;
     let protocolSignalsForLog: ReturnType<typeof parseAndStripProtocolSignals> | null = null;
-    let lengthBeforeMerge = recovery.lengthBeforeMerge;
+    const lengthBeforeMerge = recovery.lengthBeforeMerge;
     let lengthAfterMerge = recovery.lengthAfterMerge;
-    let lastMergeStrategy = recovery.lastMergeStrategy;
-    let lastOverlapWords = recovery.lastOverlapWords;
+    const lastMergeStrategy = recovery.lastMergeStrategy;
+    const lastOverlapWords = recovery.lastOverlapWords;
     let usedMergeFallback = false;
-    let discardedDuplicateCount = recovery.discardedDuplicateCount;
+    const discardedDuplicateCount = recovery.discardedDuplicateCount;
     const mergeStrategies = recovery.mergeStrategies;
     const recoveryDiagnostics: ReplyRecoveryDiagnostics = recovery.diagnostics;
 

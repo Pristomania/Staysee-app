@@ -43,6 +43,7 @@ type DatasetDiagnostic =
   | 'lifecycle_model_dataset_replay_failed';
 
 type JsonRecord = Record<string, unknown>;
+type JsonValue = null | string | boolean | number | JsonValue[] | { [key: string]: JsonValue };
 
 interface AuthoringProposal {
   type: MemoryV3LifecycleProposal[number]['type'];
@@ -117,7 +118,7 @@ function scalar(value: unknown): boolean {
     (typeof value === 'number' && Number.isFinite(value));
 }
 
-function cloneJsonData(value: unknown, seen = new WeakSet<object>()): any {
+function cloneJsonData(value: unknown, seen = new WeakSet<object>()): JsonValue {
   if (scalar(value)) return value;
   if (typeof value !== 'object' || value === null || seen.has(value)) {
     fail('lifecycle_model_dataset_invalid');
@@ -240,7 +241,7 @@ function projectExpectedState(value: unknown): { items: ExpectedGoldItem[] } {
         const evidence = rawEvidence as JsonRecord;
         if (!nonEmpty(evidence.conversationId)) fail('lifecycle_model_dataset_invalid');
         return {
-          ...(evidence as any),
+          ...(evidence as unknown as ExpectedGoldItem['evidence'][number]),
           conversationId: syntheticUuid(evidence.conversationId),
           sourceMessageId: syntheticMessageUuid(
             evidence.conversationId,
@@ -279,7 +280,7 @@ function projectExtraction(
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     fail('lifecycle_model_dataset_invalid');
   }
-  const extraction = value as any;
+  const extraction = value as Partial<MemoryV3Extraction>;
   if (extraction.run === null || typeof extraction.run !== 'object' ||
     !Array.isArray(extraction.items) || !Array.isArray(extraction.evidence)) {
     fail('lifecycle_model_dataset_invalid');
@@ -290,7 +291,7 @@ function projectExtraction(
       caseId: `memory-v3-shadow:${SYNTHETIC_LIFECYCLE_BENCHMARK_USER_ID}:${conversationId}`,
     },
     items: extraction.items.map((item: unknown) => ({ ...(item as object) })),
-    evidence: extraction.evidence.map((row: any) => ({
+    evidence: extraction.evidence.map((row: MemoryV3Extraction['evidence'][number]) => ({
       ...row,
       sourceMessageId: syntheticMessageUuid(conversationLabel, row.sourceMessageId),
     })),

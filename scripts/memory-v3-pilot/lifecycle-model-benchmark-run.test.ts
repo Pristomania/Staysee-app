@@ -127,7 +127,11 @@ async function exactFetch() {
   return fetchImpl;
 }
 
-function baseIo(overrides: Record<string, unknown> = {}): any {
+function baseIo(overrides: Record<string, unknown> = {}): {
+  options: Parameters<typeof main>[0];
+  stdout: string[];
+  stderr: string[];
+} {
   const stdout: string[] = [];
   const stderr: string[] = [];
   return {
@@ -142,7 +146,7 @@ function baseIo(overrides: Record<string, unknown> = {}): any {
       writeStdout: (text: string) => { stdout.push(text); },
       writeStderr: (text: string) => { stderr.push(text); },
       ...overrides,
-    },
+    } as unknown as Parameters<typeof main>[0],
     stdout,
     stderr,
   };

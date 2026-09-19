@@ -2,6 +2,8 @@
  * Run: npx tsx supabase/functions/_shared/summaryPersistence.cases.test.ts
  */
 
+import { readFileSync } from "node:fs";
+
 function isSummaryTimestampColumnError(message: string | undefined): boolean {
   if (!message) return false;
   return /summary_updated_at/i.test(message);
@@ -27,5 +29,11 @@ for (const [message, expected] of cases) {
     `isSummaryTimestampColumnError(${JSON.stringify(message)}) expected ${expected}`
   );
 }
+
+const memorySource = readFileSync(new URL("./memory.ts", import.meta.url), "utf8");
+assert(
+  memorySource.includes("postSaveSummaryUpdatedAt: postSummaryUpdatedAt"),
+  "summary diagnostics must pass the declared post-save timestamp variable",
+);
 
 console.log("=== summaryPersistence.cases.test.ts OK ===\n");

@@ -27,6 +27,7 @@ import type {
 const DATASET_PATH = new URL('./memory-v3-synthetic-lifecycle.v1.json', import.meta.url);
 const ENGINE_PATH = new URL('./lifecycle-model-benchmark.ts', import.meta.url);
 const profile = getLifecycleModelBenchmarkProfile(LIFECYCLE_MODEL_BENCHMARK_PROFILE_ID);
+type BenchmarkOptions = Parameters<typeof runLifecycleModelBenchmark>[0];
 
 function loadDataset(): unknown {
   return JSON.parse(readFileSync(DATASET_PATH, 'utf8'));
@@ -45,7 +46,7 @@ function exactBudget(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
-function benchmarkOptions(overrides: Record<string, unknown> = {}): any {
+function benchmarkOptions(overrides: Record<string, unknown> = {}): BenchmarkOptions {
   return {
     profileId: LIFECYCLE_MODEL_BENCHMARK_PROFILE_ID,
     dataset: loadDataset(),
@@ -53,7 +54,7 @@ function benchmarkOptions(overrides: Record<string, unknown> = {}): any {
     budget: exactBudget(),
     execute: false,
     ...overrides,
-  };
+  } as unknown as BenchmarkOptions;
 }
 
 function wireOperations(testCase: PreparedLifecycleModelCase) {
@@ -77,6 +78,8 @@ function wireOperations(testCase: PreparedLifecycleModelCase) {
   }));
 }
 
+type WireOperation = ReturnType<typeof wireOperations>[number];
+
 async function expectedWireByConversation(dataset: unknown) {
   const prepared = await prepareLifecycleModelBenchmarkCases({
     profileId: LIFECYCLE_MODEL_BENCHMARK_PROFILE_ID,
@@ -91,8 +94,8 @@ async function expectedWireByConversation(dataset: unknown) {
 async function exactAdapter(dataset: unknown, options: {
   failConversationId?: string;
   usage?: MemoryV3LifecycleTransportResult['usage'];
-  mutate?: (operations: any[], request: MemoryV3LifecycleReconcileRequest) => any[];
-  rawContent?: (operations: any[], request: MemoryV3LifecycleReconcileRequest) => string;
+  mutate?: (operations: WireOperation[], request: MemoryV3LifecycleReconcileRequest) => WireOperation[];
+  rawContent?: (operations: WireOperation[], request: MemoryV3LifecycleReconcileRequest) => string;
 } = {}) {
   const fixtures = await expectedWireByConversation(dataset);
   let active = 0;
@@ -191,10 +194,10 @@ describe('lifecycle model benchmark dry-run and preflight', () => {
       },
     });
     const symbolOptions = benchmarkOptions();
-    (symbolOptions as any)[Symbol('RAW_SYMBOL_SENTINEL')] = true;
+    (symbolOptions as BenchmarkOptions & Record<symbol, unknown>)[Symbol('RAW_SYMBOL_SENTINEL')] = true;
     const cyclicBudget = exactBudget();
     cyclicBudget.caseCount = cyclicBudget;
-    const sparseDataset: any = loadDataset();
+    const sparseDataset = loadDataset() as { scenarios: unknown[] };
     delete sparseDataset.scenarios[1];
     const revocable = Proxy.revocable(benchmarkOptions(), {});
     revocable.revoke();
@@ -207,7 +210,7 @@ describe('lifecycle model benchmark dry-run and preflight', () => {
     ]) {
       let error: unknown;
       try {
-        await runLifecycleModelBenchmark(value as any);
+        await runLifecycleModelBenchmark(value as unknown as BenchmarkOptions);
       } catch (caught) {
         error = caught;
       }
@@ -271,7 +274,7 @@ describe('createAtMostTwelveLifecycleAdapter', () => {
         return { rawContent: '{"operations":[]}', usage: null };
       },
     });
-    const request = { input: { session: { conversationId: 'x' } } } as any;
+    const request = { input: { session: { conversationId: 'x' } } } as unknown as MemoryV3LifecycleReconcileRequest;
     for (let index = 1; index <= 12; index += 1) {
       if (index === 4) await assert.rejects(() => bounded(request));
       else await bounded(request);
@@ -296,11 +299,15 @@ describe('createAtMostTwelveLifecycleAdapter', () => {
         return async () => ({ rawContent: '{}', usage: null });
       },
     });
-    assert.throws(() => createAtMostTwelveLifecycleAdapter(options as any));
+    assert.throws(() => createAtMostTwelveLifecycleAdapter(
+      options as unknown as Parameters<typeof createAtMostTwelveLifecycleAdapter>[0],
+    ));
     assert.equal(getterCalls, 0);
     const revoked = Proxy.revocable({ adapter: async () => ({ rawContent: '{}', usage: null }) }, {});
     revoked.revoke();
-    assert.throws(() => createAtMostTwelveLifecycleAdapter(revoked.proxy as any));
+    assert.throws(() => createAtMostTwelveLifecycleAdapter(
+      revoked.proxy as unknown as Parameters<typeof createAtMostTwelveLifecycleAdapter>[0],
+    ));
   });
 });
 
@@ -322,7 +329,8 @@ describe('lifecycle model benchmark execution and quality', () => {
     assert.deepEqual(fake.adapter.ends, [...profile.stepIds]);
     assert.equal(fake.adapter.maxActive, 1);
     assert.equal(result.qualityGate, 'PASS');
-    assert.equal(result.cases.every((entry: any) => entry.operationExact && entry.stateExact), true);
+    assert.equal(result.cases.every((entry) =>
+      'operationExact' in entry && entry.operationExact && entry.stateExact), true);
     assert.equal(result.failures.length, 0);
     assert.equal(result.aggregate.counts.exactStateMatchedCount, 12);
     assert.equal(result.actualUsage, null);
@@ -341,9 +349,9 @@ describe('lifecycle model benchmark execution and quality', () => {
       execute: true,
       adapter: reordered.adapter,
     }));
-    const layered = result.cases.find((entry: any) => entry.stepId === 'layered-coexistence-s01');
-    assert.equal(layered?.stateExact, true);
-    assert.equal(layered?.operationExact, true);
+    const layered = result.cases.find((entry) => entry.stepId === 'layered-coexistence-s01');
+    assert.equal(layered && 'stateExact' in layered ? layered.stateExact : undefined, true);
+    assert.equal(layered && 'operationExact' in layered ? layered.operationExact : undefined, true);
     assert.equal(result.qualityGate, 'PASS');
   });
 
@@ -392,7 +400,8 @@ describe('lifecycle model benchmark execution and quality', () => {
       adapter: wrong.adapter,
     }));
     assert.equal(failed.qualityGate, 'FAIL');
-    assert.equal(failed.cases.some((entry: any) => entry.operationExact === false), true);
+    assert.equal(failed.cases.some((entry) =>
+      'operationExact' in entry && entry.operationExact === false), true);
 
     const metered = await exactAdapter(dataset, {
       usage: { promptTokens: 10, completionTokens: 2, costUsd: 0.001 },
@@ -447,7 +456,7 @@ describe('lifecycle model benchmark execution and quality', () => {
       adapter,
     }));
     assert.equal(result.failureCount, 12);
-    assert.equal(result.failures.every((failure: any) =>
+    assert.equal(result.failures.every((failure) =>
       failure.stage === 'parse' && failure.diagnosticCode === 'lifecycle_model_parse_invalid'), true);
     assert.equal(JSON.stringify(result).includes(rawSentinel), false);
 
@@ -468,7 +477,7 @@ describe('lifecycle model benchmark execution and quality', () => {
       adapter: invalidContract,
     }));
     assert.equal(contractResult.failureCount, 12);
-    assert.equal(contractResult.failures.every((failure: any) =>
+    assert.equal(contractResult.failures.every((failure) =>
       failure.stage === 'contract' &&
       failure.diagnosticCode === 'lifecycle_model_contract_invalid'), true);
     assert.equal(JSON.stringify(contractResult).includes(contractSentinel), false);
@@ -490,8 +499,8 @@ describe('lifecycle model benchmark review packet and source isolation', () => {
       benchmarkResult: result,
     });
     assert.equal(packet.cases.length, 12);
-    assert.deepEqual(packet.cases.map((entry: any) => entry.stepId), [...profile.stepIds]);
-    assert.equal(packet.cases.every((entry: any) =>
+    assert.deepEqual(packet.cases.map((entry) => entry.stepId), [...profile.stepIds]);
+    assert.equal(packet.cases.every((entry) =>
       entry.messages.length > 0 &&
       entry.semanticVerdict === null &&
       entry.forbiddenMeaningVerdict === null &&

@@ -350,6 +350,7 @@ export function ConversationNotesScreen() {
 
   useEffect(() => {
     if (!fromProfile || !user) return;
+    const userId = user.id;
 
     async function loadConversations() {
       setConvsLoading(true);
@@ -358,7 +359,7 @@ export function ConversationNotesScreen() {
         const { data } = await supabase
           .from('conversations')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .eq('is_active', true)
           .order('last_message_at', { ascending: false });
         list = (data ?? []) as Conversation[];

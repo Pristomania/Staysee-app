@@ -235,7 +235,7 @@ describe('lifecycle model benchmark CLI argv contract', () => {
       },
     });
     const symbolArgv = dryArgv();
-    (symbolArgv as any)[Symbol(RAW_SENTINEL)] = true;
+    (symbolArgv as string[] & Record<symbol, unknown>)[Symbol(RAW_SENTINEL)] = true;
     const sparseArgv = dryArgv();
     delete sparseArgv[1];
     for (const argv of [getterArgv, symbolArgv, sparseArgv, [...dryArgv(), 123] as unknown[]]) {

@@ -14,7 +14,6 @@ import {
   type ConsolidateRowInput,
 } from "./consolidateRuleBased.ts";
 import {
-  CROSS_MEMORY_MAX_CHARS,
   isLifeMemoryFragment,
   parseLifeMemoryFromModel,
   type CrossMemoryType,
@@ -34,13 +33,6 @@ export interface ConsolidateUserResult {
   removed: number;
   added: number;
   skipped?: string;
-}
-
-function normalizeSentence(s: string): string {
-  let t = s.replace(/\s+/g, " ").trim();
-  if (!t) return "";
-  if (!/[.!?…]$/.test(t)) t += ".";
-  return t.slice(0, CROSS_MEMORY_MAX_CHARS);
 }
 
 function similarMemory(a: string, b: string): boolean {

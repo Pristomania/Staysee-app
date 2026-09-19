@@ -188,7 +188,7 @@ export function mergeLengthContinuation(
   }
 
   const merged = mergeContinuationWithoutOverlap(accumulated, continuation);
-  let content = polishMergedReply(merged.text);
+  const content = polishMergedReply(merged.text);
   const dup = repairDuplicateClosure(content);
   return {
     content: dup.text,

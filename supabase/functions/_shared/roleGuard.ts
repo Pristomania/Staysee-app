@@ -42,7 +42,7 @@ const USER_ROLE_OVERRIDE_STATIC = [
 
 function firstRolePhrase(phrase: string): string {
   const p = phrase.trim();
-  const owned = p.match(/^(?:мой|моим|моя|моей)\s+[\p{L}\-]+/iu);
+  const owned = p.match(/^(?:мой|моим|моя|моей)\s+[\p{L}-]+/iu);
   if (owned) return owned[0];
   return p.split(/\s+/u)[0] ?? p;
 }
@@ -52,7 +52,7 @@ function looksLikeRoleIdentity(phrase: string): boolean {
   if (!p || NOT_A_ROLE_COMPLEMENT.test(p)) return false;
   if (/^(?:меня|мной|здесь|сейчас|тут|и|а|но)$/iu.test(p)) return false;
   if (ROLE_INSTRUMENTAL_ENDING.test(p)) return true;
-  if (/^(?:мой|моим|моя|моей)\s+[\p{L}][\p{L}\-]{2,}/iu.test(p)) return true;
+  if (/^(?:мой|моим|моя|моей)\s+[\p{L}][\p{L}-]{2,}/iu.test(p)) return true;
   if (
     /^(?:психолог|врач|юрист|ассистент|маркетолог|копирайтер|бухгалтер|chatgpt|gpt|hr)$/iu.test(
       p

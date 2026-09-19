@@ -204,12 +204,12 @@ function build(overrides: Record<string, unknown> = {}) {
     state: state(),
     extraction: extraction(),
     ...overrides,
-  } as any);
+  } as unknown as Parameters<typeof buildMemoryV3LifecycleReconcileRequest>[0]);
 }
 
 function assertSafeReject(fn: () => unknown): void {
-  assert.throws(fn, (error: any) => {
-    assert.equal(error instanceof Error, true);
+  assert.throws(fn, (error: unknown) => {
+    assert.ok(error instanceof Error);
     assert.match(error.message, /^\[memory-v3:lifecycle-prompt\] /);
     assert.equal("cause" in error, false);
     assert.equal(JSON.stringify(error).includes(RAW_SENTINEL), false);
@@ -358,16 +358,16 @@ describe("Memory V3 lifecycle reconciler boundary", () => {
       enumerable: true,
       get() { getterCalls += 1; return RAW_SENTINEL; },
     });
-    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest(accessor as any));
+    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest(accessor as unknown as Parameters<typeof buildMemoryV3LifecycleReconcileRequest>[0]));
     assert.equal(getterCalls, 0);
-    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest({ ...accessor, [Symbol("secret")]: RAW_SENTINEL } as any));
+    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest({ ...accessor, [Symbol("secret")]: RAW_SENTINEL } as unknown as Parameters<typeof buildMemoryV3LifecycleReconcileRequest>[0]));
     const nonEnumerable = { ...accessor };
     Object.defineProperty(nonEnumerable, "secret", { value: RAW_SENTINEL, enumerable: false });
-    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest(nonEnumerable as any));
+    assertSafeReject(() => buildMemoryV3LifecycleReconcileRequest(nonEnumerable as unknown as Parameters<typeof buildMemoryV3LifecycleReconcileRequest>[0]));
     const sparse = messages();
-    delete (sparse as any)[1];
+    delete sparse[1];
     assertSafeReject(() => build({ messages: sparse }));
-    const cyclic = state() as any;
+    const cyclic = state() as ReturnType<typeof state> & { items: Array<Record<string, unknown>> };
     cyclic.items[0].cycle = cyclic;
     assertSafeReject(() => build({ state: cyclic }));
     const revoked = Proxy.revocable(state(), {});

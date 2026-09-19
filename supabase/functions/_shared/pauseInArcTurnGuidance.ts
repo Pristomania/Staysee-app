@@ -78,7 +78,7 @@ export function isPauseDeparturePhrase(message: string): boolean {
   if (
     hasCyrToken(norm, "пойду") ||
     hasCyrToken(norm, "отойду") ||
-    /(?:^|[\s,.!?«"'(\[—–-])отойти(?=[\s,.!?»"')\]—–-]|$)/iu.test(norm) ||
+    /(?:^|[\s,.!?«"'(—–-]|\[)отойти(?=[\s,.!?»"')\]—–-]|$)/iu.test(norm) ||
     hasCyrToken(norm, "вернусь") ||
     hasCyrToken(norm, "уйду") ||
     hasCyrToken(norm, "выйду")

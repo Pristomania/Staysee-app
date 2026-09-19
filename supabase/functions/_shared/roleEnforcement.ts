@@ -94,13 +94,6 @@ function recentUserTexts(history: ChatTurn[], current: string, n = 8): string[] 
   return [...fromHist, current.trim()].filter(Boolean);
 }
 
-function recentAssistantTexts(history: ChatTurn[], n = 3): string[] {
-  return history
-    .filter((m) => m.role === "assistant")
-    .map((m) => m.content.trim())
-    .slice(-n);
-}
-
 /** Thread escalation — sliding window, aligned with roleGuard (10 turns). */
 const THREAD_ESCALATION_WINDOW = 10;
 const THREAD_ESCALATION_USER_LOOKBACK = 4;
@@ -264,5 +257,7 @@ export function enforceRoleBoundedReply(
     relationalLifeTurn?: boolean;
   }
 ): string {
+  void _category;
+  void _opts;
   return content.trim();
 }

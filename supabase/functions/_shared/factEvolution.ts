@@ -533,7 +533,6 @@ export function collapseEvolvedLifeContextRows<
   T extends { content: string; memory_type: string }
 >(rows: T[]): T[] {
   const lifeRows = rows.filter((r) => r.memory_type === "life_context");
-  const other = rows.filter((r) => r.memory_type !== "life_context");
 
   const slots: FactSlot[] = [
     "relation.son",

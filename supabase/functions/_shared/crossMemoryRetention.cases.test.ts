@@ -2,11 +2,7 @@
  * Run: npx tsx supabase/functions/_shared/crossMemoryRetention.cases.test.ts
  */
 
-import {
-  filterCrossMemoryCandidates,
-  isPromotableToCrossMemory,
-  normalizePeopleFieldToLifeContext,
-} from "./crossMemoryPolicy.ts";
+import { normalizePeopleFieldToLifeContext } from "./crossMemoryPolicy.ts";
 import { consolidateRowsRuleBased } from "./consolidateRuleBased.ts";
 import { buildCrossMemoryCandidates } from "./crossMemoryBuild.ts";
 import {
