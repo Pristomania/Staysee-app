@@ -273,6 +273,9 @@ async function persistFailure(
 
 export async function runMemoryV3LifecycleShadow(
   options: MemoryV3LifecycleShadowOptions,
+  reportTransportDiagnostic?: (
+    code: NonNullable<ReturnType<typeof projectSafeMemoryV3LifecycleTransportDiagnostic>>,
+  ) => void,
 ): Promise<MemoryV3LifecycleShadowResult> {
   let projected: JsonRecord;
   try {
@@ -418,7 +421,14 @@ export async function runMemoryV3LifecycleShadow(
     if (typeof adapter !== "function") throw fail("reconciler_transport_failed");
     reconciler = lifecycleTransportResult(await adapter(bundle.request));
   } catch (error) {
-    projectSafeMemoryV3LifecycleTransportDiagnostic(error);
+    const transportDiagnostic = projectSafeMemoryV3LifecycleTransportDiagnostic(error);
+    if (transportDiagnostic !== null && typeof reportTransportDiagnostic === "function") {
+      try {
+        reportTransportDiagnostic(transportDiagnostic);
+      } catch {
+        // Safe diagnostics must never affect lifecycle persistence or the reply path.
+      }
+    }
     return await persistFailure(failStore, runId, userId, "reconciler_transport_failed");
   }
 

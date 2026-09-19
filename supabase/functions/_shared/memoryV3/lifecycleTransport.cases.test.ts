@@ -280,8 +280,8 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
   });
 
   for (const [status, diagnostic] of [
-    [400, "provider_http_4xx"],
-    [429, "provider_http_4xx"],
+    [400, "provider_http_400"],
+    [429, "provider_http_429"],
     [500, "provider_http_5xx"],
   ] as const) {
     it(`maps HTTP ${status} to ${diagnostic} without reading provider text`, async () => {
@@ -423,7 +423,7 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
       fetchImpl: recordingFetch(() => new Response("", { status: 400 })),
       apiKey: API_KEY,
     })(request()));
-    assert.equal(projectSafeMemoryV3LifecycleTransportDiagnostic(first), "provider_http_4xx");
+    assert.equal(projectSafeMemoryV3LifecycleTransportDiagnostic(first), "provider_http_400");
 
     const fetchImpl = recordingFetch(() => Promise.reject(first));
     const second = await captureError(() => createMemoryV3LifecycleOpenRouterAdapter({ fetchImpl, apiKey: API_KEY })(request()));
