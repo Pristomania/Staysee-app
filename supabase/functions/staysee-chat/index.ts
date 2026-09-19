@@ -23,6 +23,9 @@ import { createMemoryV3MessageLoader } from "../_shared/memoryV3/messages.ts";
 import { parseMemoryV3ShadowMode } from "../_shared/memoryV3/mode.ts";
 import { createMemoryV3ShadowStore } from "../_shared/memoryV3/shadowStore.ts";
 import { createMemoryV3LifecycleStore } from "../_shared/memoryV3/lifecycleStore.ts";
+import { resolveMemoryV3LifecycleReadEligibility } from "../_shared/memoryV3/lifecycleReadMode.ts";
+import { createMemoryV3LifecycleReadStore } from "../_shared/memoryV3/lifecycleReadStore.ts";
+import type { MemoryV3LifecycleReadContext } from "../_shared/memoryV3/lifecycleReadStore.ts";
 import { createMemoryV3OpenRouterAdapter } from "../_shared/memoryV3/transport.ts";
 import { createMemoryV3LifecycleOpenRouterAdapter } from "../_shared/memoryV3/lifecycleTransport.ts";
 import {
@@ -258,6 +261,33 @@ interface RequestBody {
   requestId?: string;
   /** Browser pause metadata — injected into system prompt only */
   timeGap?: TimeGapMeta;
+}
+
+type MemoryV3LifecycleReadDiagnostic =
+  | "load_failed"
+  | "invalid_shape"
+  | "too_large";
+
+function isMemoryV3LifecycleReadPromptTooLarge(error: unknown): boolean {
+  try {
+    if (typeof error !== "object" || error === null) return false;
+    const name = Object.getOwnPropertyDescriptor(error, "name");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    return Boolean(
+      name && "value" in name &&
+        name.value === "MemoryV3LifecycleReadPromptError" &&
+        message && "value" in message &&
+        message.value === "[memory-v3:lifecycle-read-prompt] prompt too large",
+    );
+  } catch {
+    return false;
+  }
+}
+
+function logMemoryV3LifecycleReadDiagnostic(
+  code: MemoryV3LifecycleReadDiagnostic,
+): void {
+  console.error(`[memory-v3-lifecycle-read] ${code}`);
 }
 
 // ── Model call with fallback ─────────────────────────────────────────────────
@@ -906,7 +936,44 @@ Deno.serve(async (req: Request) => {
         packetForSummary = trimmedPacket;
         smokeDiagSnapshot.has_packet = true;
 
-        systemPrompt = [BASE_PROMPT, buildContextPrompt(trimmedPacket)].join("\n\n");
+        let lifecycleCrossMemory: MemoryV3LifecycleReadContext | undefined;
+        const lifecycleReadEligibility = resolveMemoryV3LifecycleReadEligibility({
+          rawMode: Deno.env.get("STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE"),
+          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_LIFECYCLE_READ_USER_ID"),
+          userId,
+        });
+        if (lifecycleReadEligibility.eligible) {
+          try {
+            const loaded = await createMemoryV3LifecycleReadStore(
+              makeServiceClient(),
+            ).load(lifecycleReadEligibility.userId);
+            if (loaded !== null) lifecycleCrossMemory = loaded;
+          } catch {
+            logMemoryV3LifecycleReadDiagnostic("load_failed");
+          }
+        }
+
+        let contextPrompt: string;
+        let lifecycleCrossMemoryLoaded = false;
+        if (lifecycleCrossMemory !== undefined) {
+          try {
+            contextPrompt = buildContextPrompt(trimmedPacket, {
+              lifecycleCrossMemory,
+            });
+            lifecycleCrossMemoryLoaded = true;
+          } catch (error) {
+            logMemoryV3LifecycleReadDiagnostic(
+              isMemoryV3LifecycleReadPromptTooLarge(error)
+                ? "too_large"
+                : "invalid_shape",
+            );
+            contextPrompt = buildContextPrompt(trimmedPacket);
+          }
+        } else {
+          contextPrompt = buildContextPrompt(trimmedPacket);
+        }
+
+        systemPrompt = [BASE_PROMPT, contextPrompt].join("\n\n");
 
         if (hasRecallIntent(message)) {
           const recallGrounding = buildRecallGroundingPrompt({
@@ -930,7 +997,11 @@ Deno.serve(async (req: Request) => {
           systemPrompt = [systemPrompt, continuity].join("\n\n");
         }
 
-        memoryItemIds = trimmed.memoryItems.map((m) => m.id);
+        if (lifecycleCrossMemoryLoaded) {
+          memoryItemIds = [];
+        } else {
+          memoryItemIds = trimmed.memoryItems.map((m) => m.id);
+        }
         historyMessages = trimmed.messages;
       } catch (ctxErr) {
         smokeDiagSnapshot.ctx_error = String(ctxErr);

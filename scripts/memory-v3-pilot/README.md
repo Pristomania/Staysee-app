@@ -348,3 +348,27 @@ Offline verification:
 npx tsx --test supabase/functions/_shared/memoryV3/lifecycleWiring.cases.test.ts
 npx tsx --test supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts
 ```
+
+## Memory V3 lifecycle read canary (inactive)
+
+The lifecycle read path is **default off**. Its closed gate can authorize only
+one exact allowlisted account through server-side configuration. The son's and
+every other account remain unchanged and continue to use the existing memory
+path.
+
+For the eligible account, the read path performs one service-only RPC and
+replaces only legacy cross-conversation prompt memory. It preserves
+conversation summaries and the technical fallback. A valid authoritative empty
+result suppresses legacy resurrection instead of restoring old cross-conversation
+items. The bounded projection accepts only current `event/active`,
+`recurrence/active`, and `hypothesis/supported` items.
+
+The read path makes zero lifecycle provider calls, zero writes, and zero
+retries. Lifecycle data is server-only and is not exposed to the UI or HTTP
+response. Load, shape, or prompt-size failure falls back to the existing memory
+path with a closed diagnostic and without exposing stored content.
+
+Migration 036, Edge Function deployment, server-side configuration, and canary
+activation each require separate explicit authorization. This offline
+implementation does not claim that Migration 036 is applied, that the canary is
+active, or that real-user behavior and production quality have been validated.
