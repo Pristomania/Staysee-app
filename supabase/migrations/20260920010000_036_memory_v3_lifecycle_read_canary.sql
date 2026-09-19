@@ -8,7 +8,7 @@ AS $function$
   SELECT pg_catalog.jsonb_build_object(
     'schemaVersion', 'memory-v3-lifecycle-read-context-v1',
     'stateRevision', h.state_revision,
-    'items', pg_catalog.coalesce(projected.items, '[]'::jsonb)
+    'items', COALESCE(projected.items, '[]'::jsonb)
   )
   FROM public.memory_v3_lifecycle_shadow_heads AS h
   LEFT JOIN LATERAL (
