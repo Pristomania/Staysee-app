@@ -365,12 +365,15 @@ function inspectTransportResult(value: unknown): MemoryV3LifecycleTransportResul
 }
 
 function proposalExact(expected: MemoryV3LifecycleProposal, actual: MemoryV3LifecycleProposal): boolean {
-  return expected.length === actual.length && expected.every((row, index) => {
-    const other = actual[index];
-    return other !== undefined && row.type === other.type &&
-      row.candidateLocalItemKey === other.candidateLocalItemKey &&
-      row.targetMemoryKey === other.targetMemoryKey;
-  });
+  if (expected.length !== actual.length) return false;
+  const key = (row: MemoryV3LifecycleProposal[number]) => JSON.stringify([
+    row.type,
+    row.candidateLocalItemKey,
+    row.targetMemoryKey,
+  ]);
+  const expectedKeys = expected.map(key).sort();
+  const actualKeys = actual.map(key).sort();
+  return expectedKeys.every((value, index) => value === actualKeys[index]);
 }
 
 function buildTransitionContext(
