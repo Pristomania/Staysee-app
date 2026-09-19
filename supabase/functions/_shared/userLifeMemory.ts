@@ -18,11 +18,9 @@ import {
 import { estimateTokens } from "./cost.ts";
 import type { OpenRouterUsagePayload } from "./usageAnalytics.ts";
 import {
-  classifyCrossMemoryCategory,
   filterCrossMemoryCandidates,
   filterCrossMemoryRowsForInjection,
   isBlockedCrossMemoryContent,
-  isPromotableToCrossMemory,
   normalizeCrossMemoryContent,
   normalizePeopleFieldToLifeContext,
 } from "./crossMemoryPolicy.ts";

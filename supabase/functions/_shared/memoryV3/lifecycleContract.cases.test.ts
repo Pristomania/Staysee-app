@@ -30,7 +30,8 @@ import {
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const RAW_SENTINEL = "RAW_LIFECYCLE_SECRET_SENTINEL";
 
-type JsonRecord = Record<string, any>;
+type JsonRecord = Record<string, unknown>;
+type ProposalContext = Parameters<typeof validateMemoryV3LifecycleProposal>[1];
 
 const dataset = JSON.parse(readFileSync(
   new URL("../../../../scripts/memory-v3-pilot/memory-v3-synthetic-lifecycle.v1.json", import.meta.url),
@@ -48,7 +49,9 @@ function runtimeState(scenarioId: string, expectedState: JsonRecord, revision = 
     stateRevision: revision,
     nextMemoryOrdinal: expectedState.items.length + 1,
     items: expectedState.items.map((entry: JsonRecord, index: number) => {
-      const { goldMemoryId: _goldMemoryId, tier: _tier, ...item } = entry;
+      const item = structuredClone(entry);
+      delete item.goldMemoryId;
+      delete item.tier;
       return {
         memoryKey: memoryKey(index),
         ...structuredClone(item),
@@ -125,13 +128,13 @@ function assertContractError(
   diagnosticCode: string,
   sentinel = RAW_SENTINEL,
 ): Error {
-  let error: any;
+  let error: unknown;
   try {
     fn();
   } catch (caught) {
     error = caught;
   }
-  assert.equal(error instanceof Error, true, "expected lifecycle contract error");
+  assert.ok(error instanceof Error, "expected lifecycle contract error");
   assert.match(error.message, /^\[memory-v3:lifecycle-contract\] /);
   assert.equal("cause" in error, false);
   assert.equal(JSON.stringify(error).includes(sentinel), false);
@@ -470,7 +473,7 @@ describe("strict JSON-data-only boundaries", () => {
     let setterCalls = 0;
     Object.defineProperty(fixture.raw.operations[0], "candidateRef", {
       enumerable: true,
-      set(_value) { setterCalls += 1; },
+      set() { setterCalls += 1; },
     });
     assertContractError(
       () => validateMemoryV3LifecycleProposal(fixture.raw, contextOf(fixture)),
@@ -595,7 +598,7 @@ describe("strict JSON-data-only boundaries", () => {
     hostileContexts.push(revoked.proxy);
     for (const context of hostileContexts) {
       assertContractError(
-        () => validateMemoryV3LifecycleProposal(fixture.raw, context as any),
+        () => validateMemoryV3LifecycleProposal(fixture.raw, context as unknown as ProposalContext),
         "lifecycle_contract_invalid_proposal",
       );
     }

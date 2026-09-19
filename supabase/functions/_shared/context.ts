@@ -41,6 +41,8 @@ import { fetchCrossMemoryEnabled } from "./profilePrefs.ts";
 import { formatCrossMemoryForPrompt } from "./userLifeMemory.ts";
 import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
+import type { MemoryV3LifecycleReadContext } from "./memoryV3/lifecycleReadStore.ts";
+import { formatMemoryV3LifecycleReadPrompt } from "./memoryV3/lifecycleReadPrompt.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,70 @@ export interface ContextPacket {
   userEvidenceQuotes: UserEvidenceQuote[];
   /** Saved weekly dynamics snapshots for this conversation. */
   weeklyReflections: WeeklyReflection[];
+}
+
+export interface ContextPromptOptions {
+  lifecycleCrossMemory: MemoryV3LifecycleReadContext;
+}
+
+const CONTEXT_PROMPT_OPTION_FIELDS = ["lifecycleCrossMemory"] as const;
+const CONTEXT_PROMPT_OPTION_ERRORS = new WeakSet<object>();
+
+function contextPromptOptionsFail(): Error {
+  const error = new Error(
+    "[memory-v3:context-prompt-options] invalid options",
+  );
+  error.name = "MemoryV3ContextPromptOptionsError";
+  CONTEXT_PROMPT_OPTION_ERRORS.add(error);
+  return error;
+}
+
+function contextPromptOptionsSafe<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (
+      typeof error === "object" && error !== null &&
+      CONTEXT_PROMPT_OPTION_ERRORS.has(error)
+    ) {
+      throw error;
+    }
+    throw contextPromptOptionsFail();
+  }
+}
+
+function inspectContextPromptOptions(
+  value: ContextPromptOptions | undefined,
+): ContextPromptOptions | null {
+  if (value === undefined) return null;
+  if (
+    typeof value !== "object" || value === null ||
+    contextPromptOptionsSafe(() => Array.isArray(value))
+  ) {
+    throw contextPromptOptionsFail();
+  }
+
+  const prototype = contextPromptOptionsSafe(() => Object.getPrototypeOf(value));
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw contextPromptOptionsFail();
+  }
+
+  const keys = contextPromptOptionsSafe(() => Reflect.ownKeys(value));
+  if (
+    keys.length !== CONTEXT_PROMPT_OPTION_FIELDS.length ||
+    keys[0] !== CONTEXT_PROMPT_OPTION_FIELDS[0]
+  ) {
+    throw contextPromptOptionsFail();
+  }
+
+  const own = contextPromptOptionsSafe(() =>
+    Object.getOwnPropertyDescriptor(value, CONTEXT_PROMPT_OPTION_FIELDS[0])
+  );
+  if (!own || !own.enumerable || !("value" in own) || own.value === undefined) {
+    throw contextPromptOptionsFail();
+  }
+
+  return { lifecycleCrossMemory: own.value as MemoryV3LifecycleReadContext };
 }
 
 // ── Max limits ────────────────────────────────────────────────────────────────
@@ -264,7 +330,14 @@ export async function stampMemoryUsed(
 
 // ── Context prompt builder (rolling summary via memory.ts) ──────────────────
 
-export function buildContextPrompt(packet: ContextPacket): string {
+export function buildContextPrompt(
+  packet: ContextPacket,
+  options?: ContextPromptOptions,
+): string {
+  const inspectedOptions = inspectContextPromptOptions(options);
+  const lifecycleCrossMemoryBlock = inspectedOptions
+    ? formatMemoryV3LifecycleReadPrompt(inspectedOptions.lifecycleCrossMemory)
+    : "";
   const meta = packet.conversationMeta;
   const memoryBlock = injectSummaryIntoPrompt({
     conversationSummary: getConversationSummary(meta),
@@ -277,12 +350,15 @@ export function buildContextPrompt(packet: ContextPacket): string {
   const parts: string[] = [];
   if (memoryBlock) parts.push(memoryBlock);
 
-  const injectableCrossMemory =
-    packet.memoryItems.length > 0
+  const injectableCrossMemory = inspectedOptions
+    ? []
+    : packet.memoryItems.length > 0
       ? filterCrossMemoryRowsForInjection(packet.memoryItems)
       : [];
 
-  if (injectableCrossMemory.length > 0) {
+  if (inspectedOptions) {
+    if (lifecycleCrossMemoryBlock) parts.push(lifecycleCrossMemoryBlock);
+  } else if (injectableCrossMemory.length > 0) {
     const crossBlock = formatCrossMemoryForPrompt(injectableCrossMemory);
     if (crossBlock) parts.push(crossBlock);
   }

@@ -5,6 +5,8 @@
 
 import type { UserMemory } from '../types';
 
+export type AllowedCrossMemoryType = "life_context" | "communication" | "preference";
+
 export const ALLOWED_CROSS_MEMORY_TYPES = new Set<string>([
   "life_context",
   "communication",
@@ -167,6 +169,7 @@ export function isPromotableToCrossMemory(
   content: string,
   _opts?: PromoteCrossMemoryOptions
 ): boolean {
+  void _opts;
   if (!ALLOWED_CROSS_MEMORY_TYPES.has(memoryType)) return false;
 
   const normalized = normalizeCrossMemoryContent(content);

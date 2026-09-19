@@ -117,7 +117,7 @@ function mergeAtPartialWordBoundary(a: string, b: string): MergeContinuationResu
   if (!last || !first) return null;
 
   const { head, letters: partial, trailingPunct } = last;
-  const { letters: cont, punct: bPunct, rest: bRest } = first;
+  const { letters: cont, punct: bPunct } = first;
 
   if (cont.length < 1 || cont.length > 8) return null;
   if (!/^[а-яёa-z]/u.test(cont)) return null;
@@ -299,7 +299,7 @@ function paragraphExtendsPrevious(prev: string, next: string): boolean {
 }
 
 const LONG_REPLY_MIN_CHARS = 1200;
-const NUMBERED_BLOCK_RE = /(?<!\n\n)(\s)(?=\d+\.\s+(?:[А-ЯA-ZЁ«"(\[]|[A-Z"(\[]))/gu;
+const NUMBERED_BLOCK_RE = /(?<!\n\n)(\s)(?=\d+\.\s+(?:[А-ЯA-ZЁ«"(]|\[))/gu;
 const PRO_HEADER_RE = /(?<!\n\n)(\.\s+)(?=Про\s+[а-яёa-z])/giu;
 
 /**

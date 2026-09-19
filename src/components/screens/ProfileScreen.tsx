@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -14,6 +14,7 @@ import {
   MessageCircle,
   ScrollText,
   Shield,
+  type LucideIcon,
 } from 'lucide-react';
 import { ThemePicker } from '../ThemePicker';
 import { fetchUsageTier, tierLabel } from '../../lib/usageTier';
@@ -55,7 +56,7 @@ function CabinetRow({
   expanded,
   trailing = 'navigate',
 }: {
-  icon: ComponentType<{ className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
   title: string;
   theme: Theme;
   cardClass: string;

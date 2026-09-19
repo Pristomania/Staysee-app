@@ -116,7 +116,7 @@ console.log("\n=== fail-open logging ===\n");
 
 {
   const original = "Позвони 112 прямо сейчас.";
-  let reply = original;
+  const reply = original;
   const errorClient = {
     from() {
       return {

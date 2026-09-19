@@ -25,7 +25,9 @@ const MATERIAL_FIELDS = [
   "kind", "claim", "status", "sensitivity", "eventTimeStart", "eventTimeEnd", "alternative",
 ] as const;
 
-type JsonRecord = Record<string, any>;
+type JsonRecord = Record<string, unknown>;
+type EmptyStateInput = Parameters<typeof createEmptyMemoryV3LifecycleState>[0];
+type LifecycleStepInput = Parameters<typeof applyMemoryV3LifecycleStep>[0];
 
 const dataset = JSON.parse(readFileSync(
   new URL("../../../../scripts/memory-v3-pilot/memory-v3-synthetic-lifecycle.v1.json", import.meta.url),
@@ -75,7 +77,9 @@ function expectedProductionState(
   nextMemoryOrdinal: number,
 ): MemoryV3LifecycleState {
   const items = expectedState.items.map((entry: JsonRecord) => {
-    const { goldMemoryId, tier: _tier, ...item } = entry;
+    const { goldMemoryId, ...itemWithTier } = entry;
+    const item = structuredClone(itemWithTier);
+    delete item.tier;
     return {
       memoryKey: memoryByGold.get(goldMemoryId),
       ...structuredClone(item),
@@ -106,8 +110,8 @@ function normalizedTransitions(
 }
 
 function assertReducerError(fn: () => unknown | Promise<unknown>, diagnosticCode: string): Promise<Error> | Error {
-  const verify = (error: any): Error => {
-    assert.equal(error instanceof Error, true);
+  const verify = (error: unknown): Error => {
+    assert.ok(error instanceof Error);
     assert.match(error.message, /^\[memory-v3:lifecycle-reducer\] /);
     assert.equal("cause" in error, false);
     assert.equal(JSON.stringify(error).includes(RAW_SENTINEL), false);
@@ -623,7 +627,7 @@ describe("production lifecycle reducer public boundary", () => {
       get() { getterCalls += 1; return RAW_SENTINEL; },
     });
     await assertReducerError(
-      () => Promise.resolve(createEmptyMemoryV3LifecycleState(accessor as any)),
+      () => Promise.resolve(createEmptyMemoryV3LifecycleState(accessor as unknown as EmptyStateInput)),
       "lifecycle_reducer_invalid_input",
     );
     assert.equal(getterCalls, 0);
@@ -638,11 +642,11 @@ describe("production lifecycle reducer public boundary", () => {
       trustedForgetMemoryKeys: [],
     };
     cyclic.extraction = cyclic;
-    await assertReducerError(() => applyMemoryV3LifecycleStep(cyclic as any), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => applyMemoryV3LifecycleStep(cyclic as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
     const revoked = Proxy.revocable(cyclic, {});
     revoked.revoke();
-    await assertReducerError(() => applyMemoryV3LifecycleStep(revoked.proxy as any), "lifecycle_reducer_invalid_input");
-    await assertReducerError(() => applyMemoryV3LifecycleStep({ ...cyclic, [Symbol("secret")]: RAW_SENTINEL } as any), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => applyMemoryV3LifecycleStep(revoked.proxy as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => applyMemoryV3LifecycleStep({ ...cyclic, [Symbol("secret")]: RAW_SENTINEL } as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
     assert.equal(projectSafeMemoryV3LifecycleReducerDiagnostic({
       name: "MemoryV3LifecycleReducerError",
       diagnosticCode: "lifecycle_reducer_transition_invalid",
@@ -652,7 +656,7 @@ describe("production lifecycle reducer public boundary", () => {
   it("rejects setter-only, non-enumerable, inherited, sparse, stateful and stolen-brand inputs", async () => {
     const setterOnly: JsonRecord = {};
     Object.defineProperty(setterOnly, "userId", { enumerable: true, set() {} });
-    await assertReducerError(() => Promise.resolve(createEmptyMemoryV3LifecycleState(setterOnly as any)), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => Promise.resolve(createEmptyMemoryV3LifecycleState(setterOnly as unknown as EmptyStateInput)), "lifecycle_reducer_invalid_input");
 
     const nonEnumerable = { userId: USER_ID };
     Object.defineProperty(nonEnumerable, "userId", { value: USER_ID, enumerable: false });
@@ -667,12 +671,12 @@ describe("production lifecycle reducer public boundary", () => {
       proposal: new Array(1),
       trustedForgetMemoryKeys: [],
     };
-    await assertReducerError(() => applyMemoryV3LifecycleStep(valid as any), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => applyMemoryV3LifecycleStep(valid as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
 
     const stateful = new Proxy(valid, {
       getOwnPropertyDescriptor() { throw new Error(RAW_SENTINEL); },
     });
-    await assertReducerError(() => applyMemoryV3LifecycleStep(stateful as any), "lifecycle_reducer_invalid_input");
+    await assertReducerError(() => applyMemoryV3LifecycleStep(stateful as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
 
     let branded: Error;
     try {
@@ -684,7 +688,7 @@ describe("production lifecycle reducer public boundary", () => {
     const stolen = new Proxy(valid, {
       getPrototypeOf() { throw branded; },
     });
-    const wrapped = await assertReducerError(() => applyMemoryV3LifecycleStep(stolen as any), "lifecycle_reducer_invalid_input");
+    const wrapped = await assertReducerError(() => applyMemoryV3LifecycleStep(stolen as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
     assert.notEqual(wrapped, branded);
   });
 });

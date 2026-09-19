@@ -177,6 +177,7 @@ export function isPromotableToCrossMemory(
   content: string,
   _opts?: PromoteCrossMemoryOptions
 ): boolean {
+  void _opts;
   if (!ALLOWED_CROSS_MEMORY_TYPES.has(memoryType)) return false;
 
   const normalized = normalizeCrossMemoryContent(content);

@@ -21,12 +21,12 @@ export type DetectedCrisisContact = {
 
 /** MChS psychological line — allow spaces / optional parens / dashes. */
 const MCH_LINE_RE =
-  /\+?\s*7[\s\-]*(?:\(\s*495\s*\)|495)[\s\-]*989[\s\-]*50[\s\-]*50\b/;
+  /\+?\s*7[\s-]*(?:\(\s*495\s*\)|495)[\s-]*989[\s-]*50[\s-]*50\b/;
 
 const FINDAHELPLINE_RE = /\bfindahelpline\.com\b/i;
 
 /** Child/teen helpline 8-800-2000-122 with flexible separators. */
-const CHILD_HELPLINE_RE = /\b8[\s\-]*800[\s\-]*2000[\s\-]*122\b/;
+const CHILD_HELPLINE_RE = /\b8[\s-]*800[\s-]*2000[\s-]*122\b/;
 
 /**
  * Emergency 112 / ambulance 103 as standalone numbers (not embedded in longer digits).

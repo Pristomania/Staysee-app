@@ -43,6 +43,21 @@ type PublicDiagnostic =
 
 type FailureStage = 'transport' | 'parse' | 'contract' | 'reducer' | 'evaluation';
 type JsonRecord = Record<string, unknown>;
+type JsonValue = null | string | boolean | number | JsonValue[] | { [key: string]: JsonValue };
+type LifecycleReducerResult = Awaited<ReturnType<typeof applyMemoryV3LifecycleStep>>;
+type LifecycleReducerTransition = LifecycleReducerResult['transitions'][number];
+type ExpectedTransition = PreparedLifecycleModelCase['expectedTransitions'][number];
+type ExpectedForgetTransition = Extract<ExpectedTransition, { type: 'forget' }>;
+
+interface LifecycleStepEvaluation {
+  counts: { exactStateMatchedCount: number };
+  [key: string]: unknown;
+}
+
+interface LifecycleScenarioEvaluation {
+  counts: { exactStateMatchedCount: number };
+  [key: string]: unknown;
+}
 
 export interface LifecycleModelBenchmarkCaseResult {
   stepId: string;
@@ -67,7 +82,7 @@ export interface LifecycleModelBenchmarkResult {
   configuredBudget: Record<string, unknown>;
   cases: Array<LifecycleModelBenchmarkCaseResult | { stepId: string }>;
   failures: Array<{ stepId: string; stage: FailureStage; diagnosticCode: PublicDiagnostic }>;
-  aggregate: any | null;
+  aggregate: LifecycleScenarioEvaluation | null;
   criticalCases: Array<{ stepId: string; exact: boolean }>;
   qualityGate: 'PASS' | 'FAIL' | 'NOT_RUN';
   actualUsage: { promptTokens: number; completionTokens: number } | null;
@@ -201,7 +216,7 @@ function strictRecord(
   return output;
 }
 
-function cloneJsonData(value: unknown, message: string, seen = new WeakSet<object>()): any {
+function cloneJsonData(value: unknown, message: string, seen = new WeakSet<object>()): JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) fail('lifecycle_model_unknown_failure', message);
@@ -309,6 +324,11 @@ function isOwnError(error: unknown): error is Error {
     error !== null && OWN_ERRORS.has(error);
 }
 
+function ownDiagnosticCode(error: Error): unknown {
+  const descriptor = safeDescriptor(error, 'diagnosticCode');
+  return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+}
+
 export function createAtMostTwelveLifecycleAdapter(options: {
   adapter: MemoryV3LifecycleModelAdapter;
 }): MemoryV3LifecycleModelAdapter & { readonly callCount: number } {
@@ -337,7 +357,7 @@ function parseJsonDataOnly(rawContent: unknown): unknown {
     const parsed = JSON.parse(rawContent);
     return cloneJsonData(parsed, 'model response is invalid');
   } catch (error) {
-    if (isOwnError(error) && (error as any).diagnosticCode === 'lifecycle_model_parse_invalid') throw error;
+    if (isOwnError(error) && ownDiagnosticCode(error) === 'lifecycle_model_parse_invalid') throw error;
     fail('lifecycle_model_parse_invalid', 'model response is invalid');
   }
 }
@@ -379,29 +399,35 @@ function proposalExact(expected: MemoryV3LifecycleProposal, actual: MemoryV3Life
 function buildTransitionContext(
   testCase: PreparedLifecycleModelCase,
   proposal: MemoryV3LifecycleProposal,
-  applied: any,
-  replay: any,
+  applied: LifecycleReducerResult,
+  replay: LifecycleReducerResult,
 ) {
-  const actualForget = applied.transitions.filter((row: any) => row.type === 'forget');
-  const expectedForget = testCase.expectedTransitions.filter((row: any) => row.type === 'forget');
+  const actualForget = applied.transitions.filter(
+    (row: LifecycleReducerTransition) => row.type === 'forget',
+  );
+  const expectedForget = testCase.expectedTransitions.filter(
+    (row: ExpectedTransition): row is ExpectedForgetTransition => row.type === 'forget',
+  );
   const forbiddenMemoryKeys = applied.state.items
-    .filter((item: any) => testCase.mustNotRemember.includes(item.claim) ||
+    .filter((item) => testCase.mustNotRemember.includes(item.claim) ||
       (item.alternative !== null && testCase.mustNotRemember.includes(item.alternative)))
-    .map((item: any) => item.memoryKey);
+    .map((item) => item.memoryKey);
   const assistantOnlyMemoryKeys = applied.state.items
-    .filter((item: any) => item.evidence.length > 0 &&
-      item.evidence.every((row: any) => row.provenanceRole !== 'user'))
-    .map((item: any) => item.memoryKey);
+    .filter((item) => item.evidence.length > 0 &&
+      item.evidence.every((row) => row.provenanceRole !== 'user'))
+    .map((item) => item.memoryKey);
   return {
     expected: testCase.expectedTransitions.map((row) => ({ ...row })),
-    actual: applied.transitions.map((row: any) => ({ ...row })),
+    actual: applied.transitions.map((row) => ({ ...row })),
     replayEqual: JSON.stringify(applied) === JSON.stringify(replay),
     noOpExpected: proposal.every((row) => row.type === 'ignore') && expectedForget.length === 0,
-    deletedMemoryKeys: actualForget.map((row: any) => row.targetMemoryKey).filter(Boolean),
+    deletedMemoryKeys: actualForget
+      .map((row) => row.targetMemoryKey)
+      .filter((key): key is string => typeof key === 'string'),
     resurrectedMemoryKeys: [],
     forbiddenMemoryKeys,
     assistantOnlyMemoryKeys,
-    forgottenPairs: expectedForget.map((row: any, index: number) => ({
+    forgottenPairs: expectedForget.map((row, index) => ({
       goldMemoryId: row.targetGoldMemoryId,
       memoryKey: actualForget[index]?.targetMemoryKey ?? '',
     })),
@@ -567,7 +593,7 @@ export async function runLifecycleModelBenchmark(options: {
   const bounded = createAtMostTwelveLifecycleAdapter({ adapter: root.adapter as MemoryV3LifecycleModelAdapter });
   const caseResults: LifecycleModelBenchmarkCaseResult[] = [];
   const failures: LifecycleModelBenchmarkResult['failures'] = [];
-  const stepReports: any[] = [];
+  const stepReports: LifecycleStepEvaluation[] = [];
   const reviewCases: ReviewCaseDetail[] = [];
   const usages: NonNullable<MemoryV3LifecycleTransportResult['usage']>[] = [];
   let successfulTransportCount = 0;
@@ -624,8 +650,8 @@ export async function runLifecycleModelBenchmark(options: {
       continue;
     }
 
-    let applied: any;
-    let replay: any;
+    let applied: LifecycleReducerResult;
+    let replay: LifecycleReducerResult;
     try {
       applied = await applyMemoryV3LifecycleStep({
         state: testCase.state,
@@ -651,7 +677,7 @@ export async function runLifecycleModelBenchmark(options: {
       continue;
     }
 
-    let evaluation: any;
+    let evaluation: LifecycleStepEvaluation;
     try {
       evaluation = evaluateLifecycleStep({
         expectedState: testCase.expectedState,
@@ -661,7 +687,7 @@ export async function runLifecycleModelBenchmark(options: {
           items: applied.state.items,
         },
         transitions: buildTransitionContext(testCase, proposal, applied, replay),
-      });
+      }) as LifecycleStepEvaluation;
     } catch {
       const failed = publicFailure(testCase, 'evaluation', 'lifecycle_model_evaluation_invalid');
       caseResults.push(failed.case);
@@ -676,13 +702,13 @@ export async function runLifecycleModelBenchmark(options: {
     reviewCases.push({ testCase, predictedOperations: proposal, evaluation });
   }
 
-  let aggregate: any | null = null;
+  let aggregate: LifecycleScenarioEvaluation | null = null;
   if (stepReports.length > 0) {
     try {
       aggregate = evaluateLifecycleScenario({
         scenario: { scenarioId: profile.profileId },
         stepResults: stepReports,
-      });
+      }) as LifecycleScenarioEvaluation;
     } catch {
       fail('lifecycle_model_evaluation_invalid', 'aggregate evaluation failed');
     }

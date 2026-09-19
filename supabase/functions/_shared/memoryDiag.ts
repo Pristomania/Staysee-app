@@ -3,8 +3,6 @@
  */
 
 import type { StructuredMemory } from "./memory.ts";
-import type { FactEvolutionDecision } from "./factEvolution.ts";
-
 export const MEMORY_DIAG_TITLE_PREFIX = "__SMOKE__ fact evolution diagnostic";
 
 const SMOKE_TITLE_PREFIXES = [

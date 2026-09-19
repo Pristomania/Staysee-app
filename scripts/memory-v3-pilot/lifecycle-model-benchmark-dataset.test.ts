@@ -55,15 +55,35 @@ const EXPECTED_OPERATIONS = [
 
 const EXPECTED_PRIOR_ITEM_COUNTS = [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0] as const;
 
-function loadDataset(): any {
-  return JSON.parse(readFileSync(DATASET_URL, 'utf8'));
+interface SyntheticDatasetStep {
+  stepId: string;
+  expectedState: { items: Array<{ eventTimeStart: string | null }> };
+  [key: string]: unknown;
+}
+
+interface SyntheticDatasetScenario {
+  scenarioId: string;
+  steps: SyntheticDatasetStep[];
+  [key: string]: unknown;
+}
+
+interface SyntheticDataset {
+  datasetId: string;
+  version: string;
+  language: string;
+  scenarios: SyntheticDatasetScenario[];
+  [key: string]: unknown;
+}
+
+function loadDataset(): SyntheticDataset {
+  return JSON.parse(readFileSync(DATASET_URL, 'utf8')) as SyntheticDataset;
 }
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
-function manifestFingerprint(dataset: any): string {
+function manifestFingerprint(dataset: SyntheticDataset): string {
   return createHash('sha256')
     .update(canonicalStringify({
       datasetId: dataset.datasetId,
@@ -251,7 +271,7 @@ describe('synthetic lifecycle model gold replay', () => {
     assert.notEqual(prepared[0].extraction, dataset.scenarios[0].steps[1].validatedExtraction);
     assert.notEqual(prepared[0].state, prepared[1].state);
     assert.throws(() => {
-      (prepared[0].messages as any[]).push({});
+      prepared[0].messages.push({} as never);
     }, TypeError);
     assert.equal(canonicalStringify(dataset), before);
   });
@@ -265,7 +285,7 @@ describe('synthetic lifecycle model dataset fail-fast boundary', () => {
 
     const drifted = loadDataset();
     drifted.scenarios
-      .find((scenario: any) => scenario.scenarioId === 'event-date-correction')
+      .find((scenario) => scenario.scenarioId === 'event-date-correction')!
       .steps[0].expectedState.items[0].eventTimeStart = '2026-01-02';
     assert.notEqual(manifestFingerprint(drifted), DATASET_MANIFEST_SHA256);
     await captureDatasetError(drifted);
@@ -274,10 +294,10 @@ describe('synthetic lifecycle model dataset fail-fast boundary', () => {
   it('rejects a missing or duplicate selected step', async () => {
     const missing = loadDataset();
     const scenario = missing.scenarios.find(
-      (entry: any) => entry.scenarioId === 'layered-coexistence',
+      (entry) => entry.scenarioId === 'layered-coexistence',
     );
     scenario.steps = scenario.steps.filter(
-      (step: any) => step.stepId !== 'layered-coexistence-s01',
+      (step) => step.stepId !== 'layered-coexistence-s01',
     );
     await captureDatasetError(missing);
 

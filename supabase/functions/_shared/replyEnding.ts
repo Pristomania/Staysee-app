@@ -129,7 +129,7 @@ function stripSelfAnswerTail(text: string): string {
 }
 
 export function cleanReplyEnding(text: string): string {
-  let body = stripSelfAnswerTail(text.replace(LEGACY_GRACEFUL_TAIL_RE, "")).trim();
+  const body = stripSelfAnswerTail(text.replace(LEGACY_GRACEFUL_TAIL_RE, "")).trim();
   if (!body) return body;
   if (endsAtSentenceBoundary(body)) return body;
 
@@ -150,5 +150,6 @@ export function finalizeLengthLimitedContent(
   content: string,
   _mergedFromRetry: boolean
 ): string {
+  void _mergedFromRetry;
   return cleanReplyEnding(content);
 }
