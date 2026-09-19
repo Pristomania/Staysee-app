@@ -495,7 +495,7 @@ export function createMemoryV3LifecycleOpenRouterAdapter(
             data_collection: "deny",
             zdr: true,
           },
-          max_completion_tokens: MAX_COMPLETION_TOKENS,
+          max_tokens: MAX_COMPLETION_TOKENS,
         };
 
         let responseValue: Response;
