@@ -329,6 +329,24 @@ describe('lifecycle model benchmark execution and quality', () => {
     assert.equal(result.actualCostUsd, null);
   });
 
+  it('treats reordered independent operations as the same exact proposal', async () => {
+    const dataset = loadDataset();
+    const reordered = await exactAdapter(dataset, {
+      mutate(operations) {
+        return operations.length === 3 ? operations.reverse() : operations;
+      },
+    });
+    const result = await runLifecycleModelBenchmark(benchmarkOptions({
+      dataset,
+      execute: true,
+      adapter: reordered.adapter,
+    }));
+    const layered = result.cases.find((entry: any) => entry.stepId === 'layered-coexistence-s01');
+    assert.equal(layered?.stateExact, true);
+    assert.equal(layered?.operationExact, true);
+    assert.equal(result.qualityGate, 'PASS');
+  });
+
   it('continues after case six fails, never retries, and exposes only a safe failure', async () => {
     const dataset = loadDataset();
     const prepared = await prepareLifecycleModelBenchmarkCases({
