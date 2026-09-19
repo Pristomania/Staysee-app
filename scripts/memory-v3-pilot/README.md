@@ -284,13 +284,27 @@ The paid `hypothesis-admission-r3` run completed 4/4 sequential requests without
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.
 
-## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)
+## Memory V3 synthetic lifecycle model benchmark (offline by default)
 
-This benchmark is a scripted reference reconciler. It does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+The model benchmark uses synthetic dialogue only and makes no production, staging, or Supabase writes. It runs 12 independent gold-seeded cases through the production prompt, contract, and reducer boundary without changing production memory.
+
+Dry-run makes 0 provider calls and does not read `.env`:
+
+```bash
+npx tsx scripts/memory-v3-pilot/lifecycle-model-benchmark-run.ts --profile lifecycle-reconciler-critical-twelve-v1 --model google/gemini-3.7-flash --max-budget-usd 0.36
+```
+
+A future authorized execution has a maximum of 12 sequential calls with `maxActive = 1`, with no retry, application fallback, or repair. Its configured ceiling is `$0.348912` under a hard maximum of `$0.36`; this is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` may remain `null` when the provider does not project trusted telemetry.
+
+This documentation does not authorize a paid run. The execute flag remains forbidden and is intentionally not shown here; a separate explicit authorization from Nastya is required. The profile prices are a historical planning snapshot, not fresh-price proof. Immediately before any paid execution, an allowlisted current price snapshot must be reviewed separately; if its twelve-call ceiling exceeds `$0.36`, execution must stop before HTTP. Passing this benchmark is not primary-memory activation or production-readiness proof.
+
+The underlying deterministic fixture uses a scripted reference reconciler and makes zero external calls. That fixture does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+
+The separate 12-case model benchmark measures reconciler-model behavior when explicitly executed. Its default dry-run makes zero external calls; no paid lifecycle model benchmark has been run.
 
 It exercises all seven lifecycle operations: `create`, `confirm`, `revise`, `mark_stale`, `reject`, `ignore`, and `forget`. This includes explicit forgetting. There is no time-based deletion in the lifecycle benchmark; memory changes only through the scripted operations.
 
-The benchmark enforces hard gates for deterministic reconciliation, invariants, privacy, sequential execution, and aggregate quality. It performs zero external calls: no HTTP, provider, OpenRouter, Supabase, production, or staging calls. It uses no paid model, and no paid lifecycle benchmark has been run. Production mode remains off. Passing this offline benchmark does not authorize production integration.
+The combined offline gate enforces hard gates for deterministic reconciliation, invariants, privacy, request sequencing, and aggregate quality without HTTP, provider, OpenRouter, Supabase, production, or staging calls. Production mode remains off. Passing this offline gate does not authorize production integration.
 
 The existing 30-day shadow purge applies only to temporary shadow-run payloads. The 30-day shadow purge does not delete future primary memory.
 
