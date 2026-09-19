@@ -79,7 +79,6 @@ const LIFECYCLE_RESPONSE_SCHEMA = deepFreeze({
   properties: {
     operations: {
       type: "array",
-      maxItems: MAX_ITEMS,
       items: {
         type: "object",
         additionalProperties: false,

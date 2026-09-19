@@ -21,7 +21,6 @@ const EXPECTED_SCHEMA = {
   properties: {
     operations: {
       type: "array",
-      maxItems: 100,
       items: {
         type: "object",
         additionalProperties: false,
@@ -155,6 +154,10 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
         schema: EXPECTED_SCHEMA,
       },
     });
+    assert.equal(
+      Object.hasOwn(body.response_format.json_schema.schema.properties.operations, "maxItems"),
+      false,
+    );
     assert.deepEqual(input, snapshot);
   });
 
