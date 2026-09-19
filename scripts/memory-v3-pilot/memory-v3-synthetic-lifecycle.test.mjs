@@ -439,7 +439,7 @@ describe('synthetic lifecycle canonical manifest lock', () => {
 
 describe('synthetic lifecycle documentation contract', () => {
   test('documents the offline benchmark without implying production or paid execution', () => {
-    const heading = '## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)';
+    const heading = '## Memory V3 synthetic lifecycle model benchmark (offline by default)';
     const start = README.indexOf(heading);
     assert.notEqual(start, -1, 'README is missing the synthetic lifecycle section');
     const rest = README.slice(start + heading.length);
@@ -455,16 +455,32 @@ describe('synthetic lifecycle documentation contract', () => {
       /explicit forgetting/i,
       /no time-based deletion/i,
       /hard gates/i,
-      /zero external calls/i,
-      /no paid model/i,
+      /deterministic fixture.*scripted reference reconciler.*zero external calls/is,
+      /12-case model benchmark.*measures.*model behavior/is,
+      /dry-run.*zero external calls/is,
       /production mode remains off/i,
       /30-day shadow purge.*does not delete.*primary memory/is,
-      /scripted reference reconciler/i,
-      /does not measure model quality/i,
       /passing.*does not authorize production integration/is,
+      /synthetic dialogue only/i,
+      /no production, staging, or Supabase writes/i,
+      /12 independent gold-seeded cases/i,
+      /production prompt, contract, and reducer boundary/i,
+      /dry-run.*0 provider calls.*does not read `.env`/is,
+      /maximum of 12 sequential calls.*`maxActive = 1`/is,
+      /no retry, application fallback, or repair/i,
+      /configured ceiling.*\$0\.348912.*hard maximum.*\$0\.36/is,
+      /not actual billing/i,
+      /`actualUsage` and `actualCostUsd` may remain `null`/i,
+      /documentation does not authorize a paid run/i,
+      /separate explicit authorization from Nastya/i,
+      /not primary-memory activation or production-readiness proof/i,
+      /npx tsx scripts\/memory-v3-pilot\/lifecycle-model-benchmark-run\.ts --profile lifecycle-reconciler-critical-twelve-v1 --model google\/gemini-3\.7-flash --max-budget-usd 0\.36/,
       /node --test scripts\/memory-v3-pilot\/lifecycle-contract\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-reducer\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-evaluator\.test\.mjs scripts\/memory-v3-pilot\/memory-v3-synthetic-lifecycle\.test\.mjs scripts\/memory-v3-pilot\/lifecycle-runner\.test\.mjs/,
     ]) {
       assert.match(section, pattern);
     }
+    assert.doesNotMatch(section, /This benchmark is a scripted reference reconciler/i);
+    assert.doesNotMatch(section, /It performs zero external calls:[\s\S]*no HTTP, provider, OpenRouter/i);
+    assert.doesNotMatch(section, /It uses no paid model/i);
   });
 });
