@@ -153,12 +153,16 @@ const OWN_ERRORS = new WeakSet<object>();
 const ERROR_DETAILS = new WeakMap<object, { stage: LifecycleHistoryBackfillStage | null; code: string }>();
 const AUTHENTIC_RESULTS = new WeakSet<object>();
 
-function fail(stage: LifecycleHistoryBackfillStage | null, code: string): never {
+function createEngineError(stage: LifecycleHistoryBackfillStage | null, code: string): Error {
   const error = new Error('[memory-v3:lifecycle-history-backfill-engine] operation failed');
   error.name = 'MemoryV3LifecycleHistoryBackfillEngineError';
   OWN_ERRORS.add(error);
   ERROR_DETAILS.set(error, { stage, code });
-  throw error;
+  return error;
+}
+
+function fail(stage: LifecycleHistoryBackfillStage | null, code: string): never {
+  throw createEngineError(stage, code);
 }
 
 function details(error: unknown): { stage: LifecycleHistoryBackfillStage | null; code: string } | null {
@@ -628,19 +632,28 @@ function inspectAdapter(value: unknown): void {
 interface LifecycleHistoryProviderCallGate {
   call<T>(stage: 'extractor_transport' | 'reconciler_transport', inner: () => Promise<T>): Promise<T>;
   getAttemptCount(): number;
+  isOwnCapError(error: unknown): boolean;
 }
 
 function createLifecycleHistoryProviderCallGate(maxRequests: number): LifecycleHistoryProviderCallGate {
   if (!Number.isSafeInteger(maxRequests) || maxRequests <= 0) fail(null, 'provider_call_cap_invalid');
   let attemptCount = 0;
+  const capErrors = new WeakSet<object>();
   return {
     async call<T>(stage: 'extractor_transport' | 'reconciler_transport', inner: () => Promise<T>): Promise<T> {
-      if (attemptCount >= maxRequests) fail(stage, 'provider_call_cap_exceeded');
+      if (attemptCount >= maxRequests) {
+        const error = createEngineError(stage, 'provider_call_cap_exceeded');
+        capErrors.add(error);
+        throw error;
+      }
       attemptCount += 1;
       return await inner();
     },
     getAttemptCount(): number {
       return attemptCount;
+    },
+    isOwnCapError(error: unknown): boolean {
+      return typeof error === 'object' && error !== null && capErrors.has(error);
     },
   };
 }
@@ -787,7 +800,7 @@ export async function runLifecycleHistoryBackfill(input: {
     try {
       raw = await providerCallGate.call('extractor_transport', () => extractorAdapter(request));
     } catch (error) {
-      if (details(error)?.code === 'provider_call_cap_exceeded') throw error;
+      if (providerCallGate.isOwnCapError(error)) throw error;
       fail('extractor_transport', 'extractor_transport_failed');
     }
     const inspected = inspectExtractorTransport(raw);
@@ -800,7 +813,7 @@ export async function runLifecycleHistoryBackfill(input: {
     try {
       raw = await providerCallGate.call('reconciler_transport', () => reconcilerAdapter(request));
     } catch (error) {
-      if (details(error)?.code === 'provider_call_cap_exceeded') throw error;
+      if (providerCallGate.isOwnCapError(error)) throw error;
       fail('reconciler_transport', 'reconciler_transport_failed');
     }
     const inspected = inspectReconcilerTransport(raw);

@@ -631,6 +631,51 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     assert.equal(gate.getAttemptCount(), 2, 'blocked call must not increment attempt count');
   });
 
+  it('does not trust a provider cap error minted by a foreign gate instance', async () => {
+    const foreignGate = __testOnlyCreateLifecycleHistoryProviderCallGate(1);
+    await foreignGate.callExtractor(async () => 'allowed');
+    let foreignCapError: unknown;
+    try {
+      await foreignGate.callReconciler(async () => 'must-not-run');
+    } catch (error) {
+      foreignCapError = error;
+    }
+    assert.ok(foreignCapError instanceof Error);
+    foreignCapError.message = 'FOREIGN_GATE_CAP_ERROR_SENTINEL';
+
+    const extractorFailure = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async () => {
+        throw foreignCapError;
+      },
+      reconcilerAdapter: async () => {
+        throw new Error('must not run');
+      },
+    }));
+    assert.deepEqual(extractorFailure.failures, [{
+      chunkId: extractorFailure.manifest.chunks[0].chunkId,
+      stage: 'extractor_transport',
+      diagnosticCode: 'extractor_transport_failed',
+    }]);
+    assert.doesNotMatch(JSON.stringify(extractorFailure), /FOREIGN_GATE_CAP_ERROR_SENTINEL|provider_call_cap_exceeded/u);
+
+    const reconcilerFailure = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: null }),
+      reconcilerAdapter: async () => {
+        throw foreignCapError;
+      },
+    }));
+    assert.deepEqual(reconcilerFailure.failures, [{
+      chunkId: reconcilerFailure.manifest.chunks[0].chunkId,
+      stage: 'reconciler_transport',
+      diagnosticCode: 'reconciler_transport_failed',
+    }]);
+    assert.doesNotMatch(JSON.stringify(reconcilerFailure), /FOREIGN_GATE_CAP_ERROR_SENTINEL|provider_call_cap_exceeded/u);
+  });
+
   it('returns null aggregate telemetry when any successful transport omits usage', async () => {
     let extractorCalls = 0;
     const result = await runLifecycleHistoryBackfill(options({
