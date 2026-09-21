@@ -488,7 +488,7 @@ export function prepareLifecycleHistoryBackfill(input: {
 
 ```ts
 const dialogue = validateMemoryV3Dialogue({
-  caseId: `memory-v3-history:${conversationOrdinal}:${chunkOrdinal}`,
+  caseId: `memory-v3-shadow:${source.userId}:${conversation.conversationId}`,
   messages: candidateMessages,
 });
 const request = buildMemoryV3ExtractorRequest(dialogue);
@@ -500,6 +500,8 @@ const extractorRequestSha256 = createHash('sha256')
 ```
 
 Do not include `conversationId`, source message IDs, text, or `userId` in `projectManifest`. Compute `chunkId` as SHA-256 over the UTF-8 bytes of `canonicalStringify([profileId, sourceDigest, conversationOrdinal, chunkOrdinal])`; never hash ambiguous string concatenation. The resulting digest is safe to expose.
+
+The extractor `caseId` deliberately reuses the frozen production dialogue format. Chunk identity remains the manifest `chunkId` plus the exact request digest; do not invent a `memory-v3-history:*` case ID because the frozen production contract rejects it.
 
 - [ ] **Step 4: Run GREEN and contract regressions**
 
@@ -809,7 +811,7 @@ Use the current production functions in this order for every chunk:
 let state = createEmptyMemoryV3LifecycleState({ userId: prepared.userId });
 for (const chunk of prepared.chunks) {
   const dialogue = validateMemoryV3Dialogue({
-    caseId: `memory-v3-history:${chunk.conversationOrdinal}:${chunk.chunkOrdinal}`,
+    caseId: `memory-v3-shadow:${prepared.userId}:${chunk.conversationId}`,
     messages: chunk.messages,
   });
   const extractorRequest = buildMemoryV3ExtractorRequest(dialogue);
