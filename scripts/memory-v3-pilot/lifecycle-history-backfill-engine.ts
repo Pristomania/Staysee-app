@@ -126,8 +126,29 @@ const TRANSPORT_FIELDS = ['content', 'usage'] as const;
 const RECONCILER_TRANSPORT_FIELDS = ['rawContent', 'usage'] as const;
 const USAGE_FIELDS = ['promptTokens', 'completionTokens', 'costUsd'] as const;
 const PREPARED_FIELDS = ['userId', 'manifest', 'chunks'] as const;
+const MANIFEST_FIELDS = [
+  'schemaVersion', 'profileId', 'sourceCutoff', 'sourceSnapshotDigest',
+  'conversationCount', 'messageCount', 'userMessageCount', 'chunkCount',
+  'maxProviderCalls', 'conversations', 'chunks',
+] as const;
+const MANIFEST_CONVERSATION_FIELDS = [
+  'conversationOrdinal', 'messageCount', 'userMessageCount',
+  'firstCreatedAt', 'lastCreatedAt', 'chunkCount',
+] as const;
+const MANIFEST_CHUNK_FIELDS = [
+  'chunkId', 'conversationOrdinal', 'chunkOrdinal', 'messageCount',
+  'userMessageCount', 'firstCreatedAt', 'lastCreatedAt',
+  'extractorRequestBytes', 'extractorRequestSha256', 'sourceDigest',
+] as const;
+const PREPARED_CHUNK_FIELDS = [
+  'chunkId', 'conversationOrdinal', 'chunkOrdinal', 'conversationId', 'messages',
+  'firstCreatedAt', 'lastCreatedAt', 'firstMessageId', 'lastMessageId',
+  'messageCount', 'userMessageCount', 'extractorRequestBytes',
+  'extractorRequestSha256', 'sourceDigest',
+] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
 const OWN_ERRORS = new WeakSet<object>();
 const ERROR_DETAILS = new WeakMap<object, { stage: LifecycleHistoryBackfillStage | null; code: string }>();
 const AUTHENTIC_RESULTS = new WeakSet<object>();
@@ -273,6 +294,37 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
+function dateTimeNanoseconds(value: unknown): bigint | null {
+  if (typeof value !== 'string' || value.trim() !== value) return null;
+  const match = DATE_TIME.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? '0');
+  if (hour > 23 || minute > 59 || second > 59 || month < 1 || month > 12) return null;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (day < 1 || day > days[month - 1]) return null;
+  if (match[8] !== 'Z') {
+    const offsetHour = Number(match[10]);
+    const offsetMinute = Number(match[11]);
+    if (offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) return null;
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) return null;
+  return BigInt(milliseconds) * 1_000_000n + BigInt((match[7] ?? '').padEnd(9, '0').slice(3) || '0');
+}
+
+function compareDateTime(left: string, right: string): number {
+  const leftNs = dateTimeNanoseconds(left);
+  const rightNs = dateTimeNanoseconds(right);
+  if (leftNs === null || rightNs === null) fail(null, 'prepared_invalid');
+  return leftNs < rightNs ? -1 : leftNs > rightNs ? 1 : 0;
+}
+
 function assertUtf8BytesAtMost(
   request: unknown,
   limit: number,
@@ -308,29 +360,74 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
   const cloned = cloneJsonData(value, null, 'prepared_invalid') as JsonRecord;
   const root = strictRecord(cloned, PREPARED_FIELDS, PREPARED_FIELDS, null, 'prepared_invalid');
   if (typeof root.userId !== 'string' || !UUID.test(root.userId)) fail(null, 'prepared_invalid');
-  const prepared = root as unknown as PreparedLifecycleHistoryBackfill;
-  if (!Array.isArray(prepared.chunks) || prepared.chunks.length === 0) fail(null, 'prepared_invalid');
-  const manifest = prepared.manifest;
-  if (!manifest || manifest.schemaVersion !== 'memory-v3-lifecycle-history-manifest-v1' ||
-    manifest.profileId !== profile.profileId || manifest.chunkCount !== prepared.chunks.length ||
-    manifest.maxProviderCalls !== prepared.chunks.length * profile.maxCallsPerChunk ||
-    manifest.chunks.length !== prepared.chunks.length || !SHA256.test(manifest.sourceSnapshotDigest)) {
+  if (!Array.isArray(root.chunks) || root.chunks.length === 0) fail(null, 'prepared_invalid');
+  const manifestRecord = strictRecord(
+    root.manifest,
+    MANIFEST_FIELDS,
+    MANIFEST_FIELDS,
+    null,
+    'prepared_invalid',
+  );
+  if (manifestRecord.schemaVersion !== 'memory-v3-lifecycle-history-manifest-v1' ||
+    manifestRecord.profileId !== profile.profileId ||
+    typeof manifestRecord.sourceCutoff !== 'string' ||
+    dateTimeNanoseconds(manifestRecord.sourceCutoff) === null ||
+    typeof manifestRecord.sourceSnapshotDigest !== 'string' ||
+    !SHA256.test(manifestRecord.sourceSnapshotDigest) ||
+    !Array.isArray(manifestRecord.conversations) ||
+    !Array.isArray(manifestRecord.chunks)) {
     fail(null, 'prepared_invalid');
   }
+  const chunks = root.chunks.map((value) =>
+    strictRecord(value, PREPARED_CHUNK_FIELDS, PREPARED_CHUNK_FIELDS, null, 'prepared_invalid')
+  ) as unknown as PreparedLifecycleHistoryBackfill['chunks'];
+  if (manifestRecord.chunkCount !== chunks.length ||
+    manifestRecord.maxProviderCalls !== chunks.length * profile.maxCallsPerChunk ||
+    manifestRecord.chunks.length !== chunks.length) fail(null, 'prepared_invalid');
   let messageCount = 0;
   let userMessageCount = 0;
   const chunkIds = new Set<string>();
-  for (let index = 0; index < prepared.chunks.length; index += 1) {
-    const chunk = prepared.chunks[index];
-    const projected = manifest.chunks[index];
+  const messageIds = new Set<string>();
+  const sourceCutoff = manifestRecord.sourceCutoff as string;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    const projected = strictRecord(
+      manifestRecord.chunks[index],
+      MANIFEST_CHUNK_FIELDS,
+      MANIFEST_CHUNK_FIELDS,
+      null,
+      'prepared_invalid',
+    );
+    const dialogue = validateMemoryV3Dialogue({
+      caseId: `memory-v3-shadow:${root.userId}:${chunk.conversationId}`,
+      messages: chunk.messages,
+    });
+    const first = dialogue.messages[0];
+    const last = dialogue.messages[dialogue.messages.length - 1];
+    for (let messageIndex = 0; messageIndex < dialogue.messages.length; messageIndex += 1) {
+      const message = dialogue.messages[messageIndex];
+      if (messageIds.has(message.id) || compareDateTime(message.createdAt, sourceCutoff) > 0) {
+        fail(null, 'prepared_invalid');
+      }
+      messageIds.add(message.id);
+      if (messageIndex > 0) {
+        const previous = dialogue.messages[messageIndex - 1];
+        const byTime = compareDateTime(previous.createdAt, message.createdAt);
+        if (byTime > 0 || (byTime === 0 && previous.id >= message.id)) fail(null, 'prepared_invalid');
+      }
+    }
     if (!chunk || !projected || chunkIds.has(chunk.chunkId) ||
-      chunk.messageCount !== chunk.messages.length || chunk.messageCount <= 0 ||
+      !Number.isSafeInteger(chunk.conversationOrdinal) || chunk.conversationOrdinal < 0 ||
+      !Number.isSafeInteger(chunk.chunkOrdinal) || chunk.chunkOrdinal < 0 ||
+      chunk.messageCount !== dialogue.messages.length || chunk.messageCount <= 0 ||
       chunk.messageCount > profile.maxMessagesPerChunk ||
-      chunk.userMessageCount !== chunk.messages.filter((row) => row.role === 'user').length ||
+      chunk.userMessageCount !== dialogue.messages.filter((row) => row.role === 'user').length ||
       chunk.userMessageCount <= 0 ||
+      chunk.firstCreatedAt !== first.createdAt || chunk.lastCreatedAt !== last.createdAt ||
+      chunk.firstMessageId !== first.id || chunk.lastMessageId !== last.id ||
       chunk.sourceDigest !== canonicalLifecycleHistoryDigest({
         conversationId: chunk.conversationId,
-        messages: chunk.messages,
+        messages: dialogue.messages,
       }) ||
       chunk.chunkId !== canonicalLifecycleHistoryDigest([
         profile.profileId, chunk.sourceDigest, chunk.conversationOrdinal, chunk.chunkOrdinal,
@@ -354,9 +451,99 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
     messageCount += chunk.messageCount;
     userMessageCount += chunk.userMessageCount;
   }
-  if (manifest.messageCount !== messageCount || manifest.userMessageCount !== userMessageCount ||
-    manifest.conversationCount !== manifest.conversations.length) fail(null, 'prepared_invalid');
-  return prepared;
+  const sorted = [...chunks].sort((left, right) => {
+    const byTime = compareDateTime(left.lastCreatedAt, right.lastCreatedAt);
+    if (byTime !== 0) return byTime;
+    const byId = left.lastMessageId < right.lastMessageId ? -1 : left.lastMessageId > right.lastMessageId ? 1 : 0;
+    if (byId !== 0) return byId;
+    return left.conversationOrdinal !== right.conversationOrdinal
+      ? left.conversationOrdinal - right.conversationOrdinal
+      : left.chunkOrdinal - right.chunkOrdinal;
+  });
+  if (sorted.some((chunk, index) => chunk.chunkId !== chunks[index].chunkId)) fail(null, 'prepared_invalid');
+  const ordinals = [...new Set(chunks.map((chunk) => chunk.conversationOrdinal))].sort((a, b) => a - b);
+  if (ordinals.some((ordinal, index) => ordinal !== index) ||
+    manifestRecord.conversationCount !== ordinals.length ||
+    manifestRecord.conversations.length !== ordinals.length ||
+    manifestRecord.messageCount !== messageCount ||
+    manifestRecord.userMessageCount !== userMessageCount) fail(null, 'prepared_invalid');
+  const conversations = ordinals.map((ordinal) => {
+    const grouped = chunks.filter((chunk) => chunk.conversationOrdinal === ordinal);
+    const conversationIds = new Set(grouped.map((chunk) => chunk.conversationId));
+    if (conversationIds.size !== 1 || grouped.some((chunk, index) => chunk.chunkOrdinal !== index)) {
+      fail(null, 'prepared_invalid');
+    }
+    for (let index = 1; index < grouped.length; index += 1) {
+      const previous = grouped[index - 1];
+      const current = grouped[index];
+      const byTime = compareDateTime(previous.lastCreatedAt, current.firstCreatedAt);
+      if (byTime > 0 || (byTime === 0 && previous.lastMessageId >= current.firstMessageId)) {
+        fail(null, 'prepared_invalid');
+      }
+    }
+    const expected = {
+      conversationOrdinal: ordinal,
+      messageCount: grouped.reduce((sum, chunk) => sum + chunk.messageCount, 0),
+      userMessageCount: grouped.reduce((sum, chunk) => sum + chunk.userMessageCount, 0),
+      firstCreatedAt: grouped[0].firstCreatedAt,
+      lastCreatedAt: grouped[grouped.length - 1].lastCreatedAt,
+      chunkCount: grouped.length,
+    };
+    const supplied = strictRecord(
+      manifestRecord.conversations[ordinal],
+      MANIFEST_CONVERSATION_FIELDS,
+      MANIFEST_CONVERSATION_FIELDS,
+      null,
+      'prepared_invalid',
+    );
+    if (canonicalStringify(expected) !== canonicalStringify(supplied)) fail(null, 'prepared_invalid');
+    return expected;
+  });
+  const canonicalConversationOrder = ordinals.map((ordinal) => {
+    const grouped = chunks.filter((chunk) => chunk.conversationOrdinal === ordinal);
+    return {
+      ordinal,
+      firstCreatedAt: grouped[0].firstCreatedAt,
+      conversationId: grouped[0].conversationId,
+    };
+  }).sort((left, right) => {
+    const byTime = compareDateTime(left.firstCreatedAt, right.firstCreatedAt);
+    return byTime !== 0
+      ? byTime
+      : left.conversationId < right.conversationId
+      ? -1
+      : left.conversationId > right.conversationId
+      ? 1
+      : 0;
+  });
+  if (canonicalConversationOrder.some((entry, index) => entry.ordinal !== index)) {
+    fail(null, 'prepared_invalid');
+  }
+  const manifest: LifecycleHistoryBackfillManifest = {
+    schemaVersion: 'memory-v3-lifecycle-history-manifest-v1',
+    profileId: profile.profileId,
+    sourceCutoff,
+    sourceSnapshotDigest: manifestRecord.sourceSnapshotDigest,
+    conversationCount: ordinals.length,
+    messageCount,
+    userMessageCount,
+    chunkCount: chunks.length,
+    maxProviderCalls: chunks.length * profile.maxCallsPerChunk,
+    conversations,
+    chunks: chunks.map((chunk) => ({
+      chunkId: chunk.chunkId,
+      conversationOrdinal: chunk.conversationOrdinal,
+      chunkOrdinal: chunk.chunkOrdinal,
+      messageCount: chunk.messageCount,
+      userMessageCount: chunk.userMessageCount,
+      firstCreatedAt: chunk.firstCreatedAt,
+      lastCreatedAt: chunk.lastCreatedAt,
+      extractorRequestBytes: chunk.extractorRequestBytes,
+      extractorRequestSha256: chunk.extractorRequestSha256,
+      sourceDigest: chunk.sourceDigest,
+    })),
+  };
+  return { userId: root.userId, manifest, chunks };
 }
 
 function validatePrepared(value: unknown, profile: LifecycleHistoryBackfillProfile): PreparedLifecycleHistoryBackfill {
