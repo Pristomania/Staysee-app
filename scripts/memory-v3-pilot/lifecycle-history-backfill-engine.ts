@@ -481,6 +481,33 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
         fail(null, 'prepared_invalid');
       }
     }
+    const fullMessages = grouped.flatMap((chunk) => chunk.messages.map((message) => ({ ...message })));
+    const canonicalPartitions: typeof grouped[number]['messages'][] = [];
+    let cursor = 0;
+    while (cursor < fullMessages.length) {
+      const maximumEnd = Math.min(cursor + profile.maxMessagesPerChunk, fullMessages.length);
+      let selectedEnd = -1;
+      for (let end = cursor + 1; end <= maximumEnd; end += 1) {
+        const candidate = fullMessages.slice(cursor, end);
+        if (!candidate.some((message) => message.role === 'user')) continue;
+        const dialogue = validateMemoryV3Dialogue({
+          caseId: `memory-v3-shadow:${root.userId}:${grouped[0].conversationId}`,
+          messages: candidate,
+        });
+        const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+        if (new TextEncoder().encode(serialized).byteLength > profile.maxExtractorRequestBytes) break;
+        selectedEnd = end;
+      }
+      if (selectedEnd < 0) fail(null, 'prepared_invalid');
+      canonicalPartitions.push(fullMessages.slice(cursor, selectedEnd));
+      cursor = selectedEnd;
+    }
+    if (canonicalPartitions.length !== grouped.length ||
+      canonicalPartitions.some((messages, index) =>
+        canonicalStringify(messages) !== canonicalStringify(grouped[index].messages)
+      )) {
+      fail(null, 'prepared_invalid');
+    }
     const expected = {
       conversationOrdinal: ordinal,
       messageCount: grouped.reduce((sum, chunk) => sum + chunk.messageCount, 0),
@@ -596,6 +623,40 @@ function inspectReconcilerTransport(value: unknown): MemoryV3LifecycleTransportR
 
 function inspectAdapter(value: unknown): void {
   if (typeof value !== 'function' || isProxy(value)) fail(null, 'adapter_invalid');
+}
+
+interface LifecycleHistoryProviderCallGate {
+  call<T>(stage: 'extractor_transport' | 'reconciler_transport', inner: () => Promise<T>): Promise<T>;
+  getAttemptCount(): number;
+}
+
+function createLifecycleHistoryProviderCallGate(maxRequests: number): LifecycleHistoryProviderCallGate {
+  if (!Number.isSafeInteger(maxRequests) || maxRequests <= 0) fail(null, 'provider_call_cap_invalid');
+  let attemptCount = 0;
+  return {
+    async call<T>(stage: 'extractor_transport' | 'reconciler_transport', inner: () => Promise<T>): Promise<T> {
+      if (attemptCount >= maxRequests) fail(stage, 'provider_call_cap_exceeded');
+      attemptCount += 1;
+      return await inner();
+    },
+    getAttemptCount(): number {
+      return attemptCount;
+    },
+  };
+}
+
+/** Narrow test-only seam for the shared runtime call gate; not used by orchestration code. */
+export function __testOnlyCreateLifecycleHistoryProviderCallGate(maxRequests: number): {
+  callExtractor<T>(inner: () => Promise<T>): Promise<T>;
+  callReconciler<T>(inner: () => Promise<T>): Promise<T>;
+  getAttemptCount(): number;
+} {
+  const gate = createLifecycleHistoryProviderCallGate(maxRequests);
+  return {
+    callExtractor: <T>(inner: () => Promise<T>) => gate.call('extractor_transport', inner),
+    callReconciler: <T>(inner: () => Promise<T>) => gate.call('reconciler_transport', inner),
+    getAttemptCount: () => gate.getAttemptCount(),
+  };
 }
 
 function buildBaseResult(
@@ -718,16 +779,15 @@ export async function runLifecycleHistoryBackfill(input: {
   inspectAdapter(root.reconcilerAdapter);
   const extractorAdapter = root.extractorAdapter as MemoryV3ModelAdapter;
   const reconcilerAdapter = root.reconcilerAdapter as MemoryV3LifecycleModelAdapter;
-  let providerCallCount = 0;
+  const providerCallGate = createLifecycleHistoryProviderCallGate(budget.maxRequests);
   const usages: Usage[] = [];
   let successfulTransportCount = 0;
   const callExtractorOnce = async (request: Parameters<MemoryV3ModelAdapter>[0]) => {
-    if (providerCallCount >= budget.maxRequests) fail('extractor_transport', 'provider_call_cap_exceeded');
-    providerCallCount += 1;
     let raw: unknown;
     try {
-      raw = await extractorAdapter(request);
-    } catch {
+      raw = await providerCallGate.call('extractor_transport', () => extractorAdapter(request));
+    } catch (error) {
+      if (details(error)?.code === 'provider_call_cap_exceeded') throw error;
       fail('extractor_transport', 'extractor_transport_failed');
     }
     const inspected = inspectExtractorTransport(raw);
@@ -736,12 +796,11 @@ export async function runLifecycleHistoryBackfill(input: {
     return inspected;
   };
   const callReconcilerOnce = async (request: Parameters<MemoryV3LifecycleModelAdapter>[0]) => {
-    if (providerCallCount >= budget.maxRequests) fail('reconciler_transport', 'provider_call_cap_exceeded');
-    providerCallCount += 1;
     let raw: unknown;
     try {
-      raw = await reconcilerAdapter(request);
-    } catch {
+      raw = await providerCallGate.call('reconciler_transport', () => reconcilerAdapter(request));
+    } catch (error) {
+      if (details(error)?.code === 'provider_call_cap_exceeded') throw error;
       fail('reconciler_transport', 'reconciler_transport_failed');
     }
     const inspected = inspectReconcilerTransport(raw);
@@ -862,6 +921,7 @@ export async function runLifecycleHistoryBackfill(input: {
     );
     actualCostUsd = nanodollars / 1_000_000_000;
   }
+  const providerCallCount = providerCallGate.getAttemptCount();
   const complete = failures.length === 0 && chunkResults.length === prepared.chunks.length &&
     providerCallCount === budget.maxRequests;
   const result = deepFreeze<LifecycleHistoryBackfillResult>({
