@@ -2,7 +2,6 @@ import { isProxy } from 'node:util/types';
 
 import { MEMORY_V3_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import {
-  MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES,
   MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,
   MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
@@ -18,6 +17,7 @@ import {
 
 export const LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID =
   'memory-v3-lifecycle-history-backfill-v1' as const;
+export const LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES = 40_000 as const;
 
 export interface LifecycleHistoryBackfillProfile {
   profileId: typeof LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID;
@@ -27,7 +27,7 @@ export interface LifecycleHistoryBackfillProfile {
   reconcilerVersion: 'memory-v3-lifecycle-reconciler-v1';
   model: 'google/gemini-3.7-flash';
   maxMessagesPerChunk: 60;
-  maxExtractorRequestBytes: 20_000;
+  maxExtractorRequestBytes: 40_000;
   maxReconcilerRequestBytes: 80_000;
   reservedInputTokensPerCall: 32_768;
   maxOutputTokensPerCall: 1_200;
@@ -109,7 +109,7 @@ const PROFILE = deepFreeze<LifecycleHistoryBackfillProfile>({
   reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
   model: MEMORY_V3_LIFECYCLE_MODEL,
   maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
-  maxExtractorRequestBytes: MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES,
+  maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
   maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
   reservedInputTokensPerCall: MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
   maxOutputTokensPerCall: MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,

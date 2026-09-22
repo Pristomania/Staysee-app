@@ -17,6 +17,7 @@ import {
 } from '../../supabase/functions/_shared/memoryV3/lifecycleContract.ts';
 import { MEMORY_V3_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import {
+  LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
   calculateLifecycleHistoryBudget,
   getLifecycleHistoryBackfillProfile,
@@ -95,7 +96,7 @@ describe('history backfill profile', () => {
     assert.equal(first.maxActive, 1);
   });
 
-  it('copies every lifecycle limit exactly', () => {
+  it('copies lifecycle limits except for the history-only extractor envelope', () => {
     const profile = getLifecycleHistoryBackfillProfile(
       LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
     );
@@ -108,7 +109,7 @@ describe('history backfill profile', () => {
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       model: MEMORY_V3_LIFECYCLE_MODEL,
       maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
-      maxExtractorRequestBytes: MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES,
+      maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
       maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
       reservedInputTokensPerCall: MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
       maxOutputTokensPerCall: MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
@@ -118,6 +119,8 @@ describe('history backfill profile', () => {
       maxActive: 1,
       executeFlag: '--execute-history-backfill-paid-requests',
     });
+    assert.equal(MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES, 20_000);
+    assert.equal(LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES, 40_000);
   });
 
   it('rejects unknown strings, objects, boxed strings, symbols, arrays, and null', () => {

@@ -381,6 +381,11 @@ The current live loader covers one conversation and at
 most 60 recent messages; backfill inspection instead reads the complete eligible
 history up to an explicit cutoff with zero provider calls.
 
+Historical backfill allows an exact extractor request of at most 40,000 UTF-8
+bytes so that one indivisible older user message is not truncated. This is a
+history-only envelope: the normal live lifecycle path remains capped at 20,000
+bytes. Both paths retain the same 32,768-input-token accounting reservation.
+
 The workflow has five deliberately separate gates:
 
 1. Inspect the source without a model and record its exact manifest and digest.

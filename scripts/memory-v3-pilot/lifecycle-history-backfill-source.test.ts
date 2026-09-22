@@ -502,6 +502,40 @@ describe('lifecycle history source safety boundary', () => {
 });
 
 describe('injected Supabase history reader', () => {
+  it('accepts the current Supabase success marker only when it is true', async () => {
+    function readerFor(success: boolean) {
+      const response = {
+        data: [conversationRow(1)],
+        error: null,
+        count: null,
+        status: 200,
+        statusText: 'OK',
+        success,
+      };
+      const query = {
+        select() { return this; },
+        eq() { return this; },
+        lte() { return this; },
+        order() { return this; },
+        limit: async () => response,
+      };
+      return createLifecycleHistorySupabaseReader({ from() { return query; } });
+    }
+
+    assert.deepEqual(await readerFor(true).listConversationsPage({
+      userId: USER_ID,
+      sourceCutoff: SOURCE_CUTOFF,
+      after: null,
+      limit: 100,
+    }), [conversationRow(1)]);
+    await assert.rejects(() => readerFor(false).listConversationsPage({
+      userId: USER_ID,
+      sourceCutoff: SOURCE_CUTOFF,
+      after: null,
+      limit: 100,
+    }), assertSourceError);
+  });
+
   it('emits ownership, cutoff, ordering, keyset, and limit filters', async () => {
     const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
     const responses = {

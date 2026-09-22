@@ -143,7 +143,8 @@ The profile is a deeply frozen code constant. It fixes:
 - lifecycle schema, pipeline, extractor, and reconciler versions;
 - exact model;
 - maximum 60 source messages per chunk;
-- exact 20,000-byte extractor request cap;
+- history-only 40,000-byte extractor request cap; the normal live lifecycle
+  request cap remains 20,000 bytes;
 - exact 80,000-byte reconciler request cap;
 - maximum 100 state items and 500 total evidence rows;
 - maximum two provider calls per chunk;
@@ -199,12 +200,19 @@ For each conversation, the chunker repeatedly selects the largest next contiguou
 
 - at most 60 messages;
 - at least one user message;
-- the exact serialized extractor request is at most 20,000 UTF-8 bytes;
+- the exact serialized extractor request is at most 40,000 UTF-8 bytes for
+  historical backfill; the normal live lifecycle path remains capped at 20,000
+  bytes;
 - every included row is valid under the existing dialogue contract.
 
 The byte count is computed from the real extractor request builder with `TextEncoder`, not from character count and not from a hand-written estimate.
 
 If no valid chunk can include the next unprocessed rows, source inspection fails closed. It does not truncate a message, skip an assistant-only prefix, or send an oversized request.
+
+The wider historical envelope is required because a complete source history can
+contain one indivisible user message whose exact extractor request exceeds the
+normal live cap after the system prompt is included. It does not raise the live
+cap, and it remains below the profile's 32,768-token accounting reservation.
 
 ### Global processing order
 

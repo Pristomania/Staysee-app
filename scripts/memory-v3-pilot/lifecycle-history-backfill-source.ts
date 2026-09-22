@@ -355,7 +355,7 @@ function inspectResponse(token: object, value: unknown): unknown {
   } catch {
     fail(token);
   }
-  const allowed = new Set(['data', 'error', 'count', 'status', 'statusText']);
+  const allowed = new Set(['data', 'error', 'count', 'status', 'statusText', 'success']);
   for (const key of keys) {
     if (typeof key !== 'string' || !allowed.has(key)) fail(token);
     let descriptor: PropertyDescriptor | undefined;
@@ -374,6 +374,7 @@ function inspectResponse(token: object, value: unknown): unknown {
   }
   const data = Object.getOwnPropertyDescriptor(value, 'data');
   const error = Object.getOwnPropertyDescriptor(value, 'error');
+  const success = Object.getOwnPropertyDescriptor(value, 'success');
   if (
     !data ||
     !error ||
@@ -381,7 +382,8 @@ function inspectResponse(token: object, value: unknown): unknown {
     error.enumerable !== true ||
     !Object.prototype.hasOwnProperty.call(data, 'value') ||
     !Object.prototype.hasOwnProperty.call(error, 'value') ||
-    error.value !== null
+    error.value !== null ||
+    (success !== undefined && success.value !== true)
   ) {
     fail(token);
   }

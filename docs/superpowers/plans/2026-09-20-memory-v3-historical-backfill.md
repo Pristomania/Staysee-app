@@ -15,7 +15,11 @@
 - Work only in the existing linked worktree `D:/Staisy-main Приложение/Staysee-memory-v3` on branch `codex/memory-v3-history-backfill`.
 - Preserve the pre-existing modified files `supabase/.temp/cli-latest` and `supabase/functions/_shared/narrativeEngine.cases.test.ts`; never stage or edit them.
 - Preserve every untracked `scripts/memory-v3-pilot/_tmp-*.json` artifact; never stage, edit, rename, delete, or parse it.
-- Preserve exact lifecycle limits: 60 messages per chunk, 20,000 extractor request bytes, 80,000 reconciler request bytes, 100 state items, 500 total state evidence rows, two model calls per chunk, and `maxActive = 1`.
+- Preserve exact lifecycle limits except for one reviewed operational correction:
+  historical backfill accepts up to 40,000 extractor request bytes while the
+  normal live lifecycle path remains capped at 20,000. Preserve 60 messages per
+  chunk, 80,000 reconciler request bytes, 100 state items, 500 total state
+  evidence rows, two model calls per chunk, and `maxActive = 1`.
 - Preserve exact provider privacy fields: `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
 - Preserve model `google/gemini-3.7-flash`, schema `memory-v3-lifecycle-state-v1`, pipeline `memory-v3-lifecycle-shadow-v1`, and reconciler `memory-v3-lifecycle-reconciler-v1`.
 - The implementation must not read real dialogue, call a remote Supabase project, read `.env`, call a provider, spend money, deploy, import, or activate the canary during Tasks 1-9. Task 7 may use only a disposable local Supabase stack; if its CLI/runtime is unavailable, stop instead of downloading dependencies or using production.
@@ -214,7 +218,7 @@ export interface LifecycleHistoryBackfillProfile {
   reconcilerVersion: 'memory-v3-lifecycle-reconciler-v1';
   model: 'google/gemini-3.7-flash';
   maxMessagesPerChunk: 60;
-  maxExtractorRequestBytes: 20_000;
+  maxExtractorRequestBytes: 40_000;
   maxReconcilerRequestBytes: 80_000;
   reservedInputTokensPerCall: 32_768;
   maxOutputTokensPerCall: 1_200;
@@ -441,8 +445,10 @@ Test exact behavior:
 - conversations sort by earliest message time then conversation ID;
 - messages sort by `createdAt`, then ID using relational UTF-16 order;
 - 61 short messages become two contiguous chunks;
-- the largest prefix at or below 20,000 bytes is selected;
-- a request of exactly 20,000 bytes passes and 20,001 fails or splits;
+- a real-shaped indivisible historical message above the 20,000-byte live cap
+  is preserved without truncation;
+- the largest prefix at or below 40,000 bytes is selected;
+- a request of exactly 40,000 bytes passes and 40,001 fails or splits;
 - every chunk contains a user message;
 - an oversized single message and an assistant-only unusable prefix fail closed;
 - no message is duplicated, omitted, truncated, or moved between conversations;

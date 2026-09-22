@@ -209,12 +209,25 @@ describe('deterministic history chunk planning', () => {
     assert.deepEqual(result.chunks.map((chunk) => chunk.chunkOrdinal), [0, 1]);
   });
 
-  it('selects the largest contiguous prefix at or below 20,000 bytes', () => {
+  it('preserves an unsplittable historical user message above the live request cap', () => {
+    const userId = syntheticUuid(1);
+    const conversationId = syntheticUuid(1_001);
+    const exactText = textForExactRequestBytes(27_097, userId, conversationId, [], 1);
+    const historicalMessage = message(1, 'user', timestamp(1), exactText);
+
+    const result = prepare([conversation(1, [historicalMessage])]);
+
+    assert.equal(result.chunks.length, 1);
+    assert.equal(result.chunks[0].extractorRequestBytes, 27_097);
+    assert.equal(result.chunks[0].messages[0].text, exactText);
+  });
+
+  it('selects the largest contiguous prefix at or below 40,000 bytes', () => {
     const userId = syntheticUuid(1);
     const conversationId = syntheticUuid(1_001);
     const first = message(1, 'user', timestamp(1), 'first');
     const secondText = textForExactRequestBytes(
-      20_000,
+      40_000,
       userId,
       conversationId,
       [first],
@@ -222,23 +235,23 @@ describe('deterministic history chunk planning', () => {
     );
     const second = message(2, 'user', timestamp(2), secondText);
     const third = message(3, 'user', timestamp(3), 'third');
-    assert.equal(requestBytes(userId, conversationId, [first, second]), 20_000);
-    assert.ok(requestBytes(userId, conversationId, [first, second, third]) > 20_000);
+    assert.equal(requestBytes(userId, conversationId, [first, second]), 40_000);
+    assert.ok(requestBytes(userId, conversationId, [first, second, third]) > 40_000);
 
     const result = prepare([conversation(1, [first, second, third])]);
     assert.deepEqual(result.chunks.map((chunk) => chunk.messageCount), [2, 1]);
-    assert.equal(result.chunks[0].extractorRequestBytes, 20_000);
+    assert.equal(result.chunks[0].extractorRequestBytes, 40_000);
   });
 
-  it('accepts exactly 20,000 bytes and rejects a 20,001-byte single message', () => {
+  it('accepts exactly 40,000 bytes and rejects a 40,001-byte single message', () => {
     const userId = syntheticUuid(1);
     const conversationId = syntheticUuid(1_001);
-    const exactText = textForExactRequestBytes(20_000, userId, conversationId, [], 1);
+    const exactText = textForExactRequestBytes(40_000, userId, conversationId, [], 1);
     const exact = message(1, 'user', timestamp(1), exactText);
-    assert.equal(prepare([conversation(1, [exact])]).chunks[0].extractorRequestBytes, 20_000);
+    assert.equal(prepare([conversation(1, [exact])]).chunks[0].extractorRequestBytes, 40_000);
 
     const oversized = message(1, 'user', timestamp(1), `${exactText}x`);
-    assert.equal(requestBytes(userId, conversationId, [oversized]), 20_001);
+    assert.equal(requestBytes(userId, conversationId, [oversized]), 40_001);
     captureContractError(() => prepare([conversation(1, [oversized])]));
   });
 
@@ -252,11 +265,11 @@ describe('deterministic history chunk planning', () => {
       1,
       'user',
       timestamp(1),
-      `${unicodePrefix}${'x'.repeat(20_000 - seedBytes)}`,
+      `${unicodePrefix}${'x'.repeat(40_000 - seedBytes)}`,
     );
 
-    assert.equal(requestBytes(userId, conversationId, [exact]), 20_000);
-    assert.equal(prepare([conversation(1, [exact])]).chunks[0].extractorRequestBytes, 20_000);
+    assert.equal(requestBytes(userId, conversationId, [exact]), 40_000);
+    assert.equal(prepare([conversation(1, [exact])]).chunks[0].extractorRequestBytes, 40_000);
   });
 
   it('requires a user message in every chunk and fails on an unusable assistant prefix', () => {
