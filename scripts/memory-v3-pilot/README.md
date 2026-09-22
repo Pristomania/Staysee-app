@@ -284,13 +284,27 @@ The paid `hypothesis-admission-r3` run completed 4/4 sequential requests without
 
 Execution requires `--execute-hypothesis-four-paid-requests` and later explicit authorization from Nastya. The command above is dry-run only.
 
-## Memory V3 synthetic lifecycle benchmark (offline, not production-ready)
+## Memory V3 synthetic lifecycle model benchmark (offline by default)
 
-This benchmark is a scripted reference reconciler. It does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+The model benchmark uses synthetic dialogue only and makes no production, staging, or Supabase writes. It runs 12 independent gold-seeded cases through the production prompt, contract, and reducer boundary without changing production memory.
+
+Dry-run makes 0 provider calls and does not read `.env`:
+
+```bash
+npx tsx scripts/memory-v3-pilot/lifecycle-model-benchmark-run.ts --profile lifecycle-reconciler-critical-twelve-v1 --model google/gemini-3.7-flash --max-budget-usd 0.36
+```
+
+A future authorized execution has a maximum of 12 sequential calls with `maxActive = 1`, with no retry, application fallback, or repair. Its configured ceiling is `$0.348912` under a hard maximum of `$0.36`; this is a preflight upper bound, not actual billing. `actualUsage` and `actualCostUsd` may remain `null` when the provider does not project trusted telemetry.
+
+This documentation does not authorize a paid run. The execute flag remains forbidden and is intentionally not shown here; a separate explicit authorization from Nastya is required. The profile prices are a historical planning snapshot, not fresh-price proof. Immediately before any paid execution, an allowlisted current price snapshot must be reviewed separately; if its twelve-call ceiling exceeds `$0.36`, execution must stop before HTTP. Passing this benchmark is not primary-memory activation or production-readiness proof.
+
+The underlying deterministic fixture uses a scripted reference reconciler and makes zero external calls. That fixture does not measure model quality. The `memory-v3-synthetic-lifecycle-v1` dataset contains exactly 20 scenarios, 80 steps, and 240 synthetic messages.
+
+The separate 12-case model benchmark measures reconciler-model behavior when explicitly executed. Its default dry-run makes zero external calls; no paid lifecycle model benchmark has been run.
 
 It exercises all seven lifecycle operations: `create`, `confirm`, `revise`, `mark_stale`, `reject`, `ignore`, and `forget`. This includes explicit forgetting. There is no time-based deletion in the lifecycle benchmark; memory changes only through the scripted operations.
 
-The benchmark enforces hard gates for deterministic reconciliation, invariants, privacy, sequential execution, and aggregate quality. It performs zero external calls: no HTTP, provider, OpenRouter, Supabase, production, or staging calls. It uses no paid model, and no paid lifecycle benchmark has been run. Production mode remains off. Passing this offline benchmark does not authorize production integration.
+The combined offline gate enforces hard gates for deterministic reconciliation, invariants, privacy, request sequencing, and aggregate quality without HTTP, provider, OpenRouter, Supabase, production, or staging calls. Production mode remains off. Passing this offline gate does not authorize production integration.
 
 The existing 30-day shadow purge applies only to temporary shadow-run payloads. The 30-day shadow purge does not delete future primary memory.
 
@@ -317,3 +331,126 @@ Future activation order is deliberately non-executable:
 3. Configure one account UUID while mode remains off.
 4. Obtain separate paid activation approval from Nastya.
 5. Enable shadow only after that approval.
+
+## Memory V3 lifecycle shadow (inactive)
+
+The lifecycle shadow is **experimental and write-only**. It is **default off**, is **not deployed or activated**, and can run only for **one exact allowlisted account**. Current product memory remains unchanged: lifecycle output is not read into replies, conversation context, summaries, `user_memory`, analytics, or the UI.
+
+The inactive pipeline has two sequential model boundaries: an extractor proposes evidence-bound candidates, then a reconciler proposes lifecycle operations. A deterministic reducer, not either model, decides the stored state transition. The server permits one atomic reservation per UTC day and at most two provider calls for that reservation, with no retry or repair.
+
+The 30-day retention applies only to run payloads. Durable lifecycle state is not time-purged. Source-message, conversation, or account deletion removes the corresponding lifecycle data. The model cannot forget memory: model-authored forget operations are never trusted, and this integration passes no trusted forget keys.
+
+Migration 034 remains unapplied. No paid reconciler benchmark has been run. Migration application, function deployment, choosing the single account, activation, and any paid provider use require separate future approvals.
+
+Offline verification:
+
+```bash
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleWiring.cases.test.ts
+npx tsx --test supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts
+```
+
+## Memory V3 lifecycle read canary (inactive)
+
+The lifecycle read path is **default off**. Its closed gate can authorize only
+one exact allowlisted account through server-side configuration. The son's and
+every other account remain unchanged and continue to use the existing memory
+path.
+
+For the eligible account, the read path performs one service-only RPC and
+replaces only legacy cross-conversation prompt memory. It preserves
+conversation summaries and the technical fallback. A valid authoritative empty
+result suppresses legacy resurrection instead of restoring old cross-conversation
+items. The bounded projection accepts only current `event/active`,
+`recurrence/active`, and `hypothesis/supported` items.
+
+The read path makes zero lifecycle provider calls, zero writes, and zero
+retries. Lifecycle data is server-only and is not exposed to the UI or HTTP
+response. Load, shape, or prompt-size failure falls back to the existing memory
+path with a closed diagnostic and without exposing stored content.
+
+Migration 036, Edge Function deployment, server-side configuration, and canary
+activation each require separate explicit authorization. This offline
+implementation does not claim that Migration 036 is applied, that the canary is
+active, or that real-user behavior and production quality have been validated.
+
+## Memory V3 historical backfill
+
+Historical backfill is an **offline, review-first** workflow for preparing the
+initial semantic-memory state from older conversations. It is not automatic production learning.
+The current live loader covers one conversation and at
+most 60 recent messages; backfill inspection instead reads the complete eligible
+history up to an explicit cutoff with zero provider calls.
+
+Historical backfill allows an exact extractor request of at most 40,000 UTF-8
+bytes so that one indivisible older user message is not truncated. This is a
+history-only envelope: the normal live lifecycle path remains capped at 20,000
+bytes. Both paths retain the same 32,768-input-token accounting reservation.
+
+The history-only extractor allows at most 4,096 output tokens because Gemini
+3.7 Flash requires reasoning and a real backfill response ended with
+`finish_reason: "length"` under the normal 1,200-token allowance. The live
+extractor and reconciler remain capped at 1,200. Budget preflight conservatively
+prices all possible history calls at 4,096 output tokens; this is an upper bound,
+not actual billing.
+
+The approved history-only model route is `google/gemini-3.7-flash` followed by
+`mistralai/mistral-medium-3-5`. OpenRouter may resolve that route internally,
+but the application still makes one client HTTP request per stage and performs
+no application-layer retry or repair. This route does not change the live
+single-model lifecycle path.
+
+Every successful extractor and reconciler stage records the model OpenRouter
+actually resolved. `providerModelFallbackCount` is recomputed from those stage
+records, and the resolved model provenance is artifact-digest-bound. The
+application retry, repair, and fallback counters remain zero; provider-managed
+model selection is reported separately and cannot be presented as an
+application retry.
+
+For the reviewed 32-chunk example, `$5.111808 is a reviewed example ceiling,
+not actual billing`. Fresh two-model price and endpoint snapshots are required
+before every real execution. Paid execution still requires separate Nastya
+authorization even when all offline tests pass and the calculated hard maximum
+is within the reviewed limit.
+
+The workflow has five deliberately separate gates:
+
+1. Inspect the source without a model and record its exact manifest and digest.
+2. Before any paid execution, approve a fresh price snapshot, the exact source
+   digest, the explicit execute flag, and the hard budget.
+3. Run the model sequentially and save one digest-bound artifact for review.
+4. Record a human PASS tied to the payload digest, with one explicit PASS row
+   for every final memory.
+5. Deploy the import migration, perform the reviewed initial import, and later
+   activate reading only under separate approvals.
+
+There is no application-layer retry, repair, fallback, or parallel calls. The
+frozen provider transport retains its existing `allow_fallbacks: true` routing
+field; that provider-routing field is not an application retry. The artifact
+contains normalized personal memory and must remain untracked. It must never be
+committed, printed to logs, or copied into test fixtures.
+
+The import is initial-only, service-role-only, and atomic. It revalidates the
+complete artifact and human decision, re-inspects the source, binds every fresh
+chunk to its actual messages, requires an empty revision-zero target, and then
+uses one database RPC. The read canary remains off until a separate activation.
+Rollback means turning the read mode off, not destructive deletion of the
+imported lifecycle state.
+
+Provider-free source-inspection command shape (non-executable placeholders):
+
+```text
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --inspect-source --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <reviewed-hard-budget>
+```
+
+The paid execution and import command shapes below are documentation examples,
+not authorization to run them:
+
+```text
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --expected-source-sha256 <approved-digest> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <approved-hard-budget> --safe-output-file <untracked-history-backfill.json>
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.ts --import-reviewed-history --artifact-file <untracked-history-backfill.json> --review-file <review-decision.json> --import-id <new-import-uuid>
+```
+
+Real source inspection, paid execution, migration deployment, import, and
+activation are separate approvals. Exact paid commands are generated only after
+inspection and review; no example above supplies a real user ID, secret, current
+price, production path, or authorization value.

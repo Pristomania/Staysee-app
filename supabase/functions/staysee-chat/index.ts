@@ -20,12 +20,22 @@ import {
 } from "../_shared/memory.ts";
 import { runConversationSummaryRefresh } from "../_shared/summaryRefresh.ts";
 import { createMemoryV3MessageLoader } from "../_shared/memoryV3/messages.ts";
+import { parseMemoryV3ShadowMode } from "../_shared/memoryV3/mode.ts";
 import { createMemoryV3ShadowStore } from "../_shared/memoryV3/shadowStore.ts";
+import { createMemoryV3LifecycleStore } from "../_shared/memoryV3/lifecycleStore.ts";
+import { resolveMemoryV3LifecycleReadEligibility } from "../_shared/memoryV3/lifecycleReadMode.ts";
+import { createMemoryV3LifecycleReadStore } from "../_shared/memoryV3/lifecycleReadStore.ts";
+import type { MemoryV3LifecycleReadContext } from "../_shared/memoryV3/lifecycleReadStore.ts";
 import { createMemoryV3OpenRouterAdapter } from "../_shared/memoryV3/transport.ts";
+import { createMemoryV3LifecycleOpenRouterAdapter } from "../_shared/memoryV3/lifecycleTransport.ts";
 import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
 } from "../_shared/memoryV3/shadowRunner.ts";
+import {
+  runMemoryV3LifecycleShadow,
+  runMemoryV3LifecycleShadowBackgroundSafely,
+} from "../_shared/memoryV3/lifecycleShadowRunner.ts";
 import {
   explainSummaryRefreshDecision,
   isMemoryDiagConversation,
@@ -72,7 +82,6 @@ import {
 } from "../_shared/surgery1Prompt.ts";
 import {
   TIER_CONFIG,
-  FALLBACK_CHAIN,
   findFallbackProvider,
   isDuplicateRequest,
   makeRequestKey,
@@ -177,9 +186,7 @@ const corsHeaders = {
 
 type AiProvider = "openrouter" | "openai" | "gemini" | "deepseek" | "mistral";
 
-interface FullProviderConfig extends ProviderConfig {
-  // intentionally empty — ProviderConfig already has all fields
-}
+type FullProviderConfig = ProviderConfig;
 
 /** Legacy single-model override; per-depth routing: see _shared/modelRouter.ts */
 const CHAT_MODEL = (() => {
@@ -251,6 +258,33 @@ interface RequestBody {
   requestId?: string;
   /** Browser pause metadata — injected into system prompt only */
   timeGap?: TimeGapMeta;
+}
+
+type MemoryV3LifecycleReadDiagnostic =
+  | "load_failed"
+  | "invalid_shape"
+  | "too_large";
+
+function isMemoryV3LifecycleReadPromptTooLarge(error: unknown): boolean {
+  try {
+    if (typeof error !== "object" || error === null) return false;
+    const name = Object.getOwnPropertyDescriptor(error, "name");
+    const message = Object.getOwnPropertyDescriptor(error, "message");
+    return Boolean(
+      name && "value" in name &&
+        name.value === "MemoryV3LifecycleReadPromptError" &&
+        message && "value" in message &&
+        message.value === "[memory-v3:lifecycle-read-prompt] prompt too large",
+    );
+  } catch {
+    return false;
+  }
+}
+
+function logMemoryV3LifecycleReadDiagnostic(
+  code: MemoryV3LifecycleReadDiagnostic,
+): void {
+  console.error(`[memory-v3-lifecycle-read] ${code}`);
 }
 
 // ── Model call with fallback ─────────────────────────────────────────────────
@@ -351,7 +385,6 @@ async function callModel(
         meta: { rawKind: contentInspect.rawKind },
       });
     }
-    const usage = data.usage ?? {};
     const parsed = parseOpenRouterUsage(data);
     console.log(
       `[staysee-chat] ${provider} ok, tokens: ${parsed.totalTokens}` +
@@ -899,7 +932,44 @@ Deno.serve(async (req: Request) => {
         packetForSummary = trimmedPacket;
         smokeDiagSnapshot.has_packet = true;
 
-        systemPrompt = [BASE_PROMPT, buildContextPrompt(trimmedPacket)].join("\n\n");
+        let lifecycleCrossMemory: MemoryV3LifecycleReadContext | undefined;
+        const lifecycleReadEligibility = resolveMemoryV3LifecycleReadEligibility({
+          rawMode: Deno.env.get("STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE"),
+          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_LIFECYCLE_READ_USER_ID"),
+          userId,
+        });
+        if (lifecycleReadEligibility.eligible) {
+          try {
+            const loaded = await createMemoryV3LifecycleReadStore(
+              makeServiceClient(),
+            ).load(lifecycleReadEligibility.userId);
+            if (loaded !== null) lifecycleCrossMemory = loaded;
+          } catch {
+            logMemoryV3LifecycleReadDiagnostic("load_failed");
+          }
+        }
+
+        let contextPrompt: string;
+        let lifecycleCrossMemoryLoaded = false;
+        if (lifecycleCrossMemory !== undefined) {
+          try {
+            contextPrompt = buildContextPrompt(trimmedPacket, {
+              lifecycleCrossMemory,
+            });
+            lifecycleCrossMemoryLoaded = true;
+          } catch (error) {
+            logMemoryV3LifecycleReadDiagnostic(
+              isMemoryV3LifecycleReadPromptTooLarge(error)
+                ? "too_large"
+                : "invalid_shape",
+            );
+            contextPrompt = buildContextPrompt(trimmedPacket);
+          }
+        } else {
+          contextPrompt = buildContextPrompt(trimmedPacket);
+        }
+
+        systemPrompt = [BASE_PROMPT, contextPrompt].join("\n\n");
 
         if (hasRecallIntent(message)) {
           const recallGrounding = buildRecallGroundingPrompt({
@@ -923,7 +993,11 @@ Deno.serve(async (req: Request) => {
           systemPrompt = [systemPrompt, continuity].join("\n\n");
         }
 
-        memoryItemIds = trimmed.memoryItems.map((m) => m.id);
+        if (lifecycleCrossMemoryLoaded) {
+          memoryItemIds = [];
+        } else {
+          memoryItemIds = trimmed.memoryItems.map((m) => m.id);
+        }
         historyMessages = trimmed.messages;
       } catch (ctxErr) {
         smokeDiagSnapshot.ctx_error = String(ctxErr);
@@ -1002,7 +1076,7 @@ Deno.serve(async (req: Request) => {
       userTier,
       { flatOrdinary },
     );
-    let { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
+    const { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
 
     const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
       depthReason: responseBudget.depthReason,
@@ -1141,19 +1215,19 @@ Deno.serve(async (req: Request) => {
       finishReason: recovery.finishReason ?? result.finishReason,
     };
 
-    let autoContinueCount = recovery.autoContinueCount;
-    let finalizeCount = recovery.finalizeCount;
-    let wasAutoContinued = recovery.wasAutoContinued;
-    let wasFinalizeUsed = recovery.wasFinalizeUsed;
-    let wasTruncated = recovery.wasTruncated;
+    const autoContinueCount = recovery.autoContinueCount;
+    const finalizeCount = recovery.finalizeCount;
+    const wasAutoContinued = recovery.wasAutoContinued;
+    const wasFinalizeUsed = recovery.wasFinalizeUsed;
+    const wasTruncated = recovery.wasTruncated;
     let replyPublishable = false;
     let protocolSignalsForLog: ReturnType<typeof parseAndStripProtocolSignals> | null = null;
-    let lengthBeforeMerge = recovery.lengthBeforeMerge;
+    const lengthBeforeMerge = recovery.lengthBeforeMerge;
     let lengthAfterMerge = recovery.lengthAfterMerge;
-    let lastMergeStrategy = recovery.lastMergeStrategy;
-    let lastOverlapWords = recovery.lastOverlapWords;
+    const lastMergeStrategy = recovery.lastMergeStrategy;
+    const lastOverlapWords = recovery.lastOverlapWords;
     let usedMergeFallback = false;
-    let discardedDuplicateCount = recovery.discardedDuplicateCount;
+    const discardedDuplicateCount = recovery.discardedDuplicateCount;
     const mergeStrategies = recovery.mergeStrategies;
     const recoveryDiagnostics: ReplyRecoveryDiagnostics = recovery.diagnostics;
 
@@ -1492,6 +1566,54 @@ Deno.serve(async (req: Request) => {
 
     if (userId && clientConnected) {
       const svc = makeServiceClient();
+      const memoryV3ShadowPromise = conversationId &&
+          result.content &&
+          !isCalmFallbackContent
+        ? (() => {
+            const memoryV3Mode = parseMemoryV3ShadowMode(
+              Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
+            );
+            return memoryV3Mode === "lifecycle_shadow"
+              ? runMemoryV3LifecycleShadowBackgroundSafely(
+                  () => runMemoryV3LifecycleShadow({
+                    rawMode: memoryV3Mode,
+                    rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                    userId,
+                    conversationId,
+                    apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                    loadMessages: createMemoryV3MessageLoader(svc),
+                    store: createMemoryV3LifecycleStore(svc),
+                    extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                    reconcilerAdapterFactory: (apiKey) => createMemoryV3LifecycleOpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                  }, (code) => console.error("[memory-v3-lifecycle-transport]", code)),
+                  (code) => console.error("[memory-v3-lifecycle-shadow]", code),
+                )
+              : memoryV3Mode === "shadow"
+              ? runMemoryV3ShadowBackgroundSafely(
+                  () => runMemoryV3Shadow({
+                    rawMode: memoryV3Mode,
+                    rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
+                    userId,
+                    conversationId,
+                    apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                    loadMessages: createMemoryV3MessageLoader(svc),
+                    store: createMemoryV3ShadowStore(svc),
+                    modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                  }),
+                  (code) => console.error("[memory-v3-shadow]", code),
+                )
+              : Promise.resolve();
+          })()
+        : Promise.resolve();
 
       EdgeRuntime.waitUntil(
         Promise.all([
@@ -1640,29 +1762,14 @@ Deno.serve(async (req: Request) => {
                     }
                   })();
 
-                  const memoryV3ShadowPromise = runMemoryV3ShadowBackgroundSafely(
-                    () => runMemoryV3Shadow({
-                      rawMode: Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
-                      rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
-                      userId,
-                      conversationId,
-                      apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-                      loadMessages: createMemoryV3MessageLoader(svc),
-                      store: createMemoryV3ShadowStore(svc),
-                      modelAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                        apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
-                      }),
-                    }),
-                    (code) => console.error("[memory-v3-shadow]", code),
-                  );
-
-                  await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise]);
+                  await Promise.allSettled([summaryRefreshPromise]);
                 } catch (sumErr) {
                   console.error("[staysee-chat] summary update failed:", sumErr);
                 }
               })()
             : Promise.resolve(),
+
+          memoryV3ShadowPromise,
 
           // PR3c-1 — session processState_N (metadata column only; summary untouched)
           conversationId &&

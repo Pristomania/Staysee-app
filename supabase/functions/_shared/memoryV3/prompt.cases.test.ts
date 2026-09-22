@@ -46,6 +46,27 @@ describe("Memory V3 production prompt boundary", () => {
     assert.equal(request.system, MEMORY_V3_SYSTEM_INSTRUCTION);
   });
 
+  it("forbids duplicate evidence identity tuples", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Final check: delete duplicate evidence rows sharing \(itemRef, sourceMessageId, relation\), even if supportType or episodeKey differs\./,
+    );
+  });
+
+  it("never promotes a tentative report to a certain event", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /preserve source uncertainty \(including "вроде"\/maybe\/seems\); never emit a tentative report as a certain event\./,
+    );
+  });
+
+  it("omits a recurrence unless two distinct episodes survive the final evidence rows", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Before emitting candidate\/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence\./,
+    );
+  });
+
   it("does not mutate input and creates new allowlisted message objects", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);

@@ -25,15 +25,12 @@ function indexSource(): string {
 }
 
 function assertSingleShadowPlacement(source: string): void {
-  const bgShould = source.indexOf("const bgShould = shouldUpdateConversationSummary");
+  const responseStage = source.indexOf('recordReplyPipelineStage("before_http_response"');
+  const packetGate = source.indexOf("packetForSummary &&", responseStage);
   const shadowCalls = [...source.matchAll(/\brunMemoryV3Shadow\s*\(/g)];
   assert.equal(shadowCalls.length, 1);
-  assert.equal(bgShould >= 0, true);
-  assert.equal(shadowCalls[0].index > bgShould, true);
-  assert.equal(
-    shadowCalls[0].index > source.indexOf('recordReplyPipelineStage("before_http_response"'),
-    true,
-  );
+  assert.equal(responseStage >= 0 && packetGate > responseStage, true);
+  assert.equal(shadowCalls[0].index > responseStage && shadowCalls[0].index < packetGate, true);
 }
 
 function successfulResponseSource(source: string): string {
@@ -111,18 +108,20 @@ describe("staysee-chat Memory V3 source wiring", () => {
     }
   });
 
-  it("starts the shadow branch only after bgShould and in parallel with summary refresh", () => {
+  it("starts the shadow branch after the response stage but independently of summary refresh", () => {
     const source = indexSource();
     assertSingleShadowPlacement(source);
-    const background = source.slice(source.indexOf("const bgShould = shouldUpdateConversationSummary"));
+    const background = source.slice(source.indexOf('recordReplyPipelineStage("before_http_response"'));
     const stop = background.indexOf("if (!bgShould)");
     const summary = background.indexOf("const summaryRefreshPromise");
     const shadow = background.indexOf("const memoryV3ShadowPromise");
-    const settle = background.indexOf("await Promise.allSettled([summaryRefreshPromise, memoryV3ShadowPromise])");
+    const backgroundSettlement = background.indexOf("EdgeRuntime.waitUntil(");
+    const summarySettlement = background.indexOf("await Promise.allSettled([summaryRefreshPromise])");
     assert.equal(stop >= 0, true);
+    assert.equal(shadow > 0 && shadow < backgroundSettlement, true);
     assert.equal(summary > stop, true);
-    assert.equal(shadow > summary, true);
-    assert.equal(settle > shadow, true);
+    assert.equal(summarySettlement > summary, true);
+    assert.match(background.slice(backgroundSettlement), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
     const earlyMutation = source.replace(
       "const bgShould = shouldUpdateConversationSummary",
       "runMemoryV3Shadow({});\n                  const bgShould = shouldUpdateConversationSummary",
@@ -133,7 +132,7 @@ describe("staysee-chat Memory V3 source wiring", () => {
   it("keeps the existing summary arguments and catch log while isolating API keys", () => {
     const source = indexSource();
     const summaryStart = source.indexOf("await runConversationSummaryRefresh({");
-    const summaryEnd = source.indexOf("const memoryV3ShadowPromise", summaryStart);
+    const summaryEnd = source.indexOf("await Promise.allSettled([summaryRefreshPromise])", summaryStart);
     assert.equal(summaryStart >= 0 && summaryEnd > summaryStart, true);
     const summaryCall = source.slice(summaryStart, summaryEnd);
     assert.match(source, /const summaryApiKey = Deno\.env\.get\(PROVIDERS\[ACTIVE_PROVIDER\]\.envKey\)/);
@@ -154,7 +153,8 @@ describe("staysee-chat Memory V3 source wiring", () => {
       'path: "background"',
     ]) assert.ok(summaryCall.includes(required), required);
     assert.match(source, /console\.error\("\[staysee-chat\] summary update failed:", sumErr\)/);
-    assert.match(source, /rawMode: Deno\.env\.get\("STAYSEE_MEMORY_V3_MODE"\)/);
+    assert.equal((source.match(/rawMode: memoryV3Mode/g) ?? []).length, 2);
+    assert.doesNotMatch(source, /rawMode: Deno\.env\.get\("STAYSEE_MEMORY_V3_MODE"\)/);
     assert.match(source, /rawAllowedUserId: Deno\.env\.get\("STAYSEE_MEMORY_V3_SHADOW_USER_ID"\)/);
     assert.match(source, /apiKey: Deno\.env\.get\("OPENROUTER_API_KEY"\)/);
     assert.match(source, /fetchImpl: globalThis\.fetch\.bind\(globalThis\)/);

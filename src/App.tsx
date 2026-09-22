@@ -54,7 +54,7 @@ function AppContent() {
     const onPopState = (event: PopStateEvent) => {
       popNavigationRef.current = true;
       try {
-        let state = isAppHistoryState(event.state) ? event.state : null;
+        const state = isAppHistoryState(event.state) ? event.state : null;
         if (state && user && AUTH_ENTRY_SCREENS.includes(state.screen as (typeof AUTH_ENTRY_SCREENS)[number])) {
           const mainState = { ...state, screen: 'main' as const, conversationId: null };
           applyHistoryState(mainState);

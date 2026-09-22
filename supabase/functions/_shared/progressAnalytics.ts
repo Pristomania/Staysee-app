@@ -79,10 +79,6 @@ export async function getAllConversationsStats(
   userId: string,
   days: number = 30
 ): Promise<Array<{ conversationId: string; conversationTitle: string } & ProgressStats>> {
-  const sinceDate = new Date();
-  sinceDate.setDate(sinceDate.getDate() - days);
-  const sinceIso = sinceDate.toISOString();
-
   // Получить все беседы пользователя
   const { data: conversations, error: convError } = await supabase
     .from("conversations")

@@ -418,7 +418,6 @@ export function parseStoredMemory(raw: string | null | undefined): StructuredMem
 }
 
 function normalizeStructuredMemory(partial: Partial<StructuredMemory>): StructuredMemory {
-  const base = emptyStructuredMemory();
   return {
     people: capField(partial.people ?? [], "people"),
     themes: capField(partial.themes ?? [], "themes"),
@@ -608,7 +607,6 @@ export function compressStructuredMemory(mem: StructuredMemory): {
   memory: StructuredMemory;
   compressed: boolean;
 } {
-  let compressed = false;
   const m = normalizeStructuredMemory(mem);
   let serialized = serializeMemory(m);
   let tokens = estimateTokens(serialized);
@@ -617,7 +615,6 @@ export function compressStructuredMemory(mem: StructuredMemory): {
     return { memory: m, compressed: false };
   }
 
-  compressed = true;
   const tighter: StructuredMemory = {
     ...m,
     people: m.people.slice(0, 5),
@@ -1077,7 +1074,7 @@ export async function updateConversationSummary(
   }
 
   let postSummaryBytes = 0;
-  let postSummaryUpdatedAt: string | null = null;
+  const postSummaryUpdatedAt: string | null = null;
   const { data: postRow, error: readErr } = await input.supabase
     .from("conversations")
     .select(SAFE_CONVERSATION_SUMMARY_SELECT)
@@ -1095,7 +1092,7 @@ export async function updateConversationSummary(
       success: postSummaryBytes > 0,
       usedTimestampFallback,
       postSaveSummaryBytes: postSummaryBytes,
-      postSaveSummaryUpdatedAt,
+      postSaveSummaryUpdatedAt: postSummaryUpdatedAt,
     });
   }
 

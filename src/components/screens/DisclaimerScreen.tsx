@@ -1,4 +1,3 @@
-import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { ACCENT_TEXT_CLASS, ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
@@ -27,8 +26,7 @@ const points = [
 ];
 
 export function DisclaimerScreen() {
-  const { user } = useAuth();
-  const { navigateBack, legalReturnScreen } = useApp();
+  const { navigateBack } = useApp();
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
 

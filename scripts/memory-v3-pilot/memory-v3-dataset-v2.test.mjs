@@ -423,4 +423,58 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.match(v2, /not actual billing/i);
     assert.match(readme, /live-benchmark-six-run\.mjs --model openai\/gpt-5\.6-luna --max-budget-usd 0\.032/);
   });
+
+  it('documents the review-first Memory V3 historical backfill operator boundary', async () => {
+    const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8');
+    const heading = '## Memory V3 historical backfill';
+    const start = readme.indexOf(heading);
+    assert.notEqual(start, -1, 'README is missing the Memory V3 historical backfill section');
+    const remainder = readme.slice(start + heading.length);
+    const nextHeading = remainder.match(/\n## /);
+    const section = readme.slice(start, start + heading.length +
+      (nextHeading ? nextHeading.index : remainder.length));
+    const prose = section.replace(/\s+/g, ' ');
+
+    assert.match(prose, /offline, review-first/i);
+    assert.match(prose, /not automatic production learning/i);
+    assert.match(prose, /one conversation.*at most 60 recent messages/i);
+    assert.match(prose, /complete eligible history.*cutoff.*zero provider calls/i);
+    assert.match(prose, /fresh price snapshot.*exact source digest.*explicit execute flag.*hard budget/i);
+    assert.match(prose, /no application-layer retry, repair, fallback, or parallel calls/i);
+    assert.match(prose, /allow_fallbacks: true/);
+    assert.match(section, /google\/gemini-3\.7-flash/);
+    assert.match(section, /mistralai\/mistral-medium-3-5/);
+    assert.match(prose, /one client HTTP request per stage/i);
+    assert.match(prose, /no application-layer retry or repair/i);
+    assert.match(section, /providerModelFallbackCount/);
+    assert.match(prose, /resolved model provenance is artifact-digest-bound/i);
+    assert.match(prose, /\$5\.111808 is a reviewed example ceiling, not actual billing/i);
+    assert.match(prose, /fresh two-model price and endpoint snapshots are required/i);
+    assert.match(prose, /paid execution still requires separate Nastya authorization/i);
+    assert.match(prose, /normalized personal memory.*must remain untracked/i);
+    assert.match(prose, /human PASS.*payload digest.*one explicit PASS row.*every final memory/i);
+    assert.match(prose, /initial-only.*service-role-only.*atomic/i);
+    assert.match(prose, /read canary remains off.*separate activation/i);
+    assert.match(prose, /rollback.*read mode off.*not destructive deletion/i);
+    assert.match(prose, /source inspection.*paid execution.*migration deployment.*import.*activation.*separate approvals/i);
+    assert.match(prose, /source-inspection command shape \(non-executable placeholders\)/i);
+    assert.match(prose, /documentation examples, not authorization to run them/i);
+
+    const inspectCommand = 'npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --inspect-source --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <reviewed-hard-budget>';
+    const paidCommand = 'npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --expected-source-sha256 <approved-digest> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <approved-hard-budget> --safe-output-file <untracked-history-backfill.json>';
+    const importCommand = 'npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.ts --import-reviewed-history --artifact-file <untracked-history-backfill.json> --review-file <review-decision.json> --import-id <new-import-uuid>';
+    const commandLines = section.split(/\r?\n/).filter((line) =>
+      line.startsWith('npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-')
+    );
+    assert.deepEqual(commandLines, [inspectCommand, paidCommand, importCommand]);
+
+    assert.doesNotMatch(section, /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i);
+    assert.doesNotMatch(section, /(?:sk-|eyJ)[A-Za-z0-9._-]{8,}/);
+    assert.doesNotMatch(section, /https?:\/\//i);
+    assert.doesNotMatch(section, /(?:OPENROUTER_API_KEY|SUPABASE_SERVICE_ROLE_KEY)\s*=/i);
+    assert.doesNotMatch(section, /--source-cutoff\s+\d{4}-\d{2}-\d{2}/i);
+    assert.doesNotMatch(section, /--expected-source-sha256\s+[0-9a-f]{64}\b/i);
+    assert.doesNotMatch(section, /--max-budget-usd\s+\d/i);
+    assert.doesNotMatch(section, /--import-id\s+[0-9a-f-]{36}\b/i);
+  });
 });

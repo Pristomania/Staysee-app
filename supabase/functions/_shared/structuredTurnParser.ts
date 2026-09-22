@@ -155,7 +155,7 @@ function validateOpenFigure(value: unknown): StructuredOpenFigure | null {
 
 function looksLikeEmbeddedJsonObject(text: string): boolean {
   const trimmed = text.trim();
-  if (/^[\[{]/.test(trimmed) && /[\]}]$/.test(trimmed)) return true;
+  if (/^(?:[{]|\[)/.test(trimmed) && /[\]}]$/.test(trimmed)) return true;
   if (RESPONSE_JSON_LEAK_RE.test(text)) return true;
   return false;
 }

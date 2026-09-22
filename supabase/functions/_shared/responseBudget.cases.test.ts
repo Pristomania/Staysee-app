@@ -34,6 +34,7 @@ function detectResponseDepthOld(
   safetyCategory: SafetyCategory,
   recentHistory: Turn[]
 ): ResponseDepth {
+  void recentHistory;
   const trimmed = message.trim();
   const len = trimmed.length;
   const words = trimmed.split(/\s+/).filter(Boolean).length;

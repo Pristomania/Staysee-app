@@ -22,7 +22,7 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
-  const { navigateTo, setCurrentConversation, setMessages, conversations, setConversations } = useApp();
+  const { navigateTo, setMessages, conversations, setConversations } = useApp();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [limitReached, setLimitReached] = useState(false);

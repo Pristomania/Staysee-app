@@ -1,10 +1,10 @@
-export type MemoryV3ShadowMode = "off" | "shadow";
+export type MemoryV3ShadowMode = "off" | "shadow" | "lifecycle_shadow";
 
 export type MemoryV3ShadowEligibility =
-  | { eligible: true; mode: "shadow"; userId: string }
+  | { eligible: true; mode: "shadow" | "lifecycle_shadow"; userId: string }
   | {
       eligible: false;
-      mode: "off" | "shadow";
+      mode: MemoryV3ShadowMode;
       reason: "disabled" | "invalid_allowlist" | "user_not_allowlisted";
     };
 
@@ -52,7 +52,7 @@ function isCanonicalUuid(value: unknown): value is string {
 export function parseMemoryV3ShadowMode(
   raw: string | null | undefined,
 ): MemoryV3ShadowMode {
-  return raw === "shadow" ? "shadow" : "off";
+  return raw === "shadow" || raw === "lifecycle_shadow" ? raw : "off";
 }
 
 export function resolveMemoryV3ShadowEligibility(

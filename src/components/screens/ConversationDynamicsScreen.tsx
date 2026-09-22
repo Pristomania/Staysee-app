@@ -35,18 +35,6 @@ import type { Conversation } from '../../types';
 
 type ConvOption = Pick<Conversation, 'id' | 'title'>;
 
-function formatDateLong(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
 function formatNextAvailable(iso: string) {
   try {
     return new Date(iso).toLocaleDateString('ru-RU', {

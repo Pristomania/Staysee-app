@@ -127,8 +127,6 @@ export function ChatScreen() {
     setCurrentScreen,
     navigateTo,
     navigateBack,
-    setMemoryReturnScreen,
-    setNotesReturnScreen,
     setCurrentConversation,
     setMessages,
     setNotesCaptureLaunch,
@@ -495,42 +493,6 @@ export function ChatScreen() {
   ]);
 
   // ── Data fetchers ──────────────────────────────────────────────────────────────
-
-  async function fetchOrCreateDefaultRoom() {
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', user!.id)
-      .eq('is_active', true)
-      .order('last_message_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existing) {
-      setCurrentConversation(existing);
-    } else {
-      await createFreshRoom();
-    }
-  }
-
-  async function createFreshRoom() {
-    const { data: newRoom } = await supabase
-      .from('conversations')
-      .insert({ user_id: user!.id, title: '' })
-      .select()
-      .maybeSingle();
-    if (newRoom) {
-      setCurrentConversation(newRoom);
-      setIsNewRoom(true);
-      setMessages([{
-        id: 'greeting',
-        conversation_id: newRoom.id,
-        sender: 'ai',
-        content: GREETING,
-        created_at: new Date().toISOString(),
-      }]);
-    }
-    setLoading(false);
-  }
 
   function commitAssistantReply(finalMsg: Message, epoch: number) {
     if (epoch !== generationEpochRef.current) return;

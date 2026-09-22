@@ -41,7 +41,7 @@ const sections = [
 type DeleteState = 'idle' | 'confirming' | 'loading' | 'done' | 'error';
 
 export function PrivacyScreen() {
-  const { navigateBack, setConversations, setMessages, setCurrentConversation, legalReturnScreen } =
+  const { navigateBack, setConversations, setMessages, setCurrentConversation } =
     useApp();
   const { user } = useAuth();
   const { theme } = useTheme();

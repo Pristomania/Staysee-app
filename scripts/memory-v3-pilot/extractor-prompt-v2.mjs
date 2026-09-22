@@ -64,8 +64,8 @@ An emit decision requires at least one itemRef; an omit decision requires an emp
 Every emitted itemRef appears exactly once in the matching kind decision.
 Do not use one layer's decision as a reason to skip considering another layer.
 
-Every evidence row always contains exactly these five adapter fields and no others: itemRef, sourceMessageId, relation, supportType, episodeKey.
-The field supportType must be present. It must not be absent.
+Every evidence row has exactly itemRef, sourceMessageId, relation, supportType, episodeKey; supportType is always present.
+Final check: delete duplicate evidence rows sharing (itemRef, sourceMessageId, relation), even if supportType or episodeKey differs.
 
 supportType matrix:
 - recurrence + relation supports: supportType is exactly one of episode_observation | pattern_confirmation | scope_boundary
@@ -83,9 +83,7 @@ episodeKey matrix:
 - A later sentence that only confirms a pattern is pattern_confirmation, not a new episode
 - A sentence that only limits scope is scope_boundary, not a new episode and not automatically contradicts
 
-A recurrence requires at least two different real episode_observation supports.
-Retelling one event is not a recurrence.
-pattern_confirmation and scope_boundary do not count toward the two-episode quota.
+Before emitting candidate/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence.
 
 Epistemic layers are not mutually exclusive.
 A dialogue may yield several items of different kinds only when each item is a distinct epistemic layer, independently useful in a future conversation, not a paraphrase of another item, and admitted on its own gate.
@@ -107,12 +105,8 @@ Memory item admission requires all of the following at once:
 
 Event:
 - discrete user-lived occurrence, transition, milestone, bounded biographical episode, or an explicit standing decision the user reported as fact;
-- not a current difficulty;
-- not a mood;
-- not a general ability or inability;
-- not a denial of an assistant guess;
-- not an automatically created opposite biography;
-- not a disposable example whose only job is to support a recurrence.
+- not a current difficulty, mood, ability, denial of an assistant guess, invented opposite biography, or disposable recurrence-only example;
+- preserve source uncertainty (including "вроде"/maybe/seems); never emit a tentative report as a certain event.
 
 Recurrence:
 - at least two different real episodes;
