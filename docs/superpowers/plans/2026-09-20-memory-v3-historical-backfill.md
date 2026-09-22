@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a deterministic, review-first historical Memory V3 backfill that can inspect a complete account history, construct a draft state outside production, and atomically import only an explicitly reviewed initial state.
+**Goal:** Build a deterministic, review-first historical Memory V3 backfill that can inspect a complete account history, construct a draft state outside production through one audited Gemini-to-Mistral provider route, and atomically import only an explicitly reviewed initial state.
 
-**Architecture:** A frozen profile and pure chunk planner prepare single-conversation history chunks. A read-only source adapter builds a provider-free manifest; a sequential offline engine applies the existing extractor, reconciler, contracts, and reducer to an in-memory state; a separate service-role importer revalidates the source digest and invokes one initial-import-only SQL transaction.
+**Architecture:** A frozen profile and pure chunk planner prepare single-conversation history chunks. A history-only provider boundary composes the existing extractor and reconciler adapters with one fixed OpenRouter-managed route: Gemini 3.7 Flash first and Mistral Medium 3.5 only when Gemini cannot complete the same request. The sequential engine records the resolved model for every stage, while a separate service-role importer revalidates the source digest, route provenance, and one initial-import-only SQL transaction.
 
 **Tech Stack:** TypeScript, Node.js `node:test` through `tsx`, Supabase JavaScript client, PostgreSQL/PLpgSQL, existing Memory V3 prompt/transport/contract/reducer modules, PowerShell verification commands.
 
@@ -21,12 +21,12 @@
   chunk, 80,000 reconciler request bytes, 100 state items, 500 total state
   evidence rows, two model calls per chunk, and `maxActive = 1`.
 - Preserve exact provider privacy fields: `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
-- Preserve model `google/gemini-3.7-flash`, schema `memory-v3-lifecycle-state-v1`, pipeline `memory-v3-lifecycle-shadow-v1`, and reconciler `memory-v3-lifecycle-reconciler-v1`.
+- Preserve the exact ordered route `google/gemini-3.7-flash` then `mistralai/mistral-medium-3-5`, schema `memory-v3-lifecycle-state-v1`, pipeline `memory-v3-lifecycle-shadow-v1`, and reconciler `memory-v3-lifecycle-reconciler-v1`.
 - The implementation must not read real dialogue, call a remote Supabase project, read `.env`, call a provider, spend money, deploy, import, or activate the canary during Tasks 1-9. Task 7 may use only a disposable local Supabase stack; if its CLI/runtime is unavailable, stop instead of downloading dependencies or using production.
 - Tests use invented dialogue and generated synthetic UUIDs only. Repository fixtures contain no real user text, user identifier, email, key, token, or provider body.
-- There is no application-layer retry, repair, fallback, parallel execution, partial import, automatic paid execution, or automatic canary activation.
+- There is no application-layer retry, repair, second attempt, parallel execution, partial import, automatic paid execution, or automatic canary activation. The only fallback is OpenRouter-managed resolution inside the same client HTTP request to the exact frozen second model.
 - Raw source messages, prompts, raw provider responses, credentials, and thrown causes never enter public results, saved artifacts, stdout, stderr, or git.
-- Pricing is supplied only by a separately reviewed snapshot less than 24 hours old. No historical price in code or this plan is treated as current.
+- Pricing and endpoint capabilities are supplied only by separately reviewed snapshots for both route models, each less than 24 hours old. No historical price in code or this plan is treated as current.
 - Every task ends with a fresh targeted test, relevant regression tests, `git diff --check`, exact path review, and STOP.
 - Do not stage or commit at a task checkpoint. After separate explicit approval, stage only that task's files and use the listed `[agent]` commit subject.
 - Re-run the frozen-hash command from Task 1 after every task. Any unexpected frozen-file drift is a blocker.
@@ -55,11 +55,18 @@
 - `scripts/memory-v3-pilot/lifecycle-history-backfill-import.test.ts` — import preflight and no-provider tests.
 - `scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.ts` — import-only safe composition root.
 - `scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.test.ts` — file/env/RPC side-effect ordering tests.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-provider.ts` — history-only route composition, single-read response model observation, and routed extractor/reconciler adapters.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts` — exact route, one-client-call, provenance, privacy, and hostile-response tests.
 
 ### Modify
 
 - `scripts/memory-v3-pilot/README.md` — operator workflow, five gates, commands, privacy, rollback.
 - `scripts/memory-v3-pilot/memory-v3-dataset-v2.test.mjs` — documentation contract for the history-backfill section.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-profile.ts` and test — route constants, two-model endpoint snapshots, pessimistic price maximum.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-engine.ts` and test — resolved-model provenance and aggregate counts.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-cli.ts` and test — compose the history-only routed adapters.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts` and test — keep safe summaries aligned with the amended result contract.
+- `scripts/memory-v3-pilot/lifecycle-history-backfill-import.ts`, import-run, and tests — reject route/provenance/count tampering before RPC.
 
 ### Frozen
 
@@ -73,6 +80,12 @@
 - `supabase/migrations/20260920010000_036_memory_v3_lifecycle_read_canary.sql`
 - `docs/superpowers/specs/2026-09-20-memory-v3-historical-backfill-design.md`
 - Golden V1/V2 datasets and all `_tmp-*.json` files.
+
+## 2026-09-22 Amendment Execution Scope
+
+Tasks 1-9 are implemented and remain historical context. Commit `c142f5e163b7c2357a85e39b9c1157a603d5eab3` freezes the approved routing amendment in the design and its SHA lock. Only Tasks 10-13 below are active for the amendment. They do not authorize reading `.env`, sending real dialogue, calling OpenRouter, writing an artifact, importing, deploying, or activating the canary.
+
+The existing untracked diagnostic launcher and every `_tmp-*.json` artifact remain outside the plan's commits. The production live transports remain behaviorally unchanged; routed behavior exists only in the history composition root.
 
 ## Pre-Implementation Documentation Checkpoint
 
@@ -1486,9 +1499,427 @@ git commit -m "[agent] docs: document Memory V3 history backfill"
 
 ---
 
+### Task 10: Freeze the Two-Model Route and Pessimistic Budget
+
+**Files:**
+
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-profile.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts`
+
+**Interfaces:**
+
+- Consumes: approved design amendment, existing profile ID, 32-chunk manifest arithmetic.
+- Produces:
+
+```ts
+export const LIFECYCLE_HISTORY_PRIMARY_MODEL = 'google/gemini-3.7-flash' as const;
+export const LIFECYCLE_HISTORY_FALLBACK_MODEL = 'mistralai/mistral-medium-3-5' as const;
+export const LIFECYCLE_HISTORY_MODEL_ROUTE = Object.freeze([
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+] as const);
+
+export type LifecycleHistoryResolvedModel =
+  typeof LIFECYCLE_HISTORY_MODEL_ROUTE[number];
+
+export interface LifecycleHistoryEndpointSnapshot {
+  model: LifecycleHistoryResolvedModel;
+  inputUsdPerMillion: string;
+  outputUsdPerMillion: string;
+  observedAt: string;
+  sourceUrl: string;
+  supportedParameters: readonly [
+    'max_tokens',
+    'reasoning',
+    'reasoning_effort',
+    'response_format',
+    'structured_outputs',
+  ];
+  zdr: true;
+}
+
+export interface LifecycleHistoryRouteSnapshot {
+  route: readonly [LifecycleHistoryEndpointSnapshot, LifecycleHistoryEndpointSnapshot];
+}
+```
+
+- `LifecycleHistoryBackfillProfile` retains `model` as the primary compatibility field and adds `modelRoute` as the exact deeply frozen tuple.
+- `calculateLifecycleHistoryBudget` accepts `priceSnapshot: LifecycleHistoryRouteSnapshot` and uses the component-wise maximum input and output prices across both entries.
+
+- [ ] **Step 1: Write profile and budget RED tests**
+
+Add assertions equivalent to:
+
+```ts
+assert.deepEqual(profile.modelRoute, [
+  'google/gemini-3.7-flash',
+  'mistralai/mistral-medium-3-5',
+]);
+assert.equal(Object.isFrozen(profile.modelRoute), true);
+assert.equal(Object.isFrozen(snapshot.route), true);
+assert.equal(Object.isFrozen(snapshot.route[0]), true);
+assert.equal(Object.isFrozen(snapshot.route[1]), true);
+
+const budget = calculateLifecycleHistoryBudget({
+  chunkCount: 32,
+  priceSnapshot: snapshotWithRates({
+    gemini: ['0.75', '4.5'],
+    mistral: ['1.5', '7.5'],
+  }),
+  maxBudgetUsd: '5.12',
+});
+assert.equal(budget.maxRequests, 64);
+assert.equal(budget.ceilingUsd, '5.111808');
+```
+
+Cover reversed route order, duplicate/missing/extra route entry, unknown model, mismatched source URL model ID, stale or future observation time, `zdr: false`, missing/extra/reordered `supportedParameters`, accessor/proxy/cycle/symbol fields, and a hard maximum of `5.111807999` failing before any external dependency.
+
+- [ ] **Step 2: Run the profile tests and confirm behavioral RED**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts
+```
+
+Expected: existing tests remain green; new route/snapshot assertions fail because the profile still exposes one model and one price snapshot.
+
+- [ ] **Step 3: Implement the exact route and two-endpoint snapshot validator**
+
+Keep the current descriptor-safe boundary. Project exact own enumerable data fields only, validate the two tuple positions against the frozen route, deep-clone then deep-freeze the accepted snapshot, and compute maximum rates with integer nanodollar arithmetic. Do not add environment, filesystem, fetch, URL lookup, or runtime model selection.
+
+- [ ] **Step 4: Run targeted and history regression tests**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-frozen.test.ts
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
+```
+
+Expected: all pass; provider/network calls remain zero.
+
+- [ ] **Step 5: Verify scope and commit**
+
+Run `git diff --check`, verify the spec hash remains `FC773260D68317DF4B863B76CD0B7E9383B963E2500BAD575E086636A958B9AD`, and confirm only the profile pair plus protected unrelated paths changed. Then:
+
+```powershell
+git add -- scripts/memory-v3-pilot/lifecycle-history-backfill-profile.ts scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts
+git commit -m "[agent] feat: freeze history fallback route budget"
+```
+
+---
+
+### Task 11: Add the History-Only Single-Request Provider Route
+
+**Files:**
+
+- Create: `scripts/memory-v3-pilot/lifecycle-history-backfill-provider.ts`
+- Create: `scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts`
+
+**Interfaces:**
+
+- Consumes: frozen route from Task 10, injected `fetchImpl`, existing extractor and lifecycle reconciler adapters.
+- Produces:
+
+```ts
+export type LifecycleHistoryExtractorResult = MemoryV3TransportResult & {
+  resolvedModel: LifecycleHistoryResolvedModel;
+};
+
+export type LifecycleHistoryReconcilerResult = MemoryV3LifecycleTransportResult & {
+  resolvedModel: LifecycleHistoryResolvedModel;
+};
+
+export type LifecycleHistoryExtractorAdapter = (
+  request: Parameters<MemoryV3ModelAdapter>[0],
+) => Promise<LifecycleHistoryExtractorResult>;
+
+export function createLifecycleHistoryRoutedAdapters(input: {
+  apiKey: string;
+  fetchImpl: typeof fetch;
+}): {
+  extractorAdapter: LifecycleHistoryExtractorAdapter;
+  reconcilerAdapter: (
+    request: MemoryV3LifecycleReconcileRequest,
+  ) => Promise<LifecycleHistoryReconcilerResult>;
+};
+```
+
+The module wraps each existing adapter with a separate one-shot fetch observer. It replaces the reviewed outbound `model: primary` field with `models: [primary, fallback]`, preserves `require_parameters: true`, `data_collection: "deny"`, `zdr: true`, and validates the top-level provider response `model` while returning the same response text to the existing parser. It must consume `raw.text()` exactly once, never call `clone()`, and never issue a second client fetch for a stage.
+
+- [ ] **Step 1: Write provider-route RED tests**
+
+Create deterministic fake `Response` objects and assert:
+
+```ts
+assert.deepEqual(JSON.parse(fetch.calls[0].init.body).models, [
+  'google/gemini-3.7-flash',
+  'mistralai/mistral-medium-3-5',
+]);
+assert.equal('model' in JSON.parse(fetch.calls[0].init.body), false);
+assert.equal(fetch.calls.length, 1);
+assert.equal(response.textCalls, 1);
+assert.equal(result.resolvedModel, 'mistralai/mistral-medium-3-5');
+```
+
+Run these assertions for both extractor and reconciler. Also cover primary resolution, missing/unknown/boxed/accessor-backed model, malformed body, top-level provider error, HTTP error, inner fetch rejection, hostile request body, repeated adapter invocation, and exact privacy fields. Every failure must be branded and sanitized, with one or zero inner calls as appropriate.
+
+- [ ] **Step 2: Run the new test and confirm module RED**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts
+```
+
+Expected: `ERR_MODULE_NOT_FOUND` for the new provider module; the test file itself parses.
+
+- [ ] **Step 3: Implement the minimal routed composition**
+
+Use separate per-stage observer state so metadata cannot cross calls. The wrapper must validate and rewrite only the exact body produced by the existing adapter, call the injected fetch once, expose a response whose `text()` delegates once, validate the parsed response model without storing the body, and clear observer state in `finally`. No global fetch, environment, filesystem, Supabase, retry loop, timer loop, raw-body logging, or arbitrary model input is permitted.
+
+- [ ] **Step 4: Lock module isolation and request parity**
+
+In the same test file, parse import specifiers and require exactly:
+
+```ts
+[
+  'node:util/types',
+  './lifecycle-history-backfill-profile.ts',
+  './openrouter-adapter.mjs',
+  './openrouter-fetch-transport.mjs',
+  '../../supabase/functions/_shared/memoryV3/transport.ts',
+  '../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts',
+]
+```
+
+Assert both routed request bodies equal the existing adapter bodies after the single deterministic `model` to `models` substitution. Assert production `transport.ts` and `lifecycleTransport.ts` hashes remain unchanged.
+
+- [ ] **Step 5: Run targeted and regression tests**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts scripts/memory-v3-pilot/openrouter-adapter.test.mjs scripts/memory-v3-pilot/openrouter-fetch-transport.test.mjs
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
+```
+
+Expected: all pass; network and provider calls remain zero.
+
+- [ ] **Step 6: Verify scope and commit**
+
+Run syntax/typecheck, frozen hashes, privacy/import scan, and `git diff --check`. Confirm only the two provider files plus protected paths changed. Then:
+
+```powershell
+git add -- scripts/memory-v3-pilot/lifecycle-history-backfill-provider.ts scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts
+git commit -m "[agent] feat: add audited history provider fallback"
+```
+
+---
+
+### Task 12: Bind Resolved-Model Provenance into Engine, Artifact, and Import
+
+**Files:**
+
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-engine.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-engine.test.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-cli.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-cli.test.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-run.test.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-import.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-import.test.ts`
+- Modify: `scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.test.ts`
+
+**Interfaces:**
+
+- Consumes: Task 10 route snapshot and Task 11 routed adapters.
+- Produces these exact additions while retaining `model: primary` for compatibility:
+
+```ts
+modelRoute: readonly [
+  'google/gemini-3.7-flash',
+  'mistralai/mistral-medium-3-5',
+];
+providerModelFallbackCount: number;
+resolvedModelCounts: {
+  primary: number;
+  fallback: number;
+};
+chunks: Array<{
+  chunkId: string;
+  status: 'succeeded';
+  extractorResolvedModel: LifecycleHistoryResolvedModel;
+  reconcilerResolvedModel: LifecycleHistoryResolvedModel;
+  changed: boolean;
+  resultingStateRevision: number;
+  itemCount: number;
+  evidenceCount: number;
+  transitionTypes: string[];
+}>;
+```
+
+`providerModelFallbackCount` must equal `resolvedModelCounts.fallback`. The two counts must sum to `providerCallCount` for a complete result. `retryCount`, `repairCount`, and application-layer `fallbackCount` remain literal zero.
+
+- [ ] **Step 1: Write engine provenance RED tests**
+
+Extend fake adapters to return `resolvedModel`. Prove all-primary, mixed, and all-fallback results; extractor and reconciler provenance in canonical chunk order; missing/unknown/accessor/proxy resolved models fail at the correct transport stage; dry run exposes the frozen route with zero counts; and a failure returns no final state or review packet.
+
+Use exact invariants:
+
+```ts
+assert.equal(result.providerCallCount, 2 * result.manifest.chunkCount);
+assert.equal(
+  result.resolvedModelCounts.primary + result.resolvedModelCounts.fallback,
+  result.providerCallCount,
+);
+assert.equal(result.providerModelFallbackCount, result.resolvedModelCounts.fallback);
+assert.equal(result.retryCount, 0);
+assert.equal(result.repairCount, 0);
+assert.equal(result.fallbackCount, 0);
+```
+
+- [ ] **Step 2: Write CLI/run/import RED tests**
+
+Assert the CLI imports and calls only `createLifecycleHistoryRoutedAdapters`, the safe-output artifact includes per-stage provenance, and stdout contains only the aggregate fallback count. Recompute `semanticReviewPacket.payloadSha256` and prove changing one resolved model or either count changes the digest.
+
+For import, assert before `loadCurrentHead` or RPC:
+
+```ts
+for (const chunk of result.chunks) {
+  assert.ok(result.modelRoute.includes(chunk.extractorResolvedModel));
+  assert.ok(result.modelRoute.includes(chunk.reconcilerResolvedModel));
+}
+assert.equal(recomputedPrimary, result.resolvedModelCounts.primary);
+assert.equal(recomputedFallback, result.resolvedModelCounts.fallback);
+assert.equal(recomputedFallback, result.providerModelFallbackCount);
+```
+
+Cover missing/extra/reordered route, unknown model, changed chunk model, mismatched count, old single-model price snapshot, altered digest, and accessor/proxy/cycle fields. Every rejection yields zero RPC mutations and no provider dependency.
+
+- [ ] **Step 3: Run targeted tests and confirm behavioral RED**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-engine.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-cli.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-run.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-import.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.test.ts
+```
+
+Expected: old behavior tests stay green; new exact-field and provenance assertions fail, not syntax or setup.
+
+- [ ] **Step 4: Implement engine and artifact provenance**
+
+Extend descriptor-safe transport projection to require `resolvedModel`, increment counts only after a successful validated stage, and append both stage models to each completed chunk. Dry-run counts are zero. A failed stage cannot mint a completed chunk or importable artifact. `buildLifecycleHistoryReviewPacket` continues hashing `{ benchmarkResult, items }`, so all route and provenance fields are digest-bound automatically.
+
+- [ ] **Step 5: Implement CLI composition and import validation**
+
+Replace direct extractor/reconciler construction in the CLI with `createLifecycleHistoryRoutedAdapters({ apiKey, fetchImpl })`. Update exact field lists in the importer and recompute every model count from chunk rows. Preserve side-effect order: route/price/source/budget validation before API key and fetch; artifact/review/source validation before head load and RPC.
+
+- [ ] **Step 6: Run targeted and complete history regression**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-engine.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-cli.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-run.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-import.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.test.ts
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
+```
+
+Expected: all pass with fake fetch only.
+
+- [ ] **Step 7: Verify scope and commit**
+
+Run typecheck, frozen hashes, `git diff --check`, exact imports, secret/raw-dialogue scan, and explicit check that production live transports are unchanged. Stage only the nine listed files, then:
+
+```powershell
+git commit -m "[agent] feat: bind history fallback provenance"
+```
+
+---
+
+### Task 13: Document the Amended Workflow and Run the Full Offline Gate
+
+**Files:**
+
+- Modify: `scripts/memory-v3-pilot/README.md`
+- Modify: `scripts/memory-v3-pilot/memory-v3-dataset-v2.test.mjs`
+- Modify: `docs/superpowers/plans/2026-09-20-memory-v3-historical-backfill.md` only to mark Tasks 10-13 complete after evidence exists.
+
+**Interfaces:**
+
+- Consumes: completed Tasks 10-12.
+- Produces: operator documentation that distinguishes provider-managed model fallback from application retry and stops before any real call.
+
+- [ ] **Step 1: Write documentation-contract RED assertions**
+
+Require the history section to state all of these literal facts:
+
+```text
+google/gemini-3.7-flash
+mistralai/mistral-medium-3-5
+one client HTTP request per stage
+no application-layer retry or repair
+providerModelFallbackCount
+resolved model provenance is artifact-digest-bound
+$5.111808 is a reviewed example ceiling, not actual billing
+fresh two-model price and endpoint snapshots are required
+paid execution still requires separate Nastya authorization
+```
+
+- [ ] **Step 2: Run the documentation test and confirm RED**
+
+Run:
+
+```powershell
+node --test scripts/memory-v3-pilot/memory-v3-dataset-v2.test.mjs
+```
+
+Expected: the first missing amended statement fails while existing documentation assertions remain green.
+
+- [ ] **Step 3: Update README without adding an executable paid command**
+
+Document the exact route, provenance fields, fresh-snapshot gate, safe artifact handling, and the distinction between OpenRouter's internal fallback and application retries. Keep examples provider-free. Do not add a real path, user ID, source digest, secret name value, or ready-to-run paid command.
+
+- [ ] **Step 4: Run the full offline verification**
+
+Run:
+
+```powershell
+npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
+node --test scripts/memory-v3-pilot/*.test.mjs
+npx.cmd tsc --noEmit
+npm.cmd run lint
+npm.cmd run build
+git diff --check
+```
+
+Also run the repository's bundle verifier when its required production configuration is available; otherwise report the exact missing local prerequisite without claiming that verifier passed.
+
+- [ ] **Step 5: Run final safety and scope checks**
+
+Confirm:
+
+- no real `.env` read, remote Supabase call, OpenRouter call, paid request, artifact write, import, deploy, or canary change occurred;
+- the explicit safe-output target and its `.tmp` sibling remain absent;
+- production live transport hashes remain unchanged;
+- `_tmp-*.json`, `.superpowers/`, `supabase/.branches/`, `supabase/.temp/cli-latest`, and `narrativeEngine.cases.test.ts` remain unstaged;
+- the plan contains no unfinished placeholder marker, arbitrary model input, application retry loop, or silent source modification.
+
+- [ ] **Step 6: Commit documentation and STOP before paid execution**
+
+After tests prove the statements, mark only Tasks 10-13 checkboxes complete, stage the README, documentation test, and plan, then:
+
+```powershell
+git commit -m "[agent] docs: document audited history fallback"
+```
+
+Push the reviewed commits with an ordinary fast-forward push under Nastya's standing authorization. Then stop and request one explicit paid approval naming the freshly recomputed hard maximum. Do not reuse an earlier approval.
+
+---
+
 ## Final Operational STOP
 
-Completion of Tasks 1-9 produces tested software only. It does not authorize any real-data or production operation.
+Completion of Tasks 1-13 produces tested software only. It does not authorize another real-data or production operation.
 
 The next actions remain separate and sequential:
 
@@ -1496,8 +1927,8 @@ The next actions remain separate and sequential:
 2. ordinary push and PR only after explicit approval;
 3. merge only after review;
 4. run provider-free real source inspection only after explicit approval;
-5. verify a fresh provider price and obtain a paid maximum-budget authorization;
-6. perform at most one paid backfill with no application-layer retry;
+5. verify fresh prices and endpoint capabilities for both frozen models and obtain a paid maximum-budget authorization;
+6. perform at most one paid backfill with one client request per stage and no application-layer retry;
 7. review every resulting memory and create a digest-bound PASS decision;
 8. deploy migration 037 only after explicit approval and backup verification;
 9. import once only after explicit approval naming the artifact digest and target;
@@ -1524,6 +1955,13 @@ At no point may a worker infer permission for the next action from approval of t
 | fresh source revalidation before import | Task 8 |
 | canary remains off and rollback documented | Task 9 |
 | full offline regression and privacy gate | Task 9 |
+| exact ordered Gemini-to-Mistral route | Tasks 10-11 |
+| one client request with no application retry | Task 11 |
+| resolved model per extractor/reconciler stage | Task 12 |
+| provider fallback aggregate and digest binding | Task 12 |
+| importer recomputes model provenance | Task 12 |
+| two-endpoint capability/price snapshot and pessimistic budget | Task 10 |
+| amended operator documentation and final offline gate | Task 13 |
 
 ### Type consistency
 
@@ -1534,6 +1972,10 @@ At no point may a worker infer permission for the next action from approval of t
 - `LifecycleHistorySourceReader` is defined in Task 4 and injected into Tasks 6 and 8.
 - SQL RPC fields in Task 7 match `LifecycleHistoryImportClient.importInitialState` in Task 8.
 - Profile, schema, pipeline, model, byte caps, state caps, and execute flag use one spelling throughout.
+- `LifecycleHistoryResolvedModel` and `LIFECYCLE_HISTORY_MODEL_ROUTE` are defined in Task 10, consumed by the routed adapters in Task 11, and persisted/validated by Task 12.
+- `LifecycleHistoryRouteSnapshot` replaces the old single-model snapshot consistently in profile, engine, CLI, artifact, and importer boundaries.
+- `providerModelFallbackCount` is exactly `resolvedModelCounts.fallback`; both are recomputed from the two resolved model fields on every completed chunk before import.
+- `fallbackCount` remains the literal application-layer count `0` and is never reused for provider-managed routing.
 
 ### Scope result
 
