@@ -423,31 +423,56 @@ $$;
 CREATE OR REPLACE FUNCTION public.load_memory_v3_dialogue_read_context(
   p_user_id uuid, p_conversation_id uuid
 )
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' STABLE AS $$
-DECLARE
-  v_head public.memory_v3_dialogue_heads%ROWTYPE;
-  v_items jsonb;
-BEGIN
-  SELECT * INTO v_head FROM public.memory_v3_dialogue_heads
-  WHERE user_id = p_user_id AND conversation_id = p_conversation_id;
-  IF NOT FOUND THEN RETURN NULL; END IF;
-
-  SELECT COALESCE(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
-    'kind', i.kind, 'claim', i.claim,
-    'status', CASE WHEN i.kind = 'hypothesis' THEN 'supported' ELSE 'active' END,
-    'sensitivity', i.sensitivity, 'eventTimeStart', i.event_time_start,
-    'eventTimeEnd', i.event_time_end, 'alternative', i.alternative, 'updatedAt', i.updated_at)
-    ORDER BY i.updated_at DESC), '[]'::jsonb) INTO v_items
-  FROM public.memory_v3_dialogue_items i
-  WHERE i.user_id = p_user_id AND i.conversation_id = p_conversation_id
-    AND i.status IN ('active', 'supported')
-  LIMIT 12;
-
-  RETURN pg_catalog.jsonb_build_object(
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+  SELECT pg_catalog.jsonb_build_object(
     'schemaVersion', 'memory-v3-dialogue-read-context-v1',
-    'stateRevision', v_head.state_revision, 'items', v_items);
-END;
-$$;
+    'stateRevision', h.state_revision,
+    'items', COALESCE(projected.items, '[]'::jsonb)
+  )
+  FROM public.memory_v3_dialogue_heads AS h
+  LEFT JOIN LATERAL (
+    SELECT pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'kind', selected.kind,
+        'claim', selected.claim,
+        'status', selected.status,
+        'sensitivity', selected.sensitivity,
+        'eventTimeStart', selected.event_time_start,
+        'eventTimeEnd', selected.event_time_end,
+        'alternative', selected.alternative,
+        'updatedAt', selected.updated_at
+      )
+      ORDER BY selected.updated_at DESC, selected.memory_key COLLATE "C"
+    ) AS items
+    FROM (
+      SELECT
+        i.memory_key,
+        i.kind,
+        i.claim,
+        i.status,
+        i.sensitivity,
+        i.event_time_start,
+        i.event_time_end,
+        i.alternative,
+        i.updated_at
+      FROM public.memory_v3_dialogue_items AS i
+      WHERE i.user_id = p_user_id AND i.conversation_id = p_conversation_id
+        AND (
+          (i.kind = 'event' AND i.status = 'active')
+          OR (i.kind = 'recurrence' AND i.status = 'active')
+          OR (i.kind = 'hypothesis' AND i.status = 'supported')
+        )
+      ORDER BY i.updated_at DESC, i.memory_key COLLATE "C"
+      LIMIT 12
+    ) AS selected
+  ) AS projected ON true
+  WHERE h.user_id = p_user_id AND h.conversation_id = p_conversation_id;
+$function$;
 
 CREATE OR REPLACE FUNCTION public.purge_memory_v3_dialogue_runs()
 RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
