@@ -49,7 +49,7 @@ describe("Memory V3 production prompt boundary", () => {
   it("forbids duplicate evidence identity tuples", () => {
     assert.match(
       MEMORY_V3_SYSTEM_INSTRUCTION,
-      /Each \(itemRef, sourceMessageId, relation\) tuple may appear at most once in evidence\./,
+      /Final check: delete duplicate evidence rows sharing \(itemRef, sourceMessageId, relation\), even if supportType or episodeKey differs\./,
     );
   });
 

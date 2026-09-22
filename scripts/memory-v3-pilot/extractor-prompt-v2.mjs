@@ -65,7 +65,7 @@ Every emitted itemRef appears exactly once in the matching kind decision.
 Do not use one layer's decision as a reason to skip considering another layer.
 
 Every evidence row has exactly itemRef, sourceMessageId, relation, supportType, episodeKey; supportType is always present.
-Each (itemRef, sourceMessageId, relation) tuple may appear at most once in evidence.
+Final check: delete duplicate evidence rows sharing (itemRef, sourceMessageId, relation), even if supportType or episodeKey differs.
 
 supportType matrix:
 - recurrence + relation supports: supportType is exactly one of episode_observation | pattern_confirmation | scope_boundary

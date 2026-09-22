@@ -350,7 +350,7 @@ describe('V2 extractor evidence schema', () => {
     );
     assertContains(
       system,
-      'Each (itemRef, sourceMessageId, relation) tuple may appear at most once in evidence.',
+      'Final check: delete duplicate evidence rows sharing (itemRef, sourceMessageId, relation), even if supportType or episodeKey differs.',
     );
     for (const field of ADAPTER_ITEM_FIELDS) {
       assertQuotedField(system, field);
