@@ -7,6 +7,7 @@ import {
 } from "../_shared/conversationRetrieval.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { buildContextPacket, buildContextPrompt, stampMemoryUsed } from "../_shared/context.ts";
+import { fetchCrossMemoryEnabled } from "../_shared/profilePrefs.ts";
 import {
   buildMemoryContinuityPrompt,
   buildRecallGroundingPrompt,
@@ -967,13 +968,19 @@ Deno.serve(async (req: Request) => {
           userId,
         });
         if (lifecycleReadEligibility.eligible) {
-          try {
-            const loaded = await createMemoryV3LifecycleReadStore(
-              makeServiceClient(),
-            ).load(lifecycleReadEligibility.userId);
-            if (loaded !== null) lifecycleCrossMemory = loaded;
-          } catch {
-            logMemoryV3LifecycleReadDiagnostic("load_failed");
+          const crossMemoryOnForRead = await fetchCrossMemoryEnabled(
+            makeServiceClient(),
+            lifecycleReadEligibility.userId,
+          );
+          if (crossMemoryOnForRead) {
+            try {
+              const loaded = await createMemoryV3LifecycleReadStore(
+                makeServiceClient(),
+              ).load(lifecycleReadEligibility.userId);
+              if (loaded !== null) lifecycleCrossMemory = loaded;
+            } catch {
+              logMemoryV3LifecycleReadDiagnostic("load_failed");
+            }
           }
         }
 
@@ -1597,7 +1604,12 @@ Deno.serve(async (req: Request) => {
       const memoryV3ShadowPromise = conversationId &&
           result.content &&
           !isCalmFallbackContent
-        ? (() => {
+        ? (async () => {
+            const crossMemoryOnForWrite = await fetchCrossMemoryEnabled(
+              svc,
+              userId,
+            );
+            if (!crossMemoryOnForWrite) return;
             const memoryV3Mode = parseMemoryV3ShadowMode(
               Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
             );
