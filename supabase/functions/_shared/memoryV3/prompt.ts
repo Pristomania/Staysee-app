@@ -73,8 +73,8 @@ An emit decision requires at least one itemRef; an omit decision requires an emp
 Every emitted itemRef appears exactly once in the matching kind decision.
 Do not use one layer's decision as a reason to skip considering another layer.
 
-Every evidence row always contains exactly these five adapter fields and no others: itemRef, sourceMessageId, relation, supportType, episodeKey.
-The field supportType must be present. It must not be absent.
+Every evidence row has exactly itemRef, sourceMessageId, relation, supportType, episodeKey; supportType is always present.
+Each (itemRef, sourceMessageId, relation) tuple may appear at most once in evidence.
 
 supportType matrix:
 - recurrence + relation supports: supportType is exactly one of episode_observation | pattern_confirmation | scope_boundary

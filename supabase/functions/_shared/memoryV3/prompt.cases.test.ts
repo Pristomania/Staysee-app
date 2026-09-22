@@ -46,6 +46,13 @@ describe("Memory V3 production prompt boundary", () => {
     assert.equal(request.system, MEMORY_V3_SYSTEM_INSTRUCTION);
   });
 
+  it("forbids duplicate evidence identity tuples", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Each \(itemRef, sourceMessageId, relation\) tuple may appear at most once in evidence\./,
+    );
+  });
+
   it("does not mutate input and creates new allowlisted message objects", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);

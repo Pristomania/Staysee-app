@@ -346,9 +346,12 @@ describe('V2 extractor evidence schema', () => {
     ]);
     assertContains(
       system,
-      'Every evidence row always contains exactly these five adapter fields and no others: itemRef, sourceMessageId, relation, supportType, episodeKey.',
+      'Every evidence row has exactly itemRef, sourceMessageId, relation, supportType, episodeKey; supportType is always present.',
     );
-    assertContains(system, 'The field supportType must be present. It must not be absent.');
+    assertContains(
+      system,
+      'Each (itemRef, sourceMessageId, relation) tuple may appear at most once in evidence.',
+    );
     for (const field of ADAPTER_ITEM_FIELDS) {
       assertQuotedField(system, field);
     }
