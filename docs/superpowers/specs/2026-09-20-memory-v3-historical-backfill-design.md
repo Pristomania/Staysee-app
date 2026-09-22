@@ -118,7 +118,16 @@ The engine reuses these production semantics rather than creating a second memor
 - `lifecyclePrompt.ts` for extractor and reconciler requests;
 - `lifecycleContract.ts` for schema, proposal, item, evidence, and size limits;
 - `lifecycleReducer.ts` for deterministic state transitions and memory keys;
-- `transport.ts` and `lifecycleTransport.ts` for provider boundaries and safe diagnostics.
+- `openrouter-adapter.mjs` plus `openrouter-fetch-transport.mjs` for the
+  history-only extractor provider boundary;
+- `lifecycleTransport.ts` for the reconciler provider boundary and safe diagnostics.
+
+The normal production extractor `transport.ts` remains frozen at 1,200 output
+tokens. It is not widened for the backfill. The history-only extractor uses the
+same layered response contract, `reasoning: { effort: "low" }`, and privacy
+routing, but allows 4,096 output tokens. This is required because the selected
+Gemini model has mandatory reasoning and a real backfill response exhausted the
+1,200-token combined reasoning/output allowance with `finish_reason: "length"`.
 
 It does not call `runMemoryV3LifecycleShadow`, `reserve_memory_v3_lifecycle_shadow_run`, or `apply_memory_v3_lifecycle_shadow_state` during draft construction because those are production persistence boundaries.
 
@@ -145,6 +154,8 @@ The profile is a deeply frozen code constant. It fixes:
 - maximum 60 source messages per chunk;
 - history-only 40,000-byte extractor request cap; the normal live lifecycle
   request cap remains 20,000 bytes;
+- history-only 4,096-token maximum output allowance for the extractor; the
+  normal live extractor and reconciler remain capped at 1,200 tokens;
 - exact 80,000-byte reconciler request cap;
 - maximum 100 state items and 500 total evidence rows;
 - maximum two provider calls per chunk;
@@ -283,7 +294,9 @@ Source inspection determines the exact chunk count without provider calls. The c
 - exact chunk count;
 - maximum two calls per chunk;
 - frozen reserved input tokens per call;
-- frozen maximum output tokens per call;
+- the history profile's conservative maximum of 4,096 output tokens per call,
+  applied to every possible call in the ceiling even though the reconciler
+  remains capped at 1,200;
 - the fresh input and output prices.
 
 The CLI requires an explicit decimal `--max-budget-usd`. Paid execution is permitted only when:

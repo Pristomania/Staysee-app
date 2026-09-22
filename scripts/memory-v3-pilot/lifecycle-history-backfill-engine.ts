@@ -57,7 +57,7 @@ export interface LifecycleHistoryBackfillResult {
   budget: {
     maxRequests: number;
     reservedInputTokensPerCall: 32_768;
-    maxOutputTokensPerCall: 1_200;
+    maxOutputTokensPerCall: 4_096;
     ceilingUsd: string;
     hardMaxUsd: string;
     gate: 'PASS';

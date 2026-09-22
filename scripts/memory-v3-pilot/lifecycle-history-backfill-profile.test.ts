@@ -96,7 +96,7 @@ describe('history backfill profile', () => {
     assert.equal(first.maxActive, 1);
   });
 
-  it('copies lifecycle limits except for the history-only extractor envelope', () => {
+  it('copies lifecycle limits except for the history-only extractor envelope and output cap', () => {
     const profile = getLifecycleHistoryBackfillProfile(
       LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
     );
@@ -112,7 +112,7 @@ describe('history backfill profile', () => {
       maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
       maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
       reservedInputTokensPerCall: MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
-      maxOutputTokensPerCall: MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
+      maxOutputTokensPerCall: 4_096,
       maxStateItems: MEMORY_V3_LIFECYCLE_MAX_STATE_ITEMS,
       maxStateEvidence: MEMORY_V3_LIFECYCLE_MAX_STATE_EVIDENCE,
       maxCallsPerChunk: MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,
@@ -121,6 +121,7 @@ describe('history backfill profile', () => {
     });
     assert.equal(MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES, 20_000);
     assert.equal(LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES, 40_000);
+    assert.equal(MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL, 1_200);
   });
 
   it('rejects unknown strings, objects, boxed strings, symbols, arrays, and null', () => {
@@ -261,13 +262,13 @@ describe('exact budget arithmetic', () => {
       calculateLifecycleHistoryBudget({
         chunkCount: 2,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '0.12',
+        maxBudgetUsd: '0.16',
       }),
       {
         maxRequests: 4,
-        ceilingNanodollars: decimalNanodollars('0.116304'),
-        ceilingUsd: '0.116304',
-        hardMaxNanodollars: decimalNanodollars('0.12'),
+        ceilingNanodollars: decimalNanodollars('0.159744'),
+        ceilingUsd: '0.159744',
+        hardMaxNanodollars: decimalNanodollars('0.16'),
         gate: 'PASS',
       },
     );
@@ -328,14 +329,14 @@ describe('exact budget arithmetic', () => {
       calculateLifecycleHistoryBudget({
         chunkCount: 1,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '0.058151999',
+        maxBudgetUsd: '0.079871999',
       })
     );
     captureError(() =>
       calculateLifecycleHistoryBudget({
         chunkCount: 1,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '5.8152e-2',
+        maxBudgetUsd: '7.9872e-2',
       })
     );
   });
@@ -344,7 +345,7 @@ describe('exact budget arithmetic', () => {
     const result = calculateLifecycleHistoryBudget({
       chunkCount: 1,
       priceSnapshot: FRESH_SNAPSHOT,
-      maxBudgetUsd: '0.058152',
+      maxBudgetUsd: '0.079872',
     });
 
     assert.deepEqual(Reflect.ownKeys(result), [

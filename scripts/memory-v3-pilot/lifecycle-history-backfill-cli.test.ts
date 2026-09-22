@@ -230,9 +230,11 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     assert.equal(result.semanticReviewPacket?.schemaVersion, 'memory-v3-lifecycle-history-review-packet-v1');
     assert.equal(fetchImpl.calls.length, 2);
     assert.equal(log.indexOf('read:OPENROUTER_API_KEY') > log.indexOf('source:messages'), true);
-    for (const call of fetchImpl.calls) {
+    for (const [index, call] of fetchImpl.calls.entries()) {
       const body = JSON.parse(String(call.init.body));
       assert.equal(body.model, 'google/gemini-3.7-flash');
+      assert.equal(body.max_tokens, index === 0 ? 4_096 : 1_200);
+      assert.deepEqual(body.reasoning, { effort: 'low' });
       assert.deepEqual(body.provider, {
         allow_fallbacks: true,
         require_parameters: true,

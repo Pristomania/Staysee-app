@@ -145,7 +145,7 @@ const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/messages.ts': '46A3189C840082F52A8FEEC662F35D4FFE571B39D6FE8E5292C872FC0A01FF73',
   'supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql': '1BC7454D2140156ACEA1DE0F8FC89959D0590A26BC3E73BBDDC3774E5FE5AB21',
   'supabase/migrations/20260920010000_036_memory_v3_lifecycle_read_canary.sql': 'A81C4C01C5059E3F259F5D141825404B4F00623D980EEA67B9751B20EB070099',
-  'docs/superpowers/specs/2026-09-20-memory-v3-historical-backfill-design.md': '3B5B49DADFE56385E6CBDFB171C5666F3C51EBCB4E160EC8EEE1B8A7D0C283EA',
+  'docs/superpowers/specs/2026-09-20-memory-v3-historical-backfill-design.md': '8A77338C51E853882AAC5DE9741918502314D87E2AAC735D1C141DA81C9E0758',
 });
 ```
 
@@ -221,7 +221,7 @@ export interface LifecycleHistoryBackfillProfile {
   maxExtractorRequestBytes: 40_000;
   maxReconcilerRequestBytes: 80_000;
   reservedInputTokensPerCall: 32_768;
-  maxOutputTokensPerCall: 1_200;
+  maxOutputTokensPerCall: 4_096;
   maxStateItems: 100;
   maxStateEvidence: 500;
   maxCallsPerChunk: 2;
@@ -691,7 +691,7 @@ export interface LifecycleHistoryBackfillResult {
   budget: {
     maxRequests: number;
     reservedInputTokensPerCall: 32_768;
-    maxOutputTokensPerCall: 1_200;
+    maxOutputTokensPerCall: 4_096;
     ceilingUsd: string;
     hardMaxUsd: string;
     gate: 'PASS';
@@ -773,7 +773,7 @@ Cover:
 - state begins empty and flows from one chunk to the next;
 - event correction, cross-conversation recurrence, hypothesis rejection, assistant denial, injection, and no-worthy-memory scenarios reach exact authored final state;
 - exact request byte caps are rechecked before calls;
-- provider privacy fields remain exact in both request transports, including the frozen transport-level `allow_fallbacks: true`; there is still no application-layer retry, repair, or fallback;
+- provider privacy fields remain exact in both request transports, including `allow_fallbacks: true`; the history-only extractor uses the configurable V2 layered adapter with `max_tokens: 4096`, while the frozen live extractor and reconciler remain at 1,200; there is still no application-layer retry, repair, or fallback;
 - failure in a middle chunk stops subsequent chunks and sets `finalState` to `null`;
 - no importable partial result is returned;
 - request `2N + 1` is blocked before adapter invocation;

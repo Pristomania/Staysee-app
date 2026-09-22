@@ -246,8 +246,8 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     assert.deepEqual(result.budget, {
       maxRequests: 4,
       reservedInputTokensPerCall: 32_768,
-      maxOutputTokensPerCall: 1_200,
-      ceilingUsd: '0.116304',
+      maxOutputTokensPerCall: 4_096,
+      ceilingUsd: '0.159744',
       hardMaxUsd: '1',
       gate: 'PASS',
     });
@@ -354,8 +354,8 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     assert.deepEqual(result.budget, {
       maxRequests: 4,
       reservedInputTokensPerCall: 32_768,
-      maxOutputTokensPerCall: 1_200,
-      ceilingUsd: '0.116304',
+      maxOutputTokensPerCall: 4_096,
+      ceilingUsd: '0.159744',
       hardMaxUsd: '1',
       gate: 'PASS',
     });

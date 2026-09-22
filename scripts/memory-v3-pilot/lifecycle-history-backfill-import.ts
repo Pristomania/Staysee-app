@@ -299,7 +299,7 @@ function validateArtifact(value: unknown): {
     typeof price.outputUsdPerMillion !== 'string' || !isValidDateTime(price.observedAt) ||
     typeof price.sourceUrl !== 'string' || !price.sourceUrl.startsWith('https://') ||
     budget.maxRequests !== manifest.maxProviderCalls ||
-    budget.reservedInputTokensPerCall !== 32_768 || budget.maxOutputTokensPerCall !== 1_200 ||
+    budget.reservedInputTokensPerCall !== 32_768 || budget.maxOutputTokensPerCall !== 4_096 ||
     typeof budget.ceilingUsd !== 'string' || typeof budget.hardMaxUsd !== 'string' ||
     budget.gate !== 'PASS' || semanticReview.status !== 'required' ||
     result.execute !== true ||

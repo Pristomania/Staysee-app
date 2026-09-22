@@ -3,7 +3,6 @@ import { isProxy } from 'node:util/types';
 import { MEMORY_V3_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import {
   MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,
-  MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
   MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
   MEMORY_V3_LIFECYCLE_MAX_STATE_EVIDENCE,
@@ -18,6 +17,7 @@ import {
 export const LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID =
   'memory-v3-lifecycle-history-backfill-v1' as const;
 export const LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES = 40_000 as const;
+export const LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL = 4_096 as const;
 
 export interface LifecycleHistoryBackfillProfile {
   profileId: typeof LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID;
@@ -30,7 +30,7 @@ export interface LifecycleHistoryBackfillProfile {
   maxExtractorRequestBytes: 40_000;
   maxReconcilerRequestBytes: 80_000;
   reservedInputTokensPerCall: 32_768;
-  maxOutputTokensPerCall: 1_200;
+  maxOutputTokensPerCall: 4_096;
   maxStateItems: 100;
   maxStateEvidence: 500;
   maxCallsPerChunk: 2;
@@ -112,7 +112,7 @@ const PROFILE = deepFreeze<LifecycleHistoryBackfillProfile>({
   maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
   maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
   reservedInputTokensPerCall: MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
-  maxOutputTokensPerCall: MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
+  maxOutputTokensPerCall: LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
   maxStateItems: MEMORY_V3_LIFECYCLE_MAX_STATE_ITEMS,
   maxStateEvidence: MEMORY_V3_LIFECYCLE_MAX_STATE_EVIDENCE,
   maxCallsPerChunk: MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,

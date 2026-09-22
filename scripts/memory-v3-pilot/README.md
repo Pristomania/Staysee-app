@@ -386,6 +386,13 @@ bytes so that one indivisible older user message is not truncated. This is a
 history-only envelope: the normal live lifecycle path remains capped at 20,000
 bytes. Both paths retain the same 32,768-input-token accounting reservation.
 
+The history-only extractor allows at most 4,096 output tokens because Gemini
+3.7 Flash requires reasoning and a real backfill response ended with
+`finish_reason: "length"` under the normal 1,200-token allowance. The live
+extractor and reconciler remain capped at 1,200. Budget preflight conservatively
+prices all possible history calls at 4,096 output tokens; this is an upper bound,
+not actual billing.
+
 The workflow has five deliberately separate gates:
 
 1. Inspect the source without a model and record its exact manifest and digest.
