@@ -87,6 +87,8 @@ Tasks 1-9 are implemented and remain historical context. Commit `c142f5e163b7c23
 
 The existing untracked diagnostic launcher and every `_tmp-*.json` artifact remain outside the plan's commits. The production live transports remain behaviorally unchanged; routed behavior exists only in the history composition root.
 
+Tasks 10-12 are one cross-contract compatibility batch because the price snapshot, adapter return value, result artifact, CLI, and importer must change atomically. Each task has its own RED/GREEN target, but no intermediate commit or claim of full-suite GREEN is allowed. Task 12 runs the complete migration gate and creates the single code commit for all files from Tasks 10-12.
+
 ## Pre-Implementation Documentation Checkpoint
 
 Before Task 1, review the spec and this plan as documentation-only changes. No implementation file may exist yet. After separate explicit approval, create two documentation commits so their hashes remain independently reviewable:
@@ -1588,25 +1590,19 @@ Expected: existing tests remain green; new route/snapshot assertions fail becaus
 
 Keep the current descriptor-safe boundary. Project exact own enumerable data fields only, validate the two tuple positions against the frozen route, deep-clone then deep-freeze the accepted snapshot, and compute maximum rates with integer nanodollar arithmetic. Do not add environment, filesystem, fetch, URL lookup, or runtime model selection.
 
-- [ ] **Step 4: Run targeted and history regression tests**
+- [ ] **Step 4: Run the targeted profile contract tests**
 
 Run:
 
 ```powershell
 npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-frozen.test.ts
-npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
 ```
 
-Expected: all pass; provider/network calls remain zero.
+Expected: the profile pair passes; provider/network calls remain zero. Downstream history tests are not claimed GREEN until Task 12 migrates their fixtures and exact-field validators.
 
-- [ ] **Step 5: Verify scope and commit**
+- [ ] **Step 5: Verify the Task 10 checkpoint without staging or committing**
 
-Run `git diff --check`, verify the spec hash remains `FC773260D68317DF4B863B76CD0B7E9383B963E2500BAD575E086636A958B9AD`, and confirm only the profile pair plus protected unrelated paths changed. Then:
-
-```powershell
-git add -- scripts/memory-v3-pilot/lifecycle-history-backfill-profile.ts scripts/memory-v3-pilot/lifecycle-history-backfill-profile.test.ts
-git commit -m "[agent] feat: freeze history fallback route budget"
-```
+Run `git diff --check`, verify the spec hash remains `FC773260D68317DF4B863B76CD0B7E9383B963E2500BAD575E086636A958B9AD`, and confirm only the profile pair plus protected unrelated paths changed. Leave the index empty and continue directly to Task 11.
 
 ---
 
@@ -1696,25 +1692,19 @@ In the same test file, parse import specifiers and require exactly:
 
 Assert both routed request bodies equal the existing adapter bodies after the single deterministic `model` to `models` substitution. Assert production `transport.ts` and `lifecycleTransport.ts` hashes remain unchanged.
 
-- [ ] **Step 5: Run targeted and regression tests**
+- [ ] **Step 5: Run the routed-provider target and unchanged adapter regressions**
 
 Run:
 
 ```powershell
 npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts scripts/memory-v3-pilot/openrouter-adapter.test.mjs scripts/memory-v3-pilot/openrouter-fetch-transport.test.mjs
-npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
 ```
 
 Expected: all pass; network and provider calls remain zero.
 
-- [ ] **Step 6: Verify scope and commit**
+- [ ] **Step 6: Verify the Task 11 checkpoint without staging or committing**
 
-Run syntax/typecheck, frozen hashes, privacy/import scan, and `git diff --check`. Confirm only the two provider files plus protected paths changed. Then:
-
-```powershell
-git add -- scripts/memory-v3-pilot/lifecycle-history-backfill-provider.ts scripts/memory-v3-pilot/lifecycle-history-backfill-provider.test.ts
-git commit -m "[agent] feat: add audited history provider fallback"
-```
+Run syntax checks for the provider pair, frozen hashes, privacy/import scan, and `git diff --check`. Confirm only the Task 10 pair and Task 11 pair plus protected paths changed. Leave the index empty and continue directly to Task 12.
 
 ---
 
@@ -1829,10 +1819,10 @@ Expected: all pass with fake fetch only.
 
 - [ ] **Step 7: Verify scope and commit**
 
-Run typecheck, frozen hashes, `git diff --check`, exact imports, secret/raw-dialogue scan, and explicit check that production live transports are unchanged. Stage only the nine listed files, then:
+Run typecheck, frozen hashes, `git diff --check`, exact imports, secret/raw-dialogue scan, and explicit check that production live transports are unchanged. Stage the Task 10 profile pair, Task 11 provider pair, and the nine Task 12 files only, then:
 
 ```powershell
-git commit -m "[agent] feat: bind history fallback provenance"
+git commit -m "[agent] feat: add audited history provider fallback"
 ```
 
 ---
