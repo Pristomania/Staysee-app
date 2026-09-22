@@ -31,6 +31,8 @@
 
 This task has no automated test of its own (SQL migrations in this repo are verified by the RPC-consuming TypeScript store's tests in Task 3, exactly like `lifecycleStore.cases.test.ts` verifies `034_memory_v3_lifecycle_shadow.sql` without a dedicated SQL test file). Correctness here is verified by careful mirroring of the existing, already-production-proven migration plus the two review findings from the design doc.
 
+**Execution note (found and fixed during Task 1 itself, not anticipated when this plan was written):** the SQL block below was drafted from a partial read of `034_memory_v3_lifecycle_shadow.sql` (only its first ~20 and last ~120 lines) and was missing real content on first pass: `apply`'s actual algorithm (full state replace with server-side evidence-ownership verification and a server-computed `actual_changed`/revision integrity check, not a naive per-item upsert), the `runs` table's full audit/usage columns and terminal-shape constraints, `BEFORE DELETE` triggers on `messages`/`conversations` that clean up orphaned items, a daily `purge_memory_v3_*_runs()` cron job, and table-level `REVOKE`/`GRANT` alongside the RLS-with-no-policies pattern. The actual file written to disk (`supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql`) is the corrected, complete version — read it directly rather than trusting the SQL block below as authoritative; it predates the fix. Verified structurally complete via: `diff <(grep -o '[a-z_]*(' supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql | sort -u) <(grep -o '[a-z_]*(' supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql | sort -u)` — every function/table family in the original has a matching renamed counterpart, plus the intentionally-added `load_memory_v3_dialogue_read_context` (which in the original lives in a later migration, 036, and is folded into domain 1 here since this design needs it from the start).
+
 - [ ] **Step 1: Write the migration file**
 
 Base this file on `supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql` plus the daily-cap value from `supabase/migrations/20260922120000_038_memory_v3_full_rollout_alerts.sql` (cap = 1/day, matching current production — domain 2 will decide later whether this should become a per-user aggregate across dialogues instead; this task keeps the same literal value `1` per `(user_id, conversation_id)` since no per-user aggregate mechanism is being built in this domain).
@@ -362,13 +364,13 @@ REVOKE ALL ON FUNCTION public.load_memory_v3_dialogue_read_context(uuid, uuid) F
 GRANT EXECUTE ON FUNCTION public.load_memory_v3_dialogue_read_context(uuid, uuid) TO service_role;
 ```
 
-- [ ] **Step 2: Sanity-check the file against the two mirrored originals**
+- [x] **Step 2: Sanity-check the file against the two mirrored originals**
 
 Run: `diff <(grep -o '[a-z_]*(' supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql | sort -u) <(grep -o '[a-z_]*(' supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql | sort -u)`
 
-Expected: only function-name differences (`reserve_memory_v3_lifecycle_shadow_run` vs `reserve_memory_v3_dialogue_run` etc.) and the new `p_conversation_id` parameter on `apply_memory_v3_dialogue_state` — no unexplained structural diff.
+Done — confirmed only naming differences plus the intentionally-added `load_memory_v3_dialogue_read_context` (see execution note above).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql
