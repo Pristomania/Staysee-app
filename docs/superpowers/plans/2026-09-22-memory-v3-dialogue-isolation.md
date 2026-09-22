@@ -587,6 +587,8 @@ Verify the code mirror is complete before moving on:
 Run: `diff <(grep -oE '^export (const|type|function|interface) [A-Za-z0-9_]+' supabase/functions/_shared/memoryV3/lifecycleContract.ts | sed 's/Lifecycle/Dialogue/;s/lifecycle/dialogue/') <(grep -oE '^export (const|type|function|interface) [A-Za-z0-9_]+' supabase/functions/_shared/memoryV3/dialogueContract.ts)`
 Expected: no output (every exported name in the original has a matching renamed counterpart in the mirror).
 
+**Done.** `conversationId` added as a real, validated field throughout (state, evidence identity, extraction item scope). Test mirror reuses the same 80-scenario synthetic dataset retagged onto one fixed conversation; found and fixed a real evidence-identity collision in a handful of scenarios that reuse placeholder `sourceMessageId`s across synthetic conversations (folded the original conversationId into the retagged sourceMessageId to keep identities unique — a test-fixture fix, not a contract fix, since production sourceMessageId is always a globally unique UUID). 107/107 new tests pass; full suite 570/571 (same pre-existing unrelated failure). Commit `ac28673`.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `dialogueStore.cases.test.ts` by copying `lifecycleStore.cases.test.ts` in full, then applying exactly these mechanical replacements (verify with `grep -c` before/after that nothing else changed):
@@ -773,22 +775,15 @@ git commit -m "[agent] feat: add dialogue-scoped Memory V3 read store"
 
 **Files:** none new — this task only verifies and packages Tasks 1–4.
 
-- [ ] **Step 1: Full baseline comparison**
+- [x] **Step 1: Full baseline comparison**
 
-Run against `main` (via `git stash` if any uncommitted changes remain, otherwise `git log` confirms all 4 tasks are committed on the feature branch):
-```bash
-git branch  # confirm current branch is the feature branch created for this plan, off main
-"/c/Users/Я/.deno/bin/deno.exe" check --node-modules-dir=none --no-config supabase/functions/staysee-chat/index.ts 2>&1 | grep "Found.*error"
-npx --yes tsx --test $(find supabase/functions/_shared -name "*.cases.test.ts") 2>&1 | tail -15
-```
-Expected: identical `deno check` error count to `main`'s baseline (41, per this session's earlier measurement — reconfirm rather than trusting the stale number); test suite pass count equal to `main`'s baseline plus every new test case added across Tasks 2–4, with the same single pre-existing `narrativeEngine.cases.test.ts` failure and no others.
+Done: `deno check` on `staysee-chat/index.ts` — 41/41, unchanged from main throughout every task. Full `_shared` suite — 603/604 (main's 461 baseline + 142 new cases across Tasks 2–4), same single pre-existing `narrativeEngine.cases.test.ts` failure, confirmed unrelated on unmodified main earlier this session.
 
-- [ ] **Step 2: Confirm zero live wiring**
+- [x] **Step 2: Confirm zero live wiring**
 
-Run: `git diff main --stat` and `git diff main -- supabase/functions/staysee-chat/index.ts`
-Expected: `staysee-chat/index.ts` shows in the stat only if Task 2 touched it for the `normalizeMemoryV3LayeredResponse` call-site update (adding the 4th argument) — no other change to that file. No `.env`, no `supabase/config.toml`, no migration other than `039_memory_v3_dialogue_isolation.sql` in the diff.
+Done, and better than planned: `staysee-chat/index.ts` does not appear in `git diff main --stat` at all — Task 2's call-site update landed in `shadowRunner.ts` and `lifecycleShadowRunner.ts` instead (two production call sites were found, not the one the plan anticipated). No `.env`, no `supabase/config.toml`, only one migration (`039_memory_v3_dialogue_isolation.sql`) in the diff.
 
-- [ ] **Step 3: Push and open PR**
+- [x] **Step 3: Push and open PR**
 
 ```bash
 git push -u origin <feature-branch-name>
