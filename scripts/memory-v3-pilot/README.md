@@ -372,3 +372,54 @@ Migration 036, Edge Function deployment, server-side configuration, and canary
 activation each require separate explicit authorization. This offline
 implementation does not claim that Migration 036 is applied, that the canary is
 active, or that real-user behavior and production quality have been validated.
+
+## Memory V3 historical backfill
+
+Historical backfill is an **offline, review-first** workflow for preparing the
+initial semantic-memory state from older conversations. It is not automatic production learning.
+The current live loader covers one conversation and at
+most 60 recent messages; backfill inspection instead reads the complete eligible
+history up to an explicit cutoff with zero provider calls.
+
+The workflow has five deliberately separate gates:
+
+1. Inspect the source without a model and record its exact manifest and digest.
+2. Before any paid execution, approve a fresh price snapshot, the exact source
+   digest, the explicit execute flag, and the hard budget.
+3. Run the model sequentially and save one digest-bound artifact for review.
+4. Record a human PASS tied to the payload digest, with one explicit PASS row
+   for every final memory.
+5. Deploy the import migration, perform the reviewed initial import, and later
+   activate reading only under separate approvals.
+
+There is no application-layer retry, repair, fallback, or parallel calls. The
+frozen provider transport retains its existing `allow_fallbacks: true` routing
+field; that provider-routing field is not an application retry. The artifact
+contains normalized personal memory and must remain untracked. It must never be
+committed, printed to logs, or copied into test fixtures.
+
+The import is initial-only, service-role-only, and atomic. It revalidates the
+complete artifact and human decision, re-inspects the source, binds every fresh
+chunk to its actual messages, requires an empty revision-zero target, and then
+uses one database RPC. The read canary remains off until a separate activation.
+Rollback means turning the read mode off, not destructive deletion of the
+imported lifecycle state.
+
+Provider-free source-inspection command shape (non-executable placeholders):
+
+```text
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --inspect-source --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <reviewed-hard-budget>
+```
+
+The paid execution and import command shapes below are documentation examples,
+not authorization to run them:
+
+```text
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --expected-source-sha256 <approved-digest> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <approved-hard-budget> --safe-output-file <untracked-history-backfill.json>
+npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.ts --import-reviewed-history --artifact-file <untracked-history-backfill.json> --review-file <review-decision.json> --import-id <new-import-uuid>
+```
+
+Real source inspection, paid execution, migration deployment, import, and
+activation are separate approvals. Exact paid commands are generated only after
+inspection and review; no example above supplies a real user ID, secret, current
+price, production path, or authorization value.
