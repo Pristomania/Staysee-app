@@ -425,6 +425,25 @@ describe("Memory V3 lifecycle read context wiring", () => {
     }
   });
 
+  test("all mode loads isolated lifecycle state for every authenticated account", async () => {
+    for (const userId of [ALLOWED_USER_ID, OTHER_USER_ID]) {
+      const result = await runLifecycleReadHarness({
+        rawMode: "all",
+        rawAllowedUserId: undefined,
+        userId,
+        load: async (loadedUserId) => {
+          assert.equal(loadedUserId, userId);
+          return lifecycleContext();
+        },
+      });
+      assert.deepEqual(result.loadCalls, [userId]);
+      assert.equal(result.prompt.includes("LEGACY_CROSS_MEMORY_SENTINEL"), false);
+      assert.deepEqual(result.stampedIds, []);
+      assert.deepEqual(result.diagnostics, []);
+      assert.equal(result.providerCalls, 1);
+    }
+  });
+
   test("loaded non-empty and authoritative empty contexts suppress legacy stamping", async () => {
     for (const context of [
       lifecycleContext(),

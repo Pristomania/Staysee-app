@@ -37,6 +37,11 @@ import {
   runMemoryV3LifecycleShadowBackgroundSafely,
 } from "../_shared/memoryV3/lifecycleShadowRunner.ts";
 import {
+  sendMemoryV3TelegramAlertSafely,
+  type MemoryV3TelegramAlertDiagnostic,
+  type MemoryV3TelegramAlertPath,
+} from "../_shared/memoryV3/telegramAlert.ts";
+import {
   explainSummaryRefreshDecision,
   isMemoryDiagConversation,
   memoryDiagStart,
@@ -285,6 +290,29 @@ function logMemoryV3LifecycleReadDiagnostic(
   code: MemoryV3LifecycleReadDiagnostic,
 ): void {
   console.error(`[memory-v3-lifecycle-read] ${code}`);
+  scheduleMemoryV3TelegramAlert("read", code);
+}
+
+function scheduleMemoryV3TelegramAlert(
+  path: MemoryV3TelegramAlertPath,
+  diagnosticCode: MemoryV3TelegramAlertDiagnostic,
+): void {
+  EdgeRuntime.waitUntil(
+    sendMemoryV3TelegramAlertSafely({
+      botToken: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN"),
+      chatId: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID"),
+      path,
+      diagnosticCode,
+      reserveAlertKey: async (key) => {
+        const { data, error } = await makeServiceClient().rpc(
+          "reserve_memory_v3_alert_window",
+          { p_alert_key: key },
+        );
+        return error === null && data === true;
+      },
+      fetchImpl: globalThis.fetch.bind(globalThis),
+    }),
+  );
 }
 
 // ── Model call with fallback ─────────────────────────────────────────────────
@@ -1573,7 +1601,8 @@ Deno.serve(async (req: Request) => {
             const memoryV3Mode = parseMemoryV3ShadowMode(
               Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
             );
-            return memoryV3Mode === "lifecycle_shadow"
+            return (memoryV3Mode === "lifecycle_shadow" ||
+                memoryV3Mode === "lifecycle_all")
               ? runMemoryV3LifecycleShadowBackgroundSafely(
                   () => runMemoryV3LifecycleShadow({
                     rawMode: memoryV3Mode,
@@ -1592,7 +1621,10 @@ Deno.serve(async (req: Request) => {
                       fetchImpl: globalThis.fetch.bind(globalThis),
                     }),
                   }, (code) => console.error("[memory-v3-lifecycle-transport]", code)),
-                  (code) => console.error("[memory-v3-lifecycle-shadow]", code),
+                  (code) => {
+                    console.error("[memory-v3-lifecycle-shadow]", code);
+                    scheduleMemoryV3TelegramAlert("write", code);
+                  },
                 )
               : memoryV3Mode === "shadow"
               ? runMemoryV3ShadowBackgroundSafely(

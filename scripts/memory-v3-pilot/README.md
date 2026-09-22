@@ -373,6 +373,38 @@ activation each require separate explicit authorization. This offline
 implementation does not claim that Migration 036 is applied, that the canary is
 active, or that real-user behavior and production quality have been validated.
 
+## Memory V3 full-product rollout
+
+The guarded all-account activation values are exactly
+`STAYSEE_MEMORY_V3_MODE=lifecycle_all` for learning and
+`STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE=all` for reading. Eligibility still
+requires a canonical authenticated account UUID, and every database operation is
+scoped to that account. The cost boundary is one lifecycle reservation per
+authenticated account per UTC day, with at most two sequential provider calls
+for a reserved run and no retry or repair.
+
+A missing lifecycle head preserves legacy memory. A valid authoritative empty
+lifecycle state suppresses legacy resurrection. Any read or write failure is
+isolated from the chat reply: the reply continues through the existing fallback
+path, while the lifecycle failure keeps only a closed diagnostic code.
+
+Operator alerts use the server-only secrets
+`STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN` and
+`STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID`. An alert is reserved at most once per
+exact path and diagnostic per UTC hour. It contains only the fixed Memory V3
+label, `read` or `write`, the closed diagnostic code, and UTC time. It contains
+no user ID, conversation ID, message, claim, evidence, memory content, raw error,
+token, or chat ID. Alert failure never blocks, retries, or changes the reply.
+
+Production proof uses one existing secondary account after deployment; no
+artificial account is required for correctness because the offline suite already
+checks multiple isolated UUIDs. Rollback to the previous canary is
+`STAYSEE_MEMORY_V3_MODE=lifecycle_shadow` together with
+`STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE=canary` and the retained exact canary UUID
+secrets. Emergency rollback is `STAYSEE_MEMORY_V3_MODE=off` and
+`STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE=off`. A separate paid provider benchmark
+is not authorized by this rollout and still requires explicit approval.
+
 ## Memory V3 historical backfill
 
 Historical backfill is an **offline, review-first** workflow for preparing the

@@ -43,7 +43,7 @@ describe("staysee-chat lifecycle shadow composition", () => {
     const dispatch = text.slice(mode, settle);
     assert.match(
       dispatch,
-      /return memoryV3Mode === "lifecycle_shadow"[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
+      /return \(memoryV3Mode === "lifecycle_shadow" \|\|[\s\S]*?memoryV3Mode === "lifecycle_all"\)[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
     );
     assert.match(text.slice(settle), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
   });

@@ -284,9 +284,16 @@ export async function runMemoryV3LifecycleShadow(
     return failed(null, "unknown_failure");
   }
 
-  if (projected.rawMode !== "lifecycle_shadow") return { status: "skipped", reason: "disabled" };
-  if (typeof projected.rawAllowedUserId !== "string" || !UUID.test(projected.rawAllowedUserId) ||
-      projected.userId !== projected.rawAllowedUserId) {
+  if (projected.rawMode !== "lifecycle_shadow" && projected.rawMode !== "lifecycle_all") {
+    return { status: "skipped", reason: "disabled" };
+  }
+  if (projected.rawMode === "lifecycle_shadow" &&
+      (typeof projected.rawAllowedUserId !== "string" || !UUID.test(projected.rawAllowedUserId) ||
+        projected.userId !== projected.rawAllowedUserId)) {
+    return { status: "skipped", reason: "user_not_allowlisted" };
+  }
+  if (projected.rawMode === "lifecycle_all" &&
+      (typeof projected.userId !== "string" || !UUID.test(projected.userId))) {
     return { status: "skipped", reason: "user_not_allowlisted" };
   }
 
