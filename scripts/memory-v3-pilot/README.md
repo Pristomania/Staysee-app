@@ -393,6 +393,25 @@ extractor and reconciler remain capped at 1,200. Budget preflight conservatively
 prices all possible history calls at 4,096 output tokens; this is an upper bound,
 not actual billing.
 
+The approved history-only model route is `google/gemini-3.7-flash` followed by
+`mistralai/mistral-medium-3-5`. OpenRouter may resolve that route internally,
+but the application still makes one client HTTP request per stage and performs
+no application-layer retry or repair. This route does not change the live
+single-model lifecycle path.
+
+Every successful extractor and reconciler stage records the model OpenRouter
+actually resolved. `providerModelFallbackCount` is recomputed from those stage
+records, and the resolved model provenance is artifact-digest-bound. The
+application retry, repair, and fallback counters remain zero; provider-managed
+model selection is reported separately and cannot be presented as an
+application retry.
+
+For the reviewed 32-chunk example, `$5.111808 is a reviewed example ceiling,
+not actual billing`. Fresh two-model price and endpoint snapshots are required
+before every real execution. Paid execution still requires separate Nastya
+authorization even when all offline tests pass and the calculated hard maximum
+is within the reviewed limit.
+
 The workflow has five deliberately separate gates:
 
 1. Inspect the source without a model and record its exact manifest and digest.

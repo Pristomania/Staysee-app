@@ -442,6 +442,15 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.match(prose, /fresh price snapshot.*exact source digest.*explicit execute flag.*hard budget/i);
     assert.match(prose, /no application-layer retry, repair, fallback, or parallel calls/i);
     assert.match(prose, /allow_fallbacks: true/);
+    assert.match(section, /google\/gemini-3\.7-flash/);
+    assert.match(section, /mistralai\/mistral-medium-3-5/);
+    assert.match(prose, /one client HTTP request per stage/i);
+    assert.match(prose, /no application-layer retry or repair/i);
+    assert.match(section, /providerModelFallbackCount/);
+    assert.match(prose, /resolved model provenance is artifact-digest-bound/i);
+    assert.match(prose, /\$5\.111808 is a reviewed example ceiling, not actual billing/i);
+    assert.match(prose, /fresh two-model price and endpoint snapshots are required/i);
+    assert.match(prose, /paid execution still requires separate Nastya authorization/i);
     assert.match(prose, /normalized personal memory.*must remain untracked/i);
     assert.match(prose, /human PASS.*payload digest.*one explicit PASS row.*every final memory/i);
     assert.match(prose, /initial-only.*service-role-only.*atomic/i);

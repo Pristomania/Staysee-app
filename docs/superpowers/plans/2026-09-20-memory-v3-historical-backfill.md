@@ -1548,7 +1548,7 @@ export interface LifecycleHistoryRouteSnapshot {
 - `LifecycleHistoryBackfillProfile` retains `model` as the primary compatibility field and adds `modelRoute` as the exact deeply frozen tuple.
 - `calculateLifecycleHistoryBudget` accepts `priceSnapshot: LifecycleHistoryRouteSnapshot` and uses the component-wise maximum input and output prices across both entries.
 
-- [ ] **Step 1: Write profile and budget RED tests**
+- [x] **Step 1: Write profile and budget RED tests**
 
 Add assertions equivalent to:
 
@@ -1576,7 +1576,7 @@ assert.equal(budget.ceilingUsd, '5.111808');
 
 Cover reversed route order, duplicate/missing/extra route entry, unknown model, mismatched source URL model ID, stale or future observation time, `zdr: false`, missing/extra/reordered `supportedParameters`, accessor/proxy/cycle/symbol fields, and a hard maximum of `5.111807999` failing before any external dependency.
 
-- [ ] **Step 2: Run the profile tests and confirm behavioral RED**
+- [x] **Step 2: Run the profile tests and confirm behavioral RED**
 
 Run:
 
@@ -1586,11 +1586,11 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-profile.te
 
 Expected: existing tests remain green; new route/snapshot assertions fail because the profile still exposes one model and one price snapshot.
 
-- [ ] **Step 3: Implement the exact route and two-endpoint snapshot validator**
+- [x] **Step 3: Implement the exact route and two-endpoint snapshot validator**
 
 Keep the current descriptor-safe boundary. Project exact own enumerable data fields only, validate the two tuple positions against the frozen route, deep-clone then deep-freeze the accepted snapshot, and compute maximum rates with integer nanodollar arithmetic. Do not add environment, filesystem, fetch, URL lookup, or runtime model selection.
 
-- [ ] **Step 4: Run the targeted profile contract tests**
+- [x] **Step 4: Run the targeted profile contract tests**
 
 Run:
 
@@ -1600,7 +1600,7 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-profile.te
 
 Expected: the profile pair passes; provider/network calls remain zero. Downstream history tests are not claimed GREEN until Task 12 migrates their fixtures and exact-field validators.
 
-- [ ] **Step 5: Verify the Task 10 checkpoint without staging or committing**
+- [x] **Step 5: Verify the Task 10 checkpoint without staging or committing**
 
 Run `git diff --check`, verify the spec hash remains `FC773260D68317DF4B863B76CD0B7E9383B963E2500BAD575E086636A958B9AD`, and confirm only the profile pair plus protected unrelated paths changed. Leave the index empty and continue directly to Task 11.
 
@@ -1644,7 +1644,7 @@ export function createLifecycleHistoryRoutedAdapters(input: {
 
 The module wraps each existing adapter with a separate one-shot fetch observer. It replaces the reviewed outbound `model: primary` field with `models: [primary, fallback]`, preserves `require_parameters: true`, `data_collection: "deny"`, `zdr: true`, and validates the top-level provider response `model` while returning the same response text to the existing parser. It must consume `raw.text()` exactly once, never call `clone()`, and never issue a second client fetch for a stage.
 
-- [ ] **Step 1: Write provider-route RED tests**
+- [x] **Step 1: Write provider-route RED tests**
 
 Create deterministic fake `Response` objects and assert:
 
@@ -1661,7 +1661,7 @@ assert.equal(result.resolvedModel, 'mistralai/mistral-medium-3-5');
 
 Run these assertions for both extractor and reconciler. Also cover primary resolution, missing/unknown/boxed/accessor-backed model, malformed body, top-level provider error, HTTP error, inner fetch rejection, hostile request body, repeated adapter invocation, and exact privacy fields. Every failure must be branded and sanitized, with one or zero inner calls as appropriate.
 
-- [ ] **Step 2: Run the new test and confirm module RED**
+- [x] **Step 2: Run the new test and confirm module RED**
 
 Run:
 
@@ -1671,11 +1671,11 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.t
 
 Expected: `ERR_MODULE_NOT_FOUND` for the new provider module; the test file itself parses.
 
-- [ ] **Step 3: Implement the minimal routed composition**
+- [x] **Step 3: Implement the minimal routed composition**
 
 Use separate per-stage observer state so metadata cannot cross calls. The wrapper must validate and rewrite only the exact body produced by the existing adapter, call the injected fetch once, expose a response whose `text()` delegates once, validate the parsed response model without storing the body, and clear observer state in `finally`. No global fetch, environment, filesystem, Supabase, retry loop, timer loop, raw-body logging, or arbitrary model input is permitted.
 
-- [ ] **Step 4: Lock module isolation and request parity**
+- [x] **Step 4: Lock module isolation and request parity**
 
 In the same test file, parse import specifiers and require exactly:
 
@@ -1692,7 +1692,7 @@ In the same test file, parse import specifiers and require exactly:
 
 Assert both routed request bodies equal the existing adapter bodies after the single deterministic `model` to `models` substitution. Assert production `transport.ts` and `lifecycleTransport.ts` hashes remain unchanged.
 
-- [ ] **Step 5: Run the routed-provider target and unchanged adapter regressions**
+- [x] **Step 5: Run the routed-provider target and unchanged adapter regressions**
 
 Run:
 
@@ -1702,7 +1702,7 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-provider.t
 
 Expected: all pass; network and provider calls remain zero.
 
-- [ ] **Step 6: Verify the Task 11 checkpoint without staging or committing**
+- [x] **Step 6: Verify the Task 11 checkpoint without staging or committing**
 
 Run syntax checks for the provider pair, frozen hashes, privacy/import scan, and `git diff --check`. Confirm only the Task 10 pair and Task 11 pair plus protected paths changed. Leave the index empty and continue directly to Task 12.
 
@@ -1752,7 +1752,7 @@ chunks: Array<{
 
 `providerModelFallbackCount` must equal `resolvedModelCounts.fallback`. The two counts must sum to `providerCallCount` for a complete result. `retryCount`, `repairCount`, and application-layer `fallbackCount` remain literal zero.
 
-- [ ] **Step 1: Write engine provenance RED tests**
+- [x] **Step 1: Write engine provenance RED tests**
 
 Extend fake adapters to return `resolvedModel`. Prove all-primary, mixed, and all-fallback results; extractor and reconciler provenance in canonical chunk order; missing/unknown/accessor/proxy resolved models fail at the correct transport stage; dry run exposes the frozen route with zero counts; and a failure returns no final state or review packet.
 
@@ -1770,7 +1770,7 @@ assert.equal(result.repairCount, 0);
 assert.equal(result.fallbackCount, 0);
 ```
 
-- [ ] **Step 2: Write CLI/run/import RED tests**
+- [x] **Step 2: Write CLI/run/import RED tests**
 
 Assert the CLI imports and calls only `createLifecycleHistoryRoutedAdapters`, the safe-output artifact includes per-stage provenance, and stdout contains only the aggregate fallback count. Recompute `semanticReviewPacket.payloadSha256` and prove changing one resolved model or either count changes the digest.
 
@@ -1788,7 +1788,7 @@ assert.equal(recomputedFallback, result.providerModelFallbackCount);
 
 Cover missing/extra/reordered route, unknown model, changed chunk model, mismatched count, old single-model price snapshot, altered digest, and accessor/proxy/cycle fields. Every rejection yields zero RPC mutations and no provider dependency.
 
-- [ ] **Step 3: Run targeted tests and confirm behavioral RED**
+- [x] **Step 3: Run targeted tests and confirm behavioral RED**
 
 Run:
 
@@ -1798,15 +1798,15 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-engine.tes
 
 Expected: old behavior tests stay green; new exact-field and provenance assertions fail, not syntax or setup.
 
-- [ ] **Step 4: Implement engine and artifact provenance**
+- [x] **Step 4: Implement engine and artifact provenance**
 
 Extend descriptor-safe transport projection to require `resolvedModel`, increment counts only after a successful validated stage, and append both stage models to each completed chunk. Dry-run counts are zero. A failed stage cannot mint a completed chunk or importable artifact. `buildLifecycleHistoryReviewPacket` continues hashing `{ benchmarkResult, items }`, so all route and provenance fields are digest-bound automatically.
 
-- [ ] **Step 5: Implement CLI composition and import validation**
+- [x] **Step 5: Implement CLI composition and import validation**
 
 Replace direct extractor/reconciler construction in the CLI with `createLifecycleHistoryRoutedAdapters({ apiKey, fetchImpl })`. Update exact field lists in the importer and recompute every model count from chunk rows. Preserve side-effect order: route/price/source/budget validation before API key and fetch; artifact/review/source validation before head load and RPC.
 
-- [ ] **Step 6: Run targeted and complete history regression**
+- [x] **Step 6: Run targeted and complete history regression**
 
 Run:
 
@@ -1817,7 +1817,7 @@ npx.cmd tsx --test scripts/memory-v3-pilot/lifecycle-history-backfill-*.test.ts
 
 Expected: all pass with fake fetch only.
 
-- [ ] **Step 7: Verify scope and commit**
+- [x] **Step 7: Verify scope and commit**
 
 Run typecheck, frozen hashes, `git diff --check`, exact imports, secret/raw-dialogue scan, and explicit check that production live transports are unchanged. Stage the Task 10 profile pair, Task 11 provider pair, and the nine Task 12 files only, then:
 
@@ -1840,7 +1840,7 @@ git commit -m "[agent] feat: add audited history provider fallback"
 - Consumes: completed Tasks 10-12.
 - Produces: operator documentation that distinguishes provider-managed model fallback from application retry and stops before any real call.
 
-- [ ] **Step 1: Write documentation-contract RED assertions**
+- [x] **Step 1: Write documentation-contract RED assertions**
 
 Require the history section to state all of these literal facts:
 
@@ -1856,7 +1856,7 @@ fresh two-model price and endpoint snapshots are required
 paid execution still requires separate Nastya authorization
 ```
 
-- [ ] **Step 2: Run the documentation test and confirm RED**
+- [x] **Step 2: Run the documentation test and confirm RED**
 
 Run:
 
@@ -1866,11 +1866,11 @@ node --test scripts/memory-v3-pilot/memory-v3-dataset-v2.test.mjs
 
 Expected: the first missing amended statement fails while existing documentation assertions remain green.
 
-- [ ] **Step 3: Update README without adding an executable paid command**
+- [x] **Step 3: Update README without adding an executable paid command**
 
 Document the exact route, provenance fields, fresh-snapshot gate, safe artifact handling, and the distinction between OpenRouter's internal fallback and application retries. Keep examples provider-free. Do not add a real path, user ID, source digest, secret name value, or ready-to-run paid command.
 
-- [ ] **Step 4: Run the full offline verification**
+- [x] **Step 4: Run the full offline verification**
 
 Run:
 
@@ -1885,7 +1885,7 @@ git diff --check
 
 Also run the repository's bundle verifier when its required production configuration is available; otherwise report the exact missing local prerequisite without claiming that verifier passed.
 
-- [ ] **Step 5: Run final safety and scope checks**
+- [x] **Step 5: Run final safety and scope checks**
 
 Confirm:
 
@@ -1895,7 +1895,7 @@ Confirm:
 - `_tmp-*.json`, `.superpowers/`, `supabase/.branches/`, `supabase/.temp/cli-latest`, and `narrativeEngine.cases.test.ts` remain unstaged;
 - the plan contains no unfinished placeholder marker, arbitrary model input, application retry loop, or silent source modification.
 
-- [ ] **Step 6: Commit documentation and STOP before paid execution**
+- [x] **Step 6: Commit documentation and STOP before paid execution**
 
 After tests prove the statements, mark only Tasks 10-13 checkboxes complete, stage the README, documentation test, and plan, then:
 
