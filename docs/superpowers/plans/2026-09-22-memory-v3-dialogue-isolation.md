@@ -31,6 +31,8 @@
 
 This task has no automated test of its own (SQL migrations in this repo are verified by the RPC-consuming TypeScript store's tests in Task 3, exactly like `lifecycleStore.cases.test.ts` verifies `034_memory_v3_lifecycle_shadow.sql` without a dedicated SQL test file). Correctness here is verified by careful mirroring of the existing, already-production-proven migration plus the two review findings from the design doc.
 
+**Execution note (found and fixed during Task 1 itself, not anticipated when this plan was written):** the SQL block below was drafted from a partial read of `034_memory_v3_lifecycle_shadow.sql` (only its first ~20 and last ~120 lines) and was missing real content on first pass: `apply`'s actual algorithm (full state replace with server-side evidence-ownership verification and a server-computed `actual_changed`/revision integrity check, not a naive per-item upsert), the `runs` table's full audit/usage columns and terminal-shape constraints, `BEFORE DELETE` triggers on `messages`/`conversations` that clean up orphaned items, a daily `purge_memory_v3_*_runs()` cron job, and table-level `REVOKE`/`GRANT` alongside the RLS-with-no-policies pattern. The actual file written to disk (`supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql`) is the corrected, complete version — read it directly rather than trusting the SQL block below as authoritative; it predates the fix. Verified structurally complete via: `diff <(grep -o '[a-z_]*(' supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql | sort -u) <(grep -o '[a-z_]*(' supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql | sort -u)` — every function/table family in the original has a matching renamed counterpart, plus the intentionally-added `load_memory_v3_dialogue_read_context` (which in the original lives in a later migration, 036, and is folded into domain 1 here since this design needs it from the start).
+
 - [ ] **Step 1: Write the migration file**
 
 Base this file on `supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql` plus the daily-cap value from `supabase/migrations/20260922120000_038_memory_v3_full_rollout_alerts.sql` (cap = 1/day, matching current production — domain 2 will decide later whether this should become a per-user aggregate across dialogues instead; this task keeps the same literal value `1` per `(user_id, conversation_id)` since no per-user aggregate mechanism is being built in this domain).
@@ -362,13 +364,13 @@ REVOKE ALL ON FUNCTION public.load_memory_v3_dialogue_read_context(uuid, uuid) F
 GRANT EXECUTE ON FUNCTION public.load_memory_v3_dialogue_read_context(uuid, uuid) TO service_role;
 ```
 
-- [ ] **Step 2: Sanity-check the file against the two mirrored originals**
+- [x] **Step 2: Sanity-check the file against the two mirrored originals**
 
 Run: `diff <(grep -o '[a-z_]*(' supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql | sort -u) <(grep -o '[a-z_]*(' supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql | sort -u)`
 
-Expected: only function-name differences (`reserve_memory_v3_lifecycle_shadow_run` vs `reserve_memory_v3_dialogue_run` etc.) and the new `p_conversation_id` parameter on `apply_memory_v3_dialogue_state` — no unexplained structural diff.
+Done — confirmed only naming differences plus the intentionally-added `load_memory_v3_dialogue_read_context` (see execution note above).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260922130000_039_memory_v3_dialogue_isolation.sql
@@ -585,6 +587,8 @@ Verify the code mirror is complete before moving on:
 Run: `diff <(grep -oE '^export (const|type|function|interface) [A-Za-z0-9_]+' supabase/functions/_shared/memoryV3/lifecycleContract.ts | sed 's/Lifecycle/Dialogue/;s/lifecycle/dialogue/') <(grep -oE '^export (const|type|function|interface) [A-Za-z0-9_]+' supabase/functions/_shared/memoryV3/dialogueContract.ts)`
 Expected: no output (every exported name in the original has a matching renamed counterpart in the mirror).
 
+**Done.** `conversationId` added as a real, validated field throughout (state, evidence identity, extraction item scope). Test mirror reuses the same 80-scenario synthetic dataset retagged onto one fixed conversation; found and fixed a real evidence-identity collision in a handful of scenarios that reuse placeholder `sourceMessageId`s across synthetic conversations (folded the original conversationId into the retagged sourceMessageId to keep identities unique — a test-fixture fix, not a contract fix, since production sourceMessageId is always a globally unique UUID). 107/107 new tests pass; full suite 570/571 (same pre-existing unrelated failure). Commit `ac28673`.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `dialogueStore.cases.test.ts` by copying `lifecycleStore.cases.test.ts` in full, then applying exactly these mechanical replacements (verify with `grep -c` before/after that nothing else changed):
@@ -771,22 +775,15 @@ git commit -m "[agent] feat: add dialogue-scoped Memory V3 read store"
 
 **Files:** none new — this task only verifies and packages Tasks 1–4.
 
-- [ ] **Step 1: Full baseline comparison**
+- [x] **Step 1: Full baseline comparison**
 
-Run against `main` (via `git stash` if any uncommitted changes remain, otherwise `git log` confirms all 4 tasks are committed on the feature branch):
-```bash
-git branch  # confirm current branch is the feature branch created for this plan, off main
-"/c/Users/Я/.deno/bin/deno.exe" check --node-modules-dir=none --no-config supabase/functions/staysee-chat/index.ts 2>&1 | grep "Found.*error"
-npx --yes tsx --test $(find supabase/functions/_shared -name "*.cases.test.ts") 2>&1 | tail -15
-```
-Expected: identical `deno check` error count to `main`'s baseline (41, per this session's earlier measurement — reconfirm rather than trusting the stale number); test suite pass count equal to `main`'s baseline plus every new test case added across Tasks 2–4, with the same single pre-existing `narrativeEngine.cases.test.ts` failure and no others.
+Done: `deno check` on `staysee-chat/index.ts` — 41/41, unchanged from main throughout every task. Full `_shared` suite — 603/604 (main's 461 baseline + 142 new cases across Tasks 2–4), same single pre-existing `narrativeEngine.cases.test.ts` failure, confirmed unrelated on unmodified main earlier this session.
 
-- [ ] **Step 2: Confirm zero live wiring**
+- [x] **Step 2: Confirm zero live wiring**
 
-Run: `git diff main --stat` and `git diff main -- supabase/functions/staysee-chat/index.ts`
-Expected: `staysee-chat/index.ts` shows in the stat only if Task 2 touched it for the `normalizeMemoryV3LayeredResponse` call-site update (adding the 4th argument) — no other change to that file. No `.env`, no `supabase/config.toml`, no migration other than `039_memory_v3_dialogue_isolation.sql` in the diff.
+Done, and better than planned: `staysee-chat/index.ts` does not appear in `git diff main --stat` at all — Task 2's call-site update landed in `shadowRunner.ts` and `lifecycleShadowRunner.ts` instead (two production call sites were found, not the one the plan anticipated). No `.env`, no `supabase/config.toml`, only one migration (`039_memory_v3_dialogue_isolation.sql`) in the diff.
 
-- [ ] **Step 3: Push and open PR**
+- [x] **Step 3: Push and open PR**
 
 ```bash
 git push -u origin <feature-branch-name>

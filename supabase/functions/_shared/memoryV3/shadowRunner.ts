@@ -382,7 +382,7 @@ export async function runMemoryV3Shadow(
 
   let extraction;
   try {
-    extraction = await normalizeMemoryV3LayeredResponse(parsed, dialogue, MEMORY_V3_EXTRACTOR_VERSION);
+    extraction = await normalizeMemoryV3LayeredResponse(parsed, dialogue, MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
   } catch {
     return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
   }
