@@ -3,7 +3,7 @@
 Date: 2026-09-20
 Branch: `codex/memory-v3-history-backfill`
 HEAD at design: `657d42a5a412f1d53551f470fa02c7ba1a32f89f`
-Status: **design only; not implemented; not a paid or production-write authorization**
+Status: **baseline implemented; 2026-09-22 routing amendment approved for design only; not yet implemented; not a paid or production-write authorization**
 
 Related:
 
@@ -23,7 +23,7 @@ The draft is not written incrementally to production. Production receives it onl
 
 1. offline synthetic tests pass;
 2. a provider-free source inspection freezes the exact chunk manifest and budget inputs;
-3. Nastya separately authorizes one paid execution with a hard maximum budget;
+3. Nastya separately authorizes every paid execution with its exact hard maximum budget;
 4. the resulting normalized memories receive an explicit human semantic review;
 5. Nastya separately authorizes the production import.
 
@@ -55,7 +55,8 @@ The exact account identifiers and raw messages are intentionally absent from thi
 - Do not copy the existing `user_memory` text directly into V3 state.
 - Do not let a runtime JSON profile choose arbitrary models, prices, HTTP caps, users, or schemas.
 - Do not mix real-history execution with implementation tests.
-- Do not automatically retry, repair, fall back, parallelize, import, deploy, or activate the canary.
+- Do not automatically retry or repair at the application layer, parallelize, import, deploy, or activate the canary.
+- Do not select arbitrary fallback models. The only permitted provider-managed fallback is the exact frozen Gemini-to-Mistral route in the approved 2026-09-22 amendment below.
 - Do not claim that structural validation proves semantic correctness.
 - Do not store raw historical dialogue in the backfill artifact, logs, stdout, stderr, or git.
 - Do not modify Golden V1/V2 or reinterpret the synthetic benchmark as evidence about the real account.
@@ -77,6 +78,39 @@ This would expose partial state if chunk 8 failed after chunks 1-7 succeeded. It
 ### Put messages from different conversations into one extractor request
 
 Lifecycle evidence is bound to a conversation and the reducer receives one `conversationId` per step. Mixed-conversation chunks would weaken ownership checks and make source deletion semantics ambiguous.
+
+### Redact, split, or drop the blocked source chunk
+
+The reproducible provider refusal is content-sensitive, but changing the frozen raw dialogue would make the history incomplete and would invalidate the source digest. The backfill therefore preserves the source bytes and changes only the audited provider route.
+
+### Replace Gemini with Mistral for every call
+
+This would discard the already reviewed Gemini behavior and make the next artifact less comparable with the earlier benchmark and attempts. Gemini remains primary; Mistral is available only when OpenRouter cannot complete the same request with Gemini.
+
+## Approved 2026-09-22 provider-routing amendment
+
+Three complete paid attempts stopped safely without an artifact or production write, and one separately authorized single-call probe established that one frozen history chunk is rejected by the primary provider route with an HTTP 200 OpenRouter envelope containing provider error code 403. The source snapshot, chunk digest, raw dialogue, prompt, and state are not altered to evade that refusal.
+
+The approved design adds one fixed OpenRouter-managed model route for both extractor and reconciler calls:
+
+1. primary: `google/gemini-3.7-flash`;
+2. fallback: `mistralai/mistral-medium-3-5`;
+3. no other model is accepted from argv, environment, source data, provider response, or runtime JSON;
+4. OpenRouter receives the two IDs in one `models` array and may move to the second model only when the first route cannot complete the request;
+5. the application sends exactly one HTTP request for that stage and performs no retry, repair, or second application-layer attempt.
+
+The route is used for both stages because a content-sensitive chunk is present in the extractor request and its normalized extraction can also be present in the reconciler request. Allowing fallback on only one stage could reproduce the same refusal immediately on the next stage.
+
+The history-only provider boundary records the resolved response model for every successful stage. A missing, unknown, non-string, accessor-backed, or route-external response model is a hard failure. The engine and artifact record `extractorResolvedModel` and `reconcilerResolvedModel` per chunk plus aggregate counts. The import validator recomputes those counts and rejects any provenance mismatch. Raw provider routing bodies and errors remain excluded.
+
+OpenRouter's internal attempt at the second model does not increase the application `providerCallCount`. A separately named `providerModelFallbackCount` counts successful stage responses whose resolved model is the frozen Mistral fallback. Existing `retryCount`, `repairCount`, and application-layer `fallbackCount` remain zero.
+
+The endpoint snapshot must prove before a paid run that both routes still support the required request parameters, structured output, context envelope, and zero-data-retention routing. The reviewed sources for this amendment are:
+
+- `https://openrouter.ai/docs/guides/routing/model-fallbacks`
+- `https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints`
+
+This amendment supersedes older statements in this document and the existing implementation plan that prohibit every use of the word fallback. It does not authorize implementation, another paid run, import, activation, or deployment. The implementation plan must be revised and reviewed before code changes begin.
 
 ## Safety gates
 
@@ -122,6 +156,8 @@ The engine reuses these production semantics rather than creating a second memor
   history-only extractor provider boundary;
 - `lifecycleTransport.ts` for the reconciler provider boundary and safe diagnostics.
 
+The routing amendment is implemented behind a new history-only provider composition boundary. Production live transports remain unchanged. Its request serialization is locked against the reviewed live extractor and reconciler requests except that the history route uses the exact two-element `models` array and the already approved 4,096-token extractor allowance. The boundary accepts injected fetch only and has no filesystem, environment, database, global-fetch, import, or deployment capability.
+
 The normal production extractor `transport.ts` remains frozen at 1,200 output
 tokens. It is not widened for the backfill. The history-only extractor uses the
 same layered response contract, `reasoning: { effort: "low" }`, and privacy
@@ -131,7 +167,7 @@ Gemini model has mandatory reasoning and a real backfill response exhausted the
 
 It does not call `runMemoryV3LifecycleShadow`, `reserve_memory_v3_lifecycle_shadow_run`, or `apply_memory_v3_lifecycle_shadow_state` during draft construction because those are production persistence boundaries.
 
-Both provider calls preserve the current exact routing privacy fields: `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`.
+Both provider calls preserve the current exact routing privacy fields: `require_parameters: true`, `data_collection: "deny"`, and `zdr: true`. The fallback endpoint must satisfy the same fields; OpenRouter may not silently route to a non-ZDR endpoint.
 
 ### Proposed local modules
 
@@ -150,7 +186,7 @@ The profile is a deeply frozen code constant. It fixes:
 
 - profile ID and version;
 - lifecycle schema, pipeline, extractor, and reconciler versions;
-- exact model;
+- exact ordered primary/fallback model route;
 - maximum 60 source messages per chunk;
 - history-only 40,000-byte extractor request cap; the normal live lifecycle
   request cap remains 20,000 bytes;
@@ -160,7 +196,7 @@ The profile is a deeply frozen code constant. It fixes:
 - maximum 100 state items and 500 total evidence rows;
 - maximum two provider calls per chunk;
 - sequential concurrency of one;
-- no retry, repair, or fallback;
+- no application-layer retry or repair and no model outside the exact two-model route;
 - privacy routing parameters already used by the lifecycle transport.
 
 No file, argv value, environment value, database row, or test double may raise these limits. Tests may inject adapters, clocks, and source rows through explicit dependency interfaces, but may not replace the trusted profile with a clone.
@@ -256,11 +292,11 @@ The v1 backfill always begins with `createEmptyMemoryV3LifecycleState({ userId }
 For each manifest chunk in canonical order:
 
 1. Rebuild the exact extractor request and recheck its digest and byte length.
-2. Call the extractor once through a bounded adapter.
+2. Call the extractor once through the bounded history route and validate the resolved model.
 3. Validate and normalize the extraction with the existing contract.
 4. Build the reconciler request from the current in-memory state, current chunk, and extraction.
 5. Reject if the exact reconciler request exceeds 80,000 UTF-8 bytes.
-6. Call the reconciler once through the bounded adapter.
+6. Call the reconciler once through the bounded history route and validate the resolved model.
 7. Validate the proposal against the current state and extraction.
 8. Apply it with `applyMemoryV3LifecycleStep` at the chunk's last message time.
 9. Validate the resulting state, item/evidence limits, monotonic revision, and evidence ownership metadata.
@@ -277,15 +313,17 @@ The engine verifies after success that:
 - completed chunks equal `N`;
 - provider calls are at most `2 * N` and match recorded call stages;
 - concurrency never exceeded one;
-- retry, repair, and fallback counts are zero.
+- retry, repair, and application-layer fallback counts are zero;
+- every successful stage reports exactly one resolved model from the frozen route;
+- `providerModelFallbackCount` equals the number of successful stages resolved by Mistral.
 
 ## Budget contract
 
 ### Fresh price requirement
 
-No dollar price in an older benchmark, spec, artifact, or conversation is accepted as current. Before a paid run, the operator records a fresh price snapshot from the provider's current public model listing, including model ID, input price, output price, URL, and observation time.
+No dollar price in an older benchmark, spec, artifact, or conversation is accepted as current. Before a paid run, the operator records fresh price and endpoint snapshots for both frozen route models from the provider's current public listings, including model ID, input price, output price, supported parameters, privacy route, URL, and observation time.
 
-The snapshot expires after 24 hours or immediately if the provider changes the model route. An expired or mismatched snapshot blocks execution.
+The snapshots expire after 24 hours or immediately if the provider changes either model route. An expired or mismatched snapshot blocks execution.
 
 ### Ceiling
 
@@ -297,14 +335,23 @@ Source inspection determines the exact chunk count without provider calls. The c
 - the history profile's conservative maximum of 4,096 output tokens per call,
   applied to every possible call in the ceiling even though the reconciler
   remains capped at 1,200;
-- the fresh input and output prices.
+- the component-wise maximum input and output prices across the complete frozen route.
+
+For the reviewed 32-chunk source manifest, the application cap is 64 client HTTP requests. Using the fallback's reviewed rates of `$1.50` per million input tokens and `$7.50` per million output tokens, the pessimistic ceiling is:
+
+- input: `64 * 32,768 * 0.0000015 = $3.145728`;
+- output: `64 * 4,096 * 0.0000075 = $1.966080`;
+- total: `$5.111808`;
+- proposed explicit hard maximum: `$5.12`.
+
+These figures are a preflight upper bound, not actual billing. They must be recomputed from fresh snapshots before execution; a price increase, route change, manifest change, or snapshot expiry requires a new dry run and a new explicit authorization.
 
 The CLI requires an explicit decimal `--max-budget-usd`. Paid execution is permitted only when:
 
 - it includes the dedicated execute flag;
 - the authorized maximum is at least the calculated ceiling;
 - the authorized maximum is no greater than the amount explicitly approved by Nastya;
-- model, profile, source digest, cutoff, chunk count, and price snapshot match the reviewed dry run exactly.
+- ordered model route, profile, source digest, cutoff, chunk count, and both price/endpoint snapshots match the reviewed dry run exactly.
 
 Actual usage and actual cost remain `null` unless every successful provider response contains validated usage data. Missing usage is never reconstructed from the ceiling and the ceiling is never described as actual billing.
 
@@ -332,6 +379,7 @@ The opt-in safe-output artifact contains:
 - profile/version metadata, cutoff, source digest, and chunk manifest metadata;
 - final validated lifecycle state with normalized claims and evidence source IDs;
 - per-chunk success/failure stage, safe diagnostic, transitions, and validated usage totals;
+- per-stage resolved model provenance and aggregate `providerModelFallbackCount`;
 - counts, caps, provider call count, concurrency, and budget results;
 - semantic review fields initialized to `null`;
 - a canonical payload SHA-256 digest.
@@ -438,7 +486,10 @@ Diagnostics use fixed allowlisted codes. Errors are branded through module-local
 - no raw messages in manifest or artifact projection;
 - HTTP cap blocks request `2N + 1` before inner transport;
 - inner transport failure counts once and stops the run;
-- exact no-retry, no-repair, no-fallback, `maxActive = 1` behavior.
+- exact no-application-retry, no-repair, frozen-route, `maxActive = 1` behavior;
+- one client request can resolve to Gemini or the allowlisted Mistral fallback, while a second client request is never issued for the same stage;
+- missing, unknown, spoofed, accessor-backed, or route-external resolved model fails closed without leaking provider text;
+- route order, privacy fields, parameter support, price snapshot, and fallback count cannot be overridden by argv, environment, source data, or cloned profile objects.
 
 ### Synthetic history scenarios
 
@@ -485,6 +536,7 @@ Before any commit or deployment:
 - frozen hashes for Golden datasets and unrelated lifecycle contracts;
 - `git diff --check`;
 - privacy scan for keys, raw dialogue, user IDs, provider bodies, and committed `_tmp` artifacts.
+- artifact/import provenance tests recompute resolved-model counts and reject any model-route mismatch.
 
 ## Implementation sequence
 
@@ -507,6 +559,8 @@ The design is successfully implemented when:
 - dry run reports the exact source digest, chunks, provider cap, and current-price ceiling with zero provider calls;
 - paid execution is impossible without its exact flag and explicit budget;
 - one failed chunk cannot produce an importable artifact or mutate production;
+- a primary-route content refusal can resolve through the one fixed ZDR fallback without changing source bytes or issuing an application retry;
+- every successful provider stage has validated allowlisted model provenance bound into the artifact digest;
 - the saved artifact contains normalized reviewable state but no raw dialogue, prompts, provider bodies, or credentials;
 - semantic review is tied to the artifact digest;
 - import is initial-only, service-only, atomic, ownership-checked, and idempotency-guarded;
