@@ -255,6 +255,11 @@ function resolveSourceReader(
   return candidate as LifecycleHistorySourceReader;
 }
 
+function preflightSourceReader(candidate: unknown): void {
+  if ((typeof candidate !== 'function' &&
+    (typeof candidate !== 'object' || candidate === null)) || isProxy(candidate)) return fail();
+}
+
 export async function runLifecycleHistoryBackfillFromArgv(input: {
   argv: unknown;
   sourceReader: unknown;
@@ -269,6 +274,9 @@ export async function runLifecycleHistoryBackfillFromArgv(input: {
     const root = inspectOptions(input);
     const parsed = parseArgv(root.argv);
     if (!Number.isSafeInteger(root.nowMs)) return fail();
+    preflightSourceReader(root.sourceReader);
+    if (typeof root.readEnvText !== 'function' || isProxy(root.readEnvText)) return fail();
+    if (typeof root.fetchImpl !== 'function' || isProxy(root.fetchImpl)) return fail();
 
     const priceText = await readText(root.readEnvText, parsed.priceSnapshotFile);
     const priceSnapshot = parsePriceSnapshot(priceText, root.nowMs as number);
@@ -297,7 +305,6 @@ export async function runLifecycleHistoryBackfillFromArgv(input: {
     }
     if (prepared.manifest.sourceSnapshotDigest !== parsed.expectedSourceSha256) return fail();
     const apiKey = nonEmpty(await readText(root.readEnvText, 'OPENROUTER_API_KEY'));
-    if (typeof root.fetchImpl !== 'function' || isProxy(root.fetchImpl)) return fail();
 
     let extractorAdapter;
     let reconcilerAdapter;

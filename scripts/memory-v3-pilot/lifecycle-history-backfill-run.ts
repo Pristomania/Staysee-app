@@ -81,6 +81,19 @@ function inspectOptions(value: unknown): JsonRecord {
   return projected;
 }
 
+function captureWriteStderr(value: unknown): ((text: string) => void) | null {
+  if (typeof value !== 'object' || value === null) return null;
+  try {
+    if (isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'writeStderr');
+    if (!descriptor || descriptor.enumerable !== true || !('value' in descriptor) ||
+      typeof descriptor.value !== 'function' || isProxy(descriptor.value)) return null;
+    return descriptor.value as (text: string) => void;
+  } catch {
+    return null;
+  }
+}
+
 function inspectArgv(value: unknown): string[] {
   if (typeof value !== 'object' || value === null) return fail();
   let array = false;
@@ -158,8 +171,16 @@ function parseEnvValue(text: unknown, requestedName: string): string {
     const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/u);
     if (!match) return fail();
     let value = match[2].trim();
-    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'")))) value = value.slice(1, -1);
+    const startsDouble = value.startsWith('"');
+    const endsDouble = value.endsWith('"');
+    const startsSingle = value.startsWith("'");
+    const endsSingle = value.endsWith("'");
+    if (startsDouble || endsDouble || startsSingle || endsSingle) {
+      if (value.length < 2 || !((startsDouble && endsDouble) || (startsSingle && endsSingle))) {
+        return fail();
+      }
+      value = value.slice(1, -1);
+    }
     if (match[1] === requestedName) {
       if (found !== undefined) return fail();
       found = value;
@@ -261,10 +282,9 @@ export async function main(input: {
   writeStdout: (text: string) => void;
   writeStderr: (text: string) => void;
 }): Promise<number> {
-  let stderr: unknown;
+  const stderr = captureWriteStderr(input);
   try {
     const root = inspectOptions(input);
-    stderr = root.writeStderr;
     const parsed = parseRunArgv(root.argv);
     if (parsed.outputFile !== null) {
       await assertAbsent(root.accessImpl as (path: string) => Promise<void>, parsed.outputFile);

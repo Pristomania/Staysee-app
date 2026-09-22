@@ -263,4 +263,112 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     }
     assert.equal(Object.prototype.hasOwnProperty.call(error as object, 'cause'), false);
   });
+
+  it('validates sourceReader, readEnvText, and fetchImpl before the first read in both modes', async () => {
+    for (const argv of [INSPECT_ARGV, executeArgv('a'.repeat(64))]) {
+      for (const [field, value] of [
+        ['sourceReader', 123],
+        ['readEnvText', 123],
+        ['fetchImpl', 123],
+      ] as const) {
+        const log: string[] = [];
+        await assert.rejects(() => runLifecycleHistoryBackfillFromArgv(baseOptions({
+          argv,
+          [field]: value,
+          sourceReader: field === 'sourceReader'
+            ? value
+            : () => { log.push('source'); return sourceFactory()('', ''); },
+          readEnvText: field === 'readEnvText' ? value : textReader(log),
+          fetchImpl: field === 'fetchImpl' ? value : providerFetch(),
+        }) as never), /command failed/u);
+        assert.deepEqual(log, []);
+      }
+    }
+  });
+
+  it('rejects hostile top-level options without executing getters or proxy traps', async () => {
+    let getterCalls = 0;
+    const getterOptions = baseOptions();
+    Object.defineProperty(getterOptions, 'fetchImpl', {
+      enumerable: true,
+      get() { getterCalls += 1; return providerFetch(); },
+    });
+    const setterOptions = baseOptions();
+    Object.defineProperty(setterOptions, 'readEnvText', {
+      enumerable: true,
+      set(value) { void value; getterCalls += 1; },
+    });
+    const proxy = new Proxy(baseOptions(), {
+      getPrototypeOf() { getterCalls += 1; throw new Error('RAW_PROXY_SENTINEL'); },
+    });
+    const revocable = Proxy.revocable(baseOptions(), {});
+    revocable.revoke();
+    for (const options of [getterOptions, setterOptions, proxy, revocable.proxy]) {
+      await assert.rejects(() => runLifecycleHistoryBackfillFromArgv(options as never));
+    }
+    assert.equal(getterCalls, 0);
+  });
+
+  it('accepts a direct reader object and sanitizes hostile factory results', async () => {
+    const directReader = sourceFactory()('https://synthetic.supabase.co', 'fake-service-role-key');
+    const direct = await runLifecycleHistoryBackfillFromArgv(baseOptions({ sourceReader: directReader }) as never);
+    assert.equal(direct.benchmarkResult.manifest.messageCount, 1);
+
+    let trapCalls = 0;
+    const hostileReader = new Proxy({}, {
+      get() { trapCalls += 1; throw new Error('RAW_READER_PROXY_SENTINEL'); },
+    });
+    let error: unknown;
+    try {
+      await runLifecycleHistoryBackfillFromArgv(baseOptions({
+        sourceReader: () => hostileReader,
+      }) as never);
+    } catch (caught) {
+      error = caught;
+    }
+    assert.equal(trapCalls, 0);
+    assert.equal(String(error).includes('RAW_READER_PROXY_SENTINEL'), false);
+  });
+
+  it('sanitizes raw source and provider failures without retrying', async () => {
+    const sourceSentinel = 'RAW_SOURCE_FAILURE_SENTINEL';
+    const spoofedSourceError = Object.assign(new Error(sourceSentinel), {
+      name: 'MemoryV3LifecycleHistoryBackfillCliError',
+      diagnosticCode: 'provider_call_cap_exceeded',
+    });
+    let sourceError: unknown;
+    try {
+      await runLifecycleHistoryBackfillFromArgv(baseOptions({
+        sourceReader: () => ({
+          async listConversationsPage() { throw spoofedSourceError; },
+          async listMessagesPage() { throw spoofedSourceError; },
+        }),
+      }) as never);
+    } catch (caught) {
+      sourceError = caught;
+    }
+    assert.equal(String(sourceError).includes(sourceSentinel), false);
+
+    const inspect = await runLifecycleHistoryBackfillFromArgv(baseOptions() as never);
+    let providerCalls = 0;
+    const providerSentinel = 'RAW_PROVIDER_FAILURE_SENTINEL';
+    const spoofedProviderError = Object.assign(new Error(providerSentinel), {
+      name: 'MemoryV3LifecycleHistoryBackfillCliError',
+      diagnosticCode: 'provider_call_cap_exceeded',
+    });
+    let providerError: unknown;
+    try {
+      await runLifecycleHistoryBackfillFromArgv(baseOptions({
+        argv: executeArgv(inspect.benchmarkResult.manifest.sourceSnapshotDigest),
+        fetchImpl: (async () => {
+          providerCalls += 1;
+          throw spoofedProviderError;
+        }) as typeof fetch,
+      }) as never);
+    } catch (caught) {
+      providerError = caught;
+    }
+    assert.equal(providerCalls, 1);
+    assert.equal(String(providerError).includes(providerSentinel), false);
+  });
 });

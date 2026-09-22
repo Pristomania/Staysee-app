@@ -326,6 +326,142 @@ describe('Memory V3 lifecycle history backfill composition root', () => {
     assert.equal(h.stderr[0].includes(OUTPUT_PATH), false);
   });
 
+  it('captures a trusted writeStderr before rejecting missing or invalid filesystem dependencies', async () => {
+    for (const mutate of [
+      (options: Record<string, unknown>) => { delete options.accessImpl; },
+      (options: Record<string, unknown>) => { options.writeFileImpl = 123; },
+      (options: Record<string, unknown>) => { options.linkImpl = null; },
+      (options: Record<string, unknown>) => { options.unlinkImpl = 'invalid'; },
+    ]) {
+      const h = harness();
+      mutate(h.options as unknown as Record<string, unknown>);
+      assert.equal(await main(h.options as never), 1);
+      assert.deepEqual(h.stdout, []);
+      assert.equal(h.stderr.length, 1);
+      assert.deepEqual(JSON.parse(h.stderr[0]), {
+        ok: false,
+        stage: 'config',
+        error: '[memory-v3:lifecycle-history-backfill-run] run failed',
+      });
+      assert.deepEqual(h.log, []);
+      assert.equal(h.fetchImpl.calls.length, 0);
+    }
+  });
+
+  it('does not execute top-level option accessors or Proxy traps while locating stderr', async () => {
+    let trapCalls = 0;
+    const getterOptions = harness().options;
+    Object.defineProperty(getterOptions, 'writeStderr', {
+      enumerable: true,
+      get() { trapCalls += 1; return () => undefined; },
+    });
+    const setterOptions = harness().options;
+    Object.defineProperty(setterOptions, 'writeStderr', {
+      enumerable: true,
+      set(value) { void value; trapCalls += 1; },
+    });
+    const proxy = new Proxy(harness().options, {
+      getOwnPropertyDescriptor() { trapCalls += 1; throw new Error('RAW_TOP_PROXY'); },
+    });
+    const revocable = Proxy.revocable(harness().options, {});
+    revocable.revoke();
+    for (const options of [getterOptions, setterOptions, proxy, revocable.proxy]) {
+      assert.equal(await main(options as never), 1);
+    }
+    assert.equal(trapCalls, 0);
+  });
+
+  it('rejects accessor, Proxy, and stateful ENOENT errors without traps or raw leakage', async () => {
+    let trapCalls = 0;
+    const accessorError = Object.defineProperty(new Error('RAW_ENOENT_ACCESSOR'), 'code', {
+      enumerable: true,
+      get() { trapCalls += 1; return 'ENOENT'; },
+    });
+    const proxyError = new Proxy(new Error('RAW_ENOENT_PROXY'), {
+      getOwnPropertyDescriptor() { trapCalls += 1; throw new Error('RAW_DESCRIPTOR'); },
+    });
+    const statefulError = new Proxy(new Error('RAW_ENOENT_STATEFUL'), {
+      getOwnPropertyDescriptor() {
+        trapCalls += 1;
+        return { value: 'ENOENT', enumerable: true, configurable: true };
+      },
+    });
+    for (const error of [accessorError, proxyError, statefulError]) {
+      const h = harness();
+      h.options.accessImpl = async () => { throw error; };
+      assert.equal(await main(h.options), 1);
+      assert.deepEqual(h.stdout, []);
+      assert.equal(h.stderr.length, 1);
+      assert.equal(h.stderr[0].includes('RAW_'), false);
+      assert.deepEqual(h.writes, []);
+    }
+    assert.equal(trapCalls, 0);
+  });
+
+  it('rejects relative and wrong-extension execute outputs before any I/O', async () => {
+    for (const output of ['history-backfill.json', 'C:\\safe\\history-backfill.txt']) {
+      const h = harness(EXECUTE_ARGV.map((entry) => entry === OUTPUT_PATH ? output : entry));
+      assert.equal(await main(h.options), 1);
+      assert.deepEqual(h.log, []);
+      assert.deepEqual(h.stdout, []);
+      assert.equal(h.stderr.length, 1);
+    }
+  });
+
+  it('rejects malformed, duplicate, and unclosed env assignments without external work', async () => {
+    const invalidEnvTexts = [
+      `${ENV_TEXT}\nnot-an-assignment`,
+      `${ENV_TEXT}\nSUPABASE_URL=https://duplicate.invalid`,
+      ENV_TEXT.replace('fake-service-role-key', "'unterminated-service-key"),
+    ];
+    for (const envText of invalidEnvTexts) {
+      const h = harness(INSPECT_ARGV);
+      h.options.readFileImpl = async (path: string) =>
+        path === PRICE_PATH ? JSON.stringify(PRICE) : envText;
+      assert.equal(await main(h.options), 1);
+      assert.equal(h.fetchImpl.calls.length, 0);
+      assert.equal(h.log.some((entry) => entry.startsWith('source:')), false);
+      assert.deepEqual(h.stdout, []);
+      assert.equal(h.stderr.length, 1);
+      assert.equal(h.stderr[0].includes('unterminated-service-key'), false);
+    }
+  });
+
+  it('handles throwing stdout and stderr callbacks without retry or raw leakage', async () => {
+    const stdoutHarness = harness(INSPECT_ARGV);
+    stdoutHarness.options.writeStdout = () => { throw new Error('RAW_STDOUT'); };
+    assert.equal(await main(stdoutHarness.options), 1);
+    assert.equal(stdoutHarness.stderr.length, 1);
+    assert.equal(stdoutHarness.stderr[0].includes('RAW_STDOUT'), false);
+    assert.equal(stdoutHarness.fetchImpl.calls.length, 0);
+
+    const stderrHarness = harness();
+    let stderrCalls = 0;
+    stderrHarness.options.writeStderr = () => {
+      stderrCalls += 1;
+      throw new Error('RAW_STDERR');
+    };
+    delete (stderrHarness.options as unknown as Record<string, unknown>).accessImpl;
+    assert.equal(await main(stderrHarness.options as never), 1);
+    assert.equal(stderrCalls, 1);
+    assert.deepEqual(stderrHarness.stdout, []);
+  });
+
+  it('reports a post-link unlink failure without success stdout or a second unlink', async () => {
+    const h = harness();
+    let unlinkCalls = 0;
+    h.options.unlinkImpl = async () => {
+      unlinkCalls += 1;
+      throw new Error('RAW_POST_LINK_UNLINK');
+    };
+    assert.equal(await main(h.options), 1);
+    assert.equal(h.links.length, 1);
+    assert.equal(unlinkCalls, 1);
+    assert.deepEqual(h.stdout, []);
+    assert.equal(h.stderr.length, 1);
+    assert.equal(h.stderr[0].includes('RAW_POST_LINK_UNLINK'), false);
+  });
+
   it('keeps real filesystem, process, env path, Supabase, and global fetch bindings in direct invocation', () => {
     const source = readFileSync(
       fileURLToPath(new URL('./lifecycle-history-backfill-run.ts', import.meta.url)),
@@ -335,12 +471,23 @@ describe('Memory V3 lifecycle history backfill composition root', () => {
     assert.notEqual(directStart, -1);
     const injectedBoundary = source.slice(0, directStart);
     const directBoundary = source.slice(directStart);
-    for (const forbidden of [
-      'process.argv', 'globalThis.fetch', "new URL('../../.env'", 'createClient(',
-    ]) assert.equal(injectedBoundary.includes(forbidden), false);
-    for (const required of [
-      'process.argv', 'globalThis.fetch', "new URL('../../.env'", 'createClient(',
-      'readFile(', 'access,', 'writeFile(', 'link,', 'unlink,',
-    ]) assert.equal(directBoundary.includes(required), true);
+    const restricted = [
+      /process\.argv/gu,
+      /globalThis\.fetch/gu,
+      /new URL\('\.\.\/\.\.\/\.env'/gu,
+      /createClient\(/gu,
+      /\breadFile\(/gu,
+      /\bwriteFile\(/gu,
+    ];
+    for (const pattern of restricted) {
+      assert.equal([...injectedBoundary.matchAll(pattern)].length, 0);
+      assert.equal([...directBoundary.matchAll(pattern)].length > 0, true);
+    }
+    assert.equal([...source.matchAll(/globalThis\.fetch/gu)].length, 1);
+    assert.equal([...source.matchAll(/createClient\(/gu)].length, 1);
+    assert.equal([...source.matchAll(/new URL\('\.\.\/\.\.\/\.env'/gu)].length, 1);
+    assert.equal(directBoundary.includes('accessImpl: access'), true);
+    assert.equal(directBoundary.includes('linkImpl: link'), true);
+    assert.equal(directBoundary.includes('unlinkImpl: unlink'), true);
   });
 });
