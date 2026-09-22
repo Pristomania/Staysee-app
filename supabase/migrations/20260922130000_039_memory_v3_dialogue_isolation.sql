@@ -185,10 +185,21 @@ BEGIN
   -- Review finding fix: lock folds conversation_id into the hash, unlike
   -- the lifecycle-shadow lock which is user_id-only. This is the whole
   -- point of this table set -- two dialogues of the same user must not
-  -- serialize against each other.
+  -- serialize against each other for state writes.
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
     p_user_id::text || ':' || p_conversation_id::text || ':' ||
     ((pg_catalog.now() AT TIME ZONE 'UTC')::date)::text, 0));
+
+  -- Product decision (22.09.2026): the daily paid-call budget stays one
+  -- per PERSON, shared across every one of their dialogues -- not one
+  -- per dialogue. The count below deliberately omits conversation_id.
+  -- That makes it a shared resource two concurrent dialogues could race
+  -- on, so it needs its own lock, separate from the per-conversation one
+  -- above (different "extra" salt, 1 instead of 0, so the two locks
+  -- never collide in the advisory-lock keyspace even for the same user).
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    p_user_id::text || ':' ||
+    ((pg_catalog.now() AT TIME ZONE 'UTC')::date)::text, 1));
 
   IF EXISTS (SELECT 1 FROM public.memory_v3_dialogue_identities
     WHERE user_id = p_user_id AND conversation_id = p_conversation_id
@@ -198,7 +209,7 @@ BEGIN
 
   SELECT pg_catalog.count(*)::integer INTO v_daily_count
   FROM public.memory_v3_dialogue_runs
-  WHERE user_id = p_user_id AND conversation_id = p_conversation_id
+  WHERE user_id = p_user_id
     AND created_at >= pg_catalog.date_trunc('day', pg_catalog.now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
   IF v_daily_count >= 1 THEN
     result := 'daily_cap'; run_id := NULL; expected_state_revision := NULL; state := NULL; RETURN NEXT; RETURN;

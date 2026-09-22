@@ -131,12 +131,37 @@ describe("Memory V3 dialogue migration", () => {
     assert.match(sql, /PRIMARY KEY \(user_id, conversation_id\)/i);
   });
 
-  it("folds conversation_id into the advisory lock, not just the row lock", () => {
+  it("folds conversation_id into the state-write advisory lock, not just the row lock", () => {
     const sql = readFileSync(migrationUrl, "utf8");
     assert.match(
       sql,
       /pg_catalog\.pg_advisory_xact_lock\(pg_catalog\.hashtextextended\(\s*p_user_id::text \|\| ':' \|\| p_conversation_id::text/i,
     );
+  });
+
+  it("shares the daily paid-call budget across a user's dialogues with its own separate lock", () => {
+    // Product decision (22.09.2026): the cap is one reservation per
+    // PERSON per day, shared across every dialogue -- not one per
+    // dialogue. That makes the count query a shared resource two
+    // concurrent dialogues could race on, so it needs its own lock,
+    // independent of the per-conversation state-write lock above.
+    const sql = readFileSync(migrationUrl, "utf8");
+    const reserveStart = sql.indexOf("CREATE OR REPLACE FUNCTION public.reserve_memory_v3_dialogue_run");
+    const reserveEnd = sql.indexOf("CREATE OR REPLACE FUNCTION public.fail_memory_v3_dialogue_run", reserveStart);
+    const reserve = sql.slice(reserveStart, reserveEnd);
+    assert.equal((reserve.match(/pg_catalog\.pg_advisory_xact_lock\(pg_catalog\.hashtextextended\(/g) ?? []).length, 2);
+    assert.match(
+      reserve,
+      /pg_catalog\.pg_advisory_xact_lock\(pg_catalog\.hashtextextended\(\s*p_user_id::text \|\| ':' \|\|\s*\(\(pg_catalog\.now\(\) AT TIME ZONE 'UTC'\)::date\)::text, 1\)\)/i,
+    );
+    const capLockIndex = reserve.search(/hashtextextended\(\s*p_user_id::text \|\| ':' \|\|\s*\(\(pg_catalog\.now/i);
+    const countIndex = reserve.indexOf("SELECT pg_catalog.count(*)::integer INTO v_daily_count");
+    assert.equal(capLockIndex >= 0 && capLockIndex < countIndex, true);
+    // The count itself must span every conversation of the user --
+    // no "AND conversation_id = p_conversation_id" on this specific query.
+    const countQuery = reserve.slice(countIndex, reserve.indexOf(";", countIndex));
+    assert.equal(countQuery.includes("conversation_id"), false);
+    assert.match(countQuery, /WHERE user_id = p_user_id/i);
   });
 
   it("locks ownership to this conversation specifically, deletion, CAS, bounded state, and terminal run shapes", () => {
