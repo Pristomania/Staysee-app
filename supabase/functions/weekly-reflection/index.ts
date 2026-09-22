@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { checkRateLimit, CALM_ERRORS } from "../_shared/cost.ts";
 import { resolveApprovedUtilityModel } from "../_shared/approvedModels.ts";
 import { generateWeeklyReflectionText } from "../_shared/weeklyReflection.ts";
+import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,25 +27,56 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json() as { conversationId?: string; userId?: string };
     const conversationId = body.conversationId?.trim();
-    const userId = body.userId?.trim();
+    const requestedUserId = body.userId?.trim();
 
-    if (!conversationId || !userId) {
-      return new Response(JSON.stringify({ error: "conversationId and userId required" }), {
+    if (!conversationId) {
+      return new Response(JSON.stringify({ error: "conversationId required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const authToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    const authorizationHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
-    if (!authToken || !supabaseUrl || !supabaseAnonKey) {
-      return new Response(JSON.stringify({ error: "auth_required" }), {
-        status: 401,
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return new Response(JSON.stringify({ error: "service_unavailable" }), {
+        status: 503,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const verifiedUser = await resolveVerifiedChatUser({
+      authorizationHeader,
+      requestedUserId,
+      getUser: async (token) => {
+        const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false,
+          },
+        });
+
+        const { data, error } = await authClient.auth.getUser(token);
+
+        return {
+          user: data.user,
+          error,
+        };
+      },
+    });
+
+    if (!verifiedUser.ok) {
+      return new Response(JSON.stringify({ error: verifiedUser.reason }), {
+        status: verifiedUser.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const userId = verifiedUser.userId;
+    const authToken = verifiedUser.authToken;
 
     const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${authToken}` } },
