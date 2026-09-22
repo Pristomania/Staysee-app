@@ -83,9 +83,7 @@ episodeKey matrix:
 - A later sentence that only confirms a pattern is pattern_confirmation, not a new episode
 - A sentence that only limits scope is scope_boundary, not a new episode and not automatically contradicts
 
-A recurrence requires at least two different real episode_observation supports.
-Retelling one event is not a recurrence.
-pattern_confirmation and scope_boundary do not count toward the two-episode quota.
+Before emitting candidate/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence.
 
 Epistemic layers are not mutually exclusive.
 A dialogue may yield several items of different kinds only when each item is a distinct epistemic layer, independently useful in a future conversation, not a paraphrase of another item, and admitted on its own gate.

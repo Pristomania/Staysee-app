@@ -60,6 +60,13 @@ describe("Memory V3 production prompt boundary", () => {
     );
   });
 
+  it("omits a recurrence unless two distinct episodes survive the final evidence rows", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Before emitting candidate\/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence\./,
+    );
+  });
+
   it("does not mutate input and creates new allowlisted message objects", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);

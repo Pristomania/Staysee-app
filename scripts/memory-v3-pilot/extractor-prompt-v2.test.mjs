@@ -29,7 +29,7 @@ const REQUIRED_PHRASES = [
   'omitting a merely duplicative or optional extra layer is allowed',
   'do not invent layers for completeness',
   'if this layer were deleted, what would a future conversation lose',
-  'A recurrence requires at least two different real episode_observation supports',
+  'Before emitting candidate/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence.',
   'recurrence supports with supportType pattern_confirmation or scope_boundary: episodeKey is JSON null',
   'A separate event is permitted when the user explicitly reports a new biographical fact or decision',
   'That new event is not required on every correction',
@@ -380,11 +380,7 @@ describe('V2 extractor evidence schema', () => {
     );
     assertContains(
       system,
-      'A recurrence requires at least two different real episode_observation supports.',
-    );
-    assertContains(
-      system,
-      'pattern_confirmation and scope_boundary do not count toward the two-episode quota.',
+      'Before emitting candidate/active recurrence, count distinct episodeKey values on supports evidence with supportType episode_observation; fewer than 2 means omit that recurrence and its evidence.',
     );
     assertContains(
       system,
