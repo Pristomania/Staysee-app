@@ -313,6 +313,11 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     const directReader = sourceFactory()('https://synthetic.supabase.co', 'fake-service-role-key');
     const direct = await runLifecycleHistoryBackfillFromArgv(baseOptions({ sourceReader: directReader }) as never);
     assert.equal(direct.benchmarkResult.manifest.messageCount, 1);
+    const nullPrototypeReader = Object.assign(Object.create(null), directReader);
+    const nullPrototype = await runLifecycleHistoryBackfillFromArgv(baseOptions({
+      sourceReader: nullPrototypeReader,
+    }) as never);
+    assert.equal(nullPrototype.benchmarkResult.manifest.messageCount, 1);
 
     let trapCalls = 0;
     const hostileReader = new Proxy({}, {
@@ -328,6 +333,54 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     }
     assert.equal(trapCalls, 0);
     assert.equal(String(error).includes('RAW_READER_PROXY_SENTINEL'), false);
+  });
+
+  it('rejects malformed direct readers before any price, env, source, or provider read', async () => {
+    const valid = sourceFactory()('https://synthetic.supabase.co', 'fake-service-role-key');
+    let getterCalls = 0;
+    const accessor = {
+      get listConversationsPage() { getterCalls += 1; return valid.listConversationsPage; },
+      listMessagesPage: valid.listMessagesPage,
+    };
+    const setterOnly = Object.defineProperties({}, {
+      listConversationsPage: {
+        enumerable: true,
+        set(value) { void value; getterCalls += 1; },
+      },
+      listMessagesPage: { enumerable: true, value: valid.listMessagesPage },
+    });
+    const nonEnumerable = Object.defineProperties({}, {
+      listConversationsPage: { enumerable: false, value: valid.listConversationsPage },
+      listMessagesPage: { enumerable: true, value: valid.listMessagesPage },
+    });
+    const inherited = Object.create(valid);
+    const proxy = new Proxy(valid, {
+      ownKeys() { getterCalls += 1; throw new Error('RAW_READER_KEYS'); },
+    });
+    const revocable = Proxy.revocable(valid, {});
+    revocable.revoke();
+    const proxiedMethod = new Proxy(valid.listMessagesPage, {
+      apply() { getterCalls += 1; throw new Error('RAW_METHOD_APPLY'); },
+    });
+    const malformed: unknown[] = [
+      {}, [], new Date(), null, Symbol('reader'),
+      { ...valid, extra: () => undefined },
+      { listConversationsPage: valid.listConversationsPage },
+      accessor, setterOnly, nonEnumerable, inherited, proxy, revocable.proxy,
+      { ...valid, listMessagesPage: proxiedMethod },
+    ];
+    for (const sourceReader of malformed) {
+      const log: string[] = [];
+      const fetchImpl = providerFetch();
+      await assert.rejects(() => runLifecycleHistoryBackfillFromArgv(baseOptions({
+        sourceReader,
+        readEnvText: textReader(log),
+        fetchImpl,
+      }) as never), /command failed/u);
+      assert.deepEqual(log, []);
+      assert.equal(fetchImpl.calls.length, 0);
+    }
+    assert.equal(getterCalls, 0);
   });
 
   it('sanitizes raw source and provider failures without retrying', async () => {

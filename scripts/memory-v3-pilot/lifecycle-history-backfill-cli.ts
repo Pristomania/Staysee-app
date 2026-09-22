@@ -31,6 +31,7 @@ type SourceReaderFactory = (
 const PREFIX = '[memory-v3:lifecycle-history-backfill-cli]';
 const ERROR_NAME = 'MemoryV3LifecycleHistoryBackfillCliError';
 const OPTIONS_FIELDS = ['argv', 'sourceReader', 'readEnvText', 'fetchImpl', 'nowMs'] as const;
+const SOURCE_READER_FIELDS = ['listConversationsPage', 'listMessagesPage'] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const OWN_ERRORS = new WeakSet<object>();
@@ -256,8 +257,27 @@ function resolveSourceReader(
 }
 
 function preflightSourceReader(candidate: unknown): void {
-  if ((typeof candidate !== 'function' &&
-    (typeof candidate !== 'object' || candidate === null)) || isProxy(candidate)) return fail();
+  if (typeof candidate === 'function') {
+    if (isProxy(candidate)) return fail();
+    return;
+  }
+  if (typeof candidate !== 'object' || candidate === null || isProxy(candidate)) return fail();
+  let array: boolean;
+  try {
+    array = Array.isArray(candidate);
+  } catch {
+    return fail();
+  }
+  const prototype = safePrototype(candidate);
+  if (array || (prototype !== Object.prototype && prototype !== null)) return fail();
+  const keys = safeKeys(candidate);
+  if (keys.length !== SOURCE_READER_FIELDS.length || keys.some((key) =>
+    typeof key !== 'string' ||
+    !SOURCE_READER_FIELDS.includes(key as typeof SOURCE_READER_FIELDS[number]))) return fail();
+  for (const field of SOURCE_READER_FIELDS) {
+    const method = dataValue(candidate, field, true);
+    if (typeof method !== 'function' || isProxy(method)) return fail();
+  }
 }
 
 export async function runLifecycleHistoryBackfillFromArgv(input: {
