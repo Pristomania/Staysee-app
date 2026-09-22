@@ -24,8 +24,9 @@ function assertSafeBoundaryError(action: () => unknown): void {
   });
 }
 
-test("parseMemoryV3LifecycleReadMode accepts only the exact canary value", () => {
+test("parseMemoryV3LifecycleReadMode accepts only the exact canary and all values", () => {
   assert.equal(parseMemoryV3LifecycleReadMode("canary"), "canary");
+  assert.equal(parseMemoryV3LifecycleReadMode("all"), "all");
   for (const raw of [
     undefined,
     null,
@@ -38,12 +39,44 @@ test("parseMemoryV3LifecycleReadMode accepts only the exact canary value", () =>
     "canary,off",
     "shadow",
     "lifecycle_shadow",
+    "ALL",
+    " all",
+    "all ",
+    "*",
     new String("canary"),
   ]) {
     assert.equal(
       parseMemoryV3LifecycleReadMode(raw as string | null | undefined),
       "off",
     );
+  }
+});
+
+test("resolveMemoryV3LifecycleReadEligibility allows every canonical account only in all mode", () => {
+  for (const userId of [NASTYA, SON]) {
+    assert.deepEqual(resolveMemoryV3LifecycleReadEligibility({
+      rawMode: "all",
+      rawAllowedUserId: undefined,
+      userId,
+    }), {
+      eligible: true,
+      mode: "all",
+      userId,
+    });
+  }
+});
+
+test("resolveMemoryV3LifecycleReadEligibility rejects malformed accounts in all mode", () => {
+  for (const userId of ["", "*", ` ${NASTYA}`, ALPHA_USER.toUpperCase(), new String(NASTYA)]) {
+    assert.deepEqual(resolveMemoryV3LifecycleReadEligibility({
+      rawMode: "all",
+      rawAllowedUserId: undefined,
+      userId: userId as string,
+    }), {
+      eligible: false,
+      mode: "all",
+      reason: "user_not_allowlisted",
+    });
   }
 });
 

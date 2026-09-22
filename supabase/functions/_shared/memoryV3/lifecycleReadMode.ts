@@ -1,7 +1,7 @@
-export type MemoryV3LifecycleReadMode = "off" | "canary";
+export type MemoryV3LifecycleReadMode = "off" | "canary" | "all";
 
 export type MemoryV3LifecycleReadEligibility =
-  | { eligible: true; mode: "canary"; userId: string }
+  | { eligible: true; mode: "canary" | "all"; userId: string }
   | {
       eligible: false;
       mode: MemoryV3LifecycleReadMode;
@@ -68,7 +68,7 @@ function isCanonicalUuid(value: unknown): value is string {
 export function parseMemoryV3LifecycleReadMode(
   raw: string | null | undefined,
 ): MemoryV3LifecycleReadMode {
-  return raw === "canary" ? "canary" : "off";
+  return raw === "canary" || raw === "all" ? raw : "off";
 }
 
 export function resolveMemoryV3LifecycleReadEligibility(
@@ -79,6 +79,13 @@ export function resolveMemoryV3LifecycleReadEligibility(
     projected.rawMode as string | null | undefined,
   );
   if (mode === "off") return { eligible: false, mode, reason: "disabled" };
+
+  if (mode === "all") {
+    if (!isCanonicalUuid(projected.userId)) {
+      return { eligible: false, mode, reason: "user_not_allowlisted" };
+    }
+    return { eligible: true, mode, userId: projected.userId };
+  }
 
   if (!isCanonicalUuid(projected.rawAllowedUserId)) {
     return { eligible: false, mode, reason: "invalid_allowlist" };

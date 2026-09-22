@@ -1,7 +1,15 @@
-export type MemoryV3ShadowMode = "off" | "shadow" | "lifecycle_shadow";
+export type MemoryV3ShadowMode =
+  | "off"
+  | "shadow"
+  | "lifecycle_shadow"
+  | "lifecycle_all";
 
 export type MemoryV3ShadowEligibility =
-  | { eligible: true; mode: "shadow" | "lifecycle_shadow"; userId: string }
+  | {
+      eligible: true;
+      mode: "shadow" | "lifecycle_shadow" | "lifecycle_all";
+      userId: string;
+    }
   | {
       eligible: false;
       mode: MemoryV3ShadowMode;
@@ -52,7 +60,10 @@ function isCanonicalUuid(value: unknown): value is string {
 export function parseMemoryV3ShadowMode(
   raw: string | null | undefined,
 ): MemoryV3ShadowMode {
-  return raw === "shadow" || raw === "lifecycle_shadow" ? raw : "off";
+  return raw === "shadow" || raw === "lifecycle_shadow" ||
+      raw === "lifecycle_all"
+    ? raw
+    : "off";
 }
 
 export function resolveMemoryV3ShadowEligibility(
@@ -61,6 +72,12 @@ export function resolveMemoryV3ShadowEligibility(
   const projected = inspectInput(input);
   const mode = parseMemoryV3ShadowMode(projected.rawMode as string | null | undefined);
   if (mode === "off") return { eligible: false, mode, reason: "disabled" };
+  if (mode === "lifecycle_all") {
+    if (!isCanonicalUuid(projected.userId)) {
+      return { eligible: false, mode, reason: "user_not_allowlisted" };
+    }
+    return { eligible: true, mode, userId: projected.userId };
+  }
   if (!isCanonicalUuid(projected.rawAllowedUserId)) {
     return { eligible: false, mode, reason: "invalid_allowlist" };
   }
