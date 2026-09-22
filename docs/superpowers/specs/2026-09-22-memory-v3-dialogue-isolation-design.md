@@ -1,7 +1,7 @@
 # Memory V3 Dialogue Isolation Design
 
 **Date:** 2026-09-22
-**Status:** Proposed — awaiting product-owner approval before any implementation plan
+**Status:** Approved architecture (professional self-review done, two findings fixed/flagged below); implementation planning is the next gate
 **Requested by:** Настя (product owner), via conversational brainstorming session
 
 ## Decision
@@ -75,12 +75,16 @@ memory_v3_dialogue_runs         -- run audit trail, same shape as today's *_runs
 
 RPCs mirror the existing three exactly (`reserve_memory_v3_dialogue_run`, `fail_memory_v3_dialogue_run`, `apply_memory_v3_dialogue_state`, `load_memory_v3_dialogue_read_context`), with the advisory lock and row caps scoped to `(user_id, conversation_id)` instead of `user_id`.
 
+**Advisory lock key (professional review finding, fixed in this revision):** the existing function locks on `hashtextextended(p_user_id::text || ':' || today's date, 0)`. The dialogue-scoped `reserve_memory_v3_dialogue_run` must lock on `hashtextextended(p_user_id::text || ':' || p_conversation_id::text || ':' || today's date, 0)` — folding `conversation_id` into the hash input, not just widening the row lock. Getting this wrong (e.g. keeping the lock user-scoped while only the table rows are conversation-scoped) would silently keep the exact serialization bug this design sets out to fix.
+
 TypeScript layer: new `dialogueStore.ts` / `dialogueReadStore.ts` files, near-identical to `lifecycleStore.ts` / `lifecycleReadStore.ts`, with `conversationId` threaded through the same validation (`projectExtraction` stops rejecting a non-null `conversationId`/non-`"cross_conversation"` `scope`; everything else — the adversarial Proxy-hardening, exact-field-set checks — is preserved unchanged).
 
 ## Testing
 
 Same rigor as the existing lifecycle store: extend `contract.ts`'s test suite for the now-accepted `conversationId`/scope values, and write a new `dialogueStore.cases.test.ts` mirroring `lifecycleStore.cases.test.ts` test-for-test (reservation, duplicate detection, daily cap, compare-and-swap conflict, adversarial input hardening). No live Supabase/network/provider calls — fakes only, matching this design's scope (domain 1).
 
-## Open question for the next design (domain 2, not this one)
+## Open questions for the next design (domain 2, not this one)
 
-How the frozen legacy cross-conversation snapshot and the new dialogue-scoped state get combined when injecting into a live prompt — e.g. does a dialogue see its own state plus the full legacy snapshot unconditionally, or does the legacy snapshot get a smaller, explicitly-сквозная-flavored role once `сквозная` itself is revisited. Not decided here; flagged so it isn't forgotten.
+1. How the frozen legacy cross-conversation snapshot and the new dialogue-scoped state get combined when injecting into a live prompt — e.g. does a dialogue see its own state plus the full legacy snapshot unconditionally, or does the legacy snapshot get a smaller, explicitly-сквозная-flavored role once `сквозная` itself is revisited. Not decided here; flagged so it isn't forgotten.
+
+2. **Cost caps, per-user vs per-conversation (professional review finding).** Live production currently allows exactly 1 paid lifecycle reservation per user per UTC day, system-wide across every conversation (`supabase/migrations/20260922120000_038_memory_v3_full_rollout_alerts.sql`), and caps state at 100 items / 500 evidence rows per user. Naively scoping these same numbers to `(user_id, conversation_id)` instead of `user_id` would let a user with N active dialogues get up to N× today's daily paid-call budget and N× the stored-item ceiling. This design's domain-1 scope has no paid calls at all, so it doesn't need an answer yet — but whoever designs domain 2 (live wiring/activation) must explicitly decide the per-user daily/size ceiling across all of a user's dialogues combined, not just copy the per-conversation numbers, and get the product owner's sign-off on the resulting cost ceiling the same way every prior paid Memory V3 step did.
