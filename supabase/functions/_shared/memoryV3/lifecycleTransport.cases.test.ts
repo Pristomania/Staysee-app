@@ -142,6 +142,7 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
       zdr: true,
     });
     assert.equal(body.stream, false);
+    assert.deepEqual(body.usage, { include: true });
     assert.deepEqual(body.messages, [
       { role: "system", content: input.system },
       { role: "user", content: JSON.stringify(input.input) },

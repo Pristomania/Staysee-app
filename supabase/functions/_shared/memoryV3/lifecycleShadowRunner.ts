@@ -257,6 +257,21 @@ function failed(runId: string | null, diagnosticCode: MemoryV3LifecycleShadowDia
   return { status: "failed", runId, diagnosticCode };
 }
 
+// Cost logging is analytics, not correctness -- a failure here must never
+// affect lifecycle persistence or the reply path, so it's swallowed, same
+// as reportTransportDiagnostic above.
+async function logUsageSafely(
+  logUsage: MemoryV3LifecycleUsageLogger | undefined,
+  input: Parameters<MemoryV3LifecycleUsageLogger>[0],
+): Promise<void> {
+  if (typeof logUsage !== "function") return;
+  try {
+    await logUsage(input);
+  } catch {
+    // Swallowed intentionally.
+  }
+}
+
 async function persistFailure(
   failStore: (input: never) => Promise<unknown>,
   runId: string,
@@ -271,11 +286,23 @@ async function persistFailure(
   }
 }
 
+export type MemoryV3LifecycleUsageLogger = (input: {
+  userId: string;
+  conversationId: string;
+  runId: string;
+  stage: "extractor" | "reconciler";
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number;
+}) => Promise<void>;
+
 export async function runMemoryV3LifecycleShadow(
   options: MemoryV3LifecycleShadowOptions,
   reportTransportDiagnostic?: (
     code: NonNullable<ReturnType<typeof projectSafeMemoryV3LifecycleTransportDiagnostic>>,
   ) => void,
+  logUsage?: MemoryV3LifecycleUsageLogger,
 ): Promise<MemoryV3LifecycleShadowResult> {
   let projected: JsonRecord;
   try {
@@ -388,6 +415,16 @@ export async function runMemoryV3LifecycleShadow(
     const code = ownDiagnostic(error) ?? (transportCode ? "extractor_transport_failed" : "extractor_transport_failed");
     return await persistFailure(failStore, runId, userId, code);
   }
+  // Logged as soon as the response is in, regardless of whether the run
+  // later succeeds -- the extractor call's cost is already spent either way.
+  if (extractor.usage !== null) {
+    await logUsageSafely(logUsage, {
+      userId, conversationId, runId, stage: "extractor", model: MEMORY_V3_LIFECYCLE_MODEL,
+      promptTokens: extractor.usage.promptTokens,
+      completionTokens: extractor.usage.completionTokens,
+      costUsd: extractor.usage.costUsd,
+    });
+  }
 
   let parsedExtraction: unknown;
   try {
@@ -437,6 +474,16 @@ export async function runMemoryV3LifecycleShadow(
       }
     }
     return await persistFailure(failStore, runId, userId, "reconciler_transport_failed");
+  }
+  // Same as the extractor call above: logged now, independent of whether
+  // the run later succeeds.
+  if (reconciler.usage !== null) {
+    await logUsageSafely(logUsage, {
+      userId, conversationId, runId, stage: "reconciler", model: MEMORY_V3_LIFECYCLE_MODEL,
+      promptTokens: reconciler.usage.promptTokens,
+      completionTokens: reconciler.usage.completionTokens,
+      costUsd: reconciler.usage.costUsd,
+    });
   }
 
   let rawProposal: unknown;

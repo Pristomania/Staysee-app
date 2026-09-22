@@ -105,6 +105,7 @@ describe("Memory V3 injected OpenRouter transport", () => {
     });
     assert.equal(body.stream, false);
     assert.equal(body.messages.length, 2);
+    assert.deepEqual(body.usage, { include: true });
     assert.deepEqual(result, {
       content: JSON.stringify(validLayeredResponse),
       usage: { promptTokens: 100, completionTokens: 50, costUsd: 0.0001 },

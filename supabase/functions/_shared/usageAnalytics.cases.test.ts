@@ -10,6 +10,29 @@ import {
   AI_AUDIT_PROMPT_VERSION,
 } from "./aiAuditVersions.ts";
 
+// usageAnalytics.ts pulls in cost.ts, which imports the real "npm:" Supabase
+// client -- Deno-only, unresolvable under plain Node/tsx. So this file can't
+// import usageAnalytics.ts directly (see applyAuditDefaults above, which
+// mirrors the same file for the same reason). This mirrors
+// logMemoryV3LifecycleUsage's row-shaping instead.
+function mirrorMemoryV3LifecycleUsageRow(input: {
+  runId: string;
+  stage: "extractor" | "reconciler";
+  costUsd: number;
+  promptTokens: number;
+  completionTokens: number;
+}): Record<string, unknown> {
+  return {
+    cost: input.costUsd,
+    prompt_tokens: input.promptTokens,
+    completion_tokens: input.completionTokens,
+    call_kind: input.stage === "extractor"
+      ? "memory_lifecycle_extractor"
+      : "memory_lifecycle_reconciler",
+    request_id: input.runId,
+  };
+}
+
 /** Mirrors buildUsageLogRow audit defaults in usageAnalytics.ts */
 function applyAuditDefaults(
   audit: Record<string, unknown> = {}
@@ -61,5 +84,24 @@ for (const label of [
   assert(!label.includes("Стэйси"), `no prompt text in label: ${label}`);
   assert(!label.includes("# STAYSEE"), `no prompt text in label: ${label}`);
 }
+
+const RUN_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+const extractorRow = mirrorMemoryV3LifecycleUsageRow({
+  runId: RUN_ID, stage: "extractor", costUsd: 0.00034, promptTokens: 500, completionTokens: 120,
+});
+assert(extractorRow.call_kind === "memory_lifecycle_extractor", "extractor call_kind");
+assert(extractorRow.request_id === RUN_ID, "extractor request_id reuses runId");
+assert(extractorRow.cost === 0.00034, "extractor keeps the real reported cost");
+
+const reconcilerRow = mirrorMemoryV3LifecycleUsageRow({
+  runId: RUN_ID, stage: "reconciler", costUsd: 0.00061, promptTokens: 900, completionTokens: 200,
+});
+assert(reconcilerRow.call_kind === "memory_lifecycle_reconciler", "reconciler call_kind");
+assert(reconcilerRow.request_id === RUN_ID, "reconciler request_id reuses runId");
+assert(
+  extractorRow.request_id === reconcilerRow.request_id,
+  "both stages of one check share request_id, so count(DISTINCT request_id) counts checks"
+);
 
 console.log("usageAnalytics.cases.test.ts — all passed");
