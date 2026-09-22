@@ -81,7 +81,7 @@ function rawFor(kind = "hypothesis", status = "candidate", relation = "supports"
 async function rejectsSafely(value: unknown, input = dialogue()) {
   let caught: unknown;
   try {
-    await normalizeMemoryV3LayeredResponse(value, input, MEMORY_V3_EXTRACTOR_VERSION);
+    await normalizeMemoryV3LayeredResponse(value, input, MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
   } catch (error) {
     caught = error;
   }
@@ -118,7 +118,7 @@ describe("Memory V3 production contract", () => {
   it("normalizes a hypothesis with trusted identity and provenance", async () => {
     const input = validateMemoryV3Dialogue(dialogue());
     const output = await normalizeMemoryV3LayeredResponse(
-      rawFor(), input, MEMORY_V3_EXTRACTOR_VERSION,
+      rawFor(), input, MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation",
     );
     assert.deepEqual(output.run, { caseId: input.caseId, extractorVersion: MEMORY_V3_EXTRACTOR_VERSION });
     assert.equal(output.items.length, 1);
@@ -133,13 +133,33 @@ describe("Memory V3 production contract", () => {
     assert.equal(output.items[0].localItemKey, makeLocalItemKey(output.items[0], 0));
   });
 
+  it("tags items with the caseId's conversationId when scopeMode is conversation", async () => {
+    const input = validateMemoryV3Dialogue(dialogue());
+    const output = await normalizeMemoryV3LayeredResponse(
+      rawFor(), input, MEMORY_V3_EXTRACTOR_VERSION, "conversation",
+    );
+    assert.equal(output.items[0].scope, "conversation");
+    assert.equal(output.items[0].conversationId, "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+  });
+
+  it("rejects an unrecognized scopeMode", async () => {
+    let caught: unknown;
+    try {
+      await normalizeMemoryV3LayeredResponse(rawFor(), dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "everywhere" as never);
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof Error);
+    assert.match(caught.message, /^\[memory-v3:contract\]/);
+  });
+
   it("accepts JSON text and empty abstention", async () => {
     const empty = {
       layerDecisions: ["event", "recurrence", "hypothesis"].map((kind) => ({ kind, decision: "omit", itemRefs: [] })),
       items: [],
       evidence: [],
     };
-    const output = await normalizeMemoryV3LayeredResponse(JSON.stringify(empty), dialogue(), MEMORY_V3_EXTRACTOR_VERSION);
+    const output = await normalizeMemoryV3LayeredResponse(JSON.stringify(empty), dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
     assert.deepEqual(output.items, []);
     assert.deepEqual(output.evidence, []);
   });
@@ -152,7 +172,7 @@ describe("Memory V3 production contract", () => {
     ["hypothesis", "stale", "contradicts"], ["hypothesis", "rejected", "rejects"],
   ]) {
     it(`accepts ${kind}/${status} with ${relation}`, async () => {
-      const output = await normalizeMemoryV3LayeredResponse(rawFor(kind, status, relation), dialogue(), MEMORY_V3_EXTRACTOR_VERSION);
+      const output = await normalizeMemoryV3LayeredResponse(rawFor(kind, status, relation), dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
       assert.equal(output.items[0].status, status);
     });
   }
@@ -187,7 +207,7 @@ describe("Memory V3 production contract", () => {
     const raw = rawFor("recurrence", "active", "supports");
     raw.evidence.push(evidence({ sourceMessageId: USER_3, supportType: "pattern_confirmation", episodeKey: null }));
     raw.evidence.push(evidence({ sourceMessageId: USER_4, supportType: "scope_boundary", episodeKey: null }));
-    const output = await normalizeMemoryV3LayeredResponse(raw, dialogue(), MEMORY_V3_EXTRACTOR_VERSION);
+    const output = await normalizeMemoryV3LayeredResponse(raw, dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
     assert.deepEqual(output.evidence.map((row) => [row.supportType, row.episodeKey]), [
       ["episode_observation", `episode:${USER_1}`],
       ["episode_observation", `episode:${USER_2}`],

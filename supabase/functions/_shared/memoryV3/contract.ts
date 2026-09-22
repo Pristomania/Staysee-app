@@ -27,8 +27,8 @@ export interface MemoryV3Extraction {
     localItemKey: string;
     kind: MemoryKind;
     claim: string;
-    scope: "cross_conversation";
-    conversationId: null;
+    scope: "cross_conversation" | "conversation";
+    conversationId: string | null;
     eventTimeStart: string | null;
     eventTimeEnd: string | null;
     status: string;
@@ -160,6 +160,12 @@ function validateCaseId(value: unknown): value is string {
   return !!match && UUID.test(match[1]) && UUID.test(match[2]);
 }
 
+function conversationIdFromCaseId(caseId: string): string {
+  const match = CASE_ID.exec(caseId);
+  if (!match) throw fail();
+  return match[2];
+}
+
 export function validateMemoryV3Dialogue(input: unknown): MemoryV3DialogueInput {
   return safe(() => {
     const projected = inspectRecord(input, ["caseId", "messages"]);
@@ -235,10 +241,15 @@ export async function normalizeMemoryV3LayeredResponse(
   raw: unknown,
   input: unknown,
   extractorVersion: string,
+  scopeMode: "cross_conversation" | "conversation",
 ): Promise<MemoryV3Extraction> {
   try {
     const validated = validateMemoryV3Dialogue(input);
     if (!isNonEmptyString(extractorVersion)) throw fail();
+    if (scopeMode !== "cross_conversation" && scopeMode !== "conversation") throw fail();
+    const scopedConversationId = scopeMode === "conversation"
+      ? conversationIdFromCaseId(validated.caseId)
+      : null;
     const response = inspectRecord(parseRaw(raw), RESPONSE_FIELDS);
     const rawItems = inspectDenseArray(response.items);
     const refs = new Map<string, { key: string; kind: MemoryKind }>();
@@ -250,8 +261,8 @@ export async function normalizeMemoryV3LayeredResponse(
       const normalized = {
         kind: source.kind as MemoryKind,
         claim: source.claim as string,
-        scope: "cross_conversation" as const,
-        conversationId: null,
+        scope: scopeMode,
+        conversationId: scopedConversationId,
         eventTimeStart: source.eventTimeStart as string | null,
         eventTimeEnd: source.eventTimeEnd as string | null,
         status: source.status as string,
