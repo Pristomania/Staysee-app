@@ -526,6 +526,16 @@ describe('V2 extractor layered admission', () => {
   });
 });
 
+describe('V2 extractor epistemic scope', () => {
+  it('never promotes a tentative report to a certain event', () => {
+    const system = buildExtractorRequestV2(v2CaseWithSentinels()).system;
+    assertContains(
+      system,
+      'preserve source uncertainty (including "вроде"/maybe/seems); never emit a tentative report as a certain event.',
+    );
+  });
+});
+
 describe('V2 extractor safety and privacy', () => {
   it('keeps user-only evidence, durable admission, abstention, and date rules', () => {
     const system = buildExtractorRequestV2(v2CaseWithSentinels()).system;

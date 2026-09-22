@@ -22,7 +22,7 @@ const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/lifecycleContract.ts':
     'ECE40C7EAE6DD806D84EA223DB7FB850452C241040CAFC235809B70BCF6779B2',
   'supabase/functions/_shared/memoryV3/lifecyclePrompt.ts':
-    '80247FD956861A5D8440E6217962DAFF15B9593A7A9E237BD56E9F7869EFE841',
+    'A33BE18485A6D9609319C5AF1271D7E1F377F4E19CCFE0B88F90DBAB50D6B967',
   'supabase/functions/_shared/memoryV3/lifecycleReducer.ts':
     '071C9914B374ECC0461B6C49E0D85C00C8141AB3C7AE24AE960EDBADD6A6461A',
   'supabase/functions/_shared/memoryV3/transport.ts':

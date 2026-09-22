@@ -53,6 +53,13 @@ describe("Memory V3 production prompt boundary", () => {
     );
   });
 
+  it("never promotes a tentative report to a certain event", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /preserve source uncertainty \(including "вроде"\/maybe\/seems\); never emit a tentative report as a certain event\./,
+    );
+  });
+
   it("does not mutate input and creates new allowlisted message objects", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);

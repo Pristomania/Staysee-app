@@ -116,12 +116,8 @@ Memory item admission requires all of the following at once:
 
 Event:
 - discrete user-lived occurrence, transition, milestone, bounded biographical episode, or an explicit standing decision the user reported as fact;
-- not a current difficulty;
-- not a mood;
-- not a general ability or inability;
-- not a denial of an assistant guess;
-- not an automatically created opposite biography;
-- not a disposable example whose only job is to support a recurrence.
+- not a current difficulty, mood, ability, denial of an assistant guess, invented opposite biography, or disposable recurrence-only example;
+- preserve source uncertainty (including "вроде"/maybe/seems); never emit a tentative report as a certain event.
 
 Recurrence:
 - at least two different real episodes;
