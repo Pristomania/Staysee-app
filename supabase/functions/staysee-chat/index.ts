@@ -38,6 +38,15 @@ import {
   runMemoryV3LifecycleShadowBackgroundSafely,
 } from "../_shared/memoryV3/lifecycleShadowRunner.ts";
 import {
+  runMemoryV3DialogueShadow,
+  runMemoryV3DialogueShadowBackgroundSafely,
+} from "../_shared/memoryV3/dialogueShadowRunner.ts";
+import { createMemoryV3DialogueOpenRouterAdapter } from "../_shared/memoryV3/dialogueTransport.ts";
+import { createMemoryV3DialogueStore } from "../_shared/memoryV3/dialogueStore.ts";
+import { resolveMemoryV3DialogueEligibility } from "../_shared/memoryV3/dialogueMode.ts";
+import { createMemoryV3DialogueReadStore } from "../_shared/memoryV3/dialogueReadStore.ts";
+import type { MemoryV3DialogueReadContext } from "../_shared/memoryV3/dialogueReadStore.ts";
+import {
   sendMemoryV3TelegramAlertSafely,
   type MemoryV3TelegramAlertDiagnostic,
   type MemoryV3TelegramAlertPath,
@@ -985,12 +994,40 @@ Deno.serve(async (req: Request) => {
           }
         }
 
+        // Additive, independent of the legacy lifecycle read above: a
+        // canary account keeps seeing the frozen account-wide snapshot
+        // unconditionally, plus this conversation's own dialogue-scoped
+        // notebook alongside it -- never a replacement.
+        let dialogueMemory: MemoryV3DialogueReadContext | undefined;
+        const dialogueReadEligibility = resolveMemoryV3DialogueEligibility({
+          rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),
+          rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
+          userId,
+        });
+        if (dialogueReadEligibility.eligible && conversationId) {
+          const crossMemoryOnForDialogueRead = await fetchCrossMemoryEnabled(
+            makeServiceClient(),
+            dialogueReadEligibility.userId,
+          );
+          if (crossMemoryOnForDialogueRead) {
+            try {
+              const loadedDialogue = await createMemoryV3DialogueReadStore(
+                makeServiceClient(),
+              ).load(dialogueReadEligibility.userId, conversationId);
+              if (loadedDialogue !== null) dialogueMemory = loadedDialogue;
+            } catch {
+              console.error("[staysee-chat] dialogue read load_failed");
+            }
+          }
+        }
+
         let contextPrompt: string;
         let lifecycleCrossMemoryLoaded = false;
-        if (lifecycleCrossMemory !== undefined) {
+        if (lifecycleCrossMemory !== undefined || dialogueMemory !== undefined) {
           try {
             contextPrompt = buildContextPrompt(trimmedPacket, {
-              lifecycleCrossMemory,
+              ...(lifecycleCrossMemory !== undefined ? { lifecycleCrossMemory } : {}),
+              ...(dialogueMemory !== undefined ? { dialogueMemory } : {}),
             });
             lifecycleCrossMemoryLoaded = true;
           } catch (error) {
@@ -1611,6 +1648,32 @@ Deno.serve(async (req: Request) => {
               userId,
             );
             if (!crossMemoryOnForWrite) return;
+            const dialogueEligibility = resolveMemoryV3DialogueEligibility({
+              rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),
+              rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
+              userId,
+            });
+            if (dialogueEligibility.eligible) {
+              return runMemoryV3DialogueShadowBackgroundSafely(
+                () => runMemoryV3DialogueShadow({
+                  userId,
+                  conversationId,
+                  apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+                  loadMessages: createMemoryV3MessageLoader(svc),
+                  store: createMemoryV3DialogueStore(svc),
+                  extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
+                    apiKey,
+                    fetchImpl: globalThis.fetch.bind(globalThis),
+                  }),
+                  reconcilerAdapterFactory: (apiKey) => createMemoryV3DialogueOpenRouterAdapter({
+                    apiKey,
+                    fetchImpl: globalThis.fetch.bind(globalThis),
+                  }),
+                }, (code) => console.error("[memory-v3-dialogue-transport]", code),
+                  (usage) => logMemoryV3LifecycleUsage(svc, usage)),
+                (code) => console.error("[memory-v3-dialogue-shadow]", code),
+              );
+            }
             const memoryV3Mode = parseMemoryV3ShadowMode(
               Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
             );

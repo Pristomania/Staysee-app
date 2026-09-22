@@ -43,6 +43,8 @@ import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import type { MemoryV3LifecycleReadContext } from "./memoryV3/lifecycleReadStore.ts";
 import { formatMemoryV3LifecycleReadPrompt } from "./memoryV3/lifecycleReadPrompt.ts";
+import type { MemoryV3DialogueReadContext } from "./memoryV3/dialogueReadStore.ts";
+import { formatMemoryV3DialoguePromptBlock } from "./memoryV3/dialogueReadPrompt.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,10 +99,16 @@ export interface ContextPacket {
 }
 
 export interface ContextPromptOptions {
-  lifecycleCrossMemory: MemoryV3LifecycleReadContext;
+  lifecycleCrossMemory?: MemoryV3LifecycleReadContext;
+  dialogueMemory?: MemoryV3DialogueReadContext;
 }
 
-const CONTEXT_PROMPT_OPTION_FIELDS = ["lifecycleCrossMemory"] as const;
+interface InspectedContextPromptOptions {
+  lifecycleCrossMemory: MemoryV3LifecycleReadContext | null;
+  dialogueMemory: MemoryV3DialogueReadContext | null;
+}
+
+const CONTEXT_PROMPT_OPTION_FIELDS = ["lifecycleCrossMemory", "dialogueMemory"] as const;
 const CONTEXT_PROMPT_OPTION_ERRORS = new WeakSet<object>();
 
 function contextPromptOptionsFail(): Error {
@@ -128,7 +136,7 @@ function contextPromptOptionsSafe<T>(operation: () => T): T {
 
 function inspectContextPromptOptions(
   value: ContextPromptOptions | undefined,
-): ContextPromptOptions | null {
+): InspectedContextPromptOptions | null {
   if (value === undefined) return null;
   if (
     typeof value !== "object" || value === null ||
@@ -143,21 +151,37 @@ function inspectContextPromptOptions(
   }
 
   const keys = contextPromptOptionsSafe(() => Reflect.ownKeys(value));
-  if (
-    keys.length !== CONTEXT_PROMPT_OPTION_FIELDS.length ||
-    keys[0] !== CONTEXT_PROMPT_OPTION_FIELDS[0]
-  ) {
+  if (keys.length === 0 || keys.length > CONTEXT_PROMPT_OPTION_FIELDS.length) {
     throw contextPromptOptionsFail();
   }
 
-  const own = contextPromptOptionsSafe(() =>
-    Object.getOwnPropertyDescriptor(value, CONTEXT_PROMPT_OPTION_FIELDS[0])
-  );
-  if (!own || !own.enumerable || !("value" in own) || own.value === undefined) {
-    throw contextPromptOptionsFail();
+  const result: InspectedContextPromptOptions = {
+    lifecycleCrossMemory: null,
+    dialogueMemory: null,
+  };
+  const seen = new Set<string>();
+  for (const key of keys) {
+    if (
+      typeof key !== "string" ||
+      !(CONTEXT_PROMPT_OPTION_FIELDS as readonly string[]).includes(key) ||
+      seen.has(key)
+    ) {
+      throw contextPromptOptionsFail();
+    }
+    seen.add(key);
+    const own = contextPromptOptionsSafe(() =>
+      Object.getOwnPropertyDescriptor(value, key)
+    );
+    if (!own || !own.enumerable || !("value" in own) || own.value === undefined) {
+      throw contextPromptOptionsFail();
+    }
+    if (key === "lifecycleCrossMemory") {
+      result.lifecycleCrossMemory = own.value as MemoryV3LifecycleReadContext;
+    } else {
+      result.dialogueMemory = own.value as MemoryV3DialogueReadContext;
+    }
   }
-
-  return { lifecycleCrossMemory: own.value as MemoryV3LifecycleReadContext };
+  return result;
 }
 
 // ── Max limits ────────────────────────────────────────────────────────────────
@@ -335,8 +359,11 @@ export function buildContextPrompt(
   options?: ContextPromptOptions,
 ): string {
   const inspectedOptions = inspectContextPromptOptions(options);
-  const lifecycleCrossMemoryBlock = inspectedOptions
+  const lifecycleCrossMemoryBlock = inspectedOptions?.lifecycleCrossMemory
     ? formatMemoryV3LifecycleReadPrompt(inspectedOptions.lifecycleCrossMemory)
+    : "";
+  const dialogueMemoryBlock = inspectedOptions?.dialogueMemory
+    ? formatMemoryV3DialoguePromptBlock(inspectedOptions.dialogueMemory)
     : "";
   const meta = packet.conversationMeta;
   const memoryBlock = injectSummaryIntoPrompt({
@@ -358,6 +385,7 @@ export function buildContextPrompt(
 
   if (inspectedOptions) {
     if (lifecycleCrossMemoryBlock) parts.push(lifecycleCrossMemoryBlock);
+    if (dialogueMemoryBlock) parts.push(dialogueMemoryBlock);
   } else if (injectableCrossMemory.length > 0) {
     const crossBlock = formatCrossMemoryForPrompt(injectableCrossMemory);
     if (crossBlock) parts.push(crossBlock);
