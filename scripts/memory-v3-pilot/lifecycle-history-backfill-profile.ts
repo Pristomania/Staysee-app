@@ -18,6 +18,16 @@ export const LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID =
   'memory-v3-lifecycle-history-backfill-v1' as const;
 export const LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES = 40_000 as const;
 export const LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL = 4_096 as const;
+export const LIFECYCLE_HISTORY_PRIMARY_MODEL = 'google/gemini-3.7-flash' as const;
+export const LIFECYCLE_HISTORY_FALLBACK_MODEL =
+  'mistralai/mistral-medium-3-5' as const;
+export const LIFECYCLE_HISTORY_MODEL_ROUTE = Object.freeze([
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+] as const);
+
+export type LifecycleHistoryResolvedModel =
+  typeof LIFECYCLE_HISTORY_MODEL_ROUTE[number];
 
 export interface LifecycleHistoryBackfillProfile {
   profileId: typeof LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID;
@@ -26,6 +36,10 @@ export interface LifecycleHistoryBackfillProfile {
   extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-shadow-v2';
   reconcilerVersion: 'memory-v3-lifecycle-reconciler-v1';
   model: 'google/gemini-3.7-flash';
+  modelRoute: readonly [
+    typeof LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    typeof LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  ];
   maxMessagesPerChunk: 60;
   maxExtractorRequestBytes: 40_000;
   maxReconcilerRequestBytes: 80_000;
@@ -38,20 +52,44 @@ export interface LifecycleHistoryBackfillProfile {
   executeFlag: '--execute-history-backfill-paid-requests';
 }
 
-export interface LifecycleHistoryPriceSnapshot {
-  model: 'google/gemini-3.7-flash';
+export interface LifecycleHistoryEndpointSnapshot {
+  model: LifecycleHistoryResolvedModel;
   inputUsdPerMillion: string;
   outputUsdPerMillion: string;
   observedAt: string;
   sourceUrl: string;
+  supportedParameters: readonly [
+    'max_tokens',
+    'reasoning',
+    'reasoning_effort',
+    'response_format',
+    'structured_outputs',
+  ];
+  zdr: true;
 }
 
-const PRICE_FIELDS = [
+export interface LifecycleHistoryRouteSnapshot {
+  route: readonly [LifecycleHistoryEndpointSnapshot, LifecycleHistoryEndpointSnapshot];
+}
+
+export type LifecycleHistoryPriceSnapshot = LifecycleHistoryRouteSnapshot;
+
+const ENDPOINT_FIELDS = [
   'model',
   'inputUsdPerMillion',
   'outputUsdPerMillion',
   'observedAt',
   'sourceUrl',
+  'supportedParameters',
+  'zdr',
+] as const;
+const SNAPSHOT_FIELDS = ['route'] as const;
+const REQUIRED_PARAMETERS = [
+  'max_tokens',
+  'reasoning',
+  'reasoning_effort',
+  'response_format',
+  'structured_outputs',
 ] as const;
 const BUDGET_FIELDS = ['chunkCount', 'priceSnapshot', 'maxBudgetUsd'] as const;
 const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]{1,9})?$/;
@@ -108,6 +146,7 @@ const PROFILE = deepFreeze<LifecycleHistoryBackfillProfile>({
   extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
   reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
   model: MEMORY_V3_LIFECYCLE_MODEL,
+  modelRoute: LIFECYCLE_HISTORY_MODEL_ROUTE,
   maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
   maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
   maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
@@ -179,6 +218,69 @@ function projectRecord(
   return output;
 }
 
+function projectDenseArray(token: object, value: unknown): unknown[] {
+  let array: boolean;
+  let prototype: object | null;
+  let keys: PropertyKey[];
+  let lengthDescriptor: PropertyDescriptor | undefined;
+  try {
+    if (typeof value !== 'object' || value === null || isProxy(value)) fail(token);
+    array = Array.isArray(value);
+    prototype = Object.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+    lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      OWN_ERRORS.has(error) &&
+      ERROR_TOKENS.get(error) === token
+    ) {
+      throw error;
+    }
+    fail(token);
+  }
+  if (
+    !array ||
+    prototype !== Array.prototype ||
+    !lengthDescriptor ||
+    !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value') ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 0 ||
+    keys.length !== (lengthDescriptor.value as number) + 1
+  ) {
+    fail(token);
+  }
+  const length = lengthDescriptor.value as number;
+  const output: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const key = String(index);
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      fail(token);
+    }
+    if (
+      !descriptor ||
+      descriptor.enumerable !== true ||
+      !Object.prototype.hasOwnProperty.call(descriptor, 'value') ||
+      descriptor.value === undefined
+    ) {
+      fail(token);
+    }
+    output.push(descriptor.value);
+  }
+  if (keys.some((key) => key !== 'length' && (
+    typeof key !== 'string' ||
+    !/^(0|[1-9][0-9]*)$/.test(key) ||
+    Number(key) >= length
+  ))) {
+    fail(token);
+  }
+  return output;
+}
+
 function parseDecimalNanodollars(token: object, value: unknown): bigint {
   if (typeof value !== 'string' || !DECIMAL.test(value)) fail(token);
   const [whole, fraction = ''] = value.split('.');
@@ -213,25 +315,62 @@ function assertHttpsUrl(token: object, value: unknown): asserts value is string 
   }
 }
 
-function projectPriceSnapshot(
+function projectEndpointSnapshot(
   token: object,
   value: unknown,
-): { snapshot: LifecycleHistoryPriceSnapshot; observedAtMs: number } {
-  const record = projectRecord(token, value, PRICE_FIELDS);
-  if (record.model !== MEMORY_V3_LIFECYCLE_MODEL) fail(token);
+  expectedModel: LifecycleHistoryResolvedModel,
+): { snapshot: LifecycleHistoryEndpointSnapshot; observedAtMs: number } {
+  const record = projectRecord(token, value, ENDPOINT_FIELDS);
+  if (record.model !== expectedModel || record.zdr !== true) fail(token);
   parseDecimalNanodollars(token, record.inputUsdPerMillion);
   parseDecimalNanodollars(token, record.outputUsdPerMillion);
   const observedAtMs = parseCanonicalTimestamp(token, record.observedAt);
   assertHttpsUrl(token, record.sourceUrl);
+  const expectedUrl = `https://openrouter.ai/api/v1/models/${expectedModel}/endpoints`;
+  if (record.sourceUrl !== expectedUrl) fail(token);
+  const parameters = projectDenseArray(token, record.supportedParameters);
+  if (
+    parameters.length !== REQUIRED_PARAMETERS.length ||
+    parameters.some((parameter, index) => parameter !== REQUIRED_PARAMETERS[index])
+  ) {
+    fail(token);
+  }
   return {
     snapshot: {
-      model: MEMORY_V3_LIFECYCLE_MODEL,
+      model: expectedModel,
       inputUsdPerMillion: record.inputUsdPerMillion as string,
       outputUsdPerMillion: record.outputUsdPerMillion as string,
       observedAt: record.observedAt as string,
       sourceUrl: record.sourceUrl,
+      supportedParameters: [...REQUIRED_PARAMETERS],
+      zdr: true,
     },
     observedAtMs,
+  };
+}
+
+function projectPriceSnapshot(
+  token: object,
+  value: unknown,
+): { snapshot: LifecycleHistoryPriceSnapshot; observedAtMs: readonly [number, number] } {
+  const record = projectRecord(token, value, SNAPSHOT_FIELDS);
+  const route = projectDenseArray(token, record.route);
+  if (route.length !== LIFECYCLE_HISTORY_MODEL_ROUTE.length) fail(token);
+  const primary = projectEndpointSnapshot(
+    token,
+    route[0],
+    LIFECYCLE_HISTORY_PRIMARY_MODEL,
+  );
+  const fallback = projectEndpointSnapshot(
+    token,
+    route[1],
+    LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  );
+  return {
+    snapshot: deepFreeze({
+      route: [primary.snapshot, fallback.snapshot],
+    }),
+    observedAtMs: [primary.observedAtMs, fallback.observedAtMs],
   };
 }
 
@@ -269,8 +408,10 @@ export function validateLifecycleHistoryPriceSnapshot(
   return boundary((token) => {
     if (!Number.isSafeInteger(nowMs)) fail(token);
     const { snapshot, observedAtMs } = projectPriceSnapshot(token, value);
-    const ageMs = nowMs - observedAtMs;
-    if (ageMs < 0 || ageMs > MAX_PRICE_AGE_MS) fail(token);
+    if (observedAtMs.some((timestamp) => {
+      const ageMs = nowMs - timestamp;
+      return ageMs < 0 || ageMs > MAX_PRICE_AGE_MS;
+    })) fail(token);
     return snapshot;
   });
 }
@@ -302,8 +443,14 @@ export function calculateLifecycleHistoryBudget(input: {
     const requestCount = BigInt(maxRequests);
     const inputTokens = requestCount * BigInt(PROFILE.reservedInputTokensPerCall);
     const outputTokens = requestCount * BigInt(PROFILE.maxOutputTokensPerCall);
-    const inputPrice = parseDecimalNanodollars(token, snapshot.inputUsdPerMillion);
-    const outputPrice = parseDecimalNanodollars(token, snapshot.outputUsdPerMillion);
+    const inputPrice = snapshot.route.reduce((maximum, endpoint) => {
+      const price = parseDecimalNanodollars(token, endpoint.inputUsdPerMillion);
+      return price > maximum ? price : maximum;
+    }, 0n);
+    const outputPrice = snapshot.route.reduce((maximum, endpoint) => {
+      const price = parseDecimalNanodollars(token, endpoint.outputUsdPerMillion);
+      return price > maximum ? price : maximum;
+    }, 0n);
     const ceilingNanodollars = divideRoundUp(
       inputTokens * inputPrice + outputTokens * outputPrice,
       TOKENS_PER_MILLION,

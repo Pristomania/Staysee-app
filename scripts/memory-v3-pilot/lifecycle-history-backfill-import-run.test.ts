@@ -3,7 +3,11 @@ import { describe, it } from 'node:test';
 
 import { buildLifecycleHistoryReviewPacket, runLifecycleHistoryBackfill } from './lifecycle-history-backfill-engine.ts';
 import { prepareLifecycleHistoryBackfill } from './lifecycle-history-backfill-contract.ts';
-import { LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID } from './lifecycle-history-backfill-profile.ts';
+import {
+  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './lifecycle-history-backfill-profile.ts';
 import { main } from './lifecycle-history-backfill-import-run.ts';
 import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
 import type { MemoryV3LifecycleReconcileRequest } from '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
@@ -40,9 +44,21 @@ async function files() {
     profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
     prepared,
     priceSnapshot: {
-      model: 'google/gemini-3.7-flash', inputUsdPerMillion: '0.75',
-      outputUsdPerMillion: '3.75', observedAt: '2026-09-21T11:00:00.000Z',
-      sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+      route: [{
+        model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
+        observedAt: '2026-09-21T11:00:00.000Z',
+        sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+        supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+        zdr: true,
+      }, {
+        model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+        inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
+        observedAt: '2026-09-21T11:00:00.000Z',
+        sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+        supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+        zdr: true,
+      }],
     },
     maxBudgetUsd: '1', nowMs: Date.parse('2026-09-21T12:00:00.000Z'), execute: true,
     extractorAdapter: async (request: MemoryV3ExtractorRequest) => ({
@@ -58,12 +74,12 @@ async function files() {
         evidence: [{ itemRef: 'i1', sourceMessageId: request.input.messages[0].id,
           relation: 'supports', supportType: null,
           episodeKey: `episode:${request.input.messages[0].id}` }],
-      }), usage: null,
+      }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
     }),
     reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
       rawContent: JSON.stringify({ operations: request.input.candidates.map((candidate) => ({
         type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
-      })) }), usage: null,
+      })) }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
     }),
   });
   const packet = buildLifecycleHistoryReviewPacket(result);

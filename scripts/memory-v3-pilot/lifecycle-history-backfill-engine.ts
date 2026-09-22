@@ -9,9 +9,13 @@ import {
 import {
   calculateLifecycleHistoryBudget,
   getLifecycleHistoryBackfillProfile,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_MODEL_ROUTE,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
   validateLifecycleHistoryPriceSnapshot,
   type LifecycleHistoryBackfillProfile,
   type LifecycleHistoryPriceSnapshot,
+  type LifecycleHistoryResolvedModel,
 } from './lifecycle-history-backfill-profile.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
@@ -52,6 +56,10 @@ export interface LifecycleHistoryBackfillResult {
   schemaVersion: 'memory-v3-lifecycle-history-result-v1';
   profileId: 'memory-v3-lifecycle-history-backfill-v1';
   model: 'google/gemini-3.7-flash';
+  modelRoute: readonly [
+    'google/gemini-3.7-flash',
+    'mistralai/mistral-medium-3-5',
+  ];
   manifest: LifecycleHistoryBackfillManifest;
   priceSnapshot: LifecycleHistoryPriceSnapshot;
   budget: {
@@ -67,6 +75,11 @@ export interface LifecycleHistoryBackfillResult {
   successChunkCount: number;
   failureCount: number;
   providerCallCount: number;
+  providerModelFallbackCount: number;
+  resolvedModelCounts: {
+    primary: number;
+    fallback: number;
+  };
   maxActive: 1;
   retryCount: 0;
   repairCount: 0;
@@ -80,6 +93,8 @@ export interface LifecycleHistoryBackfillResult {
     itemCount: number;
     evidenceCount: number;
     transitionTypes: string[];
+    extractorResolvedModel: LifecycleHistoryResolvedModel;
+    reconcilerResolvedModel: LifecycleHistoryResolvedModel;
   }>;
   failures: Array<{
     chunkId: string;
@@ -122,8 +137,8 @@ const OPTIONS_FIELDS = [
 const REQUIRED_OPTIONS_FIELDS = [
   'profileId', 'prepared', 'priceSnapshot', 'maxBudgetUsd', 'nowMs', 'execute',
 ] as const;
-const TRANSPORT_FIELDS = ['content', 'usage'] as const;
-const RECONCILER_TRANSPORT_FIELDS = ['rawContent', 'usage'] as const;
+const TRANSPORT_FIELDS = ['content', 'usage', 'resolvedModel'] as const;
+const RECONCILER_TRANSPORT_FIELDS = ['rawContent', 'usage', 'resolvedModel'] as const;
 const USAGE_FIELDS = ['promptTokens', 'completionTokens', 'costUsd'] as const;
 const PREPARED_FIELDS = ['userId', 'manifest', 'chunks'] as const;
 const MANIFEST_FIELDS = [
@@ -607,13 +622,40 @@ function inspectUsage(value: unknown, stage: 'extractor_transport' | 'reconciler
   return usage as Usage;
 }
 
-function inspectExtractorTransport(value: unknown): MemoryV3TransportResult {
-  const root = strictRecord(value, TRANSPORT_FIELDS, TRANSPORT_FIELDS, 'extractor_transport', 'extractor_transport_invalid');
-  if (typeof root.content !== 'string') fail('extractor_transport', 'extractor_transport_invalid');
-  return { content: root.content, usage: inspectUsage(root.usage, 'extractor_transport') };
+type ExtractorTransport = MemoryV3TransportResult & {
+  resolvedModel: LifecycleHistoryResolvedModel;
+};
+type ReconcilerTransport = MemoryV3LifecycleTransportResult & {
+  resolvedModel: LifecycleHistoryResolvedModel;
+};
+type ExtractorAdapter = (
+  request: Parameters<MemoryV3ModelAdapter>[0],
+) => Promise<ExtractorTransport>;
+type ReconcilerAdapter = (
+  request: Parameters<MemoryV3LifecycleModelAdapter>[0],
+) => Promise<ReconcilerTransport>;
+
+function inspectResolvedModel(
+  value: unknown,
+  stage: 'extractor_transport' | 'reconciler_transport',
+): LifecycleHistoryResolvedModel {
+  if (value !== LIFECYCLE_HISTORY_PRIMARY_MODEL && value !== LIFECYCLE_HISTORY_FALLBACK_MODEL) {
+    fail(stage, `${stage}_invalid`);
+  }
+  return value;
 }
 
-function inspectReconcilerTransport(value: unknown): MemoryV3LifecycleTransportResult {
+function inspectExtractorTransport(value: unknown): ExtractorTransport {
+  const root = strictRecord(value, TRANSPORT_FIELDS, TRANSPORT_FIELDS, 'extractor_transport', 'extractor_transport_invalid');
+  if (typeof root.content !== 'string') fail('extractor_transport', 'extractor_transport_invalid');
+  return {
+    content: root.content,
+    usage: inspectUsage(root.usage, 'extractor_transport'),
+    resolvedModel: inspectResolvedModel(root.resolvedModel, 'extractor_transport'),
+  };
+}
+
+function inspectReconcilerTransport(value: unknown): ReconcilerTransport {
   const root = strictRecord(
     value,
     RECONCILER_TRANSPORT_FIELDS,
@@ -622,7 +664,11 @@ function inspectReconcilerTransport(value: unknown): MemoryV3LifecycleTransportR
     'reconciler_transport_invalid',
   );
   if (typeof root.rawContent !== 'string') fail('reconciler_transport', 'reconciler_transport_invalid');
-  return { rawContent: root.rawContent, usage: inspectUsage(root.usage, 'reconciler_transport') };
+  return {
+    rawContent: root.rawContent,
+    usage: inspectUsage(root.usage, 'reconciler_transport'),
+    resolvedModel: inspectResolvedModel(root.resolvedModel, 'reconciler_transport'),
+  };
 }
 
 function inspectAdapter(value: unknown): void {
@@ -687,6 +733,7 @@ function buildBaseResult(
     schemaVersion: 'memory-v3-lifecycle-history-result-v1',
     profileId: profile.profileId,
     model: profile.model,
+    modelRoute: LIFECYCLE_HISTORY_MODEL_ROUTE,
     manifest: prepared.manifest,
     priceSnapshot,
     budget: {
@@ -698,6 +745,8 @@ function buildBaseResult(
       gate: 'PASS',
     },
     execute,
+    providerModelFallbackCount: 0,
+    resolvedModelCounts: { primary: 0, fallback: 0 },
     maxActive: 1,
     retryCount: 0,
     repairCount: 0,
@@ -713,8 +762,8 @@ export async function runLifecycleHistoryBackfill(input: {
   maxBudgetUsd: unknown;
   nowMs: number;
   execute: unknown;
-  extractorAdapter?: MemoryV3ModelAdapter;
-  reconcilerAdapter?: MemoryV3LifecycleModelAdapter;
+  extractorAdapter?: ExtractorAdapter;
+  reconcilerAdapter?: ReconcilerAdapter;
 }): Promise<LifecycleHistoryBackfillResult> {
   const root = strictRecord(input, OPTIONS_FIELDS, REQUIRED_OPTIONS_FIELDS, null, 'options_invalid');
   const profileDescriptor = Object.getOwnPropertyDescriptor(root, 'profileId');
@@ -790,11 +839,16 @@ export async function runLifecycleHistoryBackfill(input: {
 
   inspectAdapter(root.extractorAdapter);
   inspectAdapter(root.reconcilerAdapter);
-  const extractorAdapter = root.extractorAdapter as MemoryV3ModelAdapter;
-  const reconcilerAdapter = root.reconcilerAdapter as MemoryV3LifecycleModelAdapter;
+  const extractorAdapter = root.extractorAdapter as ExtractorAdapter;
+  const reconcilerAdapter = root.reconcilerAdapter as ReconcilerAdapter;
   const providerCallGate = createLifecycleHistoryProviderCallGate(budget.maxRequests);
   const usages: Usage[] = [];
   let successfulTransportCount = 0;
+  const resolvedModelCounts = { primary: 0, fallback: 0 };
+  const recordResolvedModel = (model: LifecycleHistoryResolvedModel) => {
+    if (model === LIFECYCLE_HISTORY_PRIMARY_MODEL) resolvedModelCounts.primary += 1;
+    else resolvedModelCounts.fallback += 1;
+  };
   const callExtractorOnce = async (request: Parameters<MemoryV3ModelAdapter>[0]) => {
     let raw: unknown;
     try {
@@ -805,6 +859,7 @@ export async function runLifecycleHistoryBackfill(input: {
     }
     const inspected = inspectExtractorTransport(raw);
     successfulTransportCount += 1;
+    recordResolvedModel(inspected.resolvedModel);
     if (inspected.usage !== null) usages.push(inspected.usage);
     return inspected;
   };
@@ -818,6 +873,7 @@ export async function runLifecycleHistoryBackfill(input: {
     }
     const inspected = inspectReconcilerTransport(raw);
     successfulTransportCount += 1;
+    recordResolvedModel(inspected.resolvedModel);
     if (inspected.usage !== null) usages.push(inspected.usage);
     return inspected;
   };
@@ -908,6 +964,8 @@ export async function runLifecycleHistoryBackfill(input: {
         itemCount: state.items.length,
         evidenceCount: state.items.reduce((sum, item) => sum + item.evidence.length, 0),
         transitionTypes: reduced.transitions.map((transition) => transition.type),
+        extractorResolvedModel: extractorTransport.resolvedModel,
+        reconcilerResolvedModel: reconcilerTransport.resolvedModel,
       });
     } catch (error) {
       const own = details(error);
@@ -936,13 +994,16 @@ export async function runLifecycleHistoryBackfill(input: {
   }
   const providerCallCount = providerCallGate.getAttemptCount();
   const complete = failures.length === 0 && chunkResults.length === prepared.chunks.length &&
-    providerCallCount === budget.maxRequests;
+    providerCallCount === budget.maxRequests &&
+    resolvedModelCounts.primary + resolvedModelCounts.fallback === providerCallCount;
   const result = deepFreeze<LifecycleHistoryBackfillResult>({
     ...base,
     attemptedChunkCount,
     successChunkCount: chunkResults.length,
     failureCount: failures.length,
     providerCallCount,
+    providerModelFallbackCount: resolvedModelCounts.fallback,
+    resolvedModelCounts,
     finalState: complete ? state : null,
     chunks: chunkResults,
     failures,

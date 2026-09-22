@@ -258,6 +258,7 @@ function projectSummary(
     profileId: result.profileId,
     sourceSnapshotDigest: result.manifest.sourceSnapshotDigest,
     chunkCount: result.manifest.chunkCount,
+    providerModelFallbackCount: result.providerModelFallbackCount,
     itemCount: items.length,
     evidenceCount: items.reduce((sum, item) => sum + item.evidence.length, 0),
     payloadSha256: payload.semanticReviewPacket?.payloadSha256 ?? null,

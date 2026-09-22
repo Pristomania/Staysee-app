@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { runLifecycleHistoryBackfillFromArgv } from './lifecycle-history-backfill-cli.ts';
+import {
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './lifecycle-history-backfill-profile.ts';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
@@ -10,11 +15,21 @@ const NOW_MS = Date.parse('2026-09-22T12:00:00.000Z');
 const PRICE_PATH = 'C:\\safe\\price.json';
 const OUTPUT_PATH = 'C:\\safe\\history-backfill.json';
 const PRICE = {
-  model: 'google/gemini-3.7-flash',
-  inputUsdPerMillion: '0.75',
-  outputUsdPerMillion: '3.75',
-  observedAt: '2026-09-22T11:00:00.000Z',
-  sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+  route: [{
+    model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }, {
+    model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }],
 };
 
 const INSPECT_ARGV = [
@@ -232,7 +247,11 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     assert.equal(log.indexOf('read:OPENROUTER_API_KEY') > log.indexOf('source:messages'), true);
     for (const [index, call] of fetchImpl.calls.entries()) {
       const body = JSON.parse(String(call.init.body));
-      assert.equal(body.model, 'google/gemini-3.7-flash');
+      assert.equal(Object.hasOwn(body, 'model'), false);
+      assert.deepEqual(body.models, [
+        LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        LIFECYCLE_HISTORY_FALLBACK_MODEL,
+      ]);
       assert.equal(body.max_tokens, index === 0 ? 4_096 : 1_200);
       assert.deepEqual(body.reasoning, { effort: 'low' });
       assert.deepEqual(body.provider, {
@@ -425,5 +444,14 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
     }
     assert.equal(providerCalls, 1);
     assert.equal(String(providerError).includes(providerSentinel), false);
+  });
+
+  it('constructs provider adapters only through the audited routed boundary', () => {
+    const source = readFileSync(
+      new URL('./lifecycle-history-backfill-cli.ts', import.meta.url),
+      'utf8',
+    );
+    assert.match(source, /createLifecycleHistoryRoutedAdapters/u);
+    assert.doesNotMatch(source, /createOpenRouterAdapter|createOpenRouterFetchTransport|createMemoryV3LifecycleOpenRouterAdapter/u);
   });
 });

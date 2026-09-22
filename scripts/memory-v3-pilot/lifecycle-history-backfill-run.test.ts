@@ -8,6 +8,8 @@ import { main } from './lifecycle-history-backfill-run.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 import { prepareLifecycleHistoryBackfill } from './lifecycle-history-backfill-contract.ts';
 
@@ -18,11 +20,21 @@ const NOW_MS = Date.parse('2026-09-22T12:00:00.000Z');
 const PRICE_PATH = 'C:\\safe\\price.json';
 const OUTPUT_PATH = 'C:\\safe\\history-backfill.json';
 const PRICE = {
-  model: 'google/gemini-3.7-flash',
-  inputUsdPerMillion: '0.75',
-  outputUsdPerMillion: '3.75',
-  observedAt: '2026-09-22T11:00:00.000Z',
-  sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+  route: [{
+    model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }, {
+    model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }],
 };
 const ENV_TEXT = [
   'SUPABASE_URL=https://synthetic.supabase.co',
@@ -226,10 +238,11 @@ describe('Memory V3 lifecycle history backfill composition root', () => {
     const summary = JSON.parse(h.stdout[0]);
     assert.deepEqual(Object.keys(summary).sort(), [
       'chunkCount', 'evidenceCount', 'itemCount', 'outputWritten', 'payloadSha256',
-      'profileId', 'sourceSnapshotDigest', 'status',
+      'profileId', 'providerModelFallbackCount', 'sourceSnapshotDigest', 'status',
     ]);
     assert.equal(summary.status, 'completed');
     assert.equal(summary.outputWritten, true);
+    assert.equal(summary.providerModelFallbackCount, 0);
     assert.equal(summary.itemCount, 1);
     assert.equal(summary.evidenceCount, 1);
     for (const forbidden of [

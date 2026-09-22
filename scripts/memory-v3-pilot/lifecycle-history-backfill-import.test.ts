@@ -9,7 +9,11 @@ import {
   runLifecycleHistoryBackfill,
 } from './lifecycle-history-backfill-engine.ts';
 import { prepareLifecycleHistoryBackfill } from './lifecycle-history-backfill-contract.ts';
-import { LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID } from './lifecycle-history-backfill-profile.ts';
+import {
+  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './lifecycle-history-backfill-profile.ts';
 import { importReviewedLifecycleHistory } from './lifecycle-history-backfill-import.ts';
 import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
 import type { MemoryV3LifecycleReconcileRequest } from '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
@@ -19,11 +23,21 @@ const IMPORT_ID = '99999999-9999-4999-8999-999999999999';
 const REVIEWED_AT = '2026-09-21T12:00:00.000Z';
 const SOURCE_CUTOFF = '2026-09-20T00:00:00.000Z';
 const PRICE = {
-  model: 'google/gemini-3.7-flash',
-  inputUsdPerMillion: '0.75',
-  outputUsdPerMillion: '3.75',
-  observedAt: '2026-09-21T11:00:00.000Z',
-  sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+  route: [{
+    model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
+    observedAt: '2026-09-21T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }, {
+    model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
+    observedAt: '2026-09-21T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }],
 } as const;
 
 function prepared() {
@@ -75,6 +89,7 @@ async function fixture() {
           }],
         }),
         usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
       };
     },
     reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
@@ -84,6 +99,7 @@ async function fixture() {
         })),
       }),
       usage: null,
+      resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
     }),
   });
   const semanticReviewPacket = buildLifecycleHistoryReviewPacket(benchmarkResult);
@@ -117,6 +133,14 @@ type MutableFresh = {
     profileId: string;
     chunkCount: number;
   };
+};
+
+type MutableProvenanceResult = {
+  modelRoute: string[];
+  priceSnapshot: { route: unknown[] } | Record<string, unknown>;
+  chunks: Array<{ extractorResolvedModel: string }>;
+  resolvedModelCounts: { primary: number; fallback: number };
+  providerModelFallbackCount: number;
 };
 
 function clientFor(stateRevision: number) {
@@ -200,6 +224,55 @@ describe('reviewed lifecycle history import', () => {
       ...data, userId: USER_ID, importId: IMPORT_ID, client: fake.client,
     }));
     assert.equal(fake.calls.length, 0);
+  });
+
+  it('recomputes and rejects invalid route, per-chunk provenance, and aggregate counts before RPC', async () => {
+    const mutations = [
+      (result: MutableProvenanceResult) => { result.modelRoute.reverse(); },
+      (result: MutableProvenanceResult) => {
+        (result.priceSnapshot as { route: unknown[] }).route.reverse();
+      },
+      (result: MutableProvenanceResult) => {
+        (result.priceSnapshot as { route: unknown[] }).route.pop();
+      },
+      (result: MutableProvenanceResult) => {
+        result.priceSnapshot = {
+          model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+          inputUsdPerMillion: '0.75',
+          outputUsdPerMillion: '3.75',
+          observedAt: '2026-09-21T11:00:00.000Z',
+          sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+        };
+      },
+      (result: MutableProvenanceResult) => {
+        result.chunks[0].extractorResolvedModel = 'unknown-model';
+      },
+      (result: MutableProvenanceResult) => { result.resolvedModelCounts.primary += 1; },
+      (result: MutableProvenanceResult) => { result.providerModelFallbackCount += 1; },
+    ];
+    for (const mutate of mutations) {
+      const data = await fixture();
+      mutate(data.artifact.benchmarkResult as MutableProvenanceResult);
+      const payloadSha256 = createHash('sha256').update(canonicalStringify({
+        benchmarkResult: data.artifact.benchmarkResult,
+        items: data.artifact.semanticReviewPacket.items,
+      }), 'utf8').digest('hex');
+      data.artifact.semanticReviewPacket.payloadSha256 = payloadSha256;
+      data.reviewDecision.payloadSha256 = payloadSha256;
+      let headCalls = 0;
+      let rpcCalls = 0;
+      await assert.rejects(() => importReviewedLifecycleHistory({
+        ...data,
+        userId: USER_ID,
+        importId: IMPORT_ID,
+        client: {
+          async loadCurrentHead() { headCalls += 1; return { stateRevision: 0, itemCount: 0 }; },
+          async importInitialState() { rpcCalls += 1; return {}; },
+        },
+      }));
+      assert.equal(headCalls, 0);
+      assert.equal(rpcCalls, 0);
+    }
   });
 
   it('requires a PASS by Nastya at a valid timestamp and exact ordered item coverage', async () => {

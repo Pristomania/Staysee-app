@@ -14,6 +14,8 @@ import {
 } from './lifecycle-history-backfill-contract.ts';
 import {
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 import { validateMemoryV3Dialogue } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import {
@@ -21,18 +23,27 @@ import {
   type MemoryV3ExtractorRequest,
 } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
 import type { MemoryV3LifecycleReconcileRequest } from '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
-import { createMemoryV3OpenRouterAdapter } from '../../supabase/functions/_shared/memoryV3/transport.ts';
-import { createMemoryV3LifecycleOpenRouterAdapter } from '../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts';
+import { createLifecycleHistoryRoutedAdapters } from './lifecycle-history-backfill-provider.ts';
 import { canonicalStringify } from './contracts.mjs';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const NOW_MS = Date.parse('2026-09-22T12:00:00.000Z');
 const PRICE = {
-  model: 'google/gemini-3.7-flash',
-  inputUsdPerMillion: '0.75',
-  outputUsdPerMillion: '3.75',
-  observedAt: '2026-09-22T11:00:00.000Z',
-  sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash',
+  route: [{
+    model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }, {
+    model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
+    observedAt: '2026-09-22T11:00:00.000Z',
+    sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+    supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
+    zdr: true,
+  }],
 } as const;
 const OMIT = {
   layerDecisions: ['event', 'recurrence', 'hypothesis'].map((kind) => ({
@@ -240,6 +251,12 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     }) as never);
     assert.equal(result.execute, false);
     assert.equal(result.providerCallCount, 0);
+    assert.equal(result.providerModelFallbackCount, 0);
+    assert.deepEqual(result.resolvedModelCounts, { primary: 0, fallback: 0 });
+    assert.deepEqual(result.modelRoute, [
+      LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    ]);
     assert.equal(result.attemptedChunkCount, 0);
     assert.equal(result.finalState, null);
     assert.deepEqual(result.priceSnapshot, PRICE);
@@ -247,7 +264,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       maxRequests: 4,
       reservedInputTokensPerCall: 32_768,
       maxOutputTokensPerCall: 4_096,
-      ceilingUsd: '0.159744',
+      ceilingUsd: '0.319488',
       hardMaxUsd: '1',
       gate: 'PASS',
     });
@@ -260,17 +277,19 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     globalThis.fetch = (() => { throw new Error('GLOBAL_FETCH_SENTINEL'); }) as typeof fetch;
     let result;
     try {
+      const extractorAdapter = createLifecycleHistoryRoutedAdapters({
+        fetchImpl: extractorFetch,
+        apiKey: 'FAKE_API_KEY_SENTINEL',
+      }).extractorAdapter;
+      const reconcilerAdapter = createLifecycleHistoryRoutedAdapters({
+        fetchImpl: reconcilerFetch,
+        apiKey: 'FAKE_API_KEY_SENTINEL',
+      }).reconcilerAdapter;
       result = await runLifecycleHistoryBackfill(options({
         prepared: prepared(1),
         execute: true,
-        extractorAdapter: createMemoryV3OpenRouterAdapter({
-          fetchImpl: extractorFetch,
-          apiKey: 'FAKE_API_KEY_SENTINEL',
-        }),
-        reconcilerAdapter: createMemoryV3LifecycleOpenRouterAdapter({
-          fetchImpl: reconcilerFetch,
-          apiKey: 'FAKE_API_KEY_SENTINEL',
-        }),
+        extractorAdapter,
+        reconcilerAdapter,
       }));
     } finally {
       globalThis.fetch = originalFetch;
@@ -285,8 +304,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       const headers = call.init.headers as Record<string, string>;
       assert.equal(headers.Authorization, 'Bearer FAKE_API_KEY_SENTINEL');
       const body = JSON.parse(String(call.init.body));
-      assert.equal(body.model, 'google/gemini-3.7-flash');
-      assert.equal(body.max_tokens, 1_200);
+      assert.equal(Object.hasOwn(body, 'model'), false);
+      assert.deepEqual(body.models, [
+        LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        LIFECYCLE_HISTORY_FALLBACK_MODEL,
+      ]);
       assert.equal(body.stream, false);
       assert.deepEqual(body.reasoning, { effort: 'low' });
       assert.deepEqual(body.provider, {
@@ -297,11 +319,13 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       });
       assert.equal(body.messages.length, 2);
     }
+    assert.equal(JSON.parse(String(extractorFetch.calls[0].init.body)).max_tokens, 4_096);
+    assert.equal(JSON.parse(String(reconcilerFetch.calls[0].init.body)).max_tokens, 1_200);
     assert.deepEqual(Object.keys(JSON.parse(String(extractorFetch.calls[0].init.body))).sort(), [
-      'max_tokens', 'messages', 'model', 'provider', 'reasoning', 'response_format', 'stream',
+      'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream',
     ]);
     assert.deepEqual(Object.keys(JSON.parse(String(reconcilerFetch.calls[0].init.body))).sort(), [
-      'max_tokens', 'messages', 'model', 'provider', 'reasoning', 'response_format', 'stream',
+      'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream',
     ]);
   });
 
@@ -315,7 +339,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       order.push(`extract:${request.input.caseId}`);
       await Promise.resolve();
       active -= 1;
-      return { content: eventRaw(request), usage: { promptTokens: 10, completionTokens: 2, costUsd: 0.001 } };
+      return {
+        content: eventRaw(request),
+        usage: { promptTokens: 10, completionTokens: 2, costUsd: 0.001 },
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      };
     };
     const reconcilerAdapter = async (request: MemoryV3LifecycleReconcileRequest) => {
       active += 1;
@@ -333,6 +361,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
           })),
         }),
         usage: { promptTokens: 20, completionTokens: 3, costUsd: 0.002 },
+        resolvedModel: LIFECYCLE_HISTORY_FALLBACK_MODEL,
       };
     };
     const result = await runLifecycleHistoryBackfill(options({
@@ -345,6 +374,15 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     ]);
     assert.equal(maxActive, 1);
     assert.equal(result.providerCallCount, 4);
+    assert.equal(result.providerModelFallbackCount, 2);
+    assert.deepEqual(result.resolvedModelCounts, { primary: 2, fallback: 2 });
+    assert.deepEqual(result.chunks.map((chunk) => [
+      chunk.extractorResolvedModel,
+      chunk.reconcilerResolvedModel,
+    ]), [
+      [LIFECYCLE_HISTORY_PRIMARY_MODEL, LIFECYCLE_HISTORY_FALLBACK_MODEL],
+      [LIFECYCLE_HISTORY_PRIMARY_MODEL, LIFECYCLE_HISTORY_FALLBACK_MODEL],
+    ]);
     assert.equal(result.failureCount, 0);
     assert.equal(result.finalState?.stateRevision, 2);
     assert.deepEqual(result.finalState?.items.map((item) => item.claim), ['remember-0', 'remember-1']);
@@ -355,10 +393,78 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       maxRequests: 4,
       reservedInputTokensPerCall: 32_768,
       maxOutputTokensPerCall: 4_096,
-      ceilingUsd: '0.159744',
+      ceilingUsd: '0.319488',
       hardMaxUsd: '1',
       gate: 'PASS',
     });
+  });
+
+  it('records an all-fallback run without changing application fallbackCount', async () => {
+    const result = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async () => ({
+        content: JSON.stringify(OMIT),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+      }),
+      reconcilerAdapter: async () => ({
+        rawContent: JSON.stringify({ operations: [] }),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+      }),
+    }));
+    assert.equal(result.failureCount, 0);
+    assert.equal(result.fallbackCount, 0);
+    assert.equal(result.providerModelFallbackCount, 2);
+    assert.deepEqual(result.resolvedModelCounts, { primary: 0, fallback: 2 });
+  });
+
+  it('rejects missing, unknown, and accessor-backed resolved models at the transport stage', async () => {
+    let getterCalls = 0;
+    const withGetter = {
+      content: JSON.stringify(OMIT),
+      usage: null,
+    } as Record<string, unknown>;
+    Object.defineProperty(withGetter, 'resolvedModel', {
+      enumerable: true,
+      get() { getterCalls += 1; return LIFECYCLE_HISTORY_PRIMARY_MODEL; },
+    });
+    for (const extractorResult of [
+      { content: JSON.stringify(OMIT), usage: null },
+      { content: JSON.stringify(OMIT), usage: null, resolvedModel: 'unknown-model' },
+      withGetter,
+    ]) {
+      const result = await runLifecycleHistoryBackfill(options({
+        prepared: prepared(1),
+        execute: true,
+        extractorAdapter: async () => extractorResult as never,
+        reconcilerAdapter: async () => ({
+          rawContent: JSON.stringify({ operations: [] }),
+          usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        }),
+      }));
+      assert.equal(result.failures[0].stage, 'extractor_transport');
+      assert.equal(result.finalState, null);
+    }
+    assert.equal(getterCalls, 0);
+
+    const reconcilerFailure = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async () => ({
+        content: JSON.stringify(OMIT),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+      reconcilerAdapter: async () => ({
+        rawContent: JSON.stringify({ operations: [] }),
+        usage: null,
+        resolvedModel: 'unknown-model',
+      }) as never,
+    }));
+    assert.equal(reconcilerFailure.failures[0].stage, 'reconciler_transport');
   });
 
   it('reaches exact authored outcomes for correction, recurrence, rejection, denial, injection, and abstention', async () => {
@@ -420,6 +526,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         extractorAdapter: async (request: MemoryV3ExtractorRequest) => ({
           content: authoredRaw(request, itemByText[request.input.messages[0].text] ?? null),
           usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
         }),
         reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => {
           const candidate = request.input.candidates[0];
@@ -445,6 +552,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
               }],
             }),
             usage: null,
+            resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
           };
         },
       }));
@@ -477,11 +585,12 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         return {
           content: extractorCalls === 2 ? 'RAW_ERROR_SENTINEL{' : JSON.stringify(OMIT),
           usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
         };
       },
       reconcilerAdapter: async () => {
         reconcilerCalls += 1;
-        return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
     }));
     assert.equal(extractorCalls, 2);
@@ -506,11 +615,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       execute: true,
       extractorAdapter: async () => {
         calls += 1;
-        return { content: JSON.stringify(OMIT), usage: null };
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
       reconcilerAdapter: async () => {
         calls += 1;
-        return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
     })));
     assert.equal(calls, 0);
@@ -533,11 +642,12 @@ describe('Memory V3 lifecycle history backfill engine', () => {
             relation: 'supports',
           }),
           usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
         };
       },
       reconcilerAdapter: async () => {
         reconcilerCalls += 1;
-        return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
     }));
     assert.equal(extractorCalls, 1);
@@ -557,12 +667,12 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       extractorAdapter: async () => {
         extractorCalls += 1;
         assert.ok(extractorCalls <= source.chunks.length, 'blocked extractor call reached inner adapter');
-        return { content: JSON.stringify(OMIT), usage: null };
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
       reconcilerAdapter: async () => {
         reconcilerCalls += 1;
         assert.ok(reconcilerCalls <= source.chunks.length, 'blocked reconciler call reached inner adapter');
-        return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
     }));
     assert.equal(complete.providerCallCount, 2 * source.chunks.length);
@@ -576,11 +686,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       execute: true,
       extractorAdapter: async () => {
         blockedInnerCalls += 1;
-        return { content: JSON.stringify(OMIT), usage: null };
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
       reconcilerAdapter: async () => {
         blockedInnerCalls += 1;
-        return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
       },
     })));
     assert.equal(blockedInnerCalls, 0, 'blocked over-cap request must not reach an inner adapter');
@@ -663,7 +773,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     const reconcilerFailure = await runLifecycleHistoryBackfill(options({
       prepared: prepared(1),
       execute: true,
-      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: null }),
+      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
       reconcilerAdapter: async () => {
         throw foreignCapError;
       },
@@ -686,10 +796,12 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         usage: extractorCalls++ === 0
           ? { promptTokens: 10, completionTokens: 1, costUsd: 0.001 }
           : null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
       }),
       reconcilerAdapter: async () => ({
         rawContent: JSON.stringify({ operations: [] }),
         usage: { promptTokens: 20, completionTokens: 2, costUsd: 0.002 },
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
       }),
     }));
     assert.equal(result.failureCount, 0);
@@ -711,6 +823,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       extractorAdapter: async (request: MemoryV3ExtractorRequest) => ({
         content: eventRaw(request),
         usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
       }),
       reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
         rawContent: JSON.stringify({
@@ -719,6 +832,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
           })),
         }),
         usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
       }),
     }));
     const packet = buildLifecycleHistoryReviewPacket(result);
@@ -735,6 +849,14 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       packet.payloadSha256,
       createHash('sha256')
         .update(canonicalStringify({ benchmarkResult: result, items: mutatedItems }), 'utf8')
+        .digest('hex'),
+    );
+    const mutatedResult = structuredClone(result);
+    mutatedResult.chunks[0].extractorResolvedModel = LIFECYCLE_HISTORY_FALLBACK_MODEL;
+    assert.notEqual(
+      packet.payloadSha256,
+      createHash('sha256')
+        .update(canonicalStringify({ benchmarkResult: mutatedResult, items: packet.items }), 'utf8')
         .digest('hex'),
     );
     assert.equal(packet.items.length, 2);
@@ -757,30 +879,37 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     const hostileResult = await runLifecycleHistoryBackfill(options({
       prepared: prepared(1),
       execute: true,
-      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: hostileUsage as never }),
-      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null }),
+      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: hostileUsage as never, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
+      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
     }));
     assert.equal(getterRan, false);
     assert.equal(hostileResult.failures[0].stage, 'extractor_transport');
     assert.doesNotMatch(JSON.stringify(hostileResult), /RAW_GETTER_SENTINEL/u);
 
-    const cyclic: Record<string, unknown> = { content: JSON.stringify(OMIT) };
+    const cyclic: Record<string, unknown> = {
+      content: JSON.stringify(OMIT),
+      resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    };
     cyclic.usage = cyclic;
     const cyclicResult = await runLifecycleHistoryBackfill(options({
       prepared: prepared(1),
       execute: true,
       extractorAdapter: async () => cyclic as never,
-      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null }),
+      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
     }));
     assert.equal(cyclicResult.failures[0].stage, 'extractor_transport');
 
-    const revoked = Proxy.revocable({ content: JSON.stringify(OMIT), usage: null }, {});
+    const revoked = Proxy.revocable({
+      content: JSON.stringify(OMIT),
+      usage: null,
+      resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    }, {});
     revoked.revoke();
     const revokedResult = await runLifecycleHistoryBackfill(options({
       prepared: prepared(1),
       execute: true,
       extractorAdapter: async () => revoked.proxy as never,
-      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null }),
+      reconcilerAdapter: async () => ({ rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
     }));
     assert.equal(revokedResult.failures[0].stage, 'extractor_transport');
   });
@@ -861,11 +990,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         execute: true,
         extractorAdapter: async () => {
           calls += 1;
-          return { content: JSON.stringify(OMIT), usage: null };
+          return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
         },
         reconcilerAdapter: async () => {
           calls += 1;
-          return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+          return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
         },
       })));
       assert.equal(calls, 0);
@@ -960,11 +1089,11 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         execute: true,
         extractorAdapter: async () => {
           calls += 1;
-          return { content: JSON.stringify(OMIT), usage: null };
+          return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
         },
         reconcilerAdapter: async () => {
           calls += 1;
-          return { rawContent: JSON.stringify({ operations: [] }), usage: null };
+          return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
         },
       })));
       assert.equal(calls, 0);

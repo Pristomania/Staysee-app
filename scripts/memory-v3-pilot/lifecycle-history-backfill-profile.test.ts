@@ -25,12 +25,35 @@ import {
 } from './lifecycle-history-backfill-profile.ts';
 
 const NOW_MS = Date.parse('2026-09-21T12:00:00.000Z');
-const FRESH_SNAPSHOT = Object.freeze({
-  model: 'google/gemini-3.7-flash' as const,
+const REQUIRED_PARAMETERS = Object.freeze([
+  'max_tokens',
+  'reasoning',
+  'reasoning_effort',
+  'response_format',
+  'structured_outputs',
+] as const);
+const PRIMARY_MODEL = 'google/gemini-3.7-flash' as const;
+const FALLBACK_MODEL = 'mistralai/mistral-medium-3-5' as const;
+const PRIMARY_ENDPOINT = Object.freeze({
+  model: PRIMARY_MODEL,
   inputUsdPerMillion: '0.75',
   outputUsdPerMillion: '3.75',
   observedAt: '2026-09-21T11:00:00.000Z',
-  sourceUrl: 'https://openrouter.ai/google/gemini-3.7-flash/pricing',
+  sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
+  supportedParameters: REQUIRED_PARAMETERS,
+  zdr: true as const,
+});
+const FALLBACK_ENDPOINT = Object.freeze({
+  model: FALLBACK_MODEL,
+  inputUsdPerMillion: '1.5',
+  outputUsdPerMillion: '7.5',
+  observedAt: '2026-09-21T11:00:00.000Z',
+  sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
+  supportedParameters: REQUIRED_PARAMETERS,
+  zdr: true as const,
+});
+const FRESH_SNAPSHOT = Object.freeze({
+  route: Object.freeze([PRIMARY_ENDPOINT, FALLBACK_ENDPOINT]),
 });
 
 const PROFILE_KEYS = [
@@ -40,6 +63,7 @@ const PROFILE_KEYS = [
   'extractorVersion',
   'reconcilerVersion',
   'model',
+  'modelRoute',
   'maxMessagesPerChunk',
   'maxExtractorRequestBytes',
   'maxReconcilerRequestBytes',
@@ -51,6 +75,18 @@ const PROFILE_KEYS = [
   'maxActive',
   'executeFlag',
 ] as const;
+
+function routeSnapshot(input?: {
+  primary?: Partial<typeof PRIMARY_ENDPOINT>;
+  fallback?: Partial<typeof FALLBACK_ENDPOINT>;
+}) {
+  return {
+    route: [
+      { ...PRIMARY_ENDPOINT, ...input?.primary },
+      { ...FALLBACK_ENDPOINT, ...input?.fallback },
+    ],
+  };
+}
 
 function decimalNanodollars(value: string): bigint {
   const [whole, fraction = ''] = value.split('.');
@@ -89,6 +125,8 @@ describe('history backfill profile', () => {
     );
     assert.equal(first, second);
     assert.equal(Object.isFrozen(first), true);
+    assert.deepEqual(first.modelRoute, [PRIMARY_MODEL, FALLBACK_MODEL]);
+    assert.equal(Object.isFrozen(first.modelRoute), true);
     assert.deepEqual(Reflect.ownKeys(first), PROFILE_KEYS);
     assert.throws(() => {
       (first as { maxActive: number }).maxActive = 2;
@@ -108,6 +146,7 @@ describe('history backfill profile', () => {
       extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       model: MEMORY_V3_LIFECYCLE_MODEL,
+      modelRoute: [PRIMARY_MODEL, FALLBACK_MODEL],
       maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
       maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
       maxReconcilerRequestBytes: MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
@@ -154,26 +193,25 @@ describe('history backfill profile', () => {
 });
 
 describe('fresh price snapshot', () => {
-  it('accepts exact JSON data with matching model and HTTPS source URL', () => {
-    const input = { ...FRESH_SNAPSHOT };
+  it('accepts and deeply freezes exact endpoint snapshots in canonical route order', () => {
+    const input = routeSnapshot();
     const result = validateLifecycleHistoryPriceSnapshot(input, NOW_MS);
 
     assert.deepEqual(result, FRESH_SNAPSHOT);
     assert.notEqual(result, input);
-    assert.deepEqual(Reflect.ownKeys(result), [
-      'model',
-      'inputUsdPerMillion',
-      'outputUsdPerMillion',
-      'observedAt',
-      'sourceUrl',
-    ]);
+    assert.notEqual(result.route, input.route);
+    assert.deepEqual(Reflect.ownKeys(result), ['route']);
+    assert.equal(Object.isFrozen(result), true);
+    assert.equal(Object.isFrozen(result.route), true);
+    assert.equal(Object.isFrozen(result.route[0]), true);
+    assert.equal(Object.isFrozen(result.route[0].supportedParameters), true);
   });
 
-  it('rejects a snapshot older than 24 hours or dated in the future', () => {
-    const exactlyFresh = {
-      ...FRESH_SNAPSHOT,
-      observedAt: '2026-09-20T12:00:00.000Z',
-    };
+  it('rejects an endpoint snapshot older than 24 hours or dated in the future', () => {
+    const exactlyFresh = routeSnapshot({
+      primary: { observedAt: '2026-09-20T12:00:00.000Z' },
+      fallback: { observedAt: '2026-09-20T12:00:00.000Z' },
+    });
     assert.deepEqual(
       validateLifecycleHistoryPriceSnapshot(exactlyFresh, NOW_MS),
       exactlyFresh,
@@ -184,19 +222,32 @@ describe('fresh price snapshot', () => {
       '2026-09-21T12:00:00.001Z',
     ]) {
       captureError(() =>
-        validateLifecycleHistoryPriceSnapshot({ ...FRESH_SNAPSHOT, observedAt }, NOW_MS)
+        validateLifecycleHistoryPriceSnapshot(
+          routeSnapshot({ fallback: { observedAt } }),
+          NOW_MS,
+        )
       );
     }
   });
 
-  it('rejects number prices, negative prices, exponent notation, and extra fields', () => {
+  it('rejects route, endpoint, price, capability, privacy, and URL mismatches', () => {
     const invalid: unknown[] = [
-      { ...FRESH_SNAPSHOT, inputUsdPerMillion: 0.75 },
-      { ...FRESH_SNAPSHOT, inputUsdPerMillion: '-0.75' },
-      { ...FRESH_SNAPSHOT, outputUsdPerMillion: '3.75e0' },
-      { ...FRESH_SNAPSHOT, extra: true },
-      { ...FRESH_SNAPSHOT, model: 'another/model' },
-      { ...FRESH_SNAPSHOT, sourceUrl: 'http://openrouter.ai/pricing' },
+      { route: [FALLBACK_ENDPOINT, PRIMARY_ENDPOINT] },
+      { route: [PRIMARY_ENDPOINT, PRIMARY_ENDPOINT] },
+      { route: [PRIMARY_ENDPOINT] },
+      { route: [PRIMARY_ENDPOINT, FALLBACK_ENDPOINT, FALLBACK_ENDPOINT] },
+      routeSnapshot({ fallback: { inputUsdPerMillion: 1.5 as unknown as string } }),
+      routeSnapshot({ fallback: { inputUsdPerMillion: '-1.5' } }),
+      routeSnapshot({ fallback: { outputUsdPerMillion: '7.5e0' } }),
+      { ...routeSnapshot(), extra: true },
+      routeSnapshot({ fallback: { model: 'another/model' as typeof FALLBACK_MODEL } }),
+      routeSnapshot({ fallback: { sourceUrl: 'http://openrouter.ai/pricing' } }),
+      routeSnapshot({ fallback: { sourceUrl: PRIMARY_ENDPOINT.sourceUrl } }),
+      routeSnapshot({ fallback: { zdr: false as true } }),
+      routeSnapshot({ fallback: { supportedParameters: REQUIRED_PARAMETERS.slice(1) as unknown as typeof REQUIRED_PARAMETERS } }),
+      routeSnapshot({ fallback: { supportedParameters: [...REQUIRED_PARAMETERS].reverse() as unknown as typeof REQUIRED_PARAMETERS } }),
+      routeSnapshot({ fallback: { supportedParameters: [...REQUIRED_PARAMETERS, 'tools'] as unknown as typeof REQUIRED_PARAMETERS } }),
+      { route: [{ ...PRIMARY_ENDPOINT, extra: true }, FALLBACK_ENDPOINT] },
     ];
     for (const value of invalid) {
       captureError(() => validateLifecycleHistoryPriceSnapshot(value, NOW_MS));
@@ -205,22 +256,24 @@ describe('fresh price snapshot', () => {
 
   it('rejects getters, cycles, symbols, and proxies without leaking trap text', () => {
     let getterCalls = 0;
-    const getterValue = { ...FRESH_SNAPSHOT } as Record<string, unknown>;
-    Object.defineProperty(getterValue, 'inputUsdPerMillion', {
+    const getterEndpoint = { ...FALLBACK_ENDPOINT } as Record<string, unknown>;
+    Object.defineProperty(getterEndpoint, 'inputUsdPerMillion', {
       enumerable: true,
       get() {
         getterCalls += 1;
         throw new Error('RAW_PRICE_GETTER_SENTINEL');
       },
     });
-    captureError(() => validateLifecycleHistoryPriceSnapshot(getterValue, NOW_MS));
+    captureError(() => validateLifecycleHistoryPriceSnapshot({
+      route: [PRIMARY_ENDPOINT, getterEndpoint],
+    }, NOW_MS));
     assert.equal(getterCalls, 0);
 
-    const cyclic = { ...FRESH_SNAPSHOT } as Record<string, unknown>;
-    cyclic.inputUsdPerMillion = cyclic;
+    const cyclic = routeSnapshot() as unknown as Record<string, unknown>;
+    (cyclic.route as unknown[])[1] = cyclic;
     captureError(() => validateLifecycleHistoryPriceSnapshot(cyclic, NOW_MS));
 
-    const symbolValue = { ...FRESH_SNAPSHOT, [Symbol('secret')]: 'hidden' };
+    const symbolValue = { ...routeSnapshot(), [Symbol('secret')]: 'hidden' };
     captureError(() => validateLifecycleHistoryPriceSnapshot(symbolValue, NOW_MS));
 
     const proxy = new Proxy({}, {
@@ -232,7 +285,7 @@ describe('fresh price snapshot', () => {
     assert.equal(error.message.includes('RAW_PRICE_PROXY_SENTINEL'), false);
 
     let transparentTrapCalls = 0;
-    const transparentTarget = { ...FRESH_SNAPSHOT };
+    const transparentTarget = routeSnapshot();
     const transparentProxy = new Proxy(transparentTarget, {
       getPrototypeOf(target) {
         transparentTrapCalls += 1;
@@ -250,7 +303,7 @@ describe('fresh price snapshot', () => {
     captureError(() => validateLifecycleHistoryPriceSnapshot(transparentProxy, NOW_MS));
     assert.equal(transparentTrapCalls, 0);
 
-    const revoked = Proxy.revocable({ ...FRESH_SNAPSHOT }, {});
+    const revoked = Proxy.revocable(routeSnapshot(), {});
     revoked.revoke();
     captureError(() => validateLifecycleHistoryPriceSnapshot(revoked.proxy, NOW_MS));
   });
@@ -260,15 +313,15 @@ describe('exact budget arithmetic', () => {
   it('uses two requests per chunk and integer nanodollars', () => {
     assert.deepEqual(
       calculateLifecycleHistoryBudget({
-        chunkCount: 2,
+        chunkCount: 32,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '0.16',
+        maxBudgetUsd: '5.12',
       }),
       {
-        maxRequests: 4,
-        ceilingNanodollars: decimalNanodollars('0.159744'),
-        ceilingUsd: '0.159744',
-        hardMaxNanodollars: decimalNanodollars('0.16'),
+        maxRequests: 64,
+        ceilingNanodollars: decimalNanodollars('5.111808'),
+        ceilingUsd: '5.111808',
+        hardMaxNanodollars: decimalNanodollars('5.12'),
         gate: 'PASS',
       },
     );
@@ -276,11 +329,10 @@ describe('exact budget arithmetic', () => {
     assert.equal(
       calculateLifecycleHistoryBudget({
         chunkCount: 1,
-        priceSnapshot: {
-          ...FRESH_SNAPSHOT,
-          inputUsdPerMillion: '0.000000001',
-          outputUsdPerMillion: '0',
-        },
+        priceSnapshot: routeSnapshot({
+          primary: { inputUsdPerMillion: '0.000000001', outputUsdPerMillion: '0' },
+          fallback: { inputUsdPerMillion: '0', outputUsdPerMillion: '0' },
+        }),
         maxBudgetUsd: '0.000000001',
       }).ceilingNanodollars,
       decimalNanodollars('0.000000001'),
@@ -302,11 +354,10 @@ describe('exact budget arithmetic', () => {
     assert.equal(
       calculateLifecycleHistoryBudget({
         chunkCount: largest,
-        priceSnapshot: {
-          ...FRESH_SNAPSHOT,
-          inputUsdPerMillion: '0',
-          outputUsdPerMillion: '0',
-        },
+        priceSnapshot: routeSnapshot({
+          primary: { inputUsdPerMillion: '0', outputUsdPerMillion: '0' },
+          fallback: { inputUsdPerMillion: '0', outputUsdPerMillion: '0' },
+        }),
         maxBudgetUsd: '0',
       }).maxRequests,
       largest * 2,
@@ -314,11 +365,10 @@ describe('exact budget arithmetic', () => {
     captureError(() =>
       calculateLifecycleHistoryBudget({
         chunkCount: largest + 1,
-        priceSnapshot: {
-          ...FRESH_SNAPSHOT,
-          inputUsdPerMillion: '0',
-          outputUsdPerMillion: '0',
-        },
+        priceSnapshot: routeSnapshot({
+          primary: { inputUsdPerMillion: '0', outputUsdPerMillion: '0' },
+          fallback: { inputUsdPerMillion: '0', outputUsdPerMillion: '0' },
+        }),
         maxBudgetUsd: '0',
       })
     );
@@ -329,14 +379,14 @@ describe('exact budget arithmetic', () => {
       calculateLifecycleHistoryBudget({
         chunkCount: 1,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '0.079871999',
+        maxBudgetUsd: '0.159743999',
       })
     );
     captureError(() =>
       calculateLifecycleHistoryBudget({
         chunkCount: 1,
         priceSnapshot: FRESH_SNAPSHOT,
-        maxBudgetUsd: '7.9872e-2',
+        maxBudgetUsd: '1.59744e-1',
       })
     );
   });
@@ -345,7 +395,7 @@ describe('exact budget arithmetic', () => {
     const result = calculateLifecycleHistoryBudget({
       chunkCount: 1,
       priceSnapshot: FRESH_SNAPSHOT,
-      maxBudgetUsd: '0.079872',
+      maxBudgetUsd: '0.159744',
     });
 
     assert.deepEqual(Reflect.ownKeys(result), [

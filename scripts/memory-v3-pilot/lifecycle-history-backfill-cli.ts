@@ -10,7 +10,6 @@ import {
 } from './lifecycle-history-backfill-engine.ts';
 import {
   getLifecycleHistoryBackfillProfile,
-  LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
   validateLifecycleHistoryPriceSnapshot,
   type LifecycleHistoryPriceSnapshot,
 } from './lifecycle-history-backfill-profile.ts';
@@ -18,10 +17,8 @@ import {
   inspectLifecycleHistorySource,
   type LifecycleHistorySourceReader,
 } from './lifecycle-history-backfill-source.ts';
-import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
-import { createOpenRouterFetchTransport } from './openrouter-fetch-transport.mjs';
-import { createMemoryV3LifecycleOpenRouterAdapter } from
-  '../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts';
+import { createLifecycleHistoryRoutedAdapters } from
+  './lifecycle-history-backfill-provider.ts';
 
 type JsonRecord = Record<string, unknown>;
 type SourceReaderFactory = (
@@ -36,8 +33,6 @@ const SOURCE_READER_FIELDS = ['listConversationsPage', 'listMessagesPage'] as co
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const OWN_ERRORS = new WeakSet<object>();
-const EXTRACTOR_TIMEOUT_MS = 60_000;
-const EXTRACTOR_MAX_RESPONSE_BYTES = 1_000_000;
 
 function fail(): never {
   const error = new Error(`${PREFIX} command failed`);
@@ -332,29 +327,10 @@ export async function runLifecycleHistoryBackfillFromArgv(input: {
     let extractorAdapter;
     let reconcilerAdapter;
     try {
-      const extractorTransport = createOpenRouterFetchTransport({
-        fetchImpl: root.fetchImpl as typeof fetch,
-        timeoutMs: EXTRACTOR_TIMEOUT_MS,
-        maxResponseBytes: EXTRACTOR_MAX_RESPONSE_BYTES,
-      });
-      const extract = createOpenRouterAdapter({
-        transport: extractorTransport,
-        apiKey,
-        model: 'google/gemini-3.7-flash',
-        maxOutputTokens: LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
-        reasoningEffort: 'low',
-        responseContract: 'v2-layered',
-        allowFallbacks: true,
-        maxTokensParameter: 'max_tokens',
-      });
-      extractorAdapter = async (request) => ({
-        content: await extract(request),
-        usage: null,
-      });
-      reconcilerAdapter = createMemoryV3LifecycleOpenRouterAdapter({
+      ({ extractorAdapter, reconcilerAdapter } = createLifecycleHistoryRoutedAdapters({
         apiKey,
         fetchImpl: root.fetchImpl as typeof fetch,
-      });
+      }));
     } catch {
       return fail();
     }

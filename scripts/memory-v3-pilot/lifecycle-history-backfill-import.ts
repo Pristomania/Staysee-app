@@ -5,6 +5,9 @@ import { canonicalStringify } from './contracts.mjs';
 import {
   getLifecycleHistoryBackfillProfile,
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+  LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  LIFECYCLE_HISTORY_MODEL_ROUTE,
+  LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 import {
   canonicalLifecycleHistoryDigest,
@@ -61,9 +64,10 @@ const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\
 const MAX_REVIEWER_NOTES = 1_000;
 const OWN_ERRORS = new WeakSet<object>();
 const RESULT_FIELDS = [
-  'schemaVersion', 'profileId', 'model', 'manifest', 'priceSnapshot', 'budget',
+  'schemaVersion', 'profileId', 'model', 'modelRoute', 'manifest', 'priceSnapshot', 'budget',
   'execute', 'attemptedChunkCount', 'successChunkCount', 'failureCount',
-  'providerCallCount', 'maxActive', 'retryCount', 'repairCount', 'fallbackCount',
+  'providerCallCount', 'providerModelFallbackCount', 'resolvedModelCounts',
+  'maxActive', 'retryCount', 'repairCount', 'fallbackCount',
   'finalState', 'chunks', 'failures', 'actualUsage', 'actualCostUsd', 'semanticReview',
 ] as const;
 const MANIFEST_FIELDS = [
@@ -82,7 +86,16 @@ const MANIFEST_CHUNK_FIELDS = [
 ] as const;
 const RESULT_CHUNK_FIELDS = [
   'chunkId', 'status', 'changed', 'resultingStateRevision', 'itemCount',
-  'evidenceCount', 'transitionTypes',
+  'evidenceCount', 'transitionTypes', 'extractorResolvedModel',
+  'reconcilerResolvedModel',
+] as const;
+const ENDPOINT_FIELDS = [
+  'model', 'inputUsdPerMillion', 'outputUsdPerMillion', 'observedAt',
+  'sourceUrl', 'supportedParameters', 'zdr',
+] as const;
+const REQUIRED_PARAMETERS = [
+  'max_tokens', 'reasoning', 'reasoning_effort', 'response_format',
+  'structured_outputs',
 ] as const;
 const PREPARED_CHUNK_FIELDS = [
   'chunkId', 'conversationOrdinal', 'chunkOrdinal', 'conversationId', 'messages',
@@ -281,9 +294,10 @@ function validateArtifact(value: unknown): {
   const result = record(artifact.benchmarkResult, RESULT_FIELDS);
   const packet = record(artifact.semanticReviewPacket, ['schemaVersion', 'payloadSha256', 'items']);
   const manifest = validateManifest(result.manifest);
-  const price = record(result.priceSnapshot, [
-    'model', 'inputUsdPerMillion', 'outputUsdPerMillion', 'observedAt', 'sourceUrl',
-  ]);
+  const modelRoute = denseArray(result.modelRoute);
+  const price = record(result.priceSnapshot, ['route']);
+  const priceRoute = denseArray(price.route).map((entry) => record(entry, ENDPOINT_FIELDS));
+  const resolvedModelCounts = record(result.resolvedModelCounts, ['primary', 'fallback']);
   const budget = record(result.budget, [
     'maxRequests', 'reservedInputTokensPerCall', 'maxOutputTokensPerCall',
     'ceilingUsd', 'hardMaxUsd', 'gate',
@@ -295,9 +309,10 @@ function validateArtifact(value: unknown): {
     result.schemaVersion !== 'memory-v3-lifecycle-history-result-v1' ||
     result.profileId !== LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID ||
     result.model !== 'google/gemini-3.7-flash' ||
-    price.model !== result.model || typeof price.inputUsdPerMillion !== 'string' ||
-    typeof price.outputUsdPerMillion !== 'string' || !isValidDateTime(price.observedAt) ||
-    typeof price.sourceUrl !== 'string' || !price.sourceUrl.startsWith('https://') ||
+    modelRoute.length !== 2 ||
+    modelRoute[0] !== LIFECYCLE_HISTORY_PRIMARY_MODEL ||
+    modelRoute[1] !== LIFECYCLE_HISTORY_FALLBACK_MODEL ||
+    priceRoute.length !== 2 ||
     budget.maxRequests !== manifest.maxProviderCalls ||
     budget.reservedInputTokensPerCall !== 32_768 || budget.maxOutputTokensPerCall !== 4_096 ||
     typeof budget.ceilingUsd !== 'string' || typeof budget.hardMaxUsd !== 'string' ||
@@ -309,10 +324,33 @@ function validateArtifact(value: unknown): {
     result.attemptedChunkCount !== manifest.chunkCount ||
     result.successChunkCount !== manifest.chunkCount ||
     result.providerCallCount !== manifest.maxProviderCalls ||
+    !nonNegativeInteger(result.providerModelFallbackCount) ||
+    !nonNegativeInteger(resolvedModelCounts.primary) ||
+    !nonNegativeInteger(resolvedModelCounts.fallback) ||
+    result.providerModelFallbackCount !== resolvedModelCounts.fallback ||
+    (resolvedModelCounts.primary as number) + (resolvedModelCounts.fallback as number) !==
+      result.providerCallCount ||
     resultChunks.length !== manifest.chunkCount || failures.length !== 0 ||
     packet.schemaVersion !== 'memory-v3-lifecycle-history-review-packet-v1' ||
     typeof packet.payloadSha256 !== 'string' || !SHA256.test(packet.payloadSha256)
   ) return fail();
+  for (let index = 0; index < priceRoute.length; index += 1) {
+    const endpoint = priceRoute[index];
+    const expectedModel = LIFECYCLE_HISTORY_MODEL_ROUTE[index];
+    const parameters = denseArray(endpoint.supportedParameters);
+    if (
+      endpoint.model !== expectedModel ||
+      typeof endpoint.inputUsdPerMillion !== 'string' ||
+      typeof endpoint.outputUsdPerMillion !== 'string' ||
+      !isValidDateTime(endpoint.observedAt) ||
+      endpoint.sourceUrl !== `https://openrouter.ai/api/v1/models/${expectedModel}/endpoints` ||
+      endpoint.zdr !== true ||
+      parameters.length !== REQUIRED_PARAMETERS.length ||
+      parameters.some((entry, parameterIndex) => entry !== REQUIRED_PARAMETERS[parameterIndex])
+    ) return fail();
+  }
+  let recomputedPrimary = 0;
+  let recomputedFallback = 0;
   for (let index = 0; index < resultChunks.length; index += 1) {
     const row = resultChunks[index];
     const manifestRow = (manifest.chunks as JsonRecord[])[index];
@@ -321,7 +359,17 @@ function validateArtifact(value: unknown): {
       typeof row.changed !== 'boolean' || !positiveInteger(row.resultingStateRevision) ||
       !nonNegativeInteger(row.itemCount) || !nonNegativeInteger(row.evidenceCount) ||
       transitions.some((entry) => typeof entry !== 'string' || entry.length === 0)) return fail();
+    for (const resolvedModel of [row.extractorResolvedModel, row.reconcilerResolvedModel]) {
+      if (resolvedModel === LIFECYCLE_HISTORY_PRIMARY_MODEL) recomputedPrimary += 1;
+      else if (resolvedModel === LIFECYCLE_HISTORY_FALLBACK_MODEL) recomputedFallback += 1;
+      else return fail();
+    }
   }
+  if (
+    recomputedPrimary !== resolvedModelCounts.primary ||
+    recomputedFallback !== resolvedModelCounts.fallback ||
+    recomputedFallback !== result.providerModelFallbackCount
+  ) return fail();
   if (result.actualUsage !== null) {
     const usage = record(result.actualUsage, ['promptTokens', 'completionTokens']);
     if (!nonNegativeInteger(usage.promptTokens) || !nonNegativeInteger(usage.completionTokens)) return fail();
