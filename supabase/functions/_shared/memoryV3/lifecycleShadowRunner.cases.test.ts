@@ -136,6 +136,45 @@ describe("Memory V3 lifecycle shadow runner gates", () => {
     }
   });
 
+  it("allows lifecycle_all for canonical accounts without an allowlist", async () => {
+    for (const userId of [USER_ID, OTHER_USER_ID]) {
+      const test = harness({
+        rawMode: "lifecycle_all",
+        rawAllowedUserId: undefined,
+        userId,
+        store: {
+          ...harness().store,
+          async reserve(input) {
+            test.calls.push("reserve");
+            test.reserveInputs.push(input);
+            return { status: "duplicate" as const };
+          },
+        },
+      });
+
+      assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+        status: "skipped",
+        reason: "duplicate",
+      });
+      assert.deepEqual(test.calls, ["messages", "reserve"]);
+      assert.equal((test.reserveInputs[0] as { userId: string }).userId, userId);
+    }
+  });
+
+  it("rejects a malformed account in lifecycle_all before database or providers", async () => {
+    const test = harness({
+      rawMode: "lifecycle_all",
+      rawAllowedUserId: undefined,
+      userId: "not-a-user-id",
+    });
+
+    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+      status: "skipped",
+      reason: "user_not_allowlisted",
+    });
+    assert.deepEqual(test.calls, []);
+  });
+
   it("rejects invalid identifiers and dependencies before loading messages", async () => {
     for (const overrides of [
       { conversationId: "bad" },
