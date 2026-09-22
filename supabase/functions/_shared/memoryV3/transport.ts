@@ -390,6 +390,9 @@ export function createMemoryV3OpenRouterAdapter(
         },
         max_tokens: MEMORY_V3_MAX_OUTPUT_TOKENS,
         reasoning: { effort: "low" },
+        // Without this, OpenRouter omits usage.cost and projectUsage() below
+        // always returns null -- no per-account spend tracking is possible.
+        usage: { include: true },
       };
       let responseValue: Response;
       try {

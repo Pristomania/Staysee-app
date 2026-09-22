@@ -36,6 +36,11 @@ export interface UsageAuditFields {
   generationStatus?: string | null;
 }
 
+/** Distinguishes background/system calls from the main chat reply (undefined = chat reply). */
+export type UsageCallKind =
+  | "memory_lifecycle_extractor"
+  | "memory_lifecycle_reconciler";
+
 export interface UsageLogRow extends UsageAuditFields {
   userId: string;
   conversationId?: string | null;
@@ -46,6 +51,7 @@ export interface UsageLogRow extends UsageAuditFields {
   memoryTokens: number;
   summaryTokens: number;
   cost: number;
+  callKind?: UsageCallKind | null;
 }
 
 export interface PromptTokenBreakdown {
@@ -90,6 +96,7 @@ export function buildUsageLogRow(input: {
   memoryTokens?: number;
   summaryTokens?: number;
   audit?: UsageAuditFields;
+  callKind?: UsageCallKind | null;
 }): UsageLogRow {
   const promptTokens = input.promptTokens;
   const completionTokens = input.completionTokens;
@@ -121,6 +128,7 @@ export function buildUsageLogRow(input: {
     memoryTokens: breakdown.memoryTokens,
     summaryTokens: breakdown.summaryTokens,
     cost,
+    callKind: input.callKind ?? null,
     requestId: audit.requestId ?? null,
     finishReason: audit.finishReason ?? null,
     latencyMs: audit.latencyMs ?? null,
@@ -152,6 +160,7 @@ export async function logOpenRouterUsage(
     memory_tokens: row.memoryTokens,
     summary_tokens: row.summaryTokens,
     cost: row.cost,
+    call_kind: row.callKind ?? null,
     request_id: row.requestId ?? null,
     finish_reason: row.finishReason ?? null,
     latency_ms: row.latencyMs ?? null,
@@ -257,6 +266,46 @@ export async function logLifeMemorySynthesisUsage(
     usage: input.usage,
     memoryTokens,
     summaryTokens: 0,
+  });
+
+  await logOpenRouterUsage(supabase, row);
+}
+
+/**
+ * Log one OpenRouter call from the Memory V3 lifecycle pipeline (extractor
+ * or reconciler stage). Logged as soon as the call's response is received,
+ * independent of whether the lifecycle run itself later succeeds or fails
+ * downstream -- the money is spent either way. `runId` is stored as
+ * `requestId` so the two calls (extractor + reconciler) of one lifecycle
+ * check share an id and can be counted as one check via
+ * count(DISTINCT request_id).
+ */
+export async function logMemoryV3LifecycleUsage(
+  supabase: SupabaseClient,
+  input: {
+    userId: string;
+    conversationId: string;
+    runId: string;
+    stage: "extractor" | "reconciler";
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    costUsd: number;
+  }
+): Promise<void> {
+  const row = buildUsageLogRow({
+    userId: input.userId,
+    conversationId: input.conversationId,
+    model: input.model,
+    promptTokens: input.promptTokens,
+    completionTokens: input.completionTokens,
+    usage: { cost: input.costUsd },
+    memoryTokens: 0,
+    summaryTokens: 0,
+    callKind: input.stage === "extractor"
+      ? "memory_lifecycle_extractor"
+      : "memory_lifecycle_reconciler",
+    audit: { requestId: input.runId },
   });
 
   await logOpenRouterUsage(supabase, row);

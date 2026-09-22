@@ -325,6 +325,54 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.equal(test.calls.some((entry) => entry.startsWith("fail:")), false);
   });
 
+  it("logs real cost/tokens for both stages, tagged with their own stage and the shared run id", async () => {
+    const test = harness({
+      extractorAdapterFactory: () => async () => ({
+        content: extractorContent(),
+        usage: { promptTokens: 500, completionTokens: 80, costUsd: 0.00021 },
+      }),
+      reconcilerAdapterFactory: () => async () => ({
+        rawContent: proposalContent,
+        usage: { promptTokens: 900, completionTokens: 150, costUsd: 0.00045 },
+      }),
+    });
+    const logged: unknown[] = [];
+    const result = await runMemoryV3LifecycleShadow(
+      test.options,
+      undefined,
+      async (input) => { logged.push(input); },
+    );
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(logged, [
+      {
+        userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "extractor",
+        model: "google/gemini-3.7-flash", promptTokens: 500, completionTokens: 80, costUsd: 0.00021,
+      },
+      {
+        userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "reconciler",
+        model: "google/gemini-3.7-flash", promptTokens: 900, completionTokens: 150, costUsd: 0.00045,
+      },
+    ]);
+  });
+
+  it("never calls the usage logger when a stage reports no usage, and never fails the run if the logger throws", async () => {
+    const test = harness({
+      reconcilerAdapterFactory: () => async () => ({
+        rawContent: proposalContent,
+        usage: { promptTokens: 900, completionTokens: 150, costUsd: 0.00045 },
+      }),
+    });
+    const logged: unknown[] = [];
+    const result = await runMemoryV3LifecycleShadow(
+      test.options,
+      undefined,
+      async (input) => { logged.push(input); throw new Error("logging backend down"); },
+    );
+    assert.equal(result.status, "succeeded");
+    assert.equal(logged.length, 1);
+    assert.equal((logged[0] as { stage: string }).stage, "reconciler");
+  });
+
   it("uses a deterministic content-sensitive canonical input identity", async () => {
     const hashes: string[] = [];
     for (const text of ["Первый текст", "Второй текст"]) {

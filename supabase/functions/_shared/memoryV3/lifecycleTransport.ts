@@ -499,6 +499,9 @@ export function createMemoryV3LifecycleOpenRouterAdapter(
             zdr: true,
           },
           max_tokens: MAX_COMPLETION_TOKENS,
+          // Without this, OpenRouter omits usage.cost and projectUsage() below
+          // always returns null -- no per-account spend tracking is possible.
+          usage: { include: true },
         };
 
         let responseValue: Response;
