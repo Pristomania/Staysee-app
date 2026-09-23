@@ -56,6 +56,18 @@ import type { Conversation, UserMemory } from '../../types';
  * third section instead. Set to this feature's deploy date. */
 const MEMORY_V3_VIEWER_LAUNCH_CUTOFF = new Date('2026-09-24T00:00:00Z');
 
+const MEMORY_V3_DIALOGUE_TOPIC_LABELS: Record<string, string> = {
+  person: 'Люди',
+  fact: 'Факты',
+  preference: 'Предпочтения общения',
+};
+
+const MEMORY_V3_LIFECYCLE_TOPIC_LABELS: Record<string, string> = {
+  life_context: 'Факты профиля',
+  communication: 'Стиль общения',
+  preference: 'Что помогает в контакте',
+};
+
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 type ConvOption = Pick<Conversation, 'id' | 'title'>;
@@ -669,6 +681,7 @@ export function MemoryScreen() {
                     cardBase={cardBase}
                     onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
                     emptyMessage="Пока ничего не запомнено в этой беседе."
+                    topicLabels={MEMORY_V3_DIALOGUE_TOPIC_LABELS}
                   />
                 )}
                 </>
@@ -822,6 +835,7 @@ export function MemoryScreen() {
                   cardBase={cardBase}
                   onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
                   emptyMessage="Пока ничего не запомнено."
+                  topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
                 />
               )}
             </section>
@@ -842,6 +856,7 @@ export function MemoryScreen() {
                       cardBase={cardBase}
                       onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
                       emptyMessage="Пока ничего не запомнено в этой беседе."
+                      topicLabels={MEMORY_V3_DIALOGUE_TOPIC_LABELS}
                     />
                   </div>
                 )}
@@ -852,6 +867,7 @@ export function MemoryScreen() {
                   cardBase={cardBase}
                   onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
                   emptyMessage="Пока ничего не запомнено."
+                  topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
                 />
               </section>
             )}
