@@ -85,6 +85,34 @@ building the reconcile request, the reconciler call, `validateMemoryV3DialoguePr
 `dialogueContract.ts`, all shipped and live) and is reused directly, the
 same way the lifecycle engine reuses the lifecycle equivalents.
 
+**Correction after reading `lifecycle-history-backfill-contract.ts` in
+full:** `prepareLifecycleHistoryBackfill`'s final step
+(`chunks.sort(comparePreparedChunks)`) sorts ALL chunks from ALL
+conversations into one GLOBAL timeline by `lastCreatedAt` — chunks
+belonging to the same conversation are NOT necessarily adjacent in the
+resulting array; they can be interleaved with other conversations' chunks.
+The dialogue-scope engine must explicitly GROUP `prepared.chunks` by
+`conversationId` into separate buckets (e.g. a `Map`) before processing —
+it cannot assume "conversation changed" is detectable by just watching
+adjacent array entries.
+
+**Correction on when the "already has live data" skip happens:** doing
+this check only at the import step (as an earlier draft of this design
+said) means the paid run would spend real money extracting and
+reconciling a conversation whose result then gets thrown away at import.
+Instead: the inspect/paid-run stage queries each conversation's current
+dialogue-state emptiness up front (reusing the same DB connection the
+source reader already has) and excludes any non-empty conversation's
+chunks from what gets paid for at all — this is a cost-avoidance filter,
+not a correctness gate. The import step keeps a defensive re-check
+immediately before writing (mirroring the existing lifecycle RPC's own
+paranoia about re-verifying state right before a write) but now RAISES a
+clear error for that one conversation if something changed between the
+filter and the import (e.g. new organic messages arrived in between and
+the conversation is no longer empty) rather than silently skipping at that
+late stage — money was already spent on it by then, so Настя should be
+told plainly rather than have the result quietly dropped.
+
 ### Two-step process, mirroring the lifecycle tool's own separation
 
 Reading `lifecycle-history-backfill-import.ts`/`-import-run.ts` in full
