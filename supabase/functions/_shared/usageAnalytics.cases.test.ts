@@ -85,6 +85,26 @@ for (const label of [
   assert(!label.includes("# STAYSEE"), `no prompt text in label: ${label}`);
 }
 
+/**
+ * Mirrors buildUsageLogRow's costCategory default in usageAnalytics.ts
+ * (`input.costCategory ?? "automatic"`) -- same reason this file can't
+ * import usageAnalytics.ts directly, see the comment above.
+ */
+function mirrorCostCategory(
+  costCategory?: "automatic" | "technical"
+): "automatic" | "technical" {
+  return costCategory ?? "automatic";
+}
+
+assert(
+  mirrorCostCategory() === "automatic",
+  "costCategory defaults to automatic when the caller does not specify one"
+);
+assert(
+  mirrorCostCategory("technical") === "technical",
+  "costCategory respects an explicit technical value"
+);
+
 const RUN_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 const extractorRow = mirrorMemoryV3LifecycleUsageRow({
