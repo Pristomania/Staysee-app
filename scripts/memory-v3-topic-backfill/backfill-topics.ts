@@ -53,7 +53,14 @@ Return JSON only, matching the given schema. Pick the single best-fitting topic;
     },
     reasoning: { effort: 'low' },
     provider: { allow_fallbacks: true, require_parameters: true, data_collection: 'deny', zdr: true },
-    max_tokens: 50,
+    // 50 was too tight: low-effort reasoning still consumes some of the
+    // budget before the JSON answer, and a real run hit this -- the model
+    // fell back to a prose explanation instead of the strict schema
+    // response, which then failed JSON.parse with no diagnostic content.
+    // Production's reconciler call budgets 1_200 for a much larger
+    // response; this one-field classification needs far less, but not this
+    // little.
+    max_tokens: 300,
     usage: { include: true },
   };
   const response = await fetch(OPENROUTER_URL, {
@@ -66,9 +73,14 @@ Return JSON only, matching the given schema. Pick the single best-fitting topic;
   }
   const data = await response.json();
   const content = data.choices[0].message.content as string;
-  const parsed = JSON.parse(content) as { topic: string };
+  let parsed: { topic: string };
+  try {
+    parsed = JSON.parse(content) as { topic: string };
+  } catch {
+    throw new Error(`Model response was not valid JSON. Raw content: ${content.slice(0, 500)}`);
+  }
   if (!input.topics.includes(parsed.topic)) {
-    throw new Error(`Model returned a topic outside the allowed list: ${parsed.topic}`);
+    throw new Error(`Model returned a topic outside the allowed list: ${parsed.topic}. Raw content: ${content.slice(0, 500)}`);
   }
   const usage = data.usage ?? {};
   return {
