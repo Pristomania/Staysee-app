@@ -306,6 +306,7 @@ export function buildMemoryV3DialogueReconcileRequest(input: {
           type: "ignore",
           candidateRef: binding.candidateRef,
           targetMemoryRef: null,
+          topic: null,
         })),
       },
       { state, extraction, bindings },

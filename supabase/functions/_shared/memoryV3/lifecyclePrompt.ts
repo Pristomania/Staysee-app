@@ -306,6 +306,7 @@ export function buildMemoryV3LifecycleReconcileRequest(input: {
           type: "ignore",
           candidateRef: binding.candidateRef,
           targetMemoryRef: null,
+          topic: null,
         })),
       },
       { state, extraction, bindings },
