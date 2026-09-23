@@ -5,6 +5,7 @@ import type { MemoryV3Extraction } from "./contract.ts";
 import type {
   MemoryV3DialogueProposal,
 } from "./dialogueContract.ts";
+import { MEMORY_V3_DIALOGUE_TOPICS } from "./dialogueContract.ts";
 import {
   applyMemoryV3DialogueStep,
   createEmptyMemoryV3DialogueState,
@@ -24,6 +25,11 @@ import {
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const CONVERSATION_ID = "22222222-2222-4222-8222-222222222222";
 const RAW_SENTINEL = "RAW_DIALOGUE_REDUCER_SECRET_SENTINEL";
+// Topic used across the pre-existing (non-topic-focused) fixtures below: a single constant value
+// so that create/revise operations never trigger the new topic-changed revision bump by accident.
+// The dedicated "Memory V3 dialogue reducer topic" suite at the end of this file is what actually
+// varies topic across operations.
+const TOPIC = MEMORY_V3_DIALOGUE_TOPICS[0];
 
 type JsonRecord = Record<string, unknown>;
 type EmptyStateInput = Parameters<typeof createEmptyMemoryV3DialogueState>[0];
@@ -148,7 +154,7 @@ async function applyCreate(overrides: JsonRecord = {}) {
     at: "2026-01-10T10:00:00Z",
     conversationId: CONVERSATION_ID,
     extraction: eventExtraction(),
-    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: TOPIC }],
     trustedForgetMemoryKeys: [],
     ...overrides,
   });
@@ -195,8 +201,8 @@ describe("production dialogue reducer behavior", () => {
       evidence: [secondEvidence, { ...first.evidence[0], itemKey: "a-candidate", sourceMessageId: "a-message" }],
     } as MemoryV3Extraction;
     const proposal: MemoryV3DialogueProposal = [
-      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null },
-      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null },
+      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null, topic: TOPIC },
+      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null, topic: TOPIC },
     ];
     const input = {
       state: createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID }),
@@ -241,6 +247,7 @@ describe("production dialogue reducer behavior", () => {
         type: "confirm",
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
+        topic: null,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -258,7 +265,7 @@ describe("production dialogue reducer behavior", () => {
     const empty = createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID });
     const ignored = await applyCreate({
       state: empty,
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
     });
     assert.equal(ignored.changed, false);
     assert.deepEqual(ignored.state, empty);
@@ -269,7 +276,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(confirmed.changed, false);
@@ -287,6 +294,7 @@ describe("production dialogue reducer behavior", () => {
         type: "revise",
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
+        topic: TOPIC,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -318,6 +326,7 @@ describe("production dialogue reducer behavior", () => {
         type: "create" as const,
         candidateLocalItemKey: item.localItemKey,
         targetMemoryKey: null,
+        topic: TOPIC,
       })),
       trustedForgetMemoryKeys: [],
     });
@@ -328,7 +337,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-11T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(ignored.changed, false);
@@ -345,7 +354,7 @@ describe("production dialogue reducer behavior", () => {
         item: { claim: "Moved permanently to Kazan" },
         evidence: { sourceMessageId: "m2", episodeKey: "episode:m2", mentionTime: "2026-01-11T10:00:00Z" },
       }),
-      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey }],
+      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(revised.state.items[0].claim, "Moved permanently to Kazan");
@@ -358,7 +367,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: recurrenceInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     const stale = await applyMemoryV3DialogueStep({
@@ -375,7 +384,7 @@ describe("production dialogue reducer behavior", () => {
           mentionTime: "2026-01-12T10:00:00Z",
         }],
       }),
-      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey }],
+      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(stale.state.items[0].status, "stale");
@@ -388,7 +397,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: hypothesisInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     const rejected = await applyMemoryV3DialogueStep({
@@ -396,7 +405,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-12T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: hypothesisExtraction({ item: { status: "rejected" }, relation: "rejects" }),
-      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey }],
+      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(rejected.state.items[0].status, "rejected");
@@ -422,7 +431,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction,
-      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null })),
+      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null, topic: TOPIC })),
       trustedForgetMemoryKeys: [],
     });
     const before = structuredClone(created.state);
@@ -447,6 +456,7 @@ describe("production dialogue reducer behavior", () => {
         type: "confirm" as const,
         candidateLocalItemKey: confirmExtraction.items[index].localItemKey,
         targetMemoryKey: item.memoryKey,
+        topic: null,
       })),
       trustedForgetMemoryKeys: [],
     }), "dialogue_reducer_transition_invalid");
@@ -462,7 +472,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2025-01-01T00:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     }), "dialogue_reducer_transition_invalid");
     assert.deepEqual(created.state, before);
@@ -546,5 +556,70 @@ describe("production dialogue reducer public boundary", () => {
     });
     const wrapped = await assertReducerError(() => applyMemoryV3DialogueStep(stolen as unknown as DialogueStepInput), "dialogue_reducer_invalid_input");
     assert.notEqual(wrapped, branded);
+  });
+});
+
+describe("Memory V3 dialogue reducer topic", () => {
+  // Reuses the file's existing eventExtraction() fixture helper (see above) instead of a
+  // self-contained inline extraction() builder, per the task brief's instruction to prefer
+  // existing fixture helpers over parallel inline literals where one already exists.
+
+  it("writes the operation's topic on a create", async () => {
+    const state = createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID });
+    const result = await applyMemoryV3DialogueStep({
+      state,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "person" }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(result.state.items.length, 1);
+    assert.equal(result.state.items[0].topic, "person");
+  });
+
+  it("bumps revision and updates topic on a revise even when every other field is identical", async () => {
+    const state0 = createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID });
+    const created = await applyMemoryV3DialogueStep({
+      state: state0,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact" }],
+      trustedForgetMemoryKeys: [],
+    });
+    const memoryKey = created.state.items[0].memoryKey;
+    const revised = await applyMemoryV3DialogueStep({
+      state: created.state,
+      at: "2026-01-11T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "revise", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: "preference" }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(revised.state.items[0].topic, "preference");
+    assert.equal(revised.state.items[0].revision, created.state.items[0].revision + 1);
+  });
+
+  it("leaves topic untouched on confirm", async () => {
+    const state0 = createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID });
+    const created = await applyMemoryV3DialogueStep({
+      state: state0,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact" }],
+      trustedForgetMemoryKeys: [],
+    });
+    const memoryKey = created.state.items[0].memoryKey;
+    const confirmed = await applyMemoryV3DialogueStep({
+      state: created.state,
+      at: "2026-01-11T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "confirm", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: null }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(confirmed.state.items[0].topic, "fact");
   });
 });

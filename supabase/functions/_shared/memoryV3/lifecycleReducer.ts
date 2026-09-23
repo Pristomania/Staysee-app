@@ -35,7 +35,7 @@ const STEP_FIELDS = [
   "proposal",
   "trustedForgetMemoryKeys",
 ] as const;
-const INTERNAL_OPERATION_FIELDS = ["type", "candidateLocalItemKey", "targetMemoryKey"] as const;
+const INTERNAL_OPERATION_FIELDS = ["type", "candidateLocalItemKey", "targetMemoryKey", "topic"] as const;
 const MATERIAL_FIELDS = [
   "kind",
   "claim",
@@ -333,7 +333,8 @@ function validateInternalProposal(
         typeof row.candidateLocalItemKey !== "string" || !candidateRefByKey.has(row.candidateLocalItemKey) ||
         (row.targetMemoryKey !== null &&
           (typeof row.targetMemoryKey !== "string" || !MEMORY_KEY.test(row.targetMemoryKey) ||
-            !memoryRefByKey.has(row.targetMemoryKey)))) {
+            !memoryRefByKey.has(row.targetMemoryKey))) ||
+        (row.topic !== null && typeof row.topic !== "string")) {
       fail(token, "lifecycle_reducer_invalid_input");
     }
     const candidateLocalItemKey = row.candidateLocalItemKey as string;
@@ -342,6 +343,7 @@ function validateInternalProposal(
       type: row.type,
       candidateRef: candidateRefByKey.get(candidateLocalItemKey),
       targetMemoryRef: targetMemoryKey === null ? null : memoryRefByKey.get(targetMemoryKey),
+      topic: row.topic as string | null,
     };
   });
   return validateMemoryV3LifecycleProposal(
@@ -452,6 +454,7 @@ export async function applyMemoryV3LifecycleStep(input: {
         working.items.push({
           memoryKey: resultingMemoryKey,
           ...materialFromCandidate(candidate),
+          topic: operation.topic,
           firstSeenAt: projected.at,
           updatedAt: projected.at,
           revision: 1,
@@ -470,11 +473,15 @@ export async function applyMemoryV3LifecycleStep(input: {
         } else if (operation.type === "revise") {
           const candidateMaterial = materialFromCandidate(candidate);
           const targetMaterial = Object.fromEntries(MATERIAL_FIELDS.map((field) => [field, target[field]]));
-          working.items[index] = canonicalStringify(candidateMaterial) === canonicalStringify(targetMaterial)
+          const topicChanged = operation.topic !== target.topic;
+          const materialUnchanged = !topicChanged &&
+            canonicalStringify(candidateMaterial) === canonicalStringify(targetMaterial);
+          working.items[index] = materialUnchanged
             ? { ...target, evidence }
             : {
               ...target,
               ...candidateMaterial,
+              topic: operation.topic,
               updatedAt: projected.at,
               revision: target.revision + 1,
               evidence,

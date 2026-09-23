@@ -7,6 +7,7 @@ import type {
   MemoryV3LifecycleProposal,
   MemoryV3LifecycleState,
 } from "./lifecycleContract.ts";
+import { MEMORY_V3_LIFECYCLE_TOPICS } from "./lifecycleContract.ts";
 import {
   applyMemoryV3LifecycleStep,
   createEmptyMemoryV3LifecycleState,
@@ -24,6 +25,11 @@ const RAW_SENTINEL = "RAW_REDUCER_SECRET_SENTINEL";
 const MATERIAL_FIELDS = [
   "kind", "claim", "status", "sensitivity", "eventTimeStart", "eventTimeEnd", "alternative",
 ] as const;
+// Topic used across the pre-existing (non-topic-focused) fixtures below: a single constant value
+// so that create/revise operations never trigger the new topic-changed revision bump by accident.
+// The dedicated "Memory V3 lifecycle reducer topic" suite at the end of this file is what actually
+// varies topic across operations.
+const TOPIC = MEMORY_V3_LIFECYCLE_TOPICS[0];
 
 type JsonRecord = Record<string, unknown>;
 type EmptyStateInput = Parameters<typeof createEmptyMemoryV3LifecycleState>[0];
@@ -34,12 +40,28 @@ const dataset = JSON.parse(readFileSync(
   "utf8",
 )) as JsonRecord;
 
-function internalProposal(step: JsonRecord, memoryByGold: Map<string, string>): MemoryV3LifecycleProposal {
+function internalProposal(step: JsonRecord, memoryByGold: Map<string, string>): JsonRecord[] {
   return step.scriptedProposal.map((row: JsonRecord) => ({
     type: row.type,
     candidateLocalItemKey: row.candidateLocalItemKey,
     targetMemoryKey: row.targetGoldMemoryId === null ? null : memoryByGold.get(row.targetGoldMemoryId),
   }));
+}
+
+function topicForOperationType(type: string): (typeof MEMORY_V3_LIFECYCLE_TOPICS)[number] | null {
+  return type === "create" || type === "revise" ? MEMORY_V3_LIFECYCLE_TOPICS[0] : null;
+}
+
+// The frozen reference reducer (scripts/memory-v3-pilot/lifecycle-reducer.mjs) predates topic
+// classification and its own proposal validator has a strict, closed field list that does not
+// include "topic" -- passing it a topic field would make it throw. So the production and
+// reference proposals are built from the same base (internalProposal) but only the production
+// side gets topic attached.
+function productionProposalFor(step: JsonRecord, memoryByGold: Map<string, string>): MemoryV3LifecycleProposal {
+  return internalProposal(step, memoryByGold).map((operation) => ({
+    ...operation,
+    topic: topicForOperationType(operation.type as string),
+  })) as MemoryV3LifecycleProposal;
 }
 
 function material(value: JsonRecord): JsonRecord {
@@ -82,6 +104,11 @@ function expectedProductionState(
     delete item.tier;
     return {
       memoryKey: memoryByGold.get(goldMemoryId),
+      // The dataset predates topic classification, so every item's topic is derived the same
+      // way productionProposal() derives it: every create/revise operation uses the scope's
+      // first enum member, and confirm/mark_stale/reject never change it -- so it is always
+      // this one constant value regardless of a given item's operation history.
+      topic: MEMORY_V3_LIFECYCLE_TOPICS[0],
       ...structuredClone(item),
     };
   }).sort((left: JsonRecord, right: JsonRecord) => left.memoryKey < right.memoryKey ? -1 : left.memoryKey > right.memoryKey ? 1 : 0);
@@ -228,7 +255,7 @@ async function applyCreate(overrides: JsonRecord = {}) {
     at: "2026-01-10T10:00:00Z",
     conversationId: "conversation-01",
     extraction: eventExtraction(),
-    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: TOPIC }],
     trustedForgetMemoryKeys: [],
     ...overrides,
   });
@@ -247,7 +274,7 @@ describe("production lifecycle parity", () => {
         const productionBefore = new Map(productionByGold);
         const referenceBefore = new Map(referenceByGold);
         const previousGoldIds = new Set(productionByGold.keys());
-        const productionProposal = internalProposal(step, productionByGold);
+        const productionProposal = productionProposalFor(step, productionByGold);
         const referenceProposal = internalProposal(step, referenceByGold);
         const productionForget = step.forgetMemoryRefs.map((gold: string) => productionByGold.get(gold));
         const referenceForget = step.forgetMemoryRefs.map((gold: string) => referenceByGold.get(gold));
@@ -339,8 +366,8 @@ describe("production lifecycle reducer behavior", () => {
       evidence: [secondEvidence, { ...first.evidence[0], itemKey: "a-candidate", sourceMessageId: "a-message" }],
     } as MemoryV3Extraction;
     const proposal: MemoryV3LifecycleProposal = [
-      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null },
-      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null },
+      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null, topic: TOPIC },
+      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null, topic: TOPIC },
     ];
     const input = {
       state: createEmptyMemoryV3LifecycleState({ userId: USER_ID }),
@@ -385,6 +412,7 @@ describe("production lifecycle reducer behavior", () => {
         type: "confirm",
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
+        topic: null,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -402,7 +430,7 @@ describe("production lifecycle reducer behavior", () => {
     const empty = createEmptyMemoryV3LifecycleState({ userId: USER_ID });
     const ignored = await applyCreate({
       state: empty,
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
     });
     assert.equal(ignored.changed, false);
     assert.deepEqual(ignored.state, empty);
@@ -413,7 +441,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: "conversation-01",
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(confirmed.changed, false);
@@ -431,6 +459,7 @@ describe("production lifecycle reducer behavior", () => {
         type: "revise",
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
+        topic: TOPIC,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -462,6 +491,7 @@ describe("production lifecycle reducer behavior", () => {
         type: "create" as const,
         candidateLocalItemKey: item.localItemKey,
         targetMemoryKey: null,
+        topic: TOPIC,
       })),
       trustedForgetMemoryKeys: [],
     });
@@ -472,7 +502,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-11T10:00:00Z",
       conversationId: "conversation-02",
       extraction: eventExtraction(),
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(ignored.changed, false);
@@ -489,7 +519,7 @@ describe("production lifecycle reducer behavior", () => {
         item: { claim: "Moved permanently to Kazan" },
         evidence: { sourceMessageId: "m2", episodeKey: "episode:m2", mentionTime: "2026-01-11T10:00:00Z" },
       }),
-      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey }],
+      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(revised.state.items[0].claim, "Moved permanently to Kazan");
@@ -502,7 +532,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: "conversation-01",
       extraction: recurrenceInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     const stale = await applyMemoryV3LifecycleStep({
@@ -519,7 +549,7 @@ describe("production lifecycle reducer behavior", () => {
           mentionTime: "2026-01-12T10:00:00Z",
         }],
       }),
-      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey }],
+      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(stale.state.items[0].status, "stale");
@@ -532,7 +562,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: "conversation-01",
       extraction: hypothesisInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null, topic: TOPIC }],
       trustedForgetMemoryKeys: [],
     });
     const rejected = await applyMemoryV3LifecycleStep({
@@ -540,7 +570,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-12T10:00:00Z",
       conversationId: "conversation-02",
       extraction: hypothesisExtraction({ item: { status: "rejected" }, relation: "rejects" }),
-      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey }],
+      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(rejected.state.items[0].status, "rejected");
@@ -566,7 +596,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: "conversation-01",
       extraction,
-      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null })),
+      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null, topic: TOPIC })),
       trustedForgetMemoryKeys: [],
     });
     const before = structuredClone(created.state);
@@ -591,6 +621,7 @@ describe("production lifecycle reducer behavior", () => {
         type: "confirm" as const,
         candidateLocalItemKey: confirmExtraction.items[index].localItemKey,
         targetMemoryKey: item.memoryKey,
+        topic: null,
       })),
       trustedForgetMemoryKeys: [],
     }), "lifecycle_reducer_transition_invalid");
@@ -606,7 +637,7 @@ describe("production lifecycle reducer behavior", () => {
       at: "2025-01-01T00:00:00Z",
       conversationId: "conversation-02",
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
       trustedForgetMemoryKeys: [],
     }), "lifecycle_reducer_transition_invalid");
     assert.deepEqual(created.state, before);
@@ -690,5 +721,70 @@ describe("production lifecycle reducer public boundary", () => {
     });
     const wrapped = await assertReducerError(() => applyMemoryV3LifecycleStep(stolen as unknown as LifecycleStepInput), "lifecycle_reducer_invalid_input");
     assert.notEqual(wrapped, branded);
+  });
+});
+
+describe("Memory V3 lifecycle reducer topic", () => {
+  // Reuses the file's existing eventExtraction() fixture helper (see above) instead of a
+  // self-contained inline extraction() builder, per the task brief's instruction to prefer
+  // existing fixture helpers over parallel inline literals where one already exists.
+
+  it("writes the operation's topic on a create", async () => {
+    const state = createEmptyMemoryV3LifecycleState({ userId: USER_ID });
+    const result = await applyMemoryV3LifecycleStep({
+      state,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: "conversation-01",
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "life_context" }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(result.state.items.length, 1);
+    assert.equal(result.state.items[0].topic, "life_context");
+  });
+
+  it("bumps revision and updates topic on a revise even when every other field is identical", async () => {
+    const state0 = createEmptyMemoryV3LifecycleState({ userId: USER_ID });
+    const created = await applyMemoryV3LifecycleStep({
+      state: state0,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: "conversation-01",
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "communication" }],
+      trustedForgetMemoryKeys: [],
+    });
+    const memoryKey = created.state.items[0].memoryKey;
+    const revised = await applyMemoryV3LifecycleStep({
+      state: created.state,
+      at: "2026-01-11T10:00:00Z",
+      conversationId: "conversation-01",
+      extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "revise", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: "preference" }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(revised.state.items[0].topic, "preference");
+    assert.equal(revised.state.items[0].revision, created.state.items[0].revision + 1);
+  });
+
+  it("leaves topic untouched on confirm", async () => {
+    const state0 = createEmptyMemoryV3LifecycleState({ userId: USER_ID });
+    const created = await applyMemoryV3LifecycleStep({
+      state: state0,
+      at: "2026-01-10T10:00:00Z",
+      conversationId: "conversation-01",
+      extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "communication" }],
+      trustedForgetMemoryKeys: [],
+    });
+    const memoryKey = created.state.items[0].memoryKey;
+    const confirmed = await applyMemoryV3LifecycleStep({
+      state: created.state,
+      at: "2026-01-11T10:00:00Z",
+      conversationId: "conversation-01",
+      extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
+      proposal: [{ type: "confirm", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: null }],
+      trustedForgetMemoryKeys: [],
+    });
+    assert.equal(confirmed.state.items[0].topic, "communication");
   });
 });
