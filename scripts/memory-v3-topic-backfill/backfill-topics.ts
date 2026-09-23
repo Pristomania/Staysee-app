@@ -31,6 +31,33 @@ export function buildSchema(topics: readonly string[]) {
   };
 }
 
+const MAX_FETCH_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 3000;
+const FETCH_TIMEOUT_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Retries on network-level failures only (DNS/connect/timeout) -- a real
+ * HTTP response (even an error status) is returned immediately, since
+ * retrying a 4xx/5xx from the provider itself wouldn't help. */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    } catch (error) {
+      lastError = error;
+      if (attempt < MAX_FETCH_ATTEMPTS) {
+        console.log(`  сетевой сбой (попытка ${attempt}/${MAX_FETCH_ATTEMPTS}), повтор через ${RETRY_DELAY_MS / 1000}с...`);
+        await sleep(RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function classifyTopic(input: ClassifyInput, apiKey: string): Promise<{
   topic: string;
   promptTokens: number;
@@ -63,7 +90,7 @@ Return JSON only, matching the given schema. Pick the single best-fitting topic;
     max_tokens: 300,
     usage: { include: true },
   };
-  const response = await fetch(OPENROUTER_URL, {
+  const response = await fetchWithRetry(OPENROUTER_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
