@@ -49,7 +49,7 @@ Rules:
 17. Prefer ignore when the candidate is redundant, unsafe, unsupported for durable memory, or does not represent a meaningful lifecycle change.
 18. Extractor admission is not lifecycle admission. Independently decide whether each candidate is durable and useful in future conversations.
 19. Ignore isolated ordinary actions and momentary difficulties, moods, or needs unless they have a durable consequence or reveal a stable preference, commitment, relationship fact, or recurring pattern.
-20. When the user explicitly denies an assistant inference, never preserve that inference. Do not create a different memory from a nearby transient user statement unless it independently passes rule 18.
+20. When the user explicitly denies an assistant inference, never preserve that inference. Do not create a different memory from a nearby transient user statement unless it independently passes rule 19.
 21. Do not create an item merely because a candidate uses different wording.
 22. Do not merge different people, time periods, events, recurrence scopes, or hypothesis meanings.
 23. Preserve epistemic status. Do not turn a hypothesis or tentative report into fact, or one episode into a recurrence. A later uncertain candidate does not correct, supersede, mark stale, or reject an existing certain memory; prefer ignore until the user confirms it.
@@ -255,7 +255,7 @@ describe("Memory V3 dialogue reconciler instruction", () => {
     );
     assert.match(
       MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION,
-      /Do not create a different memory from a nearby transient user statement unless it independently passes rule 18\./,
+      /Do not create a different memory from a nearby transient user statement unless it independently passes rule 19\./,
     );
   });
 
