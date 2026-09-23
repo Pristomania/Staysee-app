@@ -21,6 +21,7 @@ import {
   MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
   MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_SCHEMA_VERSION,
+  MEMORY_V3_LIFECYCLE_TOPICS,
   projectSafeMemoryV3LifecycleContractDiagnostic,
   validateMemoryV3LifecycleProposal,
   validateMemoryV3LifecycleState,
@@ -55,6 +56,7 @@ function runtimeState(scenarioId: string, expectedState: JsonRecord, revision = 
       return {
         memoryKey: memoryKey(index),
         ...structuredClone(item),
+        topic: null,
       };
     }),
     scenarioId,
@@ -65,6 +67,13 @@ function productionState(scenarioId: string, expectedState: JsonRecord, revision
   const state = runtimeState(scenarioId, expectedState, revision);
   delete state.scenarioId;
   return state;
+}
+
+// Synthetic topic for a scripted operation: create/revise require a non-null
+// enum member, every other operation type requires exactly null. The dataset
+// predates topic classification, so tests synthesize a stable, valid value here.
+function topicForOperationType(type: string): (typeof MEMORY_V3_LIFECYCLE_TOPICS)[number] | null {
+  return type === "create" || type === "revise" ? MEMORY_V3_LIFECYCLE_TOPICS[0] : null;
 }
 
 function proposalFixture(step: JsonRecord, previousExpectedState: JsonRecord) {
@@ -94,6 +103,7 @@ function proposalFixture(step: JsonRecord, previousExpectedState: JsonRecord) {
         targetMemoryRef: operation.targetGoldMemoryId === null
           ? null
           : memoryByGoldId.get(operation.targetGoldMemoryId)?.memoryRef,
+        topic: topicForOperationType(operation.type as string),
       })),
     },
     expected: step.scriptedProposal.map((operation: JsonRecord) => ({
@@ -102,6 +112,7 @@ function proposalFixture(step: JsonRecord, previousExpectedState: JsonRecord) {
       targetMemoryKey: operation.targetGoldMemoryId === null
         ? null
         : memoryByGoldId.get(operation.targetGoldMemoryId)?.memoryKey,
+      topic: topicForOperationType(operation.type as string),
     })),
   };
 }
@@ -356,12 +367,12 @@ describe("proposal rules", () => {
     fixture.bindings.candidates.push({ candidateRef: "candidate:2", localItemKey: `${candidate.localItemKey}-2` });
     const target = fixture.bindings.memories[0].memoryRef;
     assert.doesNotThrow(() => validateMemoryV3LifecycleProposal({ operations: [
-      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target },
-      { type: "confirm", candidateRef: "candidate:2", targetMemoryRef: target },
+      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null },
+      { type: "confirm", candidateRef: "candidate:2", targetMemoryRef: target, topic: null },
     ] }, contextOf(fixture)));
     assertContractError(() => validateMemoryV3LifecycleProposal({ operations: [
-      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target },
-      { type: "revise", candidateRef: "candidate:2", targetMemoryRef: target },
+      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null },
+      { type: "revise", candidateRef: "candidate:2", targetMemoryRef: target, topic: MEMORY_V3_LIFECYCLE_TOPICS[0] },
     ] }, contextOf(fixture)), "lifecycle_contract_invalid_proposal");
   });
 
@@ -409,6 +420,7 @@ describe("proposal rules", () => {
     const fixture = proposalFixture(step, prior);
     const operation = fixture.raw.operations[0];
     operation.type = "mark_stale";
+    operation.topic = null;
     fixture.extraction.items[0].status = "active";
     assertContractError(
       () => validateMemoryV3LifecycleProposal(fixture.raw, contextOf(fixture)),
@@ -435,7 +447,7 @@ describe("proposal rules", () => {
       candidateRef: `candidate:${index}`, localItemKey: entry.localItemKey,
     }));
     fixture.raw.operations = fixture.bindings.candidates.map((entry: JsonRecord) => ({
-      type: "ignore", candidateRef: entry.candidateRef, targetMemoryRef: null,
+      type: "ignore", candidateRef: entry.candidateRef, targetMemoryRef: null, topic: null,
     }));
     assertContractError(
       () => validateMemoryV3LifecycleProposal(fixture.raw, contextOf(fixture)),
@@ -686,6 +698,7 @@ describe("strict JSON-data-only boundaries", () => {
       type: "create",
       candidateRef: "candidate:1",
       targetMemoryRef: null,
+      topic: MEMORY_V3_LIFECYCLE_TOPICS[0],
     };
     operation.candidateRef = operation;
     const proposalError = assertContractError(
@@ -715,5 +728,82 @@ describe("strict JSON-data-only boundaries", () => {
     const revoked = Proxy.revocable({}, {});
     revoked.revoke();
     assert.equal(projectSafeMemoryV3LifecycleContractDiagnostic(revoked.proxy), null);
+  });
+});
+
+function baseState(userId: string) {
+  return {
+    schemaVersion: "memory-v3-lifecycle-state-v1",
+    userId,
+    stateRevision: 0,
+    nextMemoryOrdinal: 1,
+    items: [],
+  };
+}
+
+function baseExtraction(localItemKey: string) {
+  return {
+    run: { caseId: "case-1", extractorVersion: "v1" },
+    items: [{
+      localItemKey, kind: "event", claim: "переезд в Казань", scope: "cross_conversation",
+      conversationId: null, eventTimeStart: null, eventTimeEnd: null, status: "active",
+      sensitivity: "normal", alternative: null,
+    }],
+    evidence: [{
+      itemKey: localItemKey, sourceMessageId: "m1", relation: "supports", supportType: null,
+      episodeKey: "episode:m1", provenanceRole: "user", mentionTime: "2026-09-24T10:00:00.000Z",
+    }],
+  };
+}
+
+function candidateBindings(localItemKey: string) {
+  return {
+    memories: [],
+    candidates: [{ candidateRef: "candidate:0001", localItemKey }],
+  };
+}
+
+describe("Memory V3 lifecycle contract topic", () => {
+  it("requires a valid topic on a create operation", () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const extraction = baseExtraction("item-1");
+    const context = { state: baseState(userId), extraction, bindings: candidateBindings("item-1") };
+    for (const topic of MEMORY_V3_LIFECYCLE_TOPICS) {
+      const result = validateMemoryV3LifecycleProposal(
+        { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic }] },
+        context,
+      );
+      assert.equal(result[0].topic, topic);
+    }
+  });
+
+  it("rejects a create operation with a null topic", () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const extraction = baseExtraction("item-1");
+    const context = { state: baseState(userId), extraction, bindings: candidateBindings("item-1") };
+    assert.throws(() => validateMemoryV3LifecycleProposal(
+      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: null }] },
+      context,
+    ));
+  });
+
+  it("rejects a create operation with a topic from the wrong scope's enum", () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const extraction = baseExtraction("item-1");
+    const context = { state: baseState(userId), extraction, bindings: candidateBindings("item-1") };
+    assert.throws(() => validateMemoryV3LifecycleProposal(
+      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "person" }] },
+      context,
+    ));
+  });
+
+  it("rejects an ignore operation that supplies a non-null topic", () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const extraction = baseExtraction("item-1");
+    const context = { state: baseState(userId), extraction, bindings: candidateBindings("item-1") };
+    assert.throws(() => validateMemoryV3LifecycleProposal(
+      { operations: [{ type: "ignore", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "life_context" }] },
+      context,
+    ));
   });
 });
