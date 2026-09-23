@@ -477,7 +477,7 @@ export async function runMemoryV3DialogueShadow(
     )) {
       inspectExactRecord(
         operation,
-        ["type", "candidateRef", "targetMemoryRef"],
+        ["type", "candidateRef", "targetMemoryRef", "topic"],
         "reconciler_shape_invalid",
       );
     }
