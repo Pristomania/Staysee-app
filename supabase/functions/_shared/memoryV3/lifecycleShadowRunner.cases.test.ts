@@ -47,7 +47,7 @@ function extractorContent(claim = "Любит утренние прогулки"
 }
 
 const proposalContent = JSON.stringify({
-  operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null }],
+  operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "life_context" }],
 });
 const emptyExtractorContent = JSON.stringify({
   layerDecisions: [
@@ -497,10 +497,21 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.equal(test.calls.at(-1), "fail:reconciler_shape_invalid");
   });
 
+  it("fails with reconciler_shape_invalid when an operation is missing the topic key", async () => {
+    const malformedProposal = JSON.stringify({
+      operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null }],
+    });
+    const test = harness({ reconcilerAdapterFactory: () => async () => ({ rawContent: malformedProposal, usage: null }) });
+    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+      status: "failed", runId: RUN_ID, diagnosticCode: "reconciler_shape_invalid",
+    });
+    assert.equal(test.calls.at(-1), "fail:reconciler_shape_invalid");
+  });
+
   it("validates proposal references through the trusted bundle bindings", async () => {
     let reconcilerCalls = 0;
     const rawContent = JSON.stringify({
-      operations: [{ type: "create", candidateRef: "candidate:9999", targetMemoryRef: null }],
+      operations: [{ type: "create", candidateRef: "candidate:9999", targetMemoryRef: null, topic: "life_context" }],
     });
     const test = harness({ reconcilerAdapterFactory: () => async () => {
       reconcilerCalls += 1;

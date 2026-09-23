@@ -30,6 +30,9 @@ type MemoryKind = "event" | "recurrence" | "hypothesis";
 type EvidenceRelation = "supports" | "contradicts" | "corrects" | "rejects";
 type SupportType = "episode_observation" | "pattern_confirmation" | "scope_boundary";
 
+export const MEMORY_V3_DIALOGUE_TOPICS = ["person", "fact", "preference"] as const;
+export type MemoryV3DialogueTopic = (typeof MEMORY_V3_DIALOGUE_TOPICS)[number];
+
 export interface MemoryV3DialogueEvidence {
   conversationId: string;
   sourceMessageId: string;
@@ -49,6 +52,7 @@ export interface MemoryV3DialogueItem {
   eventTimeStart: string | null;
   eventTimeEnd: string | null;
   alternative: string | null;
+  topic: MemoryV3DialogueTopic | null;
   firstSeenAt: string;
   updatedAt: string;
   revision: number;
@@ -73,6 +77,7 @@ export type MemoryV3DialogueProposal = Array<{
   type: MemoryV3DialogueOperationType;
   candidateLocalItemKey: string;
   targetMemoryKey: string | null;
+  topic: MemoryV3DialogueTopic | null;
 }>;
 
 type Diagnostic =
@@ -117,7 +122,7 @@ const STATUS_RELATION: Record<string, EvidenceRelation> = {
 const STATE_FIELDS = ["schemaVersion", "userId", "conversationId", "stateRevision", "nextMemoryOrdinal", "items"] as const;
 const ITEM_FIELDS = [
   "memoryKey", "kind", "claim", "status", "sensitivity", "eventTimeStart",
-  "eventTimeEnd", "alternative", "firstSeenAt", "updatedAt", "revision", "evidence",
+  "eventTimeEnd", "alternative", "topic", "firstSeenAt", "updatedAt", "revision", "evidence",
 ] as const;
 const EVIDENCE_FIELDS = [
   "conversationId", "sourceMessageId", "relation", "supportType", "episodeKey",
@@ -138,7 +143,7 @@ const MEMORY_BINDING_FIELDS = ["memoryRef", "memoryKey"] as const;
 const CANDIDATE_BINDING_FIELDS = ["candidateRef", "localItemKey"] as const;
 const CONTEXT_FIELDS = ["state", "extraction", "bindings"] as const;
 const PROPOSAL_ROOT_FIELDS = ["operations"] as const;
-const MODEL_OPERATION_FIELDS = ["type", "candidateRef", "targetMemoryRef"] as const;
+const MODEL_OPERATION_FIELDS = ["type", "candidateRef", "targetMemoryRef", "topic"] as const;
 
 function makeError(token: object, diagnosticCode: Diagnostic): Error {
   const error = new Error("[memory-v3:dialogue-contract] value is invalid");
@@ -346,6 +351,9 @@ function validateStateInternal(
         !KINDS.includes(item.kind as MemoryKind) || !nonEmpty(item.claim) ||
         ![...CURRENT[item.kind as MemoryKind], ...CLOSED[item.kind as MemoryKind]].includes(item.status as string) ||
         (item.sensitivity !== "normal" && item.sensitivity !== "sensitive")) fail(token, code);
+    if (item.topic !== null && !MEMORY_V3_DIALOGUE_TOPICS.includes(item.topic as MemoryV3DialogueTopic)) {
+      fail(token, code);
+    }
     keys.add(item.memoryKey);
     if ((item.eventTimeStart !== null && !validDateOrDateTime(item.eventTimeStart)) ||
         (item.eventTimeEnd !== null && !validDateOrDateTime(item.eventTimeEnd)) ||
@@ -517,6 +525,11 @@ export function validateMemoryV3DialogueProposal(
       consumed.add(localItemKey);
       const candidate = candidateByKey.get(localItemKey)!;
       const type = operation.type as MemoryV3DialogueOperationType;
+      const requiresTopic = type === "create" || type === "revise";
+      if (requiresTopic
+        ? (operation.topic === null || !MEMORY_V3_DIALOGUE_TOPICS.includes(operation.topic as MemoryV3DialogueTopic))
+        : operation.topic !== null) fail(token, code);
+      const topic = operation.topic as MemoryV3DialogueTopic | null;
       let targetMemoryKey: string | null = null;
       if (type === "create" || type === "ignore") {
         if (operation.targetMemoryRef !== null) fail(token, code);
@@ -543,7 +556,7 @@ export function validateMemoryV3DialogueProposal(
         if (type === "reject" && (candidate.status !== "rejected" || !extraction.evidence.some((row) =>
           row.itemKey === localItemKey && row.relation === "rejects"))) fail(token, code);
       }
-      translated.push({ type, candidateLocalItemKey: localItemKey, targetMemoryKey });
+      translated.push({ type, candidateLocalItemKey: localItemKey, targetMemoryKey, topic });
     }
     if (consumed.size !== candidateByKey.size) fail(token, code);
     return translated.map((operation) => ({ ...operation }));

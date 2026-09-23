@@ -8,9 +8,11 @@ import {
   getLifecycleModelBenchmarkProfile,
 } from './lifecycle-model-benchmark-profile.ts';
 import type { MemoryV3Extraction } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import type {
-  MemoryV3LifecycleProposal,
-  MemoryV3LifecycleState,
+import {
+  MEMORY_V3_LIFECYCLE_TOPICS,
+  type MemoryV3LifecycleProposal,
+  type MemoryV3LifecycleState,
+  type MemoryV3LifecycleTopic,
 } from '../../supabase/functions/_shared/memoryV3/lifecycleContract.ts';
 import {
   applyMemoryV3LifecycleStep,
@@ -339,6 +341,17 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
+// The frozen authored dataset (memory-v3-synthetic-lifecycle.v1.json) predates topic support and
+// is manifest-hash-pinned in lock step with the untouched legacy .mjs pipeline, so it cannot gain a
+// `topic` column on its scriptedProposal rows without invalidating that pinned hash. The live
+// reducer/contract now require a topic on every create/revise operation, so this offline replay
+// assigns a single fixed placeholder topic to every create/revise it translates. Because the value
+// is always the same for every operation in a case, `topic` never actually changes between a
+// create and a later revise of the same item, so the reducer's material-unchanged / revision-bump
+// comparison (which treats a topic change like any other material change) behaves exactly as it did
+// before topic existed -- this is a fixture-shape fix, not a behavioral one.
+const SYNTHETIC_PROPOSAL_TOPIC: MemoryV3LifecycleTopic = MEMORY_V3_LIFECYCLE_TOPICS[0];
+
 function translateProposal(
   authored: AuthoringProposal[],
   goldToMemory: Map<string, string>,
@@ -350,18 +363,31 @@ function translateProposal(
     if (row.targetGoldMemoryId !== null && targetMemoryKey === undefined) {
       fail('lifecycle_model_dataset_replay_failed');
     }
+    const requiresTopic = row.type === 'create' || row.type === 'revise';
     return {
       type: row.type,
       candidateLocalItemKey: row.candidateLocalItemKey,
       targetMemoryKey: targetMemoryKey ?? null,
+      topic: requiresTopic ? SYNTHETIC_PROPOSAL_TOPIC : null,
     };
   });
+}
+
+// The frozen evaluator (lifecycle-evaluator.mjs, via lifecycle-contract.mjs) is a legacy,
+// byte-pinned reference implementation that predates topic support and strictly rejects any item
+// field it does not recognize. Production lifecycle items now always carry a `topic` field, so it
+// must be projected away before an item reaches the evaluator -- the evaluator never scored topic
+// to begin with, so dropping it here changes no assertion, only the shape crossing this boundary.
+export function stripTopicForEvaluator(
+  items: MemoryV3LifecycleState['items'],
+): Array<Omit<MemoryV3LifecycleState['items'][number], 'topic'>> {
+  return items.map(({ topic: _topic, ...rest }) => rest);
 }
 
 function refreshedGoldMap(expectedItems: ExpectedGoldItem[], state: MemoryV3LifecycleState): Map<string, string> {
   let pairs: Array<{ goldMemoryId: string; memoryKey: string }>;
   try {
-    pairs = assignLifecycleItems({ expectedItems, actualItems: state.items }).pairs;
+    pairs = assignLifecycleItems({ expectedItems, actualItems: stripTopicForEvaluator(state.items) }).pairs;
   } catch {
     fail('lifecycle_model_dataset_replay_failed');
   }

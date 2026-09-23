@@ -82,7 +82,7 @@ const DIALOGUE_RESPONSE_SCHEMA = deepFreeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "candidateRef", "targetMemoryRef"],
+        required: ["type", "candidateRef", "targetMemoryRef", "topic"],
         properties: {
           type: {
             type: "string",
@@ -90,6 +90,7 @@ const DIALOGUE_RESPONSE_SCHEMA = deepFreeze({
           },
           candidateRef: { type: "string" },
           targetMemoryRef: { type: ["string", "null"] },
+          topic: { type: ["string", "null"], enum: ["person", "fact", "preference", null] },
         },
       },
     },

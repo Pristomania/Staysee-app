@@ -24,7 +24,7 @@ const EXPECTED_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "candidateRef", "targetMemoryRef"],
+        required: ["type", "candidateRef", "targetMemoryRef", "topic"],
         properties: {
           type: {
             type: "string",
@@ -32,6 +32,7 @@ const EXPECTED_SCHEMA = {
           },
           candidateRef: { type: "string" },
           targetMemoryRef: { type: ["string", "null"] },
+          topic: { type: ["string", "null"], enum: ["person", "fact", "preference", null] },
         },
       },
     },
@@ -160,6 +161,19 @@ describe("Memory V3 dialogue injected OpenRouter transport", () => {
       false,
     );
     assert.deepEqual(input, snapshot);
+  });
+
+  it("requires topic as a fourth key on every reconciler operation, scoped to the dialogue enum plus null", async () => {
+    const fetchImpl = recordingFetch();
+    await createMemoryV3DialogueOpenRouterAdapter({ fetchImpl, apiKey: API_KEY })(request());
+    assert.equal(fetchImpl.calls.length, 1);
+    const body = JSON.parse(String(fetchImpl.calls[0].init.body));
+    const operationSchema = body.response_format.json_schema.schema.properties.operations.items;
+    assert.deepEqual(operationSchema.required, ["type", "candidateRef", "targetMemoryRef", "topic"]);
+    assert.deepEqual(operationSchema.properties.topic, {
+      type: ["string", "null"],
+      enum: ["person", "fact", "preference", null],
+    });
   });
 
   it("accepts Task 3 evidence with mentionTime and preserves it in the serialized request", async () => {

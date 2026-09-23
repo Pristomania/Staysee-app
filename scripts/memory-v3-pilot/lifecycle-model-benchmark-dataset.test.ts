@@ -8,6 +8,7 @@ import { assignLifecycleItems } from './lifecycle-evaluator.mjs';
 import {
   SYNTHETIC_LIFECYCLE_BENCHMARK_USER_ID,
   prepareLifecycleModelBenchmarkCases,
+  stripTopicForEvaluator,
 } from './lifecycle-model-benchmark-dataset.ts';
 import {
   LIFECYCLE_MODEL_BENCHMARK_PROFILE_ID,
@@ -224,7 +225,7 @@ describe('synthetic lifecycle model gold replay', () => {
       });
       const assignment = assignLifecycleItems({
         expectedItems: entry.expectedState.items,
-        actualItems: applied.state.items,
+        actualItems: stripTopicForEvaluator(applied.state.items),
       });
       assert.equal(
         assignment.pairs.length,

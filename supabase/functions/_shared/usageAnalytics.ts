@@ -41,6 +41,8 @@ export type UsageCallKind =
   | "memory_lifecycle_extractor"
   | "memory_lifecycle_reconciler";
 
+export type UsageCostCategory = "automatic" | "technical";
+
 export interface UsageLogRow extends UsageAuditFields {
   userId: string;
   conversationId?: string | null;
@@ -52,6 +54,7 @@ export interface UsageLogRow extends UsageAuditFields {
   summaryTokens: number;
   cost: number;
   callKind?: UsageCallKind | null;
+  costCategory: UsageCostCategory;
 }
 
 export interface PromptTokenBreakdown {
@@ -97,6 +100,7 @@ export function buildUsageLogRow(input: {
   summaryTokens?: number;
   audit?: UsageAuditFields;
   callKind?: UsageCallKind | null;
+  costCategory?: UsageCostCategory;
 }): UsageLogRow {
   const promptTokens = input.promptTokens;
   const completionTokens = input.completionTokens;
@@ -129,6 +133,7 @@ export function buildUsageLogRow(input: {
     summaryTokens: breakdown.summaryTokens,
     cost,
     callKind: input.callKind ?? null,
+    costCategory: input.costCategory ?? "automatic",
     requestId: audit.requestId ?? null,
     finishReason: audit.finishReason ?? null,
     latencyMs: audit.latencyMs ?? null,
@@ -161,6 +166,7 @@ export async function logOpenRouterUsage(
     summary_tokens: row.summaryTokens,
     cost: row.cost,
     call_kind: row.callKind ?? null,
+    cost_category: row.costCategory,
     request_id: row.requestId ?? null,
     finish_reason: row.finishReason ?? null,
     latency_ms: row.latencyMs ?? null,

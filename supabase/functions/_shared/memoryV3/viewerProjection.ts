@@ -5,6 +5,7 @@ export interface MemoryV3ViewerSourceItem {
   eventTimeStart: string | null;
   eventTimeEnd: string | null;
   sensitivity: "normal" | "sensitive";
+  topic: string | null;
 }
 
 export interface MemoryV3ViewerItem {
@@ -14,6 +15,7 @@ export interface MemoryV3ViewerItem {
   eventTimeStart: string | null;
   eventTimeEnd: string | null;
   sensitivity: "normal" | "sensitive";
+  topic: string | null;
 }
 
 // The extractor prompt now tells the model never to write "пользователь"/
@@ -44,5 +46,6 @@ export function projectMemoryV3ViewerItems(
       eventTimeStart: item.eventTimeStart,
       eventTimeEnd: item.eventTimeEnd,
       sensitivity: item.sensitivity,
+      topic: item.topic,
     }));
 }

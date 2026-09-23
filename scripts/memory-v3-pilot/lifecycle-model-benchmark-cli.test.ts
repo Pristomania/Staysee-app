@@ -61,6 +61,7 @@ function wireOperations(testCase: PreparedLifecycleModelCase) {
       : bundle.bindings.memories.find(
         (binding) => binding.memoryKey === operation.targetMemoryKey,
       )?.memoryRef,
+    topic: operation.topic,
   }));
 }
 
