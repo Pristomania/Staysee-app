@@ -174,6 +174,12 @@ Hypothesis alternative:
 - Non-hypothesis items use alternative: null.
 - Write claims and hypothesis alternatives in the predominant user language.
 
+Claim subject and grammatical gender:
+- Never use "пользователь", "клиент", a name, or a pronoun (он/она/они) as the grammatical subject of a claim or alternative.
+- Write claim and alternative text as a subject-less third-person predicate, relying on Russian's ability to omit the subject (for example "Любит утренние прогулки", not "Пользователь любит утренние прогулки" and not "Настя любит утренние прогулки").
+- When a claim naturally requires a gender-marked past-tense or participial form (for example "переехала" versus "переехал"), infer grammatical gender only from an explicit first-person self-reference already present in this dialogue (for example "я устала" implies feminine, "я устал" implies masculine).
+- If the dialogue contains no such self-reference, prefer a phrasing that avoids a gender-marked form instead of guessing (for example present tense, or a nominalized phrase such as "переезд в Казань в ноябре").
+
 Contrast and scope versus contradicts:
 - contradicts is a user counterexample.
 - contradicts is used only if user evidence is incompatible with the claim as written.

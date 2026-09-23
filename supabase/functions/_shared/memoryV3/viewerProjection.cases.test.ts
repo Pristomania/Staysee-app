@@ -32,4 +32,31 @@ describe("Memory V3 viewer projection", () => {
       { memoryKey: "a", kind: "hypothesis", claim: "X", sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null },
     ]), []);
   });
+
+  it("strips a leading 'пользователь'/'клиент' from already-stored claims and re-capitalizes", () => {
+    const cases: Array<[string, string]> = [
+      ["Пользователь любит утренние прогулки", "Любит утренние прогулки"],
+      ["пользователь работает удалённо", "Работает удалённо"],
+      ["Пользователь: переехала в Казань", "Переехала в Казань"],
+      ["Клиент предпочитает переписку", "Предпочитает переписку"],
+    ];
+    for (const [input, expected] of cases) {
+      const [result] = projectMemoryV3ViewerItems([
+        { memoryKey: "a", kind: "event", claim: input, sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null },
+      ]);
+      assert.equal(result.claim, expected, input);
+    }
+  });
+
+  it("does not touch a claim that never had the word at the start, or one that's just the word alone", () => {
+    const untouched = projectMemoryV3ViewerItems([
+      { memoryKey: "a", kind: "event", claim: "Уважает мнение пользователя в группе", sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null },
+    ]);
+    assert.equal(untouched[0].claim, "Уважает мнение пользователя в группе");
+
+    const wordAlone = projectMemoryV3ViewerItems([
+      { memoryKey: "a", kind: "event", claim: "Пользователь", sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null },
+    ]);
+    assert.equal(wordAlone[0].claim, "Пользователь");
+  });
 });
