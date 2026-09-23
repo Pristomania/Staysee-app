@@ -60,6 +60,28 @@ describe("Memory V3 production prompt boundary", () => {
     );
   });
 
+  it("forbids writing a claim with 'пользователь', a name, or a pronoun as its subject", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Never use "пользователь", "клиент", a name, or a pronoun \(он\/она\/они\) as the grammatical subject of a claim or alternative\./,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Write claim and alternative text as a subject-less third-person predicate/,
+    );
+  });
+
+  it("only infers gender from an explicit dialogue self-reference, never a guess", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /infer grammatical gender only from an explicit first-person self-reference already present in this dialogue/,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /prefer a phrasing that avoids a gender-marked form instead of guessing/,
+    );
+  });
+
   it("omits a recurrence unless two distinct episodes survive the final evidence rows", () => {
     assert.match(
       MEMORY_V3_SYSTEM_INSTRUCTION,
