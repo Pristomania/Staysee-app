@@ -6,6 +6,7 @@ import {
 } from './lifecycle-model-benchmark-profile.ts';
 import {
   prepareLifecycleModelBenchmarkCases,
+  stripTopicForEvaluator,
   type PreparedLifecycleModelCase,
 } from './lifecycle-model-benchmark-dataset.ts';
 import { assertBudgetGate } from './benchmark-budget.mjs';
@@ -684,7 +685,7 @@ export async function runLifecycleModelBenchmark(options: {
         actualState: {
           scenarioId: testCase.scenarioId,
           nextMemoryOrdinal: applied.state.nextMemoryOrdinal,
-          items: applied.state.items,
+          items: stripTopicForEvaluator(applied.state.items),
         },
         transitions: buildTransitionContext(testCase, proposal, applied, replay),
       }) as LifecycleStepEvaluation;
