@@ -87,15 +87,36 @@ same way the lifecycle engine reuses the lifecycle equivalents.
 
 ### Two-step process, mirroring the lifecycle tool's own separation
 
-The existing lifecycle tool already separates these into different files/
-commands: `lifecycle-history-backfill-run.ts`/`-cli.ts` do the PAID
+Reading `lifecycle-history-backfill-import.ts`/`-import-run.ts` in full
+(not just inferring from file names, corrected after an earlier
+draft of this doc got this partly wrong) confirms the real shape:
+`lifecycle-history-backfill-run.ts`/`-cli.ts` do the PAID
 extraction+reconciliation and produce a `finalState` per (in this case)
-conversation plus a `semanticReview: { status: 'required' }` marker and a
-review packet; `lifecycle-history-backfill-import.ts`/`-import-run.ts` are
-a SEPARATE, later step that takes an already-computed final state and
-commits it to production via a dedicated bulk-import RPC. Настя confirmed
-this is exactly the separation she wants: look at the result first, decide
-whether it's good, only then commit.
+conversation, an `artifact` JSON file, and a `semanticReviewPacket`;
+`importReviewedLifecycleHistory` (in `-import.ts`) then requires TWO more
+things before it will write anything to production:
+
+1. A **review decision file** — not a verbal "looks fine," but a structured
+   JSON file listing every single item from the artifact with an explicit
+   `semanticVerdict: 'PASS'`, cryptographically tied to the exact reviewed
+   artifact via a SHA-256 digest match (`payloadSha256`) — approving a
+   different or changed result is rejected outright. Настя should never
+   have to hand-write this: the dialogue-scope tool auto-generates it from
+   the artifact once she has read the plain-Russian report (below) and
+   said "выглядит нормально" — a thin wrapper, not a manual JSON-editing
+   task for her.
+2. A **fresh re-read of the live message source at import time**
+   (`validateFreshSource`), which re-fetches her conversations/messages
+   from the database and recomputes the same chunk digests the paid run
+   used, failing the import if anything changed since — guards against
+   importing a result that no longer matches her actual message history
+   (e.g. she sent more messages in between the two steps).
+
+Both mechanisms carry over into the dialogue-scope version unchanged in
+spirit: an auto-generated (not hand-written) approval file gated on
+reading the plain-Russian report first, and a fresh-source re-check at
+import time, now re-verified per conversation instead of once for the
+whole account.
 
 The dialogue-scope version keeps this same two-command shape:
 1. **Разбор (paid, produces a local result — no production write):** reads
@@ -103,11 +124,35 @@ The dialogue-scope version keeps this same two-command shape:
    file (mirroring the lifecycle tool's own output format, extended with
    `conversationId`/`topic` per item) AND a plain-Russian readable report
    (see below) to local files. Nothing in the production database changes.
-2. **Перенос в память (separate command, no paid calls):** takes the
-   already-produced result file and writes it into the real
+2. **Перенос в память (separate command, no paid calls):** after Настя has
+   read the plain-Russian report from step 1 and confirmed it looks right,
+   a small approval-file helper stamps the matching auto-generated
+   review-decision file, then the import command re-verifies the live
+   source is unchanged and writes into the real
    `memory_v3_dialogue_items`/`_evidence` tables, one conversation's state
-   at a time, via a new bulk-import RPC (see Storage below). Run only
-   after Настя has read the report from step 1 and decided it looks right.
+   at a time, via a new bulk-import RPC (see Storage below).
+
+### Conversations that already have live dialogue data
+
+Dialogue-scoped Memory V3 has been running as a canary on Настя's account
+since yesterday, so a conversation that has already crossed the 10-new-
+message threshold organically may already have a non-empty, non-zero-
+revision dialogue state before this historical tool ever touches it — the
+lifecycle import RPC's own equivalent check (`p_expected_state_revision:
+0`, `validateHead` requiring `itemCount: 0`) confirms the existing design
+only ever targets a completely empty starting state, never merges into or
+overwrites one that already has real data.
+
+**Decision:** the dialogue-scope import step checks each conversation's
+current state independently and **skips** (does not import into, does not
+error the whole run for) any conversation that already has a non-empty
+dialogue state — it only ever writes into conversations that are still
+genuinely empty. Skipped conversations are called out by name/count in
+both the JSON result and the plain-Russian report, so Настя can see which
+ones were left alone and why, rather than the tool silently overwriting
+or silently skipping without telling her. This matches this project's
+standing rule of never silently overwriting already-accumulated live
+data.
 
 ### Readable report (new, doesn't exist in the lifecycle tool)
 
@@ -129,11 +174,18 @@ patched for topic in `049`) — the live dialogue-scope write path
 (`apply_memory_v3_dialogue_state`) is designed for one incremental
 reconcile at a time, not a bulk historical replacement of an entire
 conversation's item set. A new migration adds
-`import_memory_v3_dialogue_backfill_state(p_user_id, p_conversation_id,
-p_state jsonb, ...)`, mirroring `037`'s shape exactly but scoped by
+`import_memory_v3_dialogue_backfill_state(p_import_id, p_user_id,
+p_conversation_id, p_expected_state_revision, p_artifact_digest,
+p_source_snapshot_digest, p_source_cutoff, p_profile_id,
+p_pipeline_version, p_extractor_version, p_reconciler_version, p_state
+jsonb)`, mirroring `037`'s parameter list and shape exactly but scoped by
 `(user_id, conversation_id)` instead of just `user_id`, matching how every
 other lifecycle→dialogue table/RPC port this project has done added the
-conversation-scoping key.
+conversation-scoping key. Like the lifecycle original, it requires
+`p_expected_state_revision` to match the conversation's actual current
+revision (0 for a genuinely empty conversation) before writing anything —
+this is the mechanism the "skip if already has live data" behavior above
+relies on, not a new invention.
 
 ### Cost and safety controls: reused unchanged
 
