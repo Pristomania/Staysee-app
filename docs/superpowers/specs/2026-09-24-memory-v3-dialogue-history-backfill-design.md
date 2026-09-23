@@ -167,20 +167,42 @@ since yesterday, so a conversation that has already crossed the 10-new-
 message threshold organically may already have a non-empty, non-zero-
 revision dialogue state before this historical tool ever touches it — the
 lifecycle import RPC's own equivalent check (`p_expected_state_revision:
-0`, `validateHead` requiring `itemCount: 0`) confirms the existing design
-only ever targets a completely empty starting state, never merges into or
-overwrites one that already has real data.
+0`, `validateHead` requiring `itemCount: 0`) confirms the *lifecycle*
+tool only ever targets a completely empty starting state.
 
-**Decision:** the dialogue-scope import step checks each conversation's
-current state independently and **skips** (does not import into, does not
-error the whole run for) any conversation that already has a non-empty
-dialogue state — it only ever writes into conversations that are still
-genuinely empty. Skipped conversations are called out by name/count in
-both the JSON result and the plain-Russian report, so Настя can see which
-ones were left alone and why, rather than the tool silently overwriting
-or silently skipping without telling her. This matches this project's
-standing rule of never silently overwriting already-accumulated live
-data.
+**Correction after Настя's explicit choice (2026-09-24):** an earlier
+version of this design skipped any conversation that already had live
+data, reasoning from the lifecycle tool's own account-wide "empty only"
+rule. Настя explicitly rejected that for dialogue scope: her most active
+conversation is exactly the one most likely to have already accumulated
+some organic dialogue memory (and keeps growing daily), and skipping it
+would mean the one conversation she most wants a full, careful historical
+read of never gets reprocessed at all. She confirmed, when asked directly
+("skip it" vs. "reprocess and replace it anyway"): **always reprocess and
+replace**, even when a conversation already has live data.
+
+**Decision:** the dialogue-scope import step no longer treats "already
+non-empty" as a reason to skip. It reprocesses and overwrites every
+conversation's dialogue state, whether it started empty or not. What it
+still guards against — narrower than before, but not removed — is a
+*race*: at the paid-run/inspect stage, the tool records each conversation's
+current state revision at that moment (`expectedStateRevision`, per
+conversation, part of the manifest). At import time it re-checks that the
+conversation's *actual* current revision still matches that recorded
+value. If it does, the import proceeds and overwrites. If it doesn't (the
+live incremental pipeline wrote something new to that exact conversation
+in the days between the paid run and the import — plausible for her most
+active chat), the import for that one conversation is rejected with a
+clear, named error instead of silently overwriting newer real data it
+never saw — the same "tell her plainly, don't destroy silently" principle
+as everywhere else in this project, just no longer gated on emptiness.
+Every other conversation in the same import batch is unaffected by one
+conversation failing this check.
+
+The plain-Russian report must say, per conversation, whether it replaced
+existing live records or wrote into an empty one — this is now a
+genuinely destructive operation for a conversation that already had data,
+and Настя should never be surprised by that after the fact.
 
 ### Readable report (new, doesn't exist in the lifecycle tool)
 
@@ -209,11 +231,16 @@ p_pipeline_version, p_extractor_version, p_reconciler_version, p_state
 jsonb)`, mirroring `037`'s parameter list and shape exactly but scoped by
 `(user_id, conversation_id)` instead of just `user_id`, matching how every
 other lifecycle→dialogue table/RPC port this project has done added the
-conversation-scoping key. Like the lifecycle original, it requires
-`p_expected_state_revision` to match the conversation's actual current
-revision (0 for a genuinely empty conversation) before writing anything —
-this is the mechanism the "skip if already has live data" behavior above
-relies on, not a new invention.
+conversation-scoping key. Unlike the lifecycle original (which hardcodes
+`p_expected_state_revision = 0`, since it only ever imports into a
+genuinely empty account-wide state), this RPC accepts whatever revision
+the conversation actually had when the paid run inspected it — 0 for a
+conversation that was empty, or higher for one that already had organic
+live data — and simply requires the conversation's *current* revision to
+still match that value at import time, RAISING if it doesn't (see the
+"Conversations that already have live dialogue data" section above). It
+always overwrites (deletes then re-inserts) whatever items already exist
+for that conversation once the revision check passes.
 
 ### Cost and safety controls: reused unchanged
 
