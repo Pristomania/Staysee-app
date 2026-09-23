@@ -46,7 +46,15 @@ import {
   normalizeMemoryForDisplay,
 } from '../../lib/normalizeMemoryForDisplay';
 import { normalizeMemoryTextForDisplay } from '../../lib/memoryDisplayNormalize';
+import { deleteMemoryV3Item, fetchMemoryV3Items, type MemoryV3ViewerItem } from '../../lib/memoryV3Viewer';
+import { MemoryV3ItemList } from '../MemoryV3ItemList';
 import type { Conversation, UserMemory } from '../../types';
+
+/** Accounts created on/after this date see Memory V3 in place of the old
+ * simple systems in "Память беседы"/"Сквозная память"; accounts created
+ * before it keep those two sections unchanged, with Memory V3 added as a
+ * third section instead. Set to this feature's deploy date. */
+const MEMORY_V3_VIEWER_LAUNCH_CUTOFF = new Date('2026-09-24T00:00:00Z');
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -276,6 +284,11 @@ function CollapsibleMemoryDisplaySection({
 export function MemoryScreen() {
   const { user, profile } = useAuth();
   const crossMemoryOn = isCrossMemoryEnabled(profile);
+  const isNewAccount = Boolean(
+    user?.created_at && new Date(user.created_at) >= MEMORY_V3_VIEWER_LAUNCH_CUTOFF,
+  );
+  const [memoryV3AccountWide, setMemoryV3AccountWide] = useState<MemoryV3ViewerItem[]>([]);
+  const [memoryV3Dialogue, setMemoryV3Dialogue] = useState<MemoryV3ViewerItem[]>([]);
   const {
     currentConversation,
     memoryReturnScreen,
@@ -390,6 +403,10 @@ export function MemoryScreen() {
         .order('created_at', { ascending: false });
       if (memErr) throw memErr;
       setGlobalRows((mem ?? []) as UserMemory[]);
+
+      const memoryV3 = await fetchMemoryV3Items(activeConvId ?? undefined);
+      setMemoryV3AccountWide(memoryV3.accountWide);
+      setMemoryV3Dialogue(memoryV3.dialogue);
     } catch (err) {
       console.error('[memory] load failed:', err);
       setGlobalRows([]);
@@ -527,6 +544,23 @@ export function MemoryScreen() {
     }
   }
 
+  async function deleteMemoryV3AccountWideItem(item: MemoryV3ViewerItem) {
+    const result = await deleteMemoryV3Item({ scope: 'account_wide', memoryKey: item.memoryKey });
+    if (result.deleted) {
+      setMemoryV3AccountWide((rows) => rows.filter((row) => row.memoryKey !== item.memoryKey));
+    }
+  }
+
+  async function deleteMemoryV3DialogueItem(item: MemoryV3ViewerItem) {
+    if (!selectedConvId) return;
+    const result = await deleteMemoryV3Item({
+      scope: 'dialogue', memoryKey: item.memoryKey, conversationId: selectedConvId,
+    });
+    if (result.deleted) {
+      setMemoryV3Dialogue((rows) => rows.filter((row) => row.memoryKey !== item.memoryKey));
+    }
+  }
+
   return (
     <StickyScreenLayout
       header={(
@@ -568,6 +602,7 @@ export function MemoryScreen() {
 
               {selectedConvId && (
                 <>
+                {!isNewAccount ? (
                 <div className="space-y-1.5">
                     {MEMORY_DISPLAY_SECTIONS.map((section) => (
                       <CollapsibleMemoryDisplaySection
@@ -627,6 +662,15 @@ export function MemoryScreen() {
                       <p className="text-red-400/80 text-xs mt-2">Не удалось сохранить</p>
                     )}
                   </div>
+                ) : (
+                  <MemoryV3ItemList
+                    items={memoryV3Dialogue}
+                    theme={theme}
+                    cardBase={cardBase}
+                    onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
+                    emptyMessage="Пока ничего не запомнено в этой беседе."
+                  />
+                )}
                 </>
               )}
             </section>
@@ -642,6 +686,8 @@ export function MemoryScreen() {
                   : 'Сейчас выключено: в новых сообщениях StaySee не подставляет записи отсюда. Память беседы выше — по-прежнему для этого чата.'}
               </p>
 
+              {!isNewAccount ? (
+                <>
               {addingGlobal && crossMemoryOn ? (
                 <div className={`${cardBase} px-4 py-3.5 mb-2`}>
                   <textarea
@@ -768,7 +814,47 @@ export function MemoryScreen() {
                   )}
                 </div>
               )}
+                </>
+              ) : (
+                <MemoryV3ItemList
+                  items={memoryV3AccountWide}
+                  theme={theme}
+                  cardBase={cardBase}
+                  onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
+                  emptyMessage="Пока ничего не запомнено."
+                />
+              )}
             </section>
+
+            {!isNewAccount && (
+              <section className="mt-8">
+                <p className={sectionLabel}>Умная память</p>
+                <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
+                  Подтверждённые события и повторяющиеся паттерны, которые StaySee сама заметила.
+                  Догадки, которые ещё не подтвердились, здесь не показываются.
+                </p>
+                {selectedConvId && memoryV3Dialogue.length > 0 && (
+                  <div className="mb-4">
+                    <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Эта беседа</p>
+                    <MemoryV3ItemList
+                      items={memoryV3Dialogue}
+                      theme={theme}
+                      cardBase={cardBase}
+                      onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
+                      emptyMessage="Пока ничего не запомнено в этой беседе."
+                    />
+                  </div>
+                )}
+                <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Обо мне в целом</p>
+                <MemoryV3ItemList
+                  items={memoryV3AccountWide}
+                  theme={theme}
+                  cardBase={cardBase}
+                  onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
+                  emptyMessage="Пока ничего не запомнено."
+                />
+              </section>
+            )}
           </>
         )}
     </StickyScreenLayout>
