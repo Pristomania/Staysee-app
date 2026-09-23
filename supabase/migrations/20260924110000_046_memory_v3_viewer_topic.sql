@@ -1,6 +1,8 @@
 -- Adds topic to the two Memory V3 viewer-read RPCs from
 -- 043_memory_v3_viewer_read.sql, so the viewer screen can group by subject.
--- Maintains deliberate separation from the hot-path read RPCs as in the original.
+-- Same deliberate separation from the hot-path read RPCs as the original --
+-- this never touches load_memory_v3_lifecycle_read_context or
+-- load_memory_v3_dialogue_read_context.
 
 CREATE OR REPLACE FUNCTION public.load_memory_v3_lifecycle_viewer_items(p_user_id uuid)
 RETURNS jsonb

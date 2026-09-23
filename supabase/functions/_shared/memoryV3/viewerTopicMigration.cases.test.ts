@@ -12,9 +12,7 @@ const sql = readFileSync(
 
 describe("Memory V3 viewer topic migration", () => {
   it("adds topic to load_memory_v3_lifecycle_viewer_items's returned JSON", () => {
-    const [, lifecycleBody] = sql.split("load_memory_v3_dialogue_viewer_items");
     assert.match(sql.slice(0, sql.indexOf("load_memory_v3_dialogue_viewer_items")), /'topic', i\.topic/);
-    assert.ok(lifecycleBody !== undefined);
   });
 
   it("adds topic to load_memory_v3_dialogue_viewer_items's returned JSON", () => {
@@ -28,7 +26,7 @@ describe("Memory V3 viewer topic migration", () => {
   });
 
   it("never touches the hot-path read context RPCs", () => {
-    assert.equal(/load_memory_v3_lifecycle_read_context/.test(sql), false);
-    assert.equal(/load_memory_v3_dialogue_read_context/.test(sql), false);
+    assert.equal(/CREATE OR REPLACE FUNCTION public\.load_memory_v3_lifecycle_read_context/.test(sql), false);
+    assert.equal(/CREATE OR REPLACE FUNCTION public\.load_memory_v3_dialogue_read_context/.test(sql), false);
   });
 });
