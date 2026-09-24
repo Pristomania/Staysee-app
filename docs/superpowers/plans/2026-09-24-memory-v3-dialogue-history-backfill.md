@@ -995,6 +995,57 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 5b: Fork `dialogue-history-backfill-run.ts` (the real composition root)
+
+> **Inserted after Task 5, during execution, 2026-09-24.** Task 5's implementer discovered that `createLifecycleHistorySupabaseReader` never exposes the Supabase client it wraps, and that the lifecycle side's real, runnable entry point is NOT `-cli.ts` (which only ever receives already-constructed dependencies as injected parameters) but a separate file, `lifecycle-history-backfill-run.ts`, that actually constructs the real Supabase client, reads real env vars, and does the atomic output-file write. The original plan never forked this file for dialogue scope — without it, there is no real command Настя can run; Task 9's README would describe a command that doesn't correspond to any real, directly-runnable file. This task closes that gap.
+
+**Files:**
+- Create: `scripts/memory-v3-pilot/dialogue-history-backfill-run.ts`
+- Test: `scripts/memory-v3-pilot/dialogue-history-backfill-run.test.ts`
+
+**Interfaces:**
+- Consumes: `runDialogueHistoryBackfillFromArgv` from Task 5's `dialogue-history-backfill-cli.ts` — **read its actual, already-committed exported function signature first**, specifically how it names and shapes the revision-client input it added (Task 5's implementer added a new required field, likely named `revisionClient` or similar, to let the CLI query `memory_v3_dialogue_heads` — confirm the exact name and type before writing this file, do not guess). Also consumes the reused, unforked `createLifecycleHistorySupabaseReader` from `lifecycle-history-backfill-source.ts`.
+- Produces: `main(input: {...}): Promise<number>` (same overall shape as the lifecycle original's `main`, renamed), a `runDirect()` entrypoint guarded by the same `isDirectInvocation()` pattern. This is the file Настя (or Cursor, acting on her behalf, per this project's established division of labor) actually executes from a terminal.
+
+Read `scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts` in full (373 lines) before starting — this task is a fork of it, not a from-scratch design.
+
+- [ ] **Step 1: Read the real interfaces you're wiring together**
+
+Read `lifecycle-history-backfill-run.ts` in full. Read `dialogue-history-backfill-cli.ts` (Task 5's output) in full, specifically its exported `runDialogueHistoryBackfillFromArgv` function's parameter list — note exactly how it expects to receive the means to query each conversation's current revision (a raw Supabase client? a pre-built closure? match whatever Task 5 actually shipped, even if it differs from what this note guesses).
+
+- [ ] **Step 2: Fork the file**
+
+Copy `lifecycle-history-backfill-run.ts` to `dialogue-history-backfill-run.ts`. Apply the standard rename category (`runLifecycleHistoryBackfillFromArgv` → `runDialogueHistoryBackfillFromArgv`, `LifecycleHistorySourceReader` → keep as-is if Task 5's CLI still uses the reused, unforked reader type directly — confirm from what Task 5 actually imports, `MemoryV3LifecycleHistoryBackfillRunError` → `MemoryV3DialogueHistoryBackfillRunError`, the `PREFIX` string → `[memory-v3:dialogue-history-backfill-run]`).
+
+The one real structural change: `runDirect()`'s dependency wiring. The lifecycle original's `createSourceReader: (url, serviceKey) => createLifecycleHistorySupabaseReader(createClient(url, serviceKey, {...}))` only ever returns a reader, discarding the raw client — that's exactly the gap this task exists to close. Restructure so ONE real Supabase client is constructed per run and made available for BOTH purposes: build a single factory (e.g. `createSourceAndRevisionAccess: (url, serviceKey) => { reader: LifecycleHistorySourceReader; revisionClient: unknown }`, naming it to match whatever Task 5's CLI actually expects) that constructs `const client = createClient(url, serviceKey, {...})` once, returns `{ reader: createLifecycleHistorySupabaseReader(client), revisionClient: client }`. Update `inspectOptions`'s `REQUIRED_FIELDS` list and `main()`'s call into `runDialogueHistoryBackfillFromArgv` accordingly, threading the revision-client value through to whatever parameter name Task 5's CLI actually declared. Do not open a second Supabase connection anywhere in this file.
+
+Adjust `projectSummary` for the per-conversation result shape from Task 4 (`result.conversations: [...]` instead of one flat `result.finalState`): report `conversationCount: result.conversations.length`, `itemCount` and `evidenceCount` summed across every conversation's `finalState?.items` (treat a `null` finalState, i.e. a failed conversation, as contributing zero), plus the existing `status`/`profileId`/`sourceSnapshotDigest`/`providerModelFallbackCount`/`payloadSha256`/`outputWritten` fields unchanged in spirit. Keep the atomic-write (`publish`, using `writeFile` with `{flag:'wx'}` + `link` + `unlink`) and env-var-reading (`parseEnvValue`, `ENV_NAMES`) logic exactly as-is, structurally — this is scope-agnostic file/process plumbing, not lifecycle-specific. Keep `parseRunArgv`'s `--execute-history-backfill-paid-requests`/`--safe-output-file` argv handling unchanged.
+
+- [ ] **Step 3: Write the test**
+
+Read `lifecycle-history-backfill-run.test.ts` in full for its exact fake-injection style (fake `readFileImpl`/`accessImpl`/`writeFileImpl`/`linkImpl`/`unlinkImpl`, fake `createSourceReader`, fake `fetchImpl`). Mirror it for the dialogue fork's `dialogue-history-backfill-run.test.ts`, adjusted for the new combined reader-and-revision-client factory shape and the per-conversation `projectSummary`. Cover at minimum: a successful inspect-only run (no output file), a successful paid run that writes the output file atomically, and the existing-file/existing-temp-file rejection cases the original covers. This file is one of the ~34-pre-existing-failure-pattern files on the lifecycle side (Windows CRLF/temp-file issues) — it's fine and expected if your new test hits the same category of environment-specific noise on write-related assertions; note any such failures explicitly in your report rather than fighting the OS, and cross-check that they match the same failure *category* (not a new, unrelated bug).
+
+- [ ] **Step 4: Run the tests**
+
+Run: `npx tsx --test scripts/memory-v3-pilot/dialogue-history-backfill-run.test.ts`
+Expected: pass, or fail only in the same narrow way the lifecycle original's own run test fails on this OS (temp-file/link/unlink races) — explain which in your report.
+
+- [ ] **Step 5: Run the full `scripts/memory-v3-pilot` suite**
+
+Run: `npx tsx --test scripts/memory-v3-pilot/*.test.ts`
+Expected: no new failures beyond the known ~34 pre-existing ones (all in lifecycle-scope files/suites).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/memory-v3-pilot/dialogue-history-backfill-run.ts scripts/memory-v3-pilot/dialogue-history-backfill-run.test.ts
+git commit -m "feat: fork the history-backfill composition root, sharing one client for reads and revisions
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 6: Fork `dialogue-history-backfill-import.ts` + `-import-run.ts`
 
 **Files:**
