@@ -299,6 +299,16 @@ describe('deterministic history chunk planning', () => {
     assert.equal(result.chunks.length, 1);
     assert.deepEqual(result.chunks[0].messages.map((row) => row.id), [first.id, second.id]);
     assert.equal(result.chunks[0].extractorRequestBytes, 40_000);
+
+    // A real production run (25.09.2026) also hit this: the manifest's own
+    // totals were computed from the raw 3-message conversation instead of
+    // the 2-message chunk that actually survived the drop above, so the
+    // manifest disagreed with the chunk it was supposed to describe.
+    assert.equal(result.manifest.messageCount, 2);
+    assert.equal(result.manifest.userMessageCount, 2);
+    assert.equal(result.manifest.conversations[0].messageCount, 2);
+    assert.equal(result.manifest.conversations[0].userMessageCount, 2);
+    assert.equal(result.manifest.conversations[0].lastCreatedAt, second.createdAt);
   });
 
   it('still fails when a genuinely long assistant-only run separates two real user stretches', () => {

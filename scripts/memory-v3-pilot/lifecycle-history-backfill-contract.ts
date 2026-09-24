@@ -552,15 +552,8 @@ function projectManifest(
   conversations: LifecycleHistoryConversationInput[],
   chunks: LifecycleHistoryPreparedChunk[],
 ): LifecycleHistoryBackfillManifest {
-  const messageCount = conversations.reduce(
-    (total, conversation) => total + conversation.messages.length,
-    0,
-  );
-  const userMessageCount = conversations.reduce(
-    (total, conversation) =>
-      total + conversation.messages.filter((row) => row.role === 'user').length,
-    0,
-  );
+  const messageCount = chunks.reduce((total, chunk) => total + chunk.messageCount, 0);
+  const userMessageCount = chunks.reduce((total, chunk) => total + chunk.userMessageCount, 0);
   const sourceSnapshotDigest = digestCanonicalTrusted({
     profileId: profile.profileId,
     userId: source.userId,
@@ -577,14 +570,22 @@ function projectManifest(
     userMessageCount,
     chunkCount: chunks.length,
     maxProviderCalls: chunks.length * profile.maxCallsPerChunk,
-    conversations: conversations.map((conversation, conversationOrdinal) => ({
-      conversationOrdinal,
-      messageCount: conversation.messages.length,
-      userMessageCount: conversation.messages.filter((row) => row.role === 'user').length,
-      firstCreatedAt: conversation.messages[0].createdAt,
-      lastCreatedAt: conversation.messages[conversation.messages.length - 1].createdAt,
-      chunkCount: chunks.filter((chunk) => chunk.conversationOrdinal === conversationOrdinal).length,
-    })),
+    // Derived from this conversation's own chunks, not from `conversation.messages`
+    // directly: a trailing assistant-only tail can be dropped from the chunks
+    // (see chunkOneConversation), and the manifest must describe what was
+    // actually chunked -- not the raw input -- or the strict re-derivation
+    // check in validatePreparedUnsafe rejects an otherwise-correct artifact.
+    conversations: conversations.map((_conversation, conversationOrdinal) => {
+      const ownChunks = chunks.filter((chunk) => chunk.conversationOrdinal === conversationOrdinal);
+      return {
+        conversationOrdinal,
+        messageCount: ownChunks.reduce((total, chunk) => total + chunk.messageCount, 0),
+        userMessageCount: ownChunks.reduce((total, chunk) => total + chunk.userMessageCount, 0),
+        firstCreatedAt: ownChunks[0].firstCreatedAt,
+        lastCreatedAt: ownChunks[ownChunks.length - 1].lastCreatedAt,
+        chunkCount: ownChunks.length,
+      };
+    }),
     chunks: chunks.map((chunk) => ({
       chunkId: chunk.chunkId,
       conversationOrdinal: chunk.conversationOrdinal,

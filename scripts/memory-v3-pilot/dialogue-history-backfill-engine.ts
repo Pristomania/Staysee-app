@@ -527,7 +527,16 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
         if (new TextEncoder().encode(serialized).byteLength > profile.maxExtractorRequestBytes) break;
         selectedEnd = end;
       }
-      if (selectedEnd < 0) fail(null, 'prepared_invalid');
+      if (selectedEnd < 0) {
+        // Mirrors chunkOneConversation's own trailing-assistant-tail exception
+        // (dialogue-history-backfill-contract.ts): this re-derivation must
+        // tolerate the same shape it's checking against, or a legitimately
+        // prepared artifact whose last chunk dropped a trailing assistant-only
+        // tail fails this from-scratch recomputation instead of matching it.
+        const remainder = fullMessages.slice(cursor);
+        if (canonicalPartitions.length > 0 && !remainder.some((message) => message.role === 'user')) break;
+        fail(null, 'prepared_invalid');
+      }
       canonicalPartitions.push(fullMessages.slice(cursor, selectedEnd));
       cursor = selectedEnd;
     }
