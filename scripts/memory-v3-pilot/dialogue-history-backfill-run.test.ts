@@ -18,6 +18,8 @@ const PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
 const MESSAGE_ID = '33333333-3333-4333-8333-333333333333';
+const SECOND_CONVERSATION_ID = '44444444-4444-4444-8444-444444444444';
+const SECOND_MESSAGE_ID = '55555555-5555-4555-8555-555555555555';
 const NOW_MS = Date.parse('2026-09-22T12:00:00.000Z');
 const PRICE_PATH = 'C:\\safe\\price.json';
 const OUTPUT_PATH = 'C:\\safe\\history-backfill.json';
@@ -91,6 +93,44 @@ function sourceReader(log: string[]) {
   };
 }
 
+/** Two-conversation source fixture used by the partial-failure test below:
+ * both conversations are real, distinct, never-touched conversations -- one
+ * is made to fail via the provider fetch, the other must still succeed and
+ * survive in the published result. */
+function twoConversationSourceReader(log: string[]) {
+  return {
+    async listConversationsPage() {
+      log.push('source:conversations');
+      return [
+        { id: CONVERSATION_ID, user_id: USER_ID, created_at: '2026-09-10T10:00:00.000Z' },
+        { id: SECOND_CONVERSATION_ID, user_id: USER_ID, created_at: '2026-09-11T10:00:00.000Z' },
+      ];
+    },
+    async listMessagesPage(input: { conversationId: string }) {
+      log.push('source:messages');
+      if (input.conversationId === CONVERSATION_ID) {
+        return [{
+          id: MESSAGE_ID,
+          conversation_id: CONVERSATION_ID,
+          sender: 'user',
+          content: 'synthetic durable preference',
+          created_at: '2026-09-10T10:01:00.000Z',
+        }];
+      }
+      if (input.conversationId === SECOND_CONVERSATION_ID) {
+        return [{
+          id: SECOND_MESSAGE_ID,
+          conversation_id: SECOND_CONVERSATION_ID,
+          sender: 'user',
+          content: 'second conversation preference',
+          created_at: '2026-09-11T10:01:00.000Z',
+        }];
+      }
+      return [];
+    },
+  };
+}
+
 /** A fake Supabase-client-shaped revision reader: `.from(table).select(...)
  * .eq(...).eq(...).maybeSingle()`, the exact chain
  * dialogue-history-backfill-cli.ts's buildReadRevision queries against
@@ -160,6 +200,41 @@ function providerFetch(log: string[]) {
             type: 'create', candidateRef: 'candidate:0001', targetMemoryRef: null, topic: 'preference',
           }],
         });
+    return openRouterResponse(content);
+  };
+  return Object.assign(fetchImpl as typeof fetch, { calls });
+}
+
+/** Like providerFetch, but the extractor call for `failingConversationId`
+ * returns unparsable content, so exactly ONE conversation ends the run with a
+ * real extractor_parse failure while every other conversation's extractor and
+ * reconciler calls still succeed normally (mirrors
+ * dialogue-history-backfill-cli.test.ts's own providerFetchWithFailingConversation).
+ * Routes by request content (the extractor request's caseId embeds the
+ * conversationId) and by the extractor/reconciler max_tokens split (4096 vs
+ * 1200), not by call-count parity, so ordering across conversations never
+ * matters. */
+function providerFetchWithFailingConversation(log: string[], failingConversationId: string) {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    log.push('provider');
+    calls.push({ url: String(url), init: init ?? {} });
+    const bodyText = String(init?.body ?? '');
+    const isExtractor = JSON.parse(bodyText).max_tokens === 4_096;
+    if (isExtractor && bodyText.includes(failingConversationId)) {
+      return openRouterResponse('NOT_JSON{');
+    }
+    const content = isExtractor
+      ? JSON.stringify({
+          layerDecisions: [
+            { kind: 'event', decision: 'omit', itemRefs: [] },
+            { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+            { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+          ],
+          items: [],
+          evidence: [],
+        })
+      : JSON.stringify({ operations: [] });
     return openRouterResponse(content);
   };
   return Object.assign(fetchImpl as typeof fetch, { calls });
@@ -411,6 +486,72 @@ describe('Memory V3 dialogue history backfill composition root', () => {
     // The readable report is plain text for Настя, not JSON, and must not
     // itself carry the artifact's JSON structure.
     assert.throws(() => JSON.parse(reportWrite!.data));
+  });
+
+  it('still writes both the JSON artifact and the readable report when one conversation fails partway through, correctly listing the failed conversation', async () => {
+    // Compute the frozen-source digest against the TWO-conversation fixture
+    // (not the single-conversation default harness()/computeExpectedDigest()
+    // use), since the digest must match whatever source this run's own
+    // inspect pass actually sees.
+    const inspectHarness = harness(INSPECT_ARGV);
+    inspectHarness.options.createSourceAndRevisionAccess = (url: string, serviceKey: string) => {
+      inspectHarness.log.push(`supabase:${url}:${serviceKey}`);
+      return {
+        reader: twoConversationSourceReader(inspectHarness.log),
+        revisionClient: revisionClient(inspectHarness.log),
+      };
+    };
+    assert.equal(await main(inspectHarness.options), 0);
+    const digest = JSON.parse(inspectHarness.stdout[0]).sourceSnapshotDigest;
+
+    const h = harness(executeArgv(digest));
+    h.options.createSourceAndRevisionAccess = (url: string, serviceKey: string) => {
+      h.log.push(`supabase:${url}:${serviceKey}`);
+      return {
+        reader: twoConversationSourceReader(h.log),
+        revisionClient: revisionClient(h.log),
+      };
+    };
+    h.options.fetchImpl = providerFetchWithFailingConversation(h.log, SECOND_CONVERSATION_ID);
+
+    // A real paid run where one conversation fails must still return 0
+    // (success), not the generic failure exit code: the successfully
+    // processed conversation's result -- and the money spent on it -- must
+    // not be thrown away just because a sibling conversation failed.
+    assert.equal(await main(h.options), 0);
+
+    const artifactWrite = h.writes.find((row) => row.path === `${OUTPUT_PATH}.tmp`)!;
+    assert.ok(artifactWrite, 'the JSON artifact must still be written on a partial failure');
+    const artifact = JSON.parse(artifactWrite.data);
+    assert.equal(artifact.semanticReviewPacket, null);
+    assert.equal(artifact.benchmarkResult.conversations.length, 2);
+    const succeeded = artifact.benchmarkResult.conversations.find(
+      (conversation: { conversationId: string }) => conversation.conversationId === CONVERSATION_ID,
+    );
+    const failed = artifact.benchmarkResult.conversations.find(
+      (conversation: { conversationId: string }) => conversation.conversationId === SECOND_CONVERSATION_ID,
+    );
+    assert.equal(succeeded.failureCount, 0);
+    assert.notEqual(succeeded.finalState, null);
+    assert.equal(failed.failureCount, 1);
+    assert.equal(failed.finalState, null);
+
+    const reportWrite = h.writes.find((row) => row.path === `${REPORT_PATH}.tmp`);
+    assert.ok(reportWrite, 'the readable report must still be written on a partial failure');
+    assert.deepEqual(
+      h.links.find((pair) => pair[1] === REPORT_PATH),
+      [`${REPORT_PATH}.tmp`, REPORT_PATH],
+    );
+    const expectedReport = buildReadableReport({ benchmarkResult: artifact.benchmarkResult });
+    assert.equal(reportWrite!.data, expectedReport);
+    assert.ok(reportWrite!.data.includes('Не удалось разобрать: 1'));
+    assert.ok(reportWrite!.data.includes(SECOND_CONVERSATION_ID));
+
+    const summary = JSON.parse(h.stdout[0]);
+    assert.equal(summary.status, 'completed');
+    assert.equal(summary.outputWritten, true);
+    assert.equal(summary.payloadSha256, null);
+    assert.equal(summary.conversationCount, 2);
   });
 
   it('dry inspection does not save automatically and emits a safe provider-free summary', async () => {
