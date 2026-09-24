@@ -473,7 +473,29 @@ function chunkOneConversation(input: {
       selectedEnd = end;
       selectedRequest = request;
     }
-    if (selectedEnd < 0 || selectedRequest === null) fail(token);
+    if (selectedEnd < 0 || selectedRequest === null) {
+      // A conversation with no usable prefix at all (chunks.length === 0)
+      // stays a hard failure -- an existing test ('requires a user
+      // message in every chunk and fails on an unusable assistant
+      // prefix') deliberately locks in that a conversation with zero
+      // real user engagement from the very start is an anomaly worth
+      // surfacing loudly, not silently producing an empty result for.
+      //
+      // But once at least one real chunk has already been collected
+      // (chunks.length > 0), a trailing stretch with no further user
+      // turn is the normal, common state for an active conversation --
+      // it just ends "hanging" on the AI's last reply, with nothing new
+      // for the extractor to learn from a reply nobody has responded to
+      // yet. Stop here instead of failing the whole conversation. Only
+      // keep failing if a user message exists somewhere later that this
+      // window's own size cap prevented from ever being reached -- an
+      // implausibly long assistant-only run in the middle of a real
+      // conversation would still be a genuine anomaly worth surfacing
+      // loudly, not something to silently skip past.
+      const remainder = conversation.messages.slice(cursor);
+      if (chunks.length > 0 && !remainder.some((row) => row.role === 'user')) break;
+      fail(token);
+    }
 
     const messages = conversation.messages.slice(cursor, selectedEnd).map((row) => ({ ...row }));
     const first = messages[0];
