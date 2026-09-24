@@ -279,6 +279,50 @@ describe('deterministic history chunk planning', () => {
     captureContractError(() => prepare([conversation(1, [assistant])]));
   });
 
+  it('drops a trailing assistant-only tail after at least one real chunk instead of failing the whole conversation', () => {
+    // A real production run (25.09.2026) hit exactly this: a conversation
+    // whose byte-size-forced chunk boundary leaves a lone trailing
+    // assistant reply -- the normal "conversation is waiting for a
+    // reply" state -- with no further user message. That must not fail
+    // the whole conversation, unlike a conversation with zero user
+    // engagement from the very start (the test above).
+    const userId = syntheticUuid(1);
+    const conversationId = syntheticUuid(1_001);
+    const first = message(1, 'user', timestamp(1), 'first');
+    const secondText = textForExactRequestBytes(40_000, userId, conversationId, [first], 2);
+    const second = message(2, 'user', timestamp(2), secondText);
+    const trailingAssistant = message(3, 'assistant', timestamp(3), 'hanging reply, no reply yet');
+    assert.equal(requestBytes(userId, conversationId, [first, second]), 40_000);
+
+    const result = prepare([conversation(1, [first, second, trailingAssistant])]);
+
+    assert.equal(result.chunks.length, 1);
+    assert.deepEqual(result.chunks[0].messages.map((row) => row.id), [first.id, second.id]);
+    assert.equal(result.chunks[0].extractorRequestBytes, 40_000);
+  });
+
+  it('still fails when a genuinely long assistant-only run separates two real user stretches', () => {
+    // The size cap forces a chunk boundary right after `first`+`second`,
+    // then the very next window has no user message within its own
+    // maxMessagesPerChunk-sized reach even though `third` (a real user
+    // message) exists further out -- this is the "implausibly long
+    // assistant-only run in the middle" case the fix explicitly still
+    // treats as a genuine anomaly, not a trailing tail to drop.
+    const userId = syntheticUuid(1);
+    const conversationId = syntheticUuid(1_001);
+    const first = message(1, 'user', timestamp(1), 'first');
+    const secondText = textForExactRequestBytes(40_000, userId, conversationId, [first], 2);
+    const second = message(2, 'user', timestamp(2), secondText);
+    const longAssistantRun = Array.from({ length: 60 }, (_, index) =>
+      message(100 + index, 'assistant', timestamp(100 + index), `filler-${index}`)
+    );
+    const third = message(3, 'user', timestamp(200), 'third');
+
+    captureContractError(() =>
+      prepare([conversation(1, [first, second, ...longAssistantRun, third])])
+    );
+  });
+
   it('does not duplicate, omit, truncate, or move messages between conversations', () => {
     const firstMessages = Array.from({ length: 61 }, (_, index) =>
       message(index + 1, 'user', timestamp(index + 1), `first-${index + 1}`)
