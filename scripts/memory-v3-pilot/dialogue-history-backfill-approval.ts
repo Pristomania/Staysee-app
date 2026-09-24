@@ -58,7 +58,7 @@ export function generateApprovalDecision(artifact: unknown): {
 
 async function direct(): Promise<void> {
   const argv = process.argv.slice(2);
-  if (argv.length !== 4 || argv[0] !== '--generate-approval' || argv[1] !== '--artifact-file' || argv[3] === undefined) {
+  if (argv.length !== 3 || argv[0] !== '--generate-approval' || argv[1] !== '--artifact-file' || argv[2] === undefined) {
     console.error('Usage: --generate-approval --artifact-file <absolute .json path>');
     process.exitCode = 1;
     return;
