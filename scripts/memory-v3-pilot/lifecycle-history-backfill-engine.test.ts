@@ -1099,4 +1099,59 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       assert.equal(calls, 0);
     }
   });
+
+  it('validates a dry-run inspection whose last chunk dropped a trailing assistant-only tail (25.09.2026 production regression)', async () => {
+    // The chunking fix (trailing-tail drop) shipped without updating the
+    // manifest's own totals to match, so this exact shape -- a legitimate,
+    // correctly-prepared artifact -- failed real inspection with
+    // 'prepared_invalid' the first time it hit a real account.
+    const userId = USER_ID;
+    const conversationId = '44444444-4444-4444-8444-444444444444';
+    const first = {
+      id: '55555555-5555-4555-8555-555555555555',
+      role: 'user' as const,
+      text: 'first',
+      createdAt: '2026-09-10T10:00:00.000Z',
+    };
+    const secondSeed = {
+      id: '66666666-6666-4666-8666-666666666666',
+      role: 'user' as const,
+      text: 'x',
+      createdAt: '2026-09-10T10:01:00.000Z',
+    };
+    const requestBytesFor = (messages: typeof first[]) => {
+      const dialogue = validateMemoryV3Dialogue({
+        caseId: `memory-v3-shadow:${userId}:${conversationId}`,
+        messages,
+      });
+      return new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest(dialogue))).byteLength;
+    };
+    const seedBytes = requestBytesFor([first, secondSeed]);
+    const second = { ...secondSeed, text: 'x'.repeat(1 + 40_000 - seedBytes) };
+    assert.equal(requestBytesFor([first, second]), 40_000);
+    const trailingAssistant = {
+      id: '77777777-7777-4777-8777-777777777777',
+      role: 'assistant' as const,
+      text: 'hanging reply, no reply yet',
+      createdAt: '2026-09-10T10:02:00.000Z',
+    };
+
+    const trailingTailPrepared = prepareLifecycleHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      snapshot: {
+        userId,
+        sourceCutoff: '2026-09-20T00:00:00.000Z',
+        conversations: [{
+          conversationId,
+          createdAt: first.createdAt,
+          messages: [first, second, trailingAssistant],
+        }],
+      },
+    });
+    assert.equal(trailingTailPrepared.chunks.length, 1);
+
+    const result = await runLifecycleHistoryBackfill(options({ prepared: trailingTailPrepared }) as never);
+    assert.equal(result.execute, false);
+    assert.equal(result.attemptedChunkCount, 0);
+  });
 });
