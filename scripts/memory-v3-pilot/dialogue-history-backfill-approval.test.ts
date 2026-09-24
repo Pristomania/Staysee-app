@@ -3,7 +3,13 @@ import { describe, it } from "node:test";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { generateApprovalDecision } from "./dialogue-history-backfill-approval.ts";
+
+const execFileAsync = promisify(execFile);
+const APPROVAL_PATH = new URL('./dialogue-history-backfill-approval.ts', import.meta.url);
 
 function successfulArtifact() {
   return {
@@ -74,6 +80,44 @@ describe("dialogue history backfill approval generator", () => {
       assert.equal(writtenDecision.schemaVersion, "memory-v3-dialogue-history-review-v1");
       assert.deepEqual(writtenDecision.items.map((item: { memoryKey: string }) => item.memoryKey), ["a".repeat(64), "b".repeat(64), "c".repeat(64)]);
       assert.ok(writtenDecision.reviewedAt, "reviewedAt timestamp should be present");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("the direct() CLI wrapper actually runs end to end when invoked with the documented 3-token argv", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "approval-cli-test-"));
+    try {
+      const artifactPath = join(tempDir, "artifact.json");
+      await writeFile(artifactPath, JSON.stringify(successfulArtifact()), "utf8");
+
+      // Spawn the approval script as a real subprocess with documented CLI arguments
+      const { stdout, stderr } = await execFileAsync(process.execPath, [
+        "--import",
+        "tsx",
+        fileURLToPath(APPROVAL_PATH),
+        "--generate-approval",
+        "--artifact-file",
+        artifactPath,
+      ], {
+        cwd: process.cwd(),
+        windowsHide: true,
+      });
+
+      // Verify the subprocess ran successfully
+      assert.equal(stderr, "", `Expected no stderr, but got: ${stderr}`);
+      assert.ok(stdout.includes("Написан файл подтверждения"), `Expected Russian success message in stdout: ${stdout}`);
+
+      // Verify the .review.json file was created with correct content
+      const reviewPath = artifactPath.replace(/\.json$/, ".review.json");
+      const reviewContent = await readFile(reviewPath, "utf8");
+      const decision = JSON.parse(reviewContent);
+
+      assert.equal(decision.verdict, "PASS");
+      assert.equal(decision.reviewer, "Nastya");
+      assert.equal(decision.payloadSha256, "d".repeat(64));
+      assert.equal(decision.schemaVersion, "memory-v3-dialogue-history-review-v1");
+      assert.deepEqual(decision.items.map((item: { memoryKey: string }) => item.memoryKey), ["a".repeat(64), "b".repeat(64), "c".repeat(64)]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
