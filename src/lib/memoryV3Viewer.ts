@@ -57,3 +57,11 @@ export async function deleteMemoryV3Item(input: {
   if ('error' in result) return { deleted: false, error: result.error };
   return { ...result, error: null };
 }
+
+export async function deleteAllMemoryV3Data(
+  scope: 'account_wide' | 'dialogue',
+): Promise<{ deleted: boolean; error: string | null }> {
+  const result = await callMemoryV3Viewer<{ deleted: boolean }>({ action: 'delete_all', scope });
+  if ('error' in result) return { deleted: false, error: result.error };
+  return { ...result, error: null };
+}

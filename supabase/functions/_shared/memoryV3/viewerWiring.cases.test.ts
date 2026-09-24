@@ -19,7 +19,18 @@ describe("memory-v3-viewer wiring", () => {
 
   it("scopes both delete RPC calls to the verified caller's own userId, never a client-supplied one", () => {
     const source = indexSource();
-    assert.equal((source.match(/p_user_id:\s*userId/g) ?? []).length, 4);
+    assert.equal((source.match(/p_user_id:\s*userId/g) ?? []).length, 5);
+  });
+
+  it("exposes delete_all for both Memory V3 scopes and rejects any other scope", () => {
+    const source = indexSource();
+    assert.match(source, /body\.action === "delete_all"/);
+    assert.match(source, /delete_all_memory_v3_dialogue_data/);
+    assert.match(source, /delete_all_memory_v3_lifecycle_data/);
+    const deleteAllIndex = source.indexOf('body.action === "delete_all"');
+    const scopeCheck = source.indexOf('scope !== "account_wide" && scope !== "dialogue"', deleteAllIndex);
+    const invalidRequest = source.indexOf('error: "invalid_request"', deleteAllIndex);
+    assert.ok(deleteAllIndex >= 0 && scopeCheck > deleteAllIndex && invalidRequest > scopeCheck);
   });
 
   it("never calls the dialogue read RPC without checking eligibility first", () => {

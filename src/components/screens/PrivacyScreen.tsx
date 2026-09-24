@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
 import { Lock, Eye, Shield, Trash2, Database } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -48,6 +49,7 @@ export function PrivacyScreen() {
   const sectionLabel = useSectionLabelClass();
   const [deleteAllState, setDeleteAllState] = useState<DeleteState>('idle');
   const [deleteMemoryState, setDeleteMemoryState] = useState<DeleteState>('idle');
+  const [deleteMemoryV3State, setDeleteMemoryV3State] = useState<DeleteState>('idle');
 
   async function handleDeleteAllConversations() {
     if (!user) return;
@@ -89,6 +91,26 @@ export function PrivacyScreen() {
       setDeleteMemoryState('done');
     } catch {
       setDeleteMemoryState('error');
+    }
+  }
+
+  async function handleDeleteMemoryV3() {
+    if (!user) return;
+    if (deleteMemoryV3State === 'idle') {
+      setDeleteMemoryV3State('confirming');
+      return;
+    }
+    if (deleteMemoryV3State !== 'confirming') return;
+    setDeleteMemoryV3State('loading');
+    try {
+      const [lifecycleResult, dialogueResult] = await Promise.all([
+        deleteAllMemoryV3Data('account_wide'),
+        deleteAllMemoryV3Data('dialogue'),
+      ]);
+      if (lifecycleResult.error || dialogueResult.error) throw new Error('delete_all_failed');
+      setDeleteMemoryV3State('done');
+    } catch {
+      setDeleteMemoryV3State('error');
     }
   }
 
@@ -179,7 +201,7 @@ export function PrivacyScreen() {
 
             <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
               <p className={`${theme.textPrimary} text-sm font-light mb-1`}>
-                Удалить память AI
+                Удалить старую память
               </p>
               <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
                 Удалит сохранённые AI-заметки о ваших предпочтениях и темах. Беседы останутся.
@@ -212,7 +234,47 @@ export function PrivacyScreen() {
                   disabled={deleteMemoryState === 'loading'}
                   className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
                 >
-                  {deleteMemoryState === 'loading' ? 'Удаляю…' : 'Удалить память AI'}
+                  {deleteMemoryState === 'loading' ? 'Удаляю…' : 'Удалить старую память'}
+                </button>
+              )}
+            </div>
+
+            <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
+              <p className={`${theme.textPrimary} text-sm font-light mb-1`}>
+                Удалить данные умной памяти
+              </p>
+              <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
+                Удалит события и повторяющиеся факты, которые умная память собрала сама. Беседы и старые заметки останутся.
+              </p>
+              {deleteMemoryV3State === 'done' ? (
+                <p className={`${theme.textMuted} text-xs font-light`}>Умная память удалена.</p>
+              ) : deleteMemoryV3State === 'error' ? (
+                <p className="text-red-400/60 text-xs font-light">Что-то пошло не так. Попробуйте позже.</p>
+              ) : deleteMemoryV3State === 'confirming' ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMemoryV3State('idle')}
+                    className={`flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteMemoryV3}
+                    className="flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70"
+                  >
+                    Да, удалить
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDeleteMemoryV3}
+                  disabled={deleteMemoryV3State === 'loading'}
+                  className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
+                >
+                  {deleteMemoryV3State === 'loading' ? 'Удаляю…' : 'Удалить данные умной памяти'}
                 </button>
               )}
             </div>
