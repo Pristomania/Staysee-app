@@ -192,6 +192,24 @@ describe('history source validation and canonicalization', () => {
       assert.notEqual(prepare(variant).manifest.sourceSnapshotDigest, base);
     }
   });
+
+  it('skips a conversation with zero messages instead of failing the whole snapshot', () => {
+    // A real production account (25.09.2026) has a conversation the person
+    // opened but never sent a single message into. That conversation
+    // carries nothing to extract, but under the old all-or-nothing
+    // behavior it blocked every other real conversation in the account
+    // from being processed at all.
+    const real = conversation(1, [message(1), message(2, 'assistant')]);
+    const empty = conversation(2, []);
+
+    const result = prepare([real, empty]);
+
+    assert.equal(result.manifest.conversationCount, 1);
+    assert.deepEqual(
+      result.chunks.map((chunk) => chunk.conversationId),
+      [real.conversationId],
+    );
+  });
 });
 
 describe('deterministic history chunk planning', () => {

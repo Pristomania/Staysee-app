@@ -360,7 +360,7 @@ function validateAndCloneSourceSnapshot(
   const rawConversations = projectDenseArray(token, root.conversations);
   const conversationIds = new Set<string>();
   const messageIds = new Set<string>();
-  const conversations = rawConversations.map((raw): DialogueHistoryConversationInput => {
+  const conversations = rawConversations.flatMap((raw): DialogueHistoryConversationInput[] => {
     const source = projectRecord(token, raw, CONVERSATION_FIELDS);
     const conversationCreatedAt = parseDateTimeNanoseconds(source.createdAt);
     if (
@@ -374,7 +374,14 @@ function validateAndCloneSourceSnapshot(
     }
     conversationIds.add(source.conversationId);
     const rawMessages = projectDenseArray(token, source.messages);
-    if (rawMessages.length === 0) fail(token);
+    // A conversation the user opened but never sent a single message into
+    // carries nothing to extract and isn't itself an anomaly -- unlike a
+    // conversation whose messages are all from the assistant (still a hard
+    // failure below), there's no "unusable prefix" here, just nothing at
+    // all. Skip it instead of blocking every other conversation in the
+    // account (25.09.2026: exactly this shape, in a real account, was
+    // blocking the whole run over one message-less conversation).
+    if (rawMessages.length === 0) return [];
     const messages = rawMessages.map((rawMessage): MemoryV3DialogueMessage => {
       const row = projectRecord(token, rawMessage, MESSAGE_FIELDS);
       const messageCreatedAt = parseDateTimeNanoseconds(row.createdAt);
@@ -400,11 +407,11 @@ function validateAndCloneSourceSnapshot(
       } as MemoryV3DialogueMessage;
     });
     messages.sort(compareMessages);
-    return {
+    return [{
       conversationId: source.conversationId,
       createdAt: source.createdAt,
       messages,
-    };
+    }];
   });
   return {
     userId: root.userId,
