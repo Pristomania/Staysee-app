@@ -144,9 +144,16 @@ function revisionClientFactory(
                       async maybeSingle() {
                         log.push(`revision:${table}:${conversationIdArg}`);
                         const revision = revisionsByConversationId[conversationIdArg];
+                        // Mirrors the real Supabase JS client's actual response
+                        // shape, which always includes `success`/`count`/`status`/
+                        // `statusText` alongside `data`/`error` -- a real run
+                        // against production caught the fact that an earlier
+                        // version of this fake omitted `success`, which let a
+                        // too-strict validator (missing `success` from its own
+                        // allowed-keys list) slip through untested.
                         return revision === undefined
-                          ? { data: null, error: null }
-                          : { data: { state_revision: revision }, error: null };
+                          ? { data: null, error: null, count: null, status: 200, statusText: 'OK', success: true }
+                          : { data: { state_revision: revision }, error: null, count: null, status: 200, statusText: 'OK', success: true };
                       },
                     };
                   },
@@ -718,6 +725,36 @@ describe('Memory V3 dialogue history backfill CLI', () => {
     assert.equal(
       revisionLog.includes(`revision:memory_v3_dialogue_heads:${SECOND_CONVERSATION_ID}`),
       true,
+    );
+  });
+
+  it('rejects a revision lookup response whose success field is false, even when data/error look otherwise fine', async () => {
+    const hostileRevisionClient = (_url: string, _serviceKey: string) => ({
+      from(_table: string) {
+        return {
+          select(_columns: string) {
+            return {
+              eq(_col1: string, _userIdArg: string) {
+                return {
+                  eq(_col2: string, _conversationIdArg: string) {
+                    return {
+                      async maybeSingle() {
+                        return { data: null, error: null, count: null, status: 200, statusText: 'OK', success: false };
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    });
+    await assert.rejects(
+      runDialogueHistoryBackfillFromArgv(baseOptions({
+        sourceReader: twoConversationSourceFactory(),
+        revisionClient: hostileRevisionClient,
+      }) as never),
     );
   });
 
