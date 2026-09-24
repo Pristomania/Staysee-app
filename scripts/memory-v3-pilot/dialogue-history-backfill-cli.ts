@@ -568,11 +568,19 @@ export async function runDialogueHistoryBackfillFromArgv(input: {
       extractorAdapter,
       reconcilerAdapter,
     });
+    // A per-conversation failure here is a legitimate, expected outcome (see
+    // dialogue-history-backfill-engine.ts's own main loop: one conversation's
+    // extraction/reconciliation failure never aborts the others), NOT a
+    // reason to discard every other conversation's already-paid-for result.
+    // buildDialogueHistoryReviewPacket itself throws when any conversation is
+    // incomplete, so it is only called when the run is fully clean; on a
+    // partial failure semanticReviewPacket is null and the caller (run.ts)
+    // still publishes the full benchmarkResult (successes AND failures) plus
+    // the readable report that lists which conversations failed.
     const hasFailure = benchmarkResult.conversations.some(
       (conversation) => conversation.failureCount !== 0 || conversation.finalState === null,
     );
-    if (hasFailure) return fail();
-    const semanticReviewPacket = buildDialogueHistoryReviewPacket(benchmarkResult);
+    const semanticReviewPacket = hasFailure ? null : buildDialogueHistoryReviewPacket(benchmarkResult);
     return { benchmarkResult, semanticReviewPacket };
   });
 }

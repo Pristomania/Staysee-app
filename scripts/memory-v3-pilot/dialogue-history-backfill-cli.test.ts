@@ -308,6 +308,41 @@ function providerFetch() {
   return Object.assign(fetchImpl as typeof fetch, { calls });
 }
 
+/** Like providerFetch, but the extractor call for `failingConversationId`
+ * returns unparsable content (mirrors the engine test's own "NOT_JSON{"
+ * fixture), so that ONE conversation ends its run with a real extractor_parse
+ * failure while every other conversation's extractor+reconciler calls still
+ * succeed normally. Routes by request content (the extractor request's
+ * caseId embeds the conversationId, see prompt.ts's buildMemoryV3ExtractorRequest)
+ * and by the extractor/reconciler max_tokens split (4096 vs 1200, see
+ * dialogue-history-backfill-provider.ts and dialogueTransport.ts), not by
+ * call-count parity -- so it stays correct regardless of how many
+ * conversations/chunks precede the failing one. */
+function providerFetchWithFailingConversation(failingConversationId: string) {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    const bodyText = String(init?.body ?? '');
+    const isExtractor = JSON.parse(bodyText).max_tokens === 4_096;
+    if (isExtractor && bodyText.includes(failingConversationId)) {
+      return openRouterResponse('NOT_JSON{');
+    }
+    const content = isExtractor
+      ? JSON.stringify({
+          layerDecisions: [
+            { kind: 'event', decision: 'omit', itemRefs: [] },
+            { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+            { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+          ],
+          items: [],
+          evidence: [],
+        })
+      : JSON.stringify({ operations: [] });
+    return openRouterResponse(content);
+  };
+  return Object.assign(fetchImpl as typeof fetch, { calls });
+}
+
 function baseOptions(overrides: Record<string, unknown> = {}) {
   return {
     argv: INSPECT_ARGV,
@@ -684,6 +719,38 @@ describe('Memory V3 dialogue history backfill CLI', () => {
       revisionLog.includes(`revision:memory_v3_dialogue_heads:${SECOND_CONVERSATION_ID}`),
       true,
     );
+  });
+
+  it('preserves every conversation\'s result and returns a null review packet instead of throwing when only one conversation fails', async () => {
+    const inspect = await runDialogueHistoryBackfillFromArgv(baseOptions({
+      sourceReader: twoConversationSourceFactory(),
+    }) as never);
+    const digest = inspect.benchmarkResult.manifest.sourceSnapshotDigest;
+
+    const fetchImpl = providerFetchWithFailingConversation(SECOND_CONVERSATION_ID);
+    const result = await runDialogueHistoryBackfillFromArgv(baseOptions({
+      argv: executeArgv(digest),
+      sourceReader: twoConversationSourceFactory(),
+      fetchImpl,
+    }) as never);
+
+    // Must NOT throw -- the whole batch's computed results (including the
+    // successful conversation's already-paid-for extraction) must survive a
+    // single other conversation's failure.
+    assert.equal(result.semanticReviewPacket, null);
+    assert.equal(result.benchmarkResult.conversations.length, 2);
+
+    const succeeded = result.benchmarkResult.conversations.find(
+      (conversation) => conversation.conversationId === CONVERSATION_ID,
+    )!;
+    const failed = result.benchmarkResult.conversations.find(
+      (conversation) => conversation.conversationId === SECOND_CONVERSATION_ID,
+    )!;
+    assert.equal(succeeded.failureCount, 0);
+    assert.notEqual(succeeded.finalState, null);
+    assert.equal(failed.failureCount, 1);
+    assert.equal(failed.failures[0].stage, 'extractor_parse');
+    assert.equal(failed.finalState, null);
   });
 
   it('reconstructs every conversation\'s full, correctly ordered message sequence across multiple chunks, even when chunks arrive globally interleaved across conversations', async () => {
