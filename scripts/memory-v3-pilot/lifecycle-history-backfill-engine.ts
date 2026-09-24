@@ -910,10 +910,16 @@ export async function runLifecycleHistoryBackfill(input: {
       const parsedExtraction = parseJsonDataOnly(extractorTransport.content, 'extractor_parse');
       let extraction;
       try {
+        // scopeMode is 'cross_conversation' (not dialogue's 'conversation'): this
+        // engine threads one continuous state across every conversation in the
+        // account, matching lifecycleShadowRunner.ts's own live call to this same
+        // shared contract function. Missing this argument made every real
+        // execution fail on its first chunk regardless of content (25.09.2026).
         extraction = await normalizeMemoryV3LayeredResponse(
           parsedExtraction,
           dialogue,
           profile.extractorVersion,
+          'cross_conversation',
         );
       } catch {
         fail('extractor_contract', 'extractor_contract_invalid');
