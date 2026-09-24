@@ -540,6 +540,105 @@ describe('reviewed dialogue history import', () => {
     assert.equal((fake.calls[0] as { conversationId: string }).conversationId, conversationIdA);
   });
 
+  it('imports a conversation that legitimately found zero items as a plain success, without calling the RPC for it, and never blocks the other conversation', async () => {
+    const conversationIdWithItem = conversationIdFor(0);
+    const conversationIdEmpty = conversationIdFor(1);
+    const freshPreparedSource = prepared(2);
+    const conversationRevisions = revisionsFor(freshPreparedSource);
+    const benchmarkResult = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: freshPreparedSource,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: Date.parse('2026-09-21T12:00:00.000Z'),
+      execute: true,
+      conversationRevisions,
+      // Conversation 1's message is deliberately extracted as "nothing found"
+      // (layerDecisions all omit, empty items/evidence) -- a real, valid
+      // outcome ("ничего устойчивого не найдено"), not a failure.
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => {
+        const message = request.input.messages[0];
+        const foundNothing = message.text.endsWith('1');
+        return {
+          content: JSON.stringify({
+            layerDecisions: [
+              { kind: 'event', decision: foundNothing ? 'omit' : 'emit', itemRefs: foundNothing ? [] : ['i1'] },
+              { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+              { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+            ],
+            items: foundNothing ? [] : [{
+              itemRef: 'i1', kind: 'event', claim: message.text, status: 'active',
+              sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null,
+              alternative: null,
+            }],
+            evidence: foundNothing ? [] : [{
+              itemRef: 'i1', sourceMessageId: message.id, relation: 'supports',
+              supportType: null, episodeKey: `episode:${message.id}`,
+            }],
+          }),
+          usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        };
+      },
+      reconcilerAdapter: async (request: MemoryV3DialogueReconcileRequest) => ({
+        rawContent: JSON.stringify({
+          operations: request.input.candidates.map((candidate) => ({
+            type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact',
+          })),
+        }),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+    });
+    const semanticReviewPacket = buildDialogueHistoryReviewPacket(benchmarkResult);
+    const artifact = JSON.parse(JSON.stringify({ benchmarkResult, semanticReviewPacket }));
+    const reviewDecision = {
+      schemaVersion: 'memory-v3-dialogue-history-review-v1',
+      payloadSha256: semanticReviewPacket.payloadSha256,
+      verdict: 'PASS',
+      reviewedAt: REVIEWED_AT,
+      reviewer: 'Nastya',
+      items: semanticReviewPacket.items.map((item: { memoryKey: string }) => ({
+        memoryKey: item.memoryKey,
+        semanticVerdict: 'PASS',
+        reviewerNotes: null,
+      })),
+    };
+    const emptyConversation = artifact.benchmarkResult.conversations.find(
+      (conversation: { conversationId: string }) => conversation.conversationId === conversationIdEmpty,
+    );
+    assert.equal(emptyConversation.finalState.items.length, 0);
+    assert.equal(emptyConversation.finalState.stateRevision, 0);
+    assert.equal(emptyConversation.failureCount, 0, 'zero items is a success, not a failure');
+
+    const fake = clientFor(stateRevisionsFromArtifact(artifact), expectedRevisionsFromArtifact(artifact));
+    const result = await importReviewedDialogueHistory({
+      artifact, reviewDecision, freshPreparedSource, userId: USER_ID, importId: IMPORT_ID, client: fake.client,
+    });
+
+    assert.equal(result.status, 'succeeded');
+    const resultWithItem = result.results.find((row) => row.conversationId === conversationIdWithItem);
+    const resultEmpty = result.results.find((row) => row.conversationId === conversationIdEmpty);
+    assert.deepEqual(resultWithItem, {
+      conversationId: conversationIdWithItem,
+      status: 'succeeded',
+      resultingStateRevision: 1,
+      itemCount: 1,
+      evidenceCount: 1,
+    });
+    assert.deepEqual(resultEmpty, {
+      conversationId: conversationIdEmpty,
+      status: 'succeeded',
+      resultingStateRevision: 0,
+      itemCount: 0,
+      evidenceCount: 0,
+    });
+    // The RPC must never be called for the empty conversation -- its schema
+    // requires at least one item, and there is nothing to write anyway.
+    assert.equal(fake.calls.length, 1);
+    assert.equal((fake.calls[0] as { conversationId: string }).conversationId, conversationIdWithItem);
+  });
+
   it("treats the RPC's own conflict-guard exception as a per-conversation rejection, not a batch abort", async () => {
     // Simulates the narrow race the pre-check (loadCurrentHead vs.
     // expectedStateRevision) cannot close: both conversations pass the
