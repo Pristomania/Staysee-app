@@ -372,17 +372,25 @@ function inspectRevisionResponse(value: unknown): number {
   } catch {
     return fail();
   }
-  const allowed = new Set(['data', 'error', 'count', 'status', 'statusText']);
+  // The real Supabase JS client includes a `success` field on every
+  // PostgrestResponse -- lifecycle-history-backfill-source.ts's own
+  // inspectResponse() already accounts for this. A real run against
+  // production hit this exact mismatch (missing `success` here made every
+  // revision lookup fail closed), caught only because the synthetic test
+  // fakes never modeled that extra field.
+  const allowed = new Set(['data', 'error', 'count', 'status', 'statusText', 'success']);
   for (const key of keys) {
     if (typeof key !== 'string' || !allowed.has(key)) return fail();
   }
   const dataDescriptor = Object.getOwnPropertyDescriptor(value, 'data');
   const errorDescriptor = Object.getOwnPropertyDescriptor(value, 'error');
+  const successDescriptor = Object.getOwnPropertyDescriptor(value, 'success');
   if (
     !dataDescriptor || !errorDescriptor ||
     dataDescriptor.enumerable !== true || errorDescriptor.enumerable !== true ||
     !('value' in dataDescriptor) || !('value' in errorDescriptor) ||
-    errorDescriptor.value !== null
+    errorDescriptor.value !== null ||
+    (successDescriptor !== undefined && successDescriptor.value !== true)
   ) {
     return fail();
   }
