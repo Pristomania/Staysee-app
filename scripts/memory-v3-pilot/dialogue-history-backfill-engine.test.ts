@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import {
+  __testOnlyCreateDialogueHistoryProviderCallGate,
   buildDialogueHistoryReviewPacket,
   runDialogueHistoryBackfill,
 } from './dialogue-history-backfill-engine.ts';
@@ -146,6 +147,44 @@ function createAllOperations() {
     usage: null,
     resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
   });
+}
+
+/** Produces a single "event" candidate whose claim alone is large enough to push
+ * the reconciler request (which embeds the raw candidate claim text) over
+ * profile.maxReconcilerRequestBytes, so the engine's own re-check rejects it
+ * before the reconciler adapter is ever invoked. */
+function hugeClaimExtractorAdapter() {
+  return async (request: MemoryV3ExtractorRequest) => {
+    const message = request.input.messages[0];
+    return {
+      content: JSON.stringify({
+        layerDecisions: [
+          { kind: 'event', decision: 'emit', itemRefs: ['i1'] },
+          { kind: 'recurrence', decision: 'omit', itemRefs: [] },
+          { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+        ],
+        items: [{
+          itemRef: 'i1',
+          kind: 'event',
+          claim: 'x'.repeat(90_000),
+          status: 'active',
+          sensitivity: 'normal',
+          eventTimeStart: null,
+          eventTimeEnd: null,
+          alternative: null,
+        }],
+        evidence: [{
+          itemRef: 'i1',
+          sourceMessageId: message.id,
+          relation: 'supports',
+          supportType: null,
+          episodeKey: `episode:${message.id}`,
+        }],
+      }),
+      usage: null,
+      resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    };
+  };
 }
 
 function msg(id: string, createdAt: string, text: string, role: 'user' | 'assistant' = 'user'): MemoryV3DialogueMessage {
@@ -470,6 +509,45 @@ describe('Memory V3 dialogue history backfill engine', () => {
     assert.equal(reconcilerCalls, 0);
   });
 
+  it('checks every conversation has a revision entry before processing ANY of them, not just the first one reached', async () => {
+    // The FIRST conversation's entry is present and valid; only the SECOND is
+    // missing. If the guard were still inside the per-conversation loop (checked
+    // only once the loop reaches the affected conversation), the first
+    // conversation would already have spent real extractor/reconciler calls by
+    // the time this throws. The preflight check must catch this before ANY
+    // conversation is processed.
+    const preparedValue = prepared(2);
+    const firstConversationId = preparedValue.chunks[0].conversationId;
+    const secondConversationId = preparedValue.chunks[1].conversationId;
+    assert.notEqual(firstConversationId, secondConversationId);
+    let extractorCalls = 0;
+    let reconcilerCalls = 0;
+    await assert.rejects(
+      () => runDialogueHistoryBackfill({
+        profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+        prepared: preparedValue,
+        priceSnapshot: PRICE,
+        maxBudgetUsd: '1',
+        nowMs: NOW_MS,
+        execute: true,
+        // Deliberately missing the SECOND conversation's revision entry; the
+        // FIRST one is present and valid.
+        conversationRevisions: new Map([[firstConversationId, 0]]),
+        extractorAdapter: async () => {
+          extractorCalls += 1;
+          return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+        },
+        reconcilerAdapter: async () => {
+          reconcilerCalls += 1;
+          return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+        },
+      }),
+      /\[memory-v3:dialogue-history-backfill-engine\] operation failed/u,
+    );
+    assert.equal(extractorCalls, 0, 'must not spend a single extractor call on the valid first conversation');
+    assert.equal(reconcilerCalls, 0, 'must not spend a single reconciler call on the valid first conversation');
+  });
+
   // NOTE: the plan's review focus also asks for "fails only the affected
   // conversation when one conversation has no user messages, not the whole
   // run". That specific trigger (an all-assistant conversation) is rejected at
@@ -510,6 +588,211 @@ describe('Memory V3 dialogue history backfill engine', () => {
       prepared: { ...prepared(), chunks: [] },
     }) as never), /\[memory-v3:dialogue-history-backfill-engine\]/u);
     await assert.rejects(() => runDialogueHistoryBackfill(options({ execute: true }) as never));
+  });
+
+  it('rechecks exact extractor bytes before calls and rejects tampering provider-free', async () => {
+    const tampered = structuredClone(prepared());
+    tampered.chunks[0].extractorRequestBytes += 1;
+    tampered.manifest.chunks[0].extractorRequestBytes += 1;
+    let calls = 0;
+    await assert.rejects(() => runDialogueHistoryBackfill(options({
+      prepared: tampered,
+      execute: true,
+      extractorAdapter: async () => {
+        calls += 1;
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+      reconcilerAdapter: async () => {
+        calls += 1;
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+    }) as never));
+    assert.equal(calls, 0);
+  });
+
+  it('blocks an over-byte reconciler request before invoking its adapter', async () => {
+    let extractorCalls = 0;
+    let reconcilerCalls = 0;
+    const preparedValue = prepared(1);
+    const result = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: preparedValue,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(preparedValue),
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => {
+        extractorCalls += 1;
+        return hugeClaimExtractorAdapter()(request);
+      },
+      reconcilerAdapter: async () => {
+        reconcilerCalls += 1;
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+    });
+    assert.equal(extractorCalls, 1);
+    assert.equal(reconcilerCalls, 0);
+    assert.equal(result.providerCallCount, 1);
+    assert.equal(result.conversations[0].failures[0].stage, 'reconciler_request');
+    assert.equal(result.conversations[0].finalState, null);
+  });
+
+  it('never reaches request 2N + 1 and counts a rejected inner call exactly once', async () => {
+    const source = prepared(2);
+    let extractorCalls = 0;
+    let reconcilerCalls = 0;
+    const complete = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: source,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(source),
+      extractorAdapter: async () => {
+        extractorCalls += 1;
+        assert.ok(extractorCalls <= source.chunks.length, 'blocked extractor call reached inner adapter');
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+      reconcilerAdapter: async () => {
+        reconcilerCalls += 1;
+        assert.ok(reconcilerCalls <= source.chunks.length, 'blocked reconciler call reached inner adapter');
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+    });
+    assert.equal(complete.providerCallCount, 2 * source.chunks.length);
+    assert.equal(extractorCalls + reconcilerCalls, 2 * source.chunks.length);
+
+    const overCap = structuredClone(source);
+    overCap.manifest.maxProviderCalls = 2 * source.chunks.length + 1;
+    let blockedInnerCalls = 0;
+    await assert.rejects(() => runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: overCap,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(overCap),
+      extractorAdapter: async () => {
+        blockedInnerCalls += 1;
+        return { content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+      reconcilerAdapter: async () => {
+        blockedInnerCalls += 1;
+        return { rawContent: JSON.stringify({ operations: [] }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL };
+      },
+    }));
+    assert.equal(blockedInnerCalls, 0, 'blocked over-cap request must not reach an inner adapter');
+
+    const spoofed = Object.assign(new Error('RAW_INNER_REJECTION_SENTINEL'), {
+      name: 'MemoryV3DialogueHistoryBackfillEngineError',
+      diagnosticCode: 'attacker_code',
+    });
+    const singleConversation = prepared(1);
+    let rejectedCalls = 0;
+    const failed = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: singleConversation,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(singleConversation),
+      extractorAdapter: async () => {
+        rejectedCalls += 1;
+        throw spoofed;
+      },
+      reconcilerAdapter: async () => {
+        throw new Error('must not run');
+      },
+    });
+    assert.equal(rejectedCalls, 1);
+    assert.equal(failed.providerCallCount, 1);
+    assert.deepEqual(failed.conversations[0].failures, [{
+      chunkId: failed.manifest.chunks[0].chunkId,
+      stage: 'extractor_transport',
+      diagnosticCode: 'extractor_transport_failed',
+    }]);
+    assert.doesNotMatch(JSON.stringify(failed), /RAW_INNER_REJECTION_SENTINEL|attacker_code/u);
+  });
+
+  it('blocks the actual shared 2N + 1 gate call before inner invocation and increment', async () => {
+    const gate = __testOnlyCreateDialogueHistoryProviderCallGate(2);
+    let innerCalls = 0;
+    assert.equal(await gate.callExtractor(async () => {
+      innerCalls += 1;
+      return 'first';
+    }), 'first');
+    await assert.rejects(() => gate.callReconciler(async () => {
+      innerCalls += 1;
+      throw new Error('ALLOWED_INNER_REJECTION_SENTINEL');
+    }));
+    assert.equal(gate.getAttemptCount(), 2, 'rejected allowed inner call consumes one attempt');
+    await assert.rejects(() => gate.callExtractor(async () => {
+      innerCalls += 1;
+      return 'must-not-run';
+    }), /\[memory-v3:dialogue-history-backfill-engine\] operation failed/u);
+    assert.equal(innerCalls, 2, 'blocked call must not reach inner adapter');
+    assert.equal(gate.getAttemptCount(), 2, 'blocked call must not increment attempt count');
+  });
+
+  it('does not trust a provider cap error minted by a foreign gate instance', async () => {
+    const foreignGate = __testOnlyCreateDialogueHistoryProviderCallGate(1);
+    await foreignGate.callExtractor(async () => 'allowed');
+    let foreignCapError: unknown;
+    try {
+      await foreignGate.callReconciler(async () => 'must-not-run');
+    } catch (error) {
+      foreignCapError = error;
+    }
+    assert.ok(foreignCapError instanceof Error);
+    foreignCapError.message = 'FOREIGN_GATE_CAP_ERROR_SENTINEL';
+
+    const preparedForExtractorFailure = prepared(1);
+    const extractorFailure = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: preparedForExtractorFailure,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(preparedForExtractorFailure),
+      extractorAdapter: async () => {
+        throw foreignCapError;
+      },
+      reconcilerAdapter: async () => {
+        throw new Error('must not run');
+      },
+    });
+    assert.deepEqual(extractorFailure.conversations[0].failures, [{
+      chunkId: extractorFailure.manifest.chunks[0].chunkId,
+      stage: 'extractor_transport',
+      diagnosticCode: 'extractor_transport_failed',
+    }]);
+    assert.doesNotMatch(JSON.stringify(extractorFailure), /FOREIGN_GATE_CAP_ERROR_SENTINEL|provider_call_cap_exceeded/u);
+
+    const preparedForReconcilerFailure = prepared(1);
+    const reconcilerFailure = await runDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      prepared: preparedForReconcilerFailure,
+      priceSnapshot: PRICE,
+      maxBudgetUsd: '1',
+      nowMs: NOW_MS,
+      execute: true,
+      conversationRevisions: revisionsFor(preparedForReconcilerFailure),
+      extractorAdapter: async () => ({ content: JSON.stringify(OMIT), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL }),
+      reconcilerAdapter: async () => {
+        throw foreignCapError;
+      },
+    });
+    assert.deepEqual(reconcilerFailure.conversations[0].failures, [{
+      chunkId: reconcilerFailure.manifest.chunks[0].chunkId,
+      stage: 'reconciler_transport',
+      diagnosticCode: 'reconciler_transport_failed',
+    }]);
+    assert.doesNotMatch(JSON.stringify(reconcilerFailure), /FOREIGN_GATE_CAP_ERROR_SENTINEL|provider_call_cap_exceeded/u);
   });
 
   it('builds a review packet that flattens conversations, tags each item with conversationId, and is digest-bound', async () => {

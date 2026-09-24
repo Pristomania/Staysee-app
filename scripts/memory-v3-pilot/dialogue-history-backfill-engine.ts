@@ -901,18 +901,31 @@ export async function runDialogueHistoryBackfill(input: {
   }
   const conversationOrdinals = [...chunksByConversation.keys()].sort((left, right) => left - right);
 
+  // Preflight: confirm conversationRevisions has an entry for EVERY conversation
+  // BEFORE doing any per-chunk work at all, for ANY conversation. A missing
+  // entry means Task 5's CLI failed to populate the revision map for a
+  // conversation present in `prepared.chunks` -- a wiring bug, not a normal
+  // per-conversation failure a real run could hit. Checking this only when the
+  // main loop reaches the affected conversation would let earlier
+  // conversations spend real extractor/reconciler calls before the whole run
+  // is thrown away anyway; checking it here fails fast before anything is
+  // spent. This is deliberately not inside the per-chunk try/catch below: it
+  // must abort the whole run, not just the affected conversation.
+  const expectedRevisionByOrdinal = new Map<number, number>();
+  for (const conversationOrdinal of conversationOrdinals) {
+    const conversationId = chunksByConversation.get(conversationOrdinal)![0].conversationId;
+    const expectedStateRevision = conversationRevisions.get(conversationId);
+    if (expectedStateRevision === undefined) {
+      fail('reducer', 'missing_conversation_revision');
+    }
+    expectedRevisionByOrdinal.set(conversationOrdinal, expectedStateRevision);
+  }
+
   const conversationResults: DialogueHistoryBackfillResult['conversations'] = [];
   for (const conversationOrdinal of conversationOrdinals) {
     const chunksForConversation = chunksByConversation.get(conversationOrdinal)!;
     const conversationId = chunksForConversation[0].conversationId;
-    const expectedStateRevision = conversationRevisions.get(conversationId);
-    if (expectedStateRevision === undefined) {
-      // Task 5's CLI failed to populate the revision map for every conversation
-      // present in `prepared.chunks` -- a wiring bug, not a normal per-conversation
-      // failure a real run could hit. This is deliberately NOT caught by the
-      // per-chunk try/catch below: it must abort the whole run.
-      fail('reducer', 'missing_conversation_revision');
-    }
+    const expectedStateRevision = expectedRevisionByOrdinal.get(conversationOrdinal)!;
     let state = createEmptyMemoryV3DialogueState({ userId: prepared.userId, conversationId });
     const chunkResults: DialogueHistoryBackfillConversationResult['chunks'] = [];
     const failures: DialogueHistoryBackfillConversationResult['failures'] = [];
