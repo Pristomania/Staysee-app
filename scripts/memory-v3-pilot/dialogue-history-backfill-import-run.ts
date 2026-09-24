@@ -14,6 +14,16 @@ import {
   inspectLifecycleHistorySource,
   type LifecycleHistorySourceReader,
 } from './lifecycle-history-backfill-source.ts';
+import { LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID } from './lifecycle-history-backfill-profile.ts';
+import { prepareDialogueHistoryBackfill } from './dialogue-history-backfill-contract.ts';
+// reconstructDialogueConversations bridges inspectLifecycleHistorySource's
+// LIFECYCLE-shaped result (that reader is reused unchanged across both
+// scopes -- see its own file) back into the raw per-conversation snapshot
+// prepareDialogueHistoryBackfill needs. Task 5's CLI already solved this
+// exact bridging problem (dialogue-history-backfill-cli.ts); reused here
+// rather than re-implemented, so there is only one place that knows how to
+// do it.
+import { reconstructDialogueConversations } from './dialogue-history-backfill-cli.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -189,11 +199,27 @@ export async function main(input: {
     const serviceKey = await readEnv(root.readEnvText as typeof input.readEnvText,
       'SUPABASE_SERVICE_ROLE_KEY');
     const reader = (root.createSourceReader as typeof input.createSourceReader)(url, serviceKey);
-    const freshPreparedSource = await inspectLifecycleHistorySource({
-      profileId: identity.profileId,
+    // inspectLifecycleHistorySource is the shared, scope-agnostic raw reader --
+    // it only ever accepts the LIFECYCLE profile id (identity.profileId here is
+    // the DIALOGUE-scope result profileId, a different string) and always
+    // returns a lifecycle-shaped PreparedLifecycleHistoryBackfill (wrong
+    // manifest.schemaVersion for this tool's own validateFreshSource). Bridge
+    // its result back into a real dialogue-shaped PreparedDialogueHistoryBackfill
+    // exactly the way Task 5's CLI does, rather than feeding it to
+    // validateFreshSource directly.
+    const preparedLifecycle = await inspectLifecycleHistorySource({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
       userId,
       sourceCutoff: identity.sourceCutoff,
       reader,
+    });
+    const freshPreparedSource = prepareDialogueHistoryBackfill({
+      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      snapshot: {
+        userId,
+        sourceCutoff: identity.sourceCutoff,
+        conversations: reconstructDialogueConversations(preparedLifecycle),
+      },
     });
     const client = (root.createImportClient as typeof input.createImportClient)(url, serviceKey);
     const result = await importReviewedDialogueHistory({
@@ -240,7 +266,17 @@ function createImportClient(url: string, serviceKey: string): DialogueHistoryImp
         p_reconciler_version: importInput.reconcilerVersion,
         p_state: importInput.state,
       });
-      if (response.error || !Array.isArray(response.data) || response.data.length !== 1) return fail();
+      if (response.error) {
+        // Propagate the RPC's own error message (rather than swallowing it
+        // into the generic branded fail() below) so the per-conversation
+        // import loop in dialogue-history-backfill-import.ts can recognize
+        // its specific conflict-guard exception text and reject just that one
+        // conversation instead of aborting the whole batch. Any other RPC
+        // error still surfaces here as a plain Error and is treated as a real
+        // failure one level up.
+        throw new Error(typeof response.error.message === 'string' ? response.error.message : 'rpc failed');
+      }
+      if (!Array.isArray(response.data) || response.data.length !== 1) return fail();
       return {
         result: response.data[0]?.result,
         resultingStateRevision: Number(response.data[0]?.resulting_state_revision),

@@ -540,6 +540,77 @@ describe('reviewed dialogue history import', () => {
     assert.equal((fake.calls[0] as { conversationId: string }).conversationId, conversationIdA);
   });
 
+  it("treats the RPC's own conflict-guard exception as a per-conversation rejection, not a batch abort", async () => {
+    // Simulates the narrow race the pre-check (loadCurrentHead vs.
+    // expectedStateRevision) cannot close: both conversations pass the
+    // pre-check (their reported head matches expectedStateRevision exactly),
+    // but conversation A's actual RPC call still hits the server-side
+    // conflict guard (something landed on A between the pre-check and the
+    // RPC call itself). B is unaffected and must still succeed.
+    const conversationIdA = conversationIdFor(0);
+    const conversationIdB = conversationIdFor(1);
+    const data = await fixture(2);
+    const conversationB = data.artifact.benchmarkResult.conversations.find(
+      (conversation: { conversationId: string }) => conversation.conversationId === conversationIdB,
+    );
+    const stateRevisionByConversation = stateRevisionsFromArtifact(data.artifact);
+    const calls: unknown[] = [];
+    const client = {
+      async loadCurrentHead(userId: string, conversationId: string) {
+        assert.equal(userId, USER_ID);
+        return { stateRevision: 0, itemCount: 0 };
+      },
+      async importInitialState(input: unknown) {
+        calls.push(input);
+        const conversationId = (input as { conversationId: string }).conversationId;
+        if (conversationId === conversationIdA) {
+          throw new Error(
+            'dialogue backfill import conflict: conversation changed since the paid run, or this conversation/artifact was already imported',
+          );
+        }
+        return {
+          result: 'succeeded',
+          resultingStateRevision: stateRevisionByConversation.get(conversationId),
+        };
+      },
+    };
+    const result = await importReviewedDialogueHistory({
+      ...data, userId: USER_ID, importId: IMPORT_ID, client,
+    });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.results.length, 2);
+    const resultA = result.results.find((row) => row.conversationId === conversationIdA);
+    const resultB = result.results.find((row) => row.conversationId === conversationIdB);
+    assert.deepEqual(resultA, { conversationId: conversationIdA, status: 'rejected_state_changed' });
+    assert.deepEqual(resultB, {
+      conversationId: conversationIdB,
+      status: 'succeeded',
+      resultingStateRevision: conversationB.finalState.stateRevision,
+      itemCount: 1,
+      evidenceCount: 1,
+    });
+    // importInitialState was attempted for BOTH (unlike the pre-check
+    // rejection case, this failure only surfaces once the RPC is actually
+    // called), but only B's attempt resulted in a write being recorded.
+    assert.equal(calls.length, 2);
+  });
+
+  it('still aborts the whole batch on any RPC error that is not the conflict-guard exception', async () => {
+    const data = await fixture();
+    let calls = 0;
+    await assert.rejects(() => importReviewedDialogueHistory({
+      ...data, userId: USER_ID, importId: IMPORT_ID,
+      client: {
+        async loadCurrentHead() { return { stateRevision: 0, itemCount: 0 }; },
+        async importInitialState() {
+          calls += 1;
+          throw new Error('invalid dialogue backfill state');
+        },
+      },
+    }));
+    assert.equal(calls, 1);
+  });
+
   it('keeps provider, fetch, env, fs, and raw-dialogue dependencies out of the library', () => {
     const source = readFileSync(new URL('./dialogue-history-backfill-import.ts', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /from\s+['"][^'"]*(openrouter|transport)|fetch\s*\(|process\.env|node:fs|@supabase\/supabase-js/iu);

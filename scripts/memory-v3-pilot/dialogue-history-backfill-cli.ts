@@ -451,7 +451,7 @@ function buildReadRevision(
  * changes after creation, unlike message content, which remains fully
  * covered). It is NOT echoed into any chunk digest, the extractor request,
  * or any other observable result field. */
-function reconstructDialogueConversations(
+export function reconstructDialogueConversations(
   preparedLifecycle: PreparedLifecycleHistoryBackfill,
 ): DialogueHistoryConversationInput[] {
   const chunksByOrdinal = new Map<number, LifecycleHistoryPreparedChunk[]>();

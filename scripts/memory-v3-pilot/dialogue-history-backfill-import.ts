@@ -84,6 +84,14 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,9}))?)?(Z|[+-](?:0\d|1[0-3]):[0-5]\d|[+-]14:00)$/u;
 const MAX_REVIEWER_NOTES = 1_000;
+// The exact substring of the RPC's conflict-guard RAISE EXCEPTION message
+// (see import_memory_v3_dialogue_backfill_state's migration) -- textually
+// distinct from every other exception that RPC can raise. The pre-check
+// above (loadCurrentHead vs. expectedStateRevision) already catches this
+// race in the common case; this substring match is a backstop for the
+// narrower window between that check and the RPC call itself, where the
+// live incremental pipeline could still write to the same conversation.
+const RPC_CONFLICT_MESSAGE = 'dialogue backfill import conflict';
 const OWN_ERRORS = new WeakSet<object>();
 const RESULT_FIELDS = [
   'schemaVersion', 'profileId', 'model', 'modelRoute', 'manifest', 'priceSnapshot', 'budget',
@@ -662,6 +670,17 @@ function validateResponse(value: unknown, expectedRevision: number): number {
   return expectedRevision;
 }
 
+/** True only for the RPC's own conflict-guard exception (a genuine
+ * server-side revision race in the narrow window between our pre-check and
+ * the RPC call itself) -- never for any other client/RPC error, which must
+ * still abort the batch as a real failure. Reads only the error's own
+ * `message` field for this narrow textual match; never re-exposes it. */
+function isRpcConflictError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'message' in error &&
+    typeof (error as { message: unknown }).message === 'string' &&
+    (error as { message: string }).message.includes(RPC_CONFLICT_MESSAGE);
+}
+
 export async function importReviewedDialogueHistory(input: {
   artifact: unknown;
   reviewDecision: unknown;
@@ -719,20 +738,38 @@ export async function importReviewedDialogueHistory(input: {
         }));
         continue;
       }
-      const response = await client.importInitialState({
-        importId: root.importId,
-        userId: root.userId,
-        conversationId: conversation.conversationId,
-        expectedStateRevision: conversation.expectedStateRevision,
-        artifactDigest: artifact.payloadSha256,
-        sourceSnapshotDigest: artifact.manifest.sourceSnapshotDigest as string,
-        sourceCutoff: artifact.manifest.sourceCutoff as string,
-        profileId: artifact.benchmarkResult.profileId as string,
-        pipelineVersion: MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
-        extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
-        reconcilerVersion: MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
-        state: cloneJson(conversation.state) as MemoryV3DialogueState,
-      });
+      let response: unknown;
+      try {
+        response = await client.importInitialState({
+          importId: root.importId,
+          userId: root.userId,
+          conversationId: conversation.conversationId,
+          expectedStateRevision: conversation.expectedStateRevision,
+          artifactDigest: artifact.payloadSha256,
+          sourceSnapshotDigest: artifact.manifest.sourceSnapshotDigest as string,
+          sourceCutoff: artifact.manifest.sourceCutoff as string,
+          profileId: artifact.benchmarkResult.profileId as string,
+          pipelineVersion: MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
+          extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+          reconcilerVersion: MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
+          state: cloneJson(conversation.state) as MemoryV3DialogueState,
+        });
+      } catch (error) {
+        // A genuine race: something landed on this exact conversation between
+        // our pre-check above and this RPC call. Reject just this
+        // conversation and keep going -- never abort the batch for a race
+        // our own pre-check already mostly (but not perfectly) covers. Any
+        // OTHER error (a real bug, a malformed request) still propagates and
+        // aborts, exactly as before.
+        if (isRpcConflictError(error)) {
+          results.push(Object.freeze({
+            conversationId: conversation.conversationId,
+            status: 'rejected_state_changed' as const,
+          }));
+          continue;
+        }
+        throw error;
+      }
       const resultingStateRevision = validateResponse(response, conversation.state.stateRevision);
       results.push(Object.freeze({
         conversationId: conversation.conversationId,
