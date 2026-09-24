@@ -17,7 +17,15 @@
  * that revision is 0 or 12. If it no longer matches, THAT ONE conversation's
  * import is rejected (status: 'rejected_state_changed') and the loop
  * continues to the next conversation -- it does not abort the whole batch.
- * There is no "must be empty" or "skip if not empty" branch anywhere below. */
+ * There is no "must be empty" or "skip if not empty" branch anywhere below.
+ *
+ * A real run against production surfaced one more real edge case: a
+ * conversation whose paid run found zero extractable items (a valid,
+ * reported "ничего устойчивого не найдено" outcome, not a failure)
+ * legitimately never advances its state past revision 0 -- but the
+ * import RPC's own schema requires at least one item per call. Such a
+ * conversation is reported as a normal success (there is nothing to
+ * change, so nothing needs writing) without ever calling the RPC for it. */
 
 import { createHash } from 'node:crypto';
 import { isProxy } from 'node:util/types';
@@ -433,7 +441,14 @@ function validateArtifact(value: unknown): {
       const manifestChunk = manifestChunksForConversation[chunkIndex];
       const transitions = denseArray(chunkRow.transitionTypes);
       if (chunkRow.chunkId !== manifestChunk.chunkId || chunkRow.status !== 'succeeded' ||
-        typeof chunkRow.changed !== 'boolean' || !positiveInteger(chunkRow.resultingStateRevision) ||
+        typeof chunkRow.changed !== 'boolean' ||
+        // A conversation whose chunks never create/revise/confirm anything
+        // (a real run found a conversation with zero extractable facts --
+        // "ничего устойчивого не найдено" is a valid, reported outcome, not a
+        // failure) legitimately never advances its state past revision 0.
+        // Requiring a POSITIVE revision here made every such conversation's
+        // presence in the artifact reject the entire batch's validation.
+        !nonNegativeInteger(chunkRow.resultingStateRevision) ||
         !nonNegativeInteger(chunkRow.itemCount) || !nonNegativeInteger(chunkRow.evidenceCount) ||
         transitions.some((entry) => typeof entry !== 'string' || entry.length === 0)) return fail();
       for (const resolvedModel of [chunkRow.extractorResolvedModel, chunkRow.reconcilerResolvedModel]) {
@@ -452,7 +467,9 @@ function validateArtifact(value: unknown): {
     } catch {
       return fail();
     }
-    if (state.items.length < 1) return fail();
+    // No minimum item count here -- a conversation that legitimately found
+    // nothing extractable ("ничего устойчивого не найдено") is a valid,
+    // reported success with zero items, not an invalid state.
     const lastChunk = resultChunks[resultChunks.length - 1];
     if (lastChunk.resultingStateRevision !== state.stateRevision ||
       lastChunk.itemCount !== state.items.length ||
@@ -735,6 +752,24 @@ export async function importReviewedDialogueHistory(input: {
         results.push(Object.freeze({
           conversationId: conversation.conversationId,
           status: 'rejected_state_changed' as const,
+        }));
+        continue;
+      }
+      // A conversation whose paid run found zero extractable items has
+      // nothing to write -- the RPC's own schema requires at least one item
+      // per import (mirroring the lifecycle sibling), so calling it here
+      // would always fail. The conversation's live state already matches
+      // this "found nothing" result exactly (an untouched conversation is
+      // already empty at revision 0), so this is a genuine no-op success,
+      // not a skip and not a failure -- it is reported the same as any
+      // other successful conversation, just without an RPC call.
+      if (conversation.state.items.length === 0) {
+        results.push(Object.freeze({
+          conversationId: conversation.conversationId,
+          status: 'succeeded' as const,
+          resultingStateRevision: conversation.state.stateRevision,
+          itemCount: 0,
+          evidenceCount: 0,
         }));
         continue;
       }
