@@ -1154,4 +1154,38 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     assert.equal(result.execute, false);
     assert.equal(result.attemptedChunkCount, 0);
   });
+
+  it('actually completes a real create when the extractor and reconciler both produce a valid item (25.09.2026 missing-scopeMode regression)', async () => {
+    // normalizeMemoryV3LayeredResponse gained a required 4th `scopeMode`
+    // argument when dialogue-scope isolation shipped (lifecycleShadowRunner.ts
+    // and dialogue-history-backfill-engine.ts both pass it). This engine's own
+    // call site was never updated, so `scopeMode` came through as `undefined`
+    // and every real execution failed 'extractor_contract_invalid' on its
+    // very first chunk regardless of content -- caught only when
+    // day_and_night33's real paid run hit it for the first time.
+    const result = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => ({
+        content: eventRaw(request),
+        usage: { promptTokens: 10, completionTokens: 2, costUsd: 0.001 },
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+      reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
+        rawContent: JSON.stringify({
+          operations: request.input.candidates.map((candidate) => ({
+            type: 'create',
+            candidateRef: candidate.candidateRef,
+            targetMemoryRef: null,
+            topic: 'life_context',
+          })),
+        }),
+        usage: { promptTokens: 20, completionTokens: 3, costUsd: 0.002 },
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+    }));
+
+    assert.equal(result.failureCount, 0);
+    assert.equal(result.finalState?.items.length, 1);
+  });
 });
