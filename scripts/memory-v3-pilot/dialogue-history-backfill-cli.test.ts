@@ -3,11 +3,15 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { runDialogueHistoryBackfillFromArgv } from './dialogue-history-backfill-cli.ts';
+import { canonicalDialogueHistoryDigest } from './dialogue-history-backfill-contract.ts';
 import {
   LIFECYCLE_HISTORY_FALLBACK_MODEL,
   LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 
+// profile.maxMessagesPerChunk for memory-v3-lifecycle-history-backfill-v1 (the
+// shared profile both the lifecycle and dialogue tools use for their limits).
+const CHUNK_SIZE_CAP = 60;
 const PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
@@ -155,6 +159,100 @@ function revisionClientFactory(
     };
   };
   return factory;
+}
+
+function syntheticUuid(groupTag: number, index: number): string {
+  const tail = (groupTag * 1_000_000 + index).toString(16).padStart(12, '0');
+  return `00000000-0000-4000-8000-${tail}`;
+}
+
+function tickIso(baseMs: number, tick: number): string {
+  return new Date(baseMs + tick * 60_000).toISOString();
+}
+
+/** Builds a three-conversation fixture whose raw messages are interleaved in
+ * real time across conversations (round-robin between the two 65-message
+ * conversations, with the single-message conversation landing squarely
+ * between their first and second chunks), so the chunks
+ * inspectLifecycleHistorySource/reconstructDialogueConversations must handle
+ * arrive in genuinely interleaved global order -- not pre-grouped by
+ * conversation -- and two of the three conversations span multiple chunks
+ * each (65 messages > the profile's 60-message-per-chunk cap). This is the
+ * non-trivial reconstruction path the trivial one-message-per-conversation
+ * tests above never exercise. */
+function buildMultiChunkInterleavedFixture() {
+  const baseMs = Date.parse('2026-09-10T10:00:00.000Z');
+  const conversationAId = syntheticUuid(1, 0);
+  const conversationBId = syntheticUuid(2, 0);
+  const conversationCId = syntheticUuid(3, 0);
+  const conversationCreatedAt = '2026-09-10T09:00:00.000Z';
+
+  function buildMessages(
+    groupTag: number,
+    label: string,
+    count: number,
+    tickOf: (index: number) => number,
+  ) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: syntheticUuid(groupTag, index),
+      role: 'user' as const,
+      text: `${label}-msg-${index}`,
+      createdAt: tickIso(baseMs, tickOf(index)),
+    }));
+  }
+
+  // A and B: 65 messages each, interleaved minute-by-minute (A even ticks,
+  // B odd ticks) for their first 60 messages, then C's single message lands
+  // right after both first chunks close, then A/B's remaining 5 messages
+  // (their second chunks) continue interleaved after that.
+  const messagesA = buildMessages(11, 'a', 65, (index) =>
+    index < 60 ? index * 2 : 121 + (index - 60) * 2);
+  const messagesB = buildMessages(12, 'b', 65, (index) =>
+    index < 60 ? index * 2 + 1 : 122 + (index - 60) * 2);
+  const messagesC = buildMessages(13, 'c', 1, () => 120);
+
+  const messagesByConversationId: Record<string, typeof messagesA> = {
+    [conversationAId]: messagesA,
+    [conversationBId]: messagesB,
+    [conversationCId]: messagesC,
+  };
+
+  function sourceFactory(log: string[] = []) {
+    return (url: string, serviceKey: string) => {
+      log.push(`factory:${url}:${serviceKey}`);
+      return {
+        async listConversationsPage() {
+          log.push('source:conversations');
+          return [
+            { id: conversationAId, user_id: USER_ID, created_at: conversationCreatedAt },
+            { id: conversationBId, user_id: USER_ID, created_at: conversationCreatedAt },
+            { id: conversationCId, user_id: USER_ID, created_at: conversationCreatedAt },
+          ];
+        },
+        async listMessagesPage(input: { conversationId: string }) {
+          log.push('source:messages');
+          const messages = messagesByConversationId[input.conversationId] ?? [];
+          return messages.map((message) => ({
+            id: message.id,
+            conversation_id: input.conversationId,
+            sender: 'user',
+            content: message.text,
+            created_at: message.createdAt,
+          }));
+        },
+      };
+    };
+  }
+
+  return {
+    conversationAId,
+    conversationBId,
+    conversationCId,
+    messagesA,
+    messagesB,
+    messagesC,
+    sourceFactory,
+  };
 }
 
 function textReader(log: string[] = [], overrides: Record<string, string> = {}) {
@@ -586,5 +684,106 @@ describe('Memory V3 dialogue history backfill CLI', () => {
       revisionLog.includes(`revision:memory_v3_dialogue_heads:${SECOND_CONVERSATION_ID}`),
       true,
     );
+  });
+
+  it('reconstructs every conversation\'s full, correctly ordered message sequence across multiple chunks, even when chunks arrive globally interleaved across conversations', async () => {
+    const fixture = buildMultiChunkInterleavedFixture();
+    const revisions = {
+      [fixture.conversationAId]: 0,
+      [fixture.conversationBId]: 9,
+      [fixture.conversationCId]: 2,
+    };
+
+    const inspect = await runDialogueHistoryBackfillFromArgv(baseOptions({
+      sourceReader: fixture.sourceFactory(),
+      revisionClient: revisionClientFactory(revisions),
+    }) as never);
+    assert.equal(inspect.benchmarkResult.manifest.chunkCount, 5);
+    assert.equal(inspect.benchmarkResult.manifest.conversationCount, 3);
+    const digest = inspect.benchmarkResult.manifest.sourceSnapshotDigest;
+
+    const fetchImpl = providerFetch();
+    const result = await runDialogueHistoryBackfillFromArgv(baseOptions({
+      argv: executeArgv(digest),
+      sourceReader: fixture.sourceFactory(),
+      fetchImpl,
+      revisionClient: revisionClientFactory(revisions),
+    }) as never);
+
+    assert.equal(result.benchmarkResult.conversations.length, 3);
+    assert.equal(result.benchmarkResult.conversations.every((c) => c.failureCount === 0), true);
+    assert.equal(result.benchmarkResult.conversations.every((c) => c.finalState !== null), true);
+
+    // Prove the fixture's chunks genuinely arrived in globally interleaved
+    // order (not pre-grouped by conversation) before trusting it to exercise
+    // anything -- mirrors the engine test's own interleaving sanity check.
+    const globalOrdinalSequence = result.benchmarkResult.manifest.chunks.map(
+      (chunk) => chunk.conversationOrdinal,
+    );
+    const transitions = globalOrdinalSequence
+      .slice(1)
+      .filter((ordinal, index) => ordinal !== globalOrdinalSequence[index]).length;
+    const distinctOrdinals = new Set(globalOrdinalSequence).size;
+    assert.equal(distinctOrdinals, 3);
+    assert.ok(
+      transitions > distinctOrdinals - 1,
+      `fixture must actually interleave chunks across conversations, not arrive pre-grouped (sequence: ${globalOrdinalSequence.join(',')})`,
+    );
+
+    const conversationExpectations = [
+      { id: fixture.conversationAId, revision: 0, messages: fixture.messagesA },
+      { id: fixture.conversationBId, revision: 9, messages: fixture.messagesB },
+      { id: fixture.conversationCId, revision: 2, messages: fixture.messagesC },
+    ];
+
+    for (const expectation of conversationExpectations) {
+      const conversationResult = result.benchmarkResult.conversations.find(
+        (conversation) => conversation.conversationId === expectation.id,
+      );
+      assert.ok(conversationResult, `conversation ${expectation.id} must be present in the run`);
+      assert.equal(
+        conversationResult.expectedStateRevision,
+        expectation.revision,
+        `expectedStateRevision must be correctly attributed to conversation ${expectation.id}, not mixed up with another conversation's`,
+      );
+
+      const ordinal = conversationResult.conversationOrdinal;
+      const expectedChunkCount = Math.ceil(expectation.messages.length / CHUNK_SIZE_CAP);
+      const manifestChunksForConversation = result.benchmarkResult.manifest.chunks.filter(
+        (chunk) => chunk.conversationOrdinal === ordinal,
+      );
+      assert.equal(manifestChunksForConversation.length, expectedChunkCount);
+
+      // The decisive proof: independently recompute the exact content-addressed
+      // digest each chunk's message slice must produce (canonicalDialogueHistoryDigest
+      // is the SAME function dialogue-history-backfill-contract.ts uses internally
+      // to compute sourceDigest) and compare it against what the real pipeline
+      // actually produced. A mismatch here would mean a dropped, duplicated,
+      // reordered, or misattributed message somewhere in the source-read ->
+      // lifecycle-prepare -> reconstruct -> dialogue-prepare bridge.
+      for (let chunkOrdinal = 0; chunkOrdinal < expectedChunkCount; chunkOrdinal += 1) {
+        const start = chunkOrdinal * CHUNK_SIZE_CAP;
+        const end = Math.min(start + CHUNK_SIZE_CAP, expectation.messages.length);
+        const expectedSlice = expectation.messages.slice(start, end);
+        const expectedSourceDigest = canonicalDialogueHistoryDigest({
+          conversationId: expectation.id,
+          messages: expectedSlice,
+        });
+        const manifestChunk = manifestChunksForConversation.find(
+          (chunk) => chunk.chunkOrdinal === chunkOrdinal,
+        );
+        assert.ok(
+          manifestChunk,
+          `chunk ${chunkOrdinal} of conversation ${expectation.id} must exist in the manifest`,
+        );
+        assert.equal(manifestChunk!.messageCount, expectedSlice.length);
+        assert.equal(
+          manifestChunk!.sourceDigest,
+          expectedSourceDigest,
+          `chunk ${chunkOrdinal} of conversation ${expectation.id} must contain exactly its ` +
+            'original, correctly ordered message slice',
+        );
+      }
+    }
   });
 });

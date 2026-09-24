@@ -441,7 +441,16 @@ function buildReadRevision(
  * conversations.created_at row value (not preserved by either contract's
  * chunker output) -- prepareDialogueHistoryBackfill only requires
  * createdAt <= cutoff and every message.createdAt >= createdAt, both trivially
- * satisfied by this choice, and the value is never echoed into any output. */
+ * satisfied by this choice. This value IS folded into
+ * manifest.sourceSnapshotDigest (digestCanonicalTrusted hashes the whole
+ * canonicalized `conversations` array, createdAt included -- see
+ * dialogue-history-backfill-contract.ts's projectManifest), so the dialogue
+ * tool's source-freeze digest does not cover conversations.created_at the
+ * way the lifecycle tool's own digest does (accepted, low-risk: a
+ * conversation's own creation timestamp is set once and effectively never
+ * changes after creation, unlike message content, which remains fully
+ * covered). It is NOT echoed into any chunk digest, the extractor request,
+ * or any other observable result field. */
 function reconstructDialogueConversations(
   preparedLifecycle: PreparedLifecycleHistoryBackfill,
 ): DialogueHistoryConversationInput[] {
