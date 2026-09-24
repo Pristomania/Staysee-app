@@ -12,6 +12,7 @@ import {
   createLifecycleHistorySupabaseReader,
   type LifecycleHistorySourceReader,
 } from './lifecycle-history-backfill-source.ts';
+import { buildReadableReport } from './dialogue-history-backfill-report.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -277,6 +278,13 @@ function failureText(): string {
   return `${JSON.stringify({ ok: false, stage: 'config', error: `${PREFIX} run failed` })}\n`;
 }
 
+/** The plain-Russian readable report is published next to the JSON artifact,
+ * same basename, `.txt` instead of `.json` -- e.g.
+ * `history-backfill.json` -> `history-backfill.txt`. */
+function reportFileFor(outputFile: string): string {
+  return `${outputFile.slice(0, outputFile.length - extname(outputFile).length)}.txt`;
+}
+
 export async function main(input: {
   argv: unknown;
   readFileImpl: (path: string, encoding: 'utf8') => Promise<string>;
@@ -297,9 +305,12 @@ export async function main(input: {
   try {
     const root = inspectOptions(input);
     const parsed = parseRunArgv(root.argv);
+    const reportFile = parsed.outputFile !== null ? reportFileFor(parsed.outputFile) : null;
     if (parsed.outputFile !== null) {
       await assertAbsent(root.accessImpl as (path: string) => Promise<void>, parsed.outputFile);
       await assertAbsent(root.accessImpl as (path: string) => Promise<void>, `${parsed.outputFile}.tmp`);
+      await assertAbsent(root.accessImpl as (path: string) => Promise<void>, reportFile as string);
+      await assertAbsent(root.accessImpl as (path: string) => Promise<void>, `${reportFile}.tmp`);
     }
 
     const readEnvText = async (selector: string): Promise<string> => {
@@ -336,6 +347,19 @@ export async function main(input: {
       await publish(
         parsed.outputFile,
         serialize(payload),
+        root.writeFileImpl as
+          (path: string, data: string, options: { flag: 'wx' }) => Promise<void>,
+        root.linkImpl as (existingPath: string, newPath: string) => Promise<void>,
+        root.unlinkImpl as (path: string) => Promise<void>,
+      );
+      // The plain-Russian readable report is generated from the SAME
+      // completed benchmarkResult and published right after the JSON
+      // artifact, using the identical atomic wx+link+unlink convention, so
+      // Настя can read what happened before ever running the (destructive)
+      // import step.
+      await publish(
+        reportFile as string,
+        buildReadableReport({ benchmarkResult: payload.benchmarkResult }),
         root.writeFileImpl as
           (path: string, data: string, options: { flag: 'wx' }) => Promise<void>,
         root.linkImpl as (existingPath: string, newPath: string) => Promise<void>,

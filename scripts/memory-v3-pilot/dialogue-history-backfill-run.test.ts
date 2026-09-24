@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { main } from './dialogue-history-backfill-run.ts';
+import { buildReadableReport } from './dialogue-history-backfill-report.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
   LIFECYCLE_HISTORY_FALLBACK_MODEL,
@@ -20,6 +21,7 @@ const MESSAGE_ID = '33333333-3333-4333-8333-333333333333';
 const NOW_MS = Date.parse('2026-09-22T12:00:00.000Z');
 const PRICE_PATH = 'C:\\safe\\price.json';
 const OUTPUT_PATH = 'C:\\safe\\history-backfill.json';
+const REPORT_PATH = 'C:\\safe\\history-backfill.txt';
 const PRICE = {
   route: [{
     model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
@@ -229,19 +231,21 @@ describe('Memory V3 dialogue history backfill composition root', () => {
     const h = harness(executeArgv(digest));
     const code = await main(h.options);
     assert.equal(code, 0);
-    assert.deepEqual(h.log.slice(0, 2), [
+    assert.deepEqual(h.log.slice(0, 4), [
       `access:${OUTPUT_PATH}`,
       `access:${OUTPUT_PATH}.tmp`,
+      `access:${REPORT_PATH}`,
+      `access:${REPORT_PATH}.tmp`,
     ]);
-    assert.equal(h.log.findIndex((entry) => entry.startsWith('read:')) > 1, true);
-    assert.equal(h.log.findIndex((entry) => entry.startsWith('supabase:')) > 1, true);
-    assert.equal(h.log.findIndex((entry) => entry.startsWith('source:')) > 1, true);
-    assert.equal(h.log.findIndex((entry) => entry.startsWith('revision:')) > 1, true);
-    assert.equal(h.log.findIndex((entry) => entry === 'provider') > 1, true);
+    assert.equal(h.log.findIndex((entry) => entry.startsWith('read:')) > 3, true);
+    assert.equal(h.log.findIndex((entry) => entry.startsWith('supabase:')) > 3, true);
+    assert.equal(h.log.findIndex((entry) => entry.startsWith('source:')) > 3, true);
+    assert.equal(h.log.findIndex((entry) => entry.startsWith('revision:')) > 3, true);
+    assert.equal(h.log.findIndex((entry) => entry === 'provider') > 3, true);
   });
 
   it('blocks existing target or temp with zero reads, source calls, provider calls, or mutations', async () => {
-    for (const existing of [OUTPUT_PATH, `${OUTPUT_PATH}.tmp`]) {
+    for (const existing of [OUTPUT_PATH, `${OUTPUT_PATH}.tmp`, REPORT_PATH, `${REPORT_PATH}.tmp`]) {
       const h = harness(executeArgv('a'.repeat(64)));
       h.options.accessImpl = async (path: string) => {
         h.log.push(`access:${path}`);
@@ -294,9 +298,13 @@ describe('Memory V3 dialogue history backfill composition root', () => {
     assert.equal(await main(h.options), 0);
     assert.deepEqual(h.writes.map((row) => [row.path, row.options]), [
       [`${OUTPUT_PATH}.tmp`, { flag: 'wx' }],
+      [`${REPORT_PATH}.tmp`, { flag: 'wx' }],
     ]);
-    assert.deepEqual(h.links, [[`${OUTPUT_PATH}.tmp`, OUTPUT_PATH]]);
-    assert.deepEqual(h.unlinks, [`${OUTPUT_PATH}.tmp`]);
+    assert.deepEqual(h.links, [
+      [`${OUTPUT_PATH}.tmp`, OUTPUT_PATH],
+      [`${REPORT_PATH}.tmp`, REPORT_PATH],
+    ]);
+    assert.deepEqual(h.unlinks, [`${OUTPUT_PATH}.tmp`, `${REPORT_PATH}.tmp`]);
     assert.equal(h.stderr.length, 0);
     assert.equal(h.stdout.length, 1);
     const summary = JSON.parse(h.stdout[0]);
@@ -381,6 +389,28 @@ describe('Memory V3 dialogue history backfill composition root', () => {
       mutate(copy);
       assert.notEqual(hashDigest(copy), artifact.semanticReviewPacket.payloadSha256);
     }
+  });
+
+  it('writes a plain-Russian readable report next to the artifact, matching buildReadableReport for the same result', async () => {
+    const digest = await computeExpectedDigest();
+    const h = harness(executeArgv(digest));
+    assert.equal(await main(h.options), 0);
+    const reportWrite = h.writes.find((row) => row.path === `${REPORT_PATH}.tmp`);
+    assert.ok(reportWrite, 'expected a report file to be written next to the JSON artifact');
+    assert.equal(reportWrite!.options.flag, 'wx');
+    assert.deepEqual(
+      h.links.find((pair) => pair[1] === REPORT_PATH),
+      [`${REPORT_PATH}.tmp`, REPORT_PATH],
+    );
+    assert.ok(h.unlinks.includes(`${REPORT_PATH}.tmp`));
+
+    const artifactWrite = h.writes.find((row) => row.path === `${OUTPUT_PATH}.tmp`)!;
+    const artifact = JSON.parse(artifactWrite.data);
+    const expectedReport = buildReadableReport({ benchmarkResult: artifact.benchmarkResult });
+    assert.equal(reportWrite!.data, expectedReport);
+    // The readable report is plain text for Настя, not JSON, and must not
+    // itself carry the artifact's JSON structure.
+    assert.throws(() => JSON.parse(reportWrite!.data));
   });
 
   it('dry inspection does not save automatically and emits a safe provider-free summary', async () => {
