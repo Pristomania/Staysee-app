@@ -96,6 +96,28 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (body.action === "delete_all") {
+      const scope = body.scope;
+      if (scope !== "account_wide" && scope !== "dialogue") {
+        return new Response(JSON.stringify({ error: "invalid_request" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const rpcName = scope === "dialogue"
+        ? "delete_all_memory_v3_dialogue_data"
+        : "delete_all_memory_v3_lifecycle_data";
+      const { error } = await svc.rpc(rpcName, { p_user_id: userId });
+      if (error) {
+        console.error(`[memory-v3-viewer] ${rpcName}:`, error.message);
+        return new Response(JSON.stringify({ error: "internal" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ deleted: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // action === "read" (default)
     const conversationId = body.conversationId?.trim();
 
