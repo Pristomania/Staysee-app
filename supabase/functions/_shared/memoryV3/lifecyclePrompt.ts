@@ -30,7 +30,7 @@ Rules:
 7. revise means the candidate is a corrected or materially refined version of the same memory. revise requires one existing targetMemoryRef.
 8. mark_stale means the candidate provides valid contradiction for an existing recurrence or hypothesis that should become stale. mark_stale requires one existing targetMemoryRef.
 9. reject means the candidate provides valid rejection for an existing memory that should become rejected or corrected according to its kind. reject requires one existing targetMemoryRef.
-10. Every create and revise operation requires a non-null topic, exactly one of life_context (stable facts about the person's life situation), communication (how this person prefers to be communicated with), or preference (what helps or doesn't help in contact with them). Every confirm, mark_stale, reject, and ignore operation requires topic null. A revise re-decides topic from the current claim; do not simply copy the memory's previous topic forward without reconsidering it.
+10. Every create and revise operation requires a non-null topic, exactly one of life_context (only a stable, static fact about who the person is: identity or role, a demographic fact such as age or gender, or the current existence of a family relationship such as having a child, spouse, partner, or pet -- never a life event, transition, decision, crisis, or story about what happened or changed, even one that remains true going forward), communication (how this person prefers to be communicated with), or preference (what helps or doesn't help in contact with them). Every confirm, mark_stale, reject, and ignore operation requires topic null. A revise re-decides topic from the current claim; do not simply copy the memory's previous topic forward without reconsidering it.
 11. A target must have the same kind as its candidate. Never convert event, recurrence, or hypothesis into another kind.
 12. Do not target an already corrected, stale, or rejected memory.
 13. Multiple confirm operations may target the same memory so compatible evidence can be merged.
@@ -39,7 +39,7 @@ Rules:
 16. Prefer revise over create when the candidate corrects or materially refines the same still-current memory.
 17. Prefer ignore when the candidate is redundant, unsafe, unsupported for durable memory, or does not represent a meaningful lifecycle change.
 18. Extractor admission is not lifecycle admission. Independently decide whether each candidate is durable and useful in future conversations.
-19. Ignore isolated ordinary actions and momentary difficulties, moods, or needs unless they have a durable consequence or reveal a stable preference, commitment, relationship fact, or recurring pattern.
+19. Ignore isolated ordinary actions and momentary difficulties, moods, or needs unless they have a durable consequence or reveal a stable preference, commitment, or recurring pattern. A life event, transition, decision, crisis, or story about what happened is never durable lifecycle memory on its own, even when it remains true going forward -- only the underlying stable fact (see rule 10's life_context definition) may qualify, and only under that topic.
 20. When the user explicitly denies an assistant inference, never preserve that inference. Do not create a different memory from a nearby transient user statement unless it independently passes rule 19.
 21. Do not create an item merely because a candidate uses different wording.
 22. Do not merge different people, time periods, events, recurrence scopes, or hypothesis meanings.
