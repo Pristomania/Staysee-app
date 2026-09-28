@@ -18,6 +18,10 @@ const context = await readFile(
   new URL("../context.ts", import.meta.url),
   "utf8",
 );
+const consolidation = await readFile(
+  new URL("../consolidateUserLifeMemory.ts", import.meta.url),
+  "utf8",
+);
 
 describe("legacy memory retirement wiring", () => {
   it("gates legacy user_memory before cross-memory reads and model calls", () => {
@@ -41,6 +45,35 @@ describe("legacy memory retirement wiring", () => {
     assert.match(
       context,
       /crossMemoryOn && legacyMemoryCompatibilityEnabled\s*\? await fetchMemoryItems/u,
+    );
+  });
+
+  it("gates legacy diagnostics and consolidation before reading user_memory", () => {
+    const summaryCompat = summaryRefresh.indexOf(
+      "fetchLegacyMemoryCompatibilityEnabled(",
+    );
+    const summaryRead = summaryRefresh.indexOf('.from("user_memory")');
+    assert.ok(summaryCompat >= 0 && summaryRead > summaryCompat);
+    assert.match(
+      summaryRefresh,
+      /if \(input\.userId && legacyMemoryCompatibilityEnabled\)/u,
+    );
+
+    const consolidateAllStart = consolidation.indexOf(
+      "export async function consolidateAllUserLifeMemory(",
+    );
+    const consolidationCompat = consolidation.indexOf(
+      "fetchLegacyMemoryCompatibilityEnabled(",
+      consolidateAllStart,
+    );
+    const consolidationRead = consolidation.indexOf(
+      '.from("user_memory")',
+      consolidateAllStart,
+    );
+    assert.ok(consolidationCompat >= 0 && consolidationRead > consolidationCompat);
+    assert.match(
+      consolidation,
+      /if \(!legacyMemoryCompatibilityEnabled\) return \[\];/u,
     );
   });
 });

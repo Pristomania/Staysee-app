@@ -33,4 +33,15 @@ describe("legacy memory compatibility migration", () => {
       /WHERE id = 'ad52b415-875a-45e9-9f6b-be4d25a2c0e0'::uuid/iu,
     );
   });
+
+  it("prevents ordinary profiles from enabling the legacy engine", () => {
+    assert.match(
+      migration,
+      /ADD CONSTRAINT profiles_legacy_memory_compat_owner_check/iu,
+    );
+    assert.match(
+      migration,
+      /CHECK\s*\(\s*legacy_memory_compat_enabled = false\s*OR\s*id = 'ad52b415-875a-45e9-9f6b-be4d25a2c0e0'::uuid\s*\)/iu,
+    );
+  });
 });

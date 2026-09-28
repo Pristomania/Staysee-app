@@ -328,6 +328,9 @@ export function MemoryScreen() {
   const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
   const [sectionOpen, setSectionOpen] = useState(initialSectionOpenState);
+  const activeCrossMemoryOn = memoryReturnScreen === 'chat'
+    ? conversationCrossMemoryOn
+    : crossMemoryOn;
 
   const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
     () => partitionCrossMemoryRows(globalRows),
@@ -665,8 +668,8 @@ export function MemoryScreen() {
                       Обо мне · {memoryV3AccountWide.length}
                     </span>
                   )}
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${crossMemoryOn ? 'text-[#c9a96e]' : theme.textMuted}`}>
-                    Сквозная · {crossMemoryOn ? 'включена' : 'выключена'}
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${activeCrossMemoryOn ? 'text-[#c9a96e]' : theme.textMuted}`}>
+                    Сквозная · {activeCrossMemoryOn ? 'включена' : 'выключена'}
                   </span>
                 </div>
               )}
