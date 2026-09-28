@@ -3,16 +3,10 @@
  * Pure request construction. No network, filesystem, env, or provider I/O.
  */
 
-import type { MemoryV3DialogueMessage } from "./messages.ts";
-import { validateMemoryV3Dialogue } from "./contract.ts";
+import { buildMemoryV3ExtractorRequestForInstruction } from "./extractorRequest.ts";
+import type { MemoryV3ExtractorRequest } from "./extractorRequest.ts";
 
-export interface MemoryV3ExtractorRequest {
-  system: string;
-  input: {
-    caseId: string;
-    messages: MemoryV3DialogueMessage[];
-  };
-}
+export type { MemoryV3ExtractorRequest } from "./extractorRequest.ts";
 
 export const MEMORY_V3_SYSTEM_INSTRUCTION = `You extract StaySEE Memory V3 V2 items from a dialogue.
 
@@ -256,17 +250,8 @@ Forbidden:
 `;
 
 export function buildMemoryV3ExtractorRequest(input: unknown): MemoryV3ExtractorRequest {
-  const validated = validateMemoryV3Dialogue(input);
-  return {
-    system: MEMORY_V3_SYSTEM_INSTRUCTION,
-    input: {
-      caseId: validated.caseId,
-      messages: validated.messages.map(({ id, role, text, createdAt }) => ({
-        id,
-        role,
-        text,
-        createdAt,
-      })),
-    },
-  };
+  return buildMemoryV3ExtractorRequestForInstruction(
+    input,
+    MEMORY_V3_SYSTEM_INSTRUCTION,
+  );
 }
