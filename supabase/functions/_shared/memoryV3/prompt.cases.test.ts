@@ -89,6 +89,29 @@ describe("Memory V3 production prompt boundary", () => {
     );
   });
 
+  it("admits stable profile and communication facts from one clear user statement", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /One clear user statement is sufficient for a stable profile fact or durable communication preference; never require repetition for these event items\./,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /name, age, occupation or field of activity, current family relationships and identifying details, stable close friendships, pets, current living situation, current geography, and long-term ongoing projects or roles/,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /preferred form of address, grammatical gender used for addressing them, tone, directness, and what helps or does not help in contact/,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /These are event items, not recurrence items; the two-episode recurrence rule does not apply\./,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /Never admit health, medical conditions, religion, or beliefs through this stable-fact rule\./,
+    );
+  });
+
   it("does not mutate input and creates new allowlisted message objects", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);
