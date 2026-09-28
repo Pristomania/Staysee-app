@@ -107,7 +107,7 @@ function endpoint(value: unknown, model: HistoryBackfillResolvedModel): { value:
       outputUsdPerMillion: input.outputUsdPerMillion as string,
       observedAt: input.observedAt,
       sourceUrl: expectedUrl,
-      supportedParameters: Object.freeze([...PARAMETERS]),
+      supportedParameters: Object.freeze([...PARAMETERS]) as HistoryBackfillEndpointSnapshot['supportedParameters'],
       zdr: true,
     }),
     time,
@@ -123,7 +123,12 @@ function projectSnapshot(value: unknown): {
   const primary = endpoint(route[0], HISTORY_BACKFILL_PRIMARY_MODEL);
   const fallback = endpoint(route[1], HISTORY_BACKFILL_FALLBACK_MODEL);
   return {
-    snapshot: Object.freeze({ route: Object.freeze([primary.value, fallback.value]) }),
+    snapshot: Object.freeze({
+      route: Object.freeze([
+        primary.value,
+        fallback.value,
+      ]) as HistoryBackfillPriceSnapshot['route'],
+    }),
     observedAt: [primary.time, fallback.time],
   };
 }

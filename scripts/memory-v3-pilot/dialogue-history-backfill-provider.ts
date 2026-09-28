@@ -145,7 +145,7 @@ function rewriteBody(raw: unknown): string {
   return JSON.stringify(body);
 }
 
-function projectResolvedModel(value: unknown): LifecycleHistoryResolvedModel {
+function projectResolvedModel(value: unknown): HistoryBackfillResolvedModel {
   if (
     value !== HISTORY_BACKFILL_MODEL_ROUTE[0] &&
     value !== HISTORY_BACKFILL_MODEL_ROUTE[1]
@@ -153,7 +153,7 @@ function projectResolvedModel(value: unknown): LifecycleHistoryResolvedModel {
   return value;
 }
 
-function parseResolvedModel(text: unknown): LifecycleHistoryResolvedModel {
+function parseResolvedModel(text: unknown): HistoryBackfillResolvedModel {
   if (typeof text !== 'string') fail();
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { fail(); }
@@ -227,14 +227,14 @@ async function readRawResponse(
 interface Observer {
   begin(): void;
   fetch: typeof fetch;
-  finish(): LifecycleHistoryResolvedModel;
+  finish(): HistoryBackfillResolvedModel;
   clear(): void;
 }
 
 function createObserver(innerFetch: typeof fetch): Observer {
   let active = false;
   let callCount = 0;
-  let resolvedModel: LifecycleHistoryResolvedModel | null = null;
+  let resolvedModel: HistoryBackfillResolvedModel | null = null;
 
   return {
     begin() {
