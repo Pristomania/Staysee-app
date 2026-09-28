@@ -38,4 +38,13 @@ describe("MemoryScreen legacy visibility", () => {
       /conversationCrossMemoryOn\s*\? 'Общие факты, которые StaySee учитывает в этой беседе\.'/u,
     );
   });
+
+  it("keeps the chat memory copy free of repeated conversation labels", () => {
+    assert.doesNotMatch(screen, /Текущая беседа/u);
+    assert.match(
+      screen,
+      /currentConversation\?\.title \|\| 'Эта беседа'/u,
+    );
+    assert.match(screen, /!loading && capabilities\.canChooseConversation/u);
+  });
 });

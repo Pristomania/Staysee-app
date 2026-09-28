@@ -53,7 +53,7 @@ export function ConversationCrossMemoryToggle({
         />
         <div className="min-w-0 flex-1">
           <p className={`${theme.textPrimary} text-sm font-light`}>
-            Сквозная память в этой беседе
+            Учитывать сквозную память
           </p>
           <p className={`${theme.textMuted} text-xs font-light mt-1 leading-relaxed opacity-90`}>
             {confirmedEnabled
@@ -75,7 +75,7 @@ export function ConversationCrossMemoryToggle({
           type="button"
           role="switch"
           aria-checked={confirmedEnabled}
-          aria-label="Сквозная память в этой беседе"
+          aria-label="Учитывать сквозную память"
           disabled={busy}
           onClick={() => void toggle()}
           className={`
