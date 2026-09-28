@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(
-  join(here, "..", "..", "..", "migrations", "20260928030000_053_memory_v3_lifecycle_backfill_replace.sql"),
+  join(here, "..", "..", "..", "migrations", "20260928040000_054_memory_v3_lifecycle_backfill_replace_sql_fix.sql"),
   "utf8",
 );
 
@@ -27,7 +27,7 @@ describe("Memory V3 lifecycle backfill replacement migration", () => {
   it("advances the stored revision beyond both the artifact and replaced head", () => {
     assert.match(
       sql,
-      /v_resulting_state_revision := pg_catalog\.greatest\(\s*\(p_state->>'stateRevision'\)::bigint,\s*p_expected_state_revision \+ 1\s*\)/,
+      /v_resulting_state_revision := GREATEST\(\s*\(p_state->>'stateRevision'\)::bigint,\s*p_expected_state_revision \+ 1\s*\)/,
     );
     assert.match(sql, /SET state_revision = v_resulting_state_revision/);
     assert.match(sql, /p_expected_state_revision,\s*v_resulting_state_revision, v_item_count, v_evidence_count/);
@@ -37,8 +37,12 @@ describe("Memory V3 lifecycle backfill replacement migration", () => {
   it("never reuses memory ordinals consumed by the replaced live state", () => {
     assert.match(
       sql,
-      /next_memory_ordinal = pg_catalog\.greatest\(\s*\(p_state->>'nextMemoryOrdinal'\)::bigint,\s*v_head\.next_memory_ordinal\s*\)/,
+      /next_memory_ordinal = GREATEST\(\s*\(p_state->>'nextMemoryOrdinal'\)::bigint,\s*v_head\.next_memory_ordinal\s*\)/,
     );
+  });
+
+  it("does not schema-qualify PostgreSQL's GREATEST conditional expression", () => {
+    assert.doesNotMatch(sql, /pg_catalog\.greatest/);
   });
 
   it("keeps one reviewed import per user and service-role-only execution", () => {
