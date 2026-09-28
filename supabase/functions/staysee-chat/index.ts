@@ -1760,8 +1760,21 @@ Deno.serve(async (req: Request) => {
           })()
         : Promise.resolve();
 
+      // Registered on its own, independent waitUntil call -- this pipeline
+      // runs two sequential real LLM calls and is the slowest task in the
+      // background batch below. If it shared one Promise.all/allSettled with
+      // the best-effort logging/analytics tasks, an unrelated change to that
+      // list could still contend with or (with plain Promise.all) truncate
+      // this one; keeping it separate makes that impossible by construction.
+      EdgeRuntime.waitUntil(memoryV3ShadowPromise);
+
       EdgeRuntime.waitUntil(
-        Promise.all([
+        // allSettled, not all: this batch is best-effort logging/analytics
+        // where one entry's unhandled rejection must never cut short the
+        // others still in flight (all resolve to Promise.resolve() or are
+        // independently .catch()-guarded already, so nothing here needs the
+        // settled results).
+        Promise.allSettled([
           // Stamp memory items used
           memoryItemIds.length > 0 && authToken && supabaseUrl && supabaseAnonKey
             ? stampMemoryUsed(
@@ -1913,8 +1926,6 @@ Deno.serve(async (req: Request) => {
                 }
               })()
             : Promise.resolve(),
-
-          memoryV3ShadowPromise,
 
           // PR3c-1 — session processState_N (metadata column only; summary untouched)
           conversationId &&

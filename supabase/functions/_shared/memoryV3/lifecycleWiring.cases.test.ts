@@ -52,7 +52,11 @@ describe("staysee-chat lifecycle shadow composition", () => {
       /const lifecycleMemoryPromise\s*=\s*crossMemoryOnForWrite\s*&&\s*\(memoryV3Mode === "lifecycle_shadow" \|\|[\s\S]*?memoryV3Mode === "lifecycle_all"\)[\s\S]*?: crossMemoryOnForWrite && memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
     );
     assert.match(dispatch, /return Promise\.all\(\[dialogueMemoryPromise, lifecycleMemoryPromise\]\);/);
-    assert.match(text.slice(settle), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+    // The shadow pipeline gets its own dedicated waitUntil, ahead of the
+    // shared best-effort logging/analytics batch -- not folded into that
+    // batch's own Promise.allSettled array (see stayseeChatWiring.cases.test.ts
+    // for why: a batch entry rejecting early must never cut this off).
+    assert.match(text.slice(settle), /^EdgeRuntime\.waitUntil\(memoryV3ShadowPromise\);/);
   });
 
   it("resolves the current conversation preference before lifecycle background work", () => {
@@ -82,7 +86,7 @@ describe("staysee-chat lifecycle shadow composition", () => {
       /const memoryV3ShadowPromise = conversationId &&[\s\S]*?result\.content &&[\s\S]*?!isCalmFallbackContent[\s\S]*?parseMemoryV3ShadowMode/,
     );
     const settlement = text.slice(backgroundSettlement, text.indexOf("} else if (userId && !clientConnected)", backgroundSettlement));
-    assert.match(settlement, /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+    assert.match(settlement, /^EdgeRuntime\.waitUntil\(memoryV3ShadowPromise\);[\s\S]*?Promise\.allSettled\(\[/);
   });
 
   it("reuses the bounded loader and exact server-only environment names", () => {
@@ -126,7 +130,7 @@ describe("staysee-chat lifecycle shadow composition", () => {
     const lifecycle = text.indexOf("runMemoryV3LifecycleShadow({");
     assert.equal(legacy > responseStage, true);
     assert.equal(lifecycle > responseStage, true);
-    assert.match(text, /EdgeRuntime\.waitUntil\(\s*Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+    assert.match(text, /EdgeRuntime\.waitUntil\(memoryV3ShadowPromise\);/);
   });
 });
 

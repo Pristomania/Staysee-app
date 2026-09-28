@@ -115,13 +115,26 @@ describe("staysee-chat Memory V3 source wiring", () => {
     const stop = background.indexOf("if (!bgShould)");
     const summary = background.indexOf("const summaryRefreshPromise");
     const shadow = background.indexOf("const memoryV3ShadowPromise");
-    const backgroundSettlement = background.indexOf("EdgeRuntime.waitUntil(");
+    const shadowSettlement = background.indexOf("EdgeRuntime.waitUntil(memoryV3ShadowPromise)");
+    const batchSettlement = background.indexOf("EdgeRuntime.waitUntil(", shadowSettlement + 1);
     const summarySettlement = background.indexOf("await Promise.allSettled([summaryRefreshPromise])");
     assert.equal(stop >= 0, true);
-    assert.equal(shadow > 0 && shadow < backgroundSettlement, true);
+    // The shadow pipeline gets its own dedicated waitUntil, registered
+    // before the shared best-effort logging/analytics batch below it --
+    // not folded into that batch's own array. Two sequential real LLM
+    // calls make this the slowest task in the request; sharing settlement
+    // with unrelated logging calls let one of those reject early and end
+    // the wait before the shadow pipeline had finished (see the fix that
+    // added this assertion: runs were found permanently stuck at
+    // "reserved" with no error, never reaching a terminal state).
+    assert.equal(shadow > 0 && shadow < shadowSettlement, true);
+    assert.equal(shadowSettlement > 0 && shadowSettlement < batchSettlement, true);
     assert.equal(summary > stop, true);
     assert.equal(summarySettlement > summary, true);
-    assert.match(background.slice(backgroundSettlement), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+    // allSettled, not all: one rejecting entry in the logging/analytics
+    // batch must never cut the wait short for its still-running siblings.
+    assert.match(background.slice(batchSettlement), /Promise\.allSettled\(\[/);
+    assert.doesNotMatch(background.slice(batchSettlement), /memoryV3ShadowPromise/);
     const earlyMutation = source.replace(
       "const bgShould = shouldUpdateConversationSummary",
       "runMemoryV3Shadow({});\n                  const bgShould = shouldUpdateConversationSummary",
