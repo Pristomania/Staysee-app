@@ -6,7 +6,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isProxy } from 'node:util/types';
 import { createClient } from '@supabase/supabase-js';
 
-import { runLifecycleHistoryBackfillFromArgv } from './lifecycle-history-backfill-cli.ts';
+import {
+  getLifecycleHistoryBackfillCliFailure,
+  runLifecycleHistoryBackfillFromArgv,
+} from './lifecycle-history-backfill-cli.ts';
 import {
   createLifecycleHistorySupabaseReader,
   type LifecycleHistorySourceReader,
@@ -266,8 +269,11 @@ function projectSummary(
   };
 }
 
-function failureText(): string {
-  return `${JSON.stringify({ ok: false, stage: 'config', error: `${PREFIX} run failed` })}\n`;
+function failureText(error: unknown): string {
+  const trusted = getLifecycleHistoryBackfillCliFailure(error);
+  return `${JSON.stringify(trusted === null
+    ? { ok: false, stage: 'config', error: `${PREFIX} run failed` }
+    : { ok: false, ...trusted, error: `${PREFIX} run failed` })}\n`;
 }
 
 export async function main(input: {
@@ -320,10 +326,10 @@ export async function main(input: {
       serialize(projectSummary(payload, parsed.outputFile !== null)),
     );
     return 0;
-  } catch {
+  } catch (error) {
     if (typeof stderr === 'function') {
       try {
-        await (stderr as (text: string) => void)(failureText());
+        await (stderr as (text: string) => void)(failureText(error));
       } catch {
         // Public stderr remains best-effort and fixed.
       }

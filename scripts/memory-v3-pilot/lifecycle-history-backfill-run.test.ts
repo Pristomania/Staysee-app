@@ -144,6 +144,7 @@ function providerFetch(log: string[]) {
       : JSON.stringify({
           operations: [{
             type: 'create', candidateRef: 'candidate:0001', targetMemoryRef: null,
+            topic: 'life_context',
           }],
         });
     return openRouterResponse(content);
@@ -337,6 +338,27 @@ describe('Memory V3 lifecycle history backfill composition root', () => {
     assert.equal(h.stderr[0].includes(USER_ID), false);
     assert.equal(h.stderr[0].includes('RAW_ROW'), false);
     assert.equal(h.stderr[0].includes(OUTPUT_PATH), false);
+  });
+
+  it('reports trusted model failure diagnostics without leaking the raw response', async () => {
+    const h = harness();
+    h.options.fetchImpl = (async () => openRouterResponse('RAW_PROVIDER_SENTINEL')) as typeof fetch;
+
+    assert.equal(await main(h.options), 1);
+    assert.deepEqual(h.stdout, []);
+    assert.equal(h.stderr.length, 1);
+    assert.deepEqual(JSON.parse(h.stderr[0]), {
+      ok: false,
+      stage: 'extractor_parse',
+      diagnosticCode: 'extractor_parse_invalid',
+      attemptedChunkCount: 1,
+      providerCallCount: 1,
+      error: '[memory-v3:lifecycle-history-backfill-run] run failed',
+    });
+    assert.equal(h.stderr[0].includes('RAW_PROVIDER_SENTINEL'), false);
+    assert.deepEqual(h.writes, []);
+    assert.deepEqual(h.links, []);
+    assert.deepEqual(h.unlinks, []);
   });
 
   it('captures a trusted writeStderr before rejecting missing or invalid filesystem dependencies', async () => {
