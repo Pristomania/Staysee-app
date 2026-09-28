@@ -8,6 +8,7 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
+import { isLegacyMemoryCompatibilityEnabled } from '../../lib/memoryScreenMode';
 import { Lock, Eye, Shield, Trash2, Database } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -41,14 +42,76 @@ const sections = [
 
 type DeleteState = 'idle' | 'confirming' | 'loading' | 'done' | 'error';
 
+function DeleteAction({
+  title,
+  description,
+  doneText,
+  state,
+  onStart,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  doneText: string;
+  state: DeleteState;
+  onStart: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { theme } = useTheme();
+  return (
+    <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
+      <p className={`${theme.textPrimary} text-sm font-light mb-1`}>{title}</p>
+      <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
+        {description}
+      </p>
+      {state === 'done' ? (
+        <p className={`${theme.textMuted} text-xs font-light`}>{doneText}</p>
+      ) : state === 'error' ? (
+        <p className="text-red-400/60 text-xs font-light">Что-то пошло не так. Попробуйте позже.</p>
+      ) : state === 'confirming' ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className={`flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70"
+          >
+            Да, удалить
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={state === 'loading'}
+          className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
+        >
+          {state === 'loading' ? 'Удаляю…' : 'Удалить'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function PrivacyScreen() {
   const { navigateBack, setConversations, setMessages, setCurrentConversation } =
     useApp();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
+  const showLegacyMemoryDelete = isLegacyMemoryCompatibilityEnabled(profile);
   const [deleteAllState, setDeleteAllState] = useState<DeleteState>('idle');
   const [deleteMemoryState, setDeleteMemoryState] = useState<DeleteState>('idle');
+  const [deleteLifecycleState, setDeleteLifecycleState] = useState<DeleteState>('idle');
+  const [deleteDialogueState, setDeleteDialogueState] = useState<DeleteState>('idle');
   const [deleteMemoryV3State, setDeleteMemoryV3State] = useState<DeleteState>('idle');
 
   async function handleDeleteAllConversations() {
@@ -91,6 +154,40 @@ export function PrivacyScreen() {
       setDeleteMemoryState('done');
     } catch {
       setDeleteMemoryState('error');
+    }
+  }
+
+  async function handleDeleteLifecycle() {
+    if (!user) return;
+    if (deleteLifecycleState === 'idle') {
+      setDeleteLifecycleState('confirming');
+      return;
+    }
+    if (deleteLifecycleState !== 'confirming') return;
+    setDeleteLifecycleState('loading');
+    try {
+      const { error } = await deleteAllMemoryV3Data('account_wide');
+      if (error) throw new Error('delete_lifecycle_failed');
+      setDeleteLifecycleState('done');
+    } catch {
+      setDeleteLifecycleState('error');
+    }
+  }
+
+  async function handleDeleteDialogue() {
+    if (!user) return;
+    if (deleteDialogueState === 'idle') {
+      setDeleteDialogueState('confirming');
+      return;
+    }
+    if (deleteDialogueState !== 'confirming') return;
+    setDeleteDialogueState('loading');
+    try {
+      const { error } = await deleteAllMemoryV3Data('dialogue');
+      if (error) throw new Error('delete_dialogue_failed');
+      setDeleteDialogueState('done');
+    } catch {
+      setDeleteDialogueState('error');
     }
   }
 
@@ -159,125 +256,57 @@ export function PrivacyScreen() {
           <p className={sectionLabel}>Управление данными</p>
 
           <div className="space-y-2.5">
-            <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
-              <p className={`${theme.textPrimary} text-sm font-light mb-1`}>
-                Удалить все беседы
-              </p>
-              <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
-                Все сообщения и беседы будут удалены навсегда. Это действие нельзя отменить.
-              </p>
-              {deleteAllState === 'done' ? (
-                <p className={`${theme.textMuted} text-xs font-light`}>Беседы удалены.</p>
-              ) : deleteAllState === 'error' ? (
-                <p className="text-red-400/60 text-xs font-light">Что-то пошло не так. Попробуйте позже.</p>
-              ) : deleteAllState === 'confirming' ? (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteAllState('idle')}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteAllConversations}
-                    className="flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70"
-                  >
-                    Да, удалить всё
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleDeleteAllConversations}
-                  disabled={deleteAllState === 'loading'}
-                  className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
-                >
-                  {deleteAllState === 'loading' ? 'Удаляю…' : 'Удалить все беседы'}
-                </button>
-              )}
-            </div>
+            <DeleteAction
+              title="Удалить все беседы"
+              description="Все сообщения и беседы будут удалены навсегда. Это действие нельзя отменить."
+              doneText="Беседы удалены."
+              state={deleteAllState}
+              onStart={handleDeleteAllConversations}
+              onCancel={() => setDeleteAllState('idle')}
+              onConfirm={handleDeleteAllConversations}
+            />
 
-            <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
-              <p className={`${theme.textPrimary} text-sm font-light mb-1`}>
-                Удалить старую память
-              </p>
-              <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
-                Удалит сохранённые AI-заметки о ваших предпочтениях и темах. Беседы останутся.
-              </p>
-              {deleteMemoryState === 'done' ? (
-                <p className={`${theme.textMuted} text-xs font-light`}>Память удалена.</p>
-              ) : deleteMemoryState === 'error' ? (
-                <p className="text-red-400/60 text-xs font-light">Что-то пошло не так. Попробуйте позже.</p>
-              ) : deleteMemoryState === 'confirming' ? (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteMemoryState('idle')}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteMemory}
-                    className="flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70"
-                  >
-                    Да, удалить
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleDeleteMemory}
-                  disabled={deleteMemoryState === 'loading'}
-                  className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
-                >
-                  {deleteMemoryState === 'loading' ? 'Удаляю…' : 'Удалить старую память'}
-                </button>
-              )}
-            </div>
+            {showLegacyMemoryDelete && (
+              <DeleteAction
+                title="Удалить старую память"
+                description="Удалит сохранённые AI-заметки о ваших предпочтениях и темах. Беседы останутся."
+                doneText="Память удалена."
+                state={deleteMemoryState}
+                onStart={handleDeleteMemory}
+                onCancel={() => setDeleteMemoryState('idle')}
+                onConfirm={handleDeleteMemory}
+              />
+            )}
 
-            <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5`}>
-              <p className={`${theme.textPrimary} text-sm font-light mb-1`}>
-                Удалить данные умной памяти
-              </p>
-              <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-3 opacity-85`}>
-                Удалит события и повторяющиеся факты, которые умная память собрала сама. Беседы и старые заметки останутся.
-              </p>
-              {deleteMemoryV3State === 'done' ? (
-                <p className={`${theme.textMuted} text-xs font-light`}>Умная память удалена.</p>
-              ) : deleteMemoryV3State === 'error' ? (
-                <p className="text-red-400/60 text-xs font-light">Что-то пошло не так. Попробуйте позже.</p>
-              ) : deleteMemoryV3State === 'confirming' ? (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteMemoryV3State('idle')}
-                    className={`flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
-                  >
-                    Отмена
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeleteMemoryV3}
-                    className="flex-1 py-2 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70"
-                  >
-                    Да, удалить
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleDeleteMemoryV3}
-                  disabled={deleteMemoryV3State === 'loading'}
-                  className="py-2 px-4 rounded-lg border text-xs font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70 disabled:opacity-40"
-                >
-                  {deleteMemoryV3State === 'loading' ? 'Удаляю…' : 'Удалить данные умной памяти'}
-                </button>
-              )}
-            </div>
+            <DeleteAction
+              title="Удалить сквозную память"
+              description="Удалит устойчивые факты профиля, накопленные из всех бесед. Сами беседы останутся."
+              doneText="Сквозная память удалена."
+              state={deleteLifecycleState}
+              onStart={handleDeleteLifecycle}
+              onCancel={() => setDeleteLifecycleState('idle')}
+              onConfirm={handleDeleteLifecycle}
+            />
+
+            <DeleteAction
+              title="Удалить память бесед"
+              description="Удалит устойчивые факты, накопленные внутри отдельных бесед. Сами беседы останутся."
+              doneText="Память бесед удалена."
+              state={deleteDialogueState}
+              onStart={handleDeleteDialogue}
+              onCancel={() => setDeleteDialogueState('idle')}
+              onConfirm={handleDeleteDialogue}
+            />
+
+            <DeleteAction
+              title="Удалить всю память"
+              description="Удалит и сквозную память, и память бесед одновременно. Сами беседы останутся."
+              doneText="Вся память удалена."
+              state={deleteMemoryV3State}
+              onStart={handleDeleteMemoryV3}
+              onCancel={() => setDeleteMemoryV3State('idle')}
+              onConfirm={handleDeleteMemoryV3}
+            />
           </div>
         </section>
 
