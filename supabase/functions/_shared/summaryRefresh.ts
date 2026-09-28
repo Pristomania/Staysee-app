@@ -21,6 +21,7 @@ import {
   type OpenRouterUsagePayload,
 } from "./usageAnalytics.ts";
 import { refreshUserLifeMemory, type LifeMemoryModelConfig } from "./userLifeMemory.ts";
+import { fetchLegacyMemoryCompatibilityEnabled } from "./profilePrefs.ts";
 import {
   memoryDiagSummaryBuild,
   memoryDiagSummarySave,
@@ -195,7 +196,10 @@ export async function runConversationSummaryRefresh(
       postSaveSummaryUpdatedAt: null,
     });
 
-    if (input.userId) {
+    const legacyMemoryCompatibilityEnabled = input.userId
+      ? await fetchLegacyMemoryCompatibilityEnabled(input.supabase, input.userId)
+      : false;
+    if (input.userId && legacyMemoryCompatibilityEnabled) {
       await refreshUserLifeMemory(
         input.supabase,
         input.userId,

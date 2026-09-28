@@ -7,6 +7,12 @@ export interface MemoryScreenCapabilities {
   showConversationControl: boolean;
 }
 
+export function isLegacyMemoryCompatibilityEnabled(
+  profile: { legacy_memory_compat_enabled?: boolean | null } | null | undefined,
+): boolean {
+  return profile?.legacy_memory_compat_enabled === true;
+}
+
 const PROFILE_CAPABILITIES: MemoryScreenCapabilities = Object.freeze({
   canChooseConversation: true,
   showAccountWideMemory: true,

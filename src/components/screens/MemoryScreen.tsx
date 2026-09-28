@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Brain, ChevronDown, Pencil, Plus, Trash2, X, Check } from 'lucide-react';
+import { Brain, ChevronDown, History, Pencil, Plus, Sparkles, Trash2, X, Check } from 'lucide-react';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -48,15 +48,12 @@ import {
 } from '../../lib/normalizeMemoryForDisplay';
 import { normalizeMemoryTextForDisplay } from '../../lib/memoryDisplayNormalize';
 import { deleteMemoryV3Item, fetchMemoryV3Items, type MemoryV3ViewerItem } from '../../lib/memoryV3Viewer';
-import { resolveMemoryScreenCapabilities } from '../../lib/memoryScreenMode';
+import {
+  isLegacyMemoryCompatibilityEnabled,
+  resolveMemoryScreenCapabilities,
+} from '../../lib/memoryScreenMode';
 import { MemoryV3ItemList } from '../MemoryV3ItemList';
 import type { Conversation, UserMemory } from '../../types';
-
-/** Accounts created on/after this date see Memory V3 in place of the old
- * simple systems in "Память беседы"/"Сквозная память"; accounts created
- * before it keep those two sections unchanged, with Memory V3 added as a
- * third section instead. Set to this feature's deploy date. */
-const MEMORY_V3_VIEWER_LAUNCH_CUTOFF = new Date('2026-09-24T00:00:00Z');
 
 const MEMORY_V3_DIALOGUE_TOPIC_LABELS: Record<string, string> = {
   person: 'Люди',
@@ -298,9 +295,7 @@ function CollapsibleMemoryDisplaySection({
 export function MemoryScreen() {
   const { user, profile } = useAuth();
   const crossMemoryOn = isCrossMemoryEnabled(profile);
-  const isNewAccount = Boolean(
-    user?.created_at && new Date(user.created_at) >= MEMORY_V3_VIEWER_LAUNCH_CUTOFF,
-  );
+  const showLegacyCompatibility = isLegacyMemoryCompatibilityEnabled(profile);
   const [memoryV3AccountWide, setMemoryV3AccountWide] = useState<MemoryV3ViewerItem[]>([]);
   const [memoryV3Dialogue, setMemoryV3Dialogue] = useState<MemoryV3ViewerItem[]>([]);
   const {
@@ -333,6 +328,9 @@ export function MemoryScreen() {
   const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
   const [sectionOpen, setSectionOpen] = useState(initialSectionOpenState);
+  const activeCrossMemoryOn = memoryReturnScreen === 'chat'
+    ? conversationCrossMemoryOn
+    : crossMemoryOn;
 
   const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
     () => partitionCrossMemoryRows(globalRows),
@@ -405,9 +403,12 @@ export function MemoryScreen() {
       if (selectedConvId !== convId) setSelectedConvId(convId);
 
       if (convId) {
+        const conversationFields = showLegacyCompatibility
+          ? 'conversation_summary, cross_memory_enabled'
+          : 'cross_memory_enabled';
         const { data, error } = await supabase
           .from('conversations')
-          .select('conversation_summary, cross_memory_enabled')
+          .select(conversationFields)
           .eq('id', convId)
           .eq('user_id', user.id)
           .maybeSingle();
@@ -416,8 +417,14 @@ export function MemoryScreen() {
           navigateBack();
           return;
         }
-        setConversationCrossMemoryOn(data?.cross_memory_enabled !== false);
-        const raw = (data?.conversation_summary as string | null) ?? null;
+        const conversationData = data as {
+          conversation_summary?: string | null;
+          cross_memory_enabled?: boolean | null;
+        } | null;
+        setConversationCrossMemoryOn(conversationData?.cross_memory_enabled !== false);
+        const raw = showLegacyCompatibility
+          ? (conversationData?.conversation_summary ?? null)
+          : null;
         const parsed = parseConversationMemory(raw);
         if (parsed) {
           setConvMemory(parsed);
@@ -436,7 +443,7 @@ export function MemoryScreen() {
         setLegacyRaw(null);
       }
 
-      if (capabilities.showAccountWideMemory) {
+      if (capabilities.showAccountWideMemory && showLegacyCompatibility) {
         const { data: mem, error: memErr } = await supabase
           .from('user_memory')
           .select('id, user_id, memory_type, content, created_at')
@@ -469,6 +476,7 @@ export function MemoryScreen() {
   }, [
     capabilities.canChooseConversation,
     capabilities.showAccountWideMemory,
+    showLegacyCompatibility,
     currentConversation?.id,
     memoryReturnScreen,
     navigateBack,
@@ -635,6 +643,40 @@ export function MemoryScreen() {
             : 'Здесь можно выбрать беседу, проверить её память и управлять общими фактами профиля.'}
         </p>
 
+        <div className={`relative overflow-hidden rounded-2xl border px-5 py-5 mb-6 ${theme.border} ${theme.surface}`}>
+          <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#c9a96e]/10 blur-2xl" />
+          <div className="relative flex items-start gap-3.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#c9a96e]/20 bg-[#c9a96e]/10">
+              <Sparkles className="h-4 w-4 text-[#c9a96e]" strokeWidth={1.5} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className={`${theme.textPrimary} text-[15px] font-light`}>
+                Память, которой можно доверять
+              </p>
+              <p className={`${theme.textMuted} mt-1 text-xs font-light leading-relaxed`}>
+                {memoryReturnScreen === 'chat'
+                  ? 'Здесь остаётся только контекст этой беседы. Общая память управляется отдельно.'
+                  : 'StaySee разделяет память бесед и устойчивые факты о тебе — они больше не смешиваются.'}
+              </p>
+              {!loading && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${theme.textSecondary}`}>
+                    Эта беседа · {memoryV3Dialogue.length}
+                  </span>
+                  {capabilities.showAccountWideMemory && (
+                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${theme.textSecondary}`}>
+                      Обо мне · {memoryV3AccountWide.length}
+                    </span>
+                  )}
+                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${activeCrossMemoryOn ? 'text-[#c9a96e]' : theme.textMuted}`}>
+                    Сквозная · {activeCrossMemoryOn ? 'включена' : 'выключена'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         <ConversationHubNav active="memory" show={memoryReturnScreen === 'chat' && !!selectedConvId} />
 
         {loading ? (
@@ -644,7 +686,7 @@ export function MemoryScreen() {
         ) : (
           <>
             <section className="mb-8">
-              <p className={sectionLabel}>Память беседы</p>
+              <p className={sectionLabel}>Память этой беседы</p>
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
                 Устойчивые факты и ориентиры по этой беседе — без лишних деталей диалога.
               </p>
@@ -681,9 +723,26 @@ export function MemoryScreen() {
               )}
 
               {selectedConvId && (
-                <>
-                {!isNewAccount ? (
-                <div className="space-y-1.5">
+                <div className="space-y-4">
+                  <MemoryV3ItemList
+                    items={memoryV3Dialogue}
+                    theme={theme}
+                    cardBase={cardBase}
+                    onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
+                    emptyMessage="Пока ничего не запомнено в этой беседе."
+                    topicLabels={MEMORY_V3_DIALOGUE_TOPIC_LABELS}
+                  />
+
+                  {showLegacyCompatibility && (
+                    <details className={`${cardBase} overflow-hidden opacity-80`}>
+                      <summary className={`cursor-pointer list-none px-4 py-3.5 flex items-center gap-3 ${theme.surfaceHover}`}>
+                        <History className={`w-4 h-4 ${theme.textMuted} shrink-0`} strokeWidth={1.5} />
+                        <span className={`${theme.textSecondary} text-sm font-light flex-1`}>
+                          Старая память беседы — для сравнения
+                        </span>
+                        <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
+                      </summary>
+                      <div className="space-y-1.5 px-3 pb-3 pt-2">
                     {MEMORY_DISPLAY_SECTIONS.map((section) => (
                       <CollapsibleMemoryDisplaySection
                         key={section.id}
@@ -741,24 +800,16 @@ export function MemoryScreen() {
                     {convSave === 'error' && (
                       <p className="text-red-400/80 text-xs mt-2">Не удалось сохранить</p>
                     )}
-                  </div>
-                ) : (
-                  <MemoryV3ItemList
-                    items={memoryV3Dialogue}
-                    theme={theme}
-                    cardBase={cardBase}
-                    onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
-                    emptyMessage="Пока ничего не запомнено в этой беседе."
-                    topicLabels={MEMORY_V3_DIALOGUE_TOPIC_LABELS}
-                  />
-                )}
-                </>
+                      </div>
+                    </details>
+                  )}
+                </div>
               )}
             </section>
 
             {capabilities.showAccountWideMemory && (
             <section>
-              <p className={sectionLabel}>Сквозная память</p>
+              <p className={sectionLabel}>Обо мне</p>
               {capabilities.showProfileBulkControl && (
                 <div className="mb-3">
                   <CrossMemoryToggle cardClass={cardBase} onChanged={() => void load()} />
@@ -770,8 +821,25 @@ export function MemoryScreen() {
                   : 'Сейчас выключено: в новых сообщениях StaySee не подставляет записи отсюда. Память беседы выше — по-прежнему для этого чата.'}
               </p>
 
-              {!isNewAccount ? (
-                <>
+              <MemoryV3ItemList
+                items={memoryV3AccountWide}
+                theme={theme}
+                cardBase={cardBase}
+                onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
+                emptyMessage="Пока ничего не запомнено."
+                topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
+              />
+
+              {showLegacyCompatibility && (
+                <details className={`${cardBase} mt-4 overflow-hidden opacity-80`}>
+                  <summary className={`cursor-pointer list-none px-4 py-3.5 flex items-center gap-3 ${theme.surfaceHover}`}>
+                    <History className={`w-4 h-4 ${theme.textMuted} shrink-0`} strokeWidth={1.5} />
+                    <span className={`${theme.textSecondary} text-sm font-light flex-1`}>
+                      Старая сквозная память — для сравнения
+                    </span>
+                    <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
+                  </summary>
+                  <div className="px-3 pb-3 pt-2">
               {addingGlobal && crossMemoryOn ? (
                 <div className={`${cardBase} px-4 py-3.5 mb-2`}>
                   <textarea
@@ -898,55 +966,10 @@ export function MemoryScreen() {
                   )}
                 </div>
               )}
-                </>
-              ) : (
-                <MemoryV3ItemList
-                  items={memoryV3AccountWide}
-                  theme={theme}
-                  cardBase={cardBase}
-                  onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
-                  emptyMessage="Пока ничего не запомнено."
-                  topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
-                />
+                  </div>
+                </details>
               )}
             </section>
-            )}
-
-            {!isNewAccount && (
-              <section className="mt-8">
-                <p className={sectionLabel}>Умная память</p>
-                <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-                  Подтверждённые события и повторяющиеся паттерны, которые StaySee сама заметила.
-                  Догадки, которые ещё не подтвердились, здесь не показываются.
-                </p>
-                {selectedConvId &&
-                  (memoryV3Dialogue.length > 0 || !capabilities.showAccountWideMemory) && (
-                  <div className="mb-4">
-                    <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Эта беседа</p>
-                    <MemoryV3ItemList
-                      items={memoryV3Dialogue}
-                      theme={theme}
-                      cardBase={cardBase}
-                      onDelete={(item) => void deleteMemoryV3DialogueItem(item)}
-                      emptyMessage="Пока ничего не запомнено в этой беседе."
-                      topicLabels={MEMORY_V3_DIALOGUE_TOPIC_LABELS}
-                    />
-                  </div>
-                )}
-                {capabilities.showAccountWideMemory && (
-                  <>
-                    <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Обо мне в целом</p>
-                    <MemoryV3ItemList
-                      items={memoryV3AccountWide}
-                      theme={theme}
-                      cardBase={cardBase}
-                      onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
-                      emptyMessage="Пока ничего не запомнено."
-                      topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
-                    />
-                  </>
-                )}
-              </section>
             )}
           </>
         )}

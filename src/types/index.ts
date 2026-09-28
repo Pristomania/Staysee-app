@@ -6,6 +6,8 @@ export interface Profile {
   primary_concern?: string;
   /** When false, user_memory is not used in chat or auto-filled from summaries. */
   cross_memory_enabled?: boolean;
+  /** Internal comparison mode for the retired pre-V3 memory system. */
+  legacy_memory_compat_enabled?: boolean;
   room_deletion_requested_at?: string | null;
   room_purge_after?: string | null;
   created_at: string;

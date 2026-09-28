@@ -19,6 +19,7 @@ import {
   type CrossMemoryType,
   type LifeMemoryModelConfig,
 } from "./userLifeMemory.ts";
+import { fetchLegacyMemoryCompatibilityEnabled } from "./profilePrefs.ts";
 
 export { consolidateRowsRuleBased } from "./consolidateRuleBased.ts";
 
@@ -254,12 +255,33 @@ export async function consolidateAllUserLifeMemory(
   model?: LifeMemoryModelConfig,
   opts?: { userId?: string; dryRun?: boolean; forceRebuild?: boolean }
 ): Promise<ConsolidateUserResult[]> {
-  let q = supabase
+  let compatibleUserIds: string[];
+  if (opts?.userId) {
+    const legacyMemoryCompatibilityEnabled =
+      await fetchLegacyMemoryCompatibilityEnabled(supabase, opts.userId);
+    if (!legacyMemoryCompatibilityEnabled) return [];
+    compatibleUserIds = [opts.userId];
+  } else {
+    const { data: compatibleProfiles, error: compatibleProfilesError } =
+      await supabase
+        .from("profiles")
+        .select("id")
+        .eq("legacy_memory_compat_enabled", true);
+    if (compatibleProfilesError) {
+      console.warn("[consolidate] legacy compatibility unavailable");
+      return [];
+    }
+    compatibleUserIds = (compatibleProfiles ?? []).map((profile) =>
+      String(profile.id)
+    );
+    if (!compatibleUserIds.length) return [];
+  }
+
+  const q = supabase
     .from("user_memory")
     .select("id, user_id, memory_type, content")
-    .order("created_at", { ascending: true });
-
-  if (opts?.userId) q = q.eq("user_id", opts.userId);
+    .order("created_at", { ascending: true })
+    .in("user_id", compatibleUserIds);
 
   const { data, error } = await q;
   if (error) throw error;
