@@ -51,6 +51,7 @@ import {
   type MemoryV3TelegramAlertDiagnostic,
   type MemoryV3TelegramAlertPath,
 } from "../_shared/memoryV3/telegramAlert.ts";
+import { sendMemoryV3StaleAlertSafely } from "../_shared/memoryV3/staleAlert.ts";
 import {
   explainSummaryRefreshDecision,
   isMemoryDiagConversation,
@@ -294,6 +295,45 @@ function isMemoryV3LifecycleReadPromptTooLarge(error: unknown): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+/** Runs on every reply, across all accounts: catches a memory pipeline that
+ * has gone completely silent (no error, so the diagnostic-based alert below
+ * never fires -- e.g. an eligibility check throwing before ever attempting a
+ * reservation). Cheap and best-effort; a failure here must never affect the
+ * reply path. Kept outside the alert-scheduling helper below on purpose --
+ * that helper's own privacy-boundary tests require it to never reference an
+ * identifier by name, and this function's row lookup legitimately carries
+ * one (kept only for the database dedup table, never sent to Telegram). */
+async function checkMemoryV3StaleConversations(
+  svc: ReturnType<typeof makeServiceClient>,
+): Promise<void> {
+  try {
+    const { data, error } = await svc.rpc("flag_memory_v3_stale_conversations");
+    if (error || !Array.isArray(data)) return;
+    const botToken = Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN");
+    const chatId = Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID");
+    for (const row of data as Array<{
+      user_id: string;
+      conversation_id: string;
+      scope: string;
+      new_message_count: number;
+    }>) {
+      await sendMemoryV3StaleAlertSafely({
+        botToken,
+        chatId,
+        row: {
+          userId: row.user_id,
+          conversationId: row.conversation_id,
+          scope: row.scope as "dialogue" | "lifecycle",
+          newMessageCount: row.new_message_count,
+        },
+        fetchImpl: globalThis.fetch.bind(globalThis),
+      });
+    }
+  } catch {
+    // Best-effort background health check; must never affect the reply path.
   }
 }
 
@@ -1945,6 +1985,11 @@ Deno.serve(async (req: Request) => {
                 maxMessages: 12,
               })
             : Promise.resolve(),
+
+          // Cross-account memory-v3 health check: catches a silently stuck
+          // pipeline (no error raised, so the diagnostic-based alert never
+          // fires). Cheap and best-effort.
+          checkMemoryV3StaleConversations(svc),
         ])
       );
     } else if (userId && !clientConnected) {
