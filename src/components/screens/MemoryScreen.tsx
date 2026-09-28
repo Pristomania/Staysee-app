@@ -733,6 +733,7 @@ export function MemoryScreen() {
 
               {selectedConvId && (
                 <div className="space-y-4">
+                  <p className={sectionLabel}>Личная память беседы</p>
                   <MemoryV3ItemList
                     items={memoryV3Dialogue}
                     theme={theme}
