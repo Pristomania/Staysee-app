@@ -563,9 +563,11 @@ function validateClient(value: unknown): LifecycleHistoryImportClient {
   return value as LifecycleHistoryImportClient;
 }
 
-function validateHead(value: unknown): void {
+function validateHead(value: unknown): number {
   const head = record(value, ['stateRevision', 'itemCount']);
-  if (head.stateRevision !== 0 || head.itemCount !== 0) return fail();
+  if (!nonNegativeInteger(head.stateRevision) || !nonNegativeInteger(head.itemCount) ||
+    (head.stateRevision === 0 && head.itemCount !== 0)) return fail();
+  return head.stateRevision;
 }
 
 function validateResponse(value: unknown, expectedRevision: number): number {
@@ -600,11 +602,15 @@ export async function importReviewedLifecycleHistory(input: {
     const approvedState = validateDecision(root.reviewDecision, artifact);
     validateFreshSource(root.freshPreparedSource, artifact);
     const client = validateClient(root.client);
-    validateHead(await client.loadCurrentHead(root.userId));
+    const expectedStateRevision = validateHead(await client.loadCurrentHead(root.userId));
+    const expectedResultingStateRevision = Math.max(
+      approvedState.stateRevision,
+      expectedStateRevision + 1,
+    );
     const response = await client.importInitialState({
       importId: root.importId,
       userId: root.userId,
-      expectedStateRevision: 0,
+      expectedStateRevision,
       artifactDigest: artifact.payloadSha256,
       sourceSnapshotDigest: artifact.manifest.sourceSnapshotDigest as string,
       sourceCutoff: artifact.manifest.sourceCutoff as string,
@@ -614,7 +620,7 @@ export async function importReviewedLifecycleHistory(input: {
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       state: cloneJson(approvedState) as MemoryV3LifecycleState,
     });
-    const resultingStateRevision = validateResponse(response, artifact.state.stateRevision);
+    const resultingStateRevision = validateResponse(response, expectedResultingStateRevision);
     return Object.freeze({
       status: 'succeeded' as const,
       artifactDigest: artifact.payloadSha256,

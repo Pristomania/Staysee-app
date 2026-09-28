@@ -236,6 +236,31 @@ describe('reviewed lifecycle history import', () => {
     assert.equal(result.evidenceCount, 1);
   });
 
+  it('atomically replaces an existing state using its exact revision and advances the revision', async () => {
+    const data = await fixture();
+    const currentRevision = 5;
+    const calls: Array<Record<string, unknown>> = [];
+    const result = await importReviewedLifecycleHistory({
+      ...data,
+      userId: USER_ID,
+      importId: IMPORT_ID,
+      client: {
+        async loadCurrentHead() {
+          return { stateRevision: currentRevision, itemCount: 6 };
+        },
+        async importInitialState(input) {
+          calls.push(input as unknown as Record<string, unknown>);
+          return { result: 'succeeded', resultingStateRevision: currentRevision + 1 };
+        },
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].expectedStateRevision, currentRevision);
+    assert.equal(result.resultingStateRevision, currentRevision + 1);
+    assert.equal(result.itemCount, 1);
+  });
+
   it('rejects a rejected item without notes and refuses a review that rejects every item', async () => {
     for (const rejectAll of [false, true]) {
       const data = await fixture(rejectAll ? 1 : 2);
@@ -393,10 +418,10 @@ describe('reviewed lifecycle history import', () => {
     assert.equal(headCalls, 0);
   });
 
-  it('requires an empty revision-zero head and validates the single RPC response', async () => {
+  it('validates the observed head shape and the single RPC response', async () => {
     const data = await fixture();
     for (const head of [
-      { stateRevision: 1, itemCount: 0 },
+      { stateRevision: -1, itemCount: 0 },
       { stateRevision: 0, itemCount: 1 },
       { stateRevision: 0 },
     ]) {
@@ -415,7 +440,7 @@ describe('reviewed lifecycle history import', () => {
     await assert.rejects(() => importReviewedLifecycleHistory({
       ...data, userId: USER_ID, importId: IMPORT_ID,
       client: {
-        async loadCurrentHead() { return { stateRevision: 0, itemCount: 0 }; },
+        async loadCurrentHead() { return { stateRevision: 1, itemCount: 0 }; },
         async importInitialState() { calls += 1; return { result: 'wrong', resultingStateRevision: 1 }; },
       },
     }));
