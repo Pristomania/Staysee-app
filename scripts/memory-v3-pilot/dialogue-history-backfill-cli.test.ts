@@ -5,14 +5,14 @@ import { describe, it } from 'node:test';
 import { runDialogueHistoryBackfillFromArgv } from './dialogue-history-backfill-cli.ts';
 import { canonicalDialogueHistoryDigest } from './dialogue-history-backfill-contract.ts';
 import {
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  HISTORY_BACKFILL_FALLBACK_MODEL,
+  HISTORY_BACKFILL_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 
 // profile.maxMessagesPerChunk for memory-v3-lifecycle-history-backfill-v1 (the
 // shared profile both the lifecycle and dialogue tools use for their limits).
 const CHUNK_SIZE_CAP = 60;
-const PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
+const PROFILE_ID = 'memory-v3-dialogue-history-backfill-v1';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
 const MESSAGE_ID = '33333333-3333-4333-8333-333333333333';
@@ -23,14 +23,14 @@ const PRICE_PATH = 'C:\\safe\\price.json';
 const OUTPUT_PATH = 'C:\\safe\\history-backfill.json';
 const PRICE = {
   route: [{
-    model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+    model: HISTORY_BACKFILL_PRIMARY_MODEL,
     inputUsdPerMillion: '0.75', outputUsdPerMillion: '3.75',
     observedAt: '2026-09-22T11:00:00.000Z',
     sourceUrl: 'https://openrouter.ai/api/v1/models/google/gemini-3.7-flash/endpoints',
     supportedParameters: ['max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'structured_outputs'],
     zdr: true,
   }, {
-    model: LIFECYCLE_HISTORY_FALLBACK_MODEL,
+    model: HISTORY_BACKFILL_FALLBACK_MODEL,
     inputUsdPerMillion: '1.5', outputUsdPerMillion: '7.5',
     observedAt: '2026-09-22T11:00:00.000Z',
     sourceUrl: 'https://openrouter.ai/api/v1/models/mistralai/mistral-medium-3-5/endpoints',
@@ -363,6 +363,25 @@ function baseOptions(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Memory V3 dialogue history backfill CLI', () => {
+  it('rejects the lifecycle profile before env, source, revision, or provider access', async () => {
+    const calls: string[] = [];
+    const fetchImpl = providerFetch();
+    const argv = INSPECT_ARGV.map((entry) =>
+      entry === PROFILE_ID ? 'memory-v3-lifecycle-history-backfill-v1' : entry
+    );
+
+    await assert.rejects(() => runDialogueHistoryBackfillFromArgv(baseOptions({
+      argv,
+      sourceReader: () => { calls.push('source'); return {}; },
+      readEnvText: async () => { calls.push('read'); return ''; },
+      fetchImpl,
+      revisionClient: () => { calls.push('revision'); return {}; },
+    }) as never), /profile|command failed/u);
+
+    assert.deepEqual(calls, []);
+    assert.equal(fetchImpl.calls.length, 0);
+  });
+
   it('inspects the frozen source provider-free and returns no review packet', async () => {
     const log: string[] = [];
     const fetchImpl = providerFetch();
@@ -477,8 +496,8 @@ describe('Memory V3 dialogue history backfill CLI', () => {
       const body = JSON.parse(String(call.init.body));
       assert.equal(Object.hasOwn(body, 'model'), false);
       assert.deepEqual(body.models, [
-        LIFECYCLE_HISTORY_PRIMARY_MODEL,
-        LIFECYCLE_HISTORY_FALLBACK_MODEL,
+        HISTORY_BACKFILL_PRIMARY_MODEL,
+        HISTORY_BACKFILL_FALLBACK_MODEL,
       ]);
       assert.equal(body.max_tokens, index === 0 ? 4_096 : 1_200);
       assert.deepEqual(body.reasoning, { effort: 'low' });

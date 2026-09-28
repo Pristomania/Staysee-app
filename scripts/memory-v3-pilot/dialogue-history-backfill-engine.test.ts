@@ -12,16 +12,18 @@ import {
   type PreparedDialogueHistoryBackfill,
 } from './dialogue-history-backfill-contract.ts';
 import {
-  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  DIALOGUE_HISTORY_BACKFILL_PROFILE_ID as LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  HISTORY_BACKFILL_FALLBACK_MODEL as LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  HISTORY_BACKFILL_PRIMARY_MODEL as LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 import { canonicalStringify } from './contracts.mjs';
 import { validateMemoryV3Dialogue } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import {
-  buildMemoryV3ExtractorRequest,
-  type MemoryV3ExtractorRequest,
-} from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+  buildMemoryV3DialogueExtractorRequest as buildMemoryV3ExtractorRequest,
+} from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
+import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/extractorRequest.ts';
 import type { MemoryV3DialogueMessage } from '../../supabase/functions/_shared/memoryV3/messages.ts';
 import type { MemoryV3DialogueReconcileRequest } from '../../supabase/functions/_shared/memoryV3/dialoguePrompt.ts';
 

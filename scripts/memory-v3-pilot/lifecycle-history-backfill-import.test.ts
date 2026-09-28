@@ -15,7 +15,7 @@ import {
   LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 import { importReviewedLifecycleHistory } from './lifecycle-history-backfill-import.ts';
-import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/extractorRequest.ts';
 import type { MemoryV3LifecycleReconcileRequest } from '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -411,5 +411,15 @@ describe('reviewed lifecycle history import', () => {
       createHash('sha256').update('source-lock-v1').digest('hex').length,
       64,
     );
+    for (const file of [
+      './lifecycle-history-backfill-contract.ts',
+      './lifecycle-history-backfill-engine.ts',
+      './lifecycle-history-backfill-import.ts',
+    ]) {
+      const scopedSource = readFileSync(new URL(file, import.meta.url), 'utf8');
+      assert.doesNotMatch(scopedSource, /memoryV3\/prompt\.ts/);
+      assert.doesNotMatch(scopedSource, /dialogueExtractorPrompt/);
+      assert.match(scopedSource, /lifecycleExtractorPrompt\.ts/);
+    }
   });
 });

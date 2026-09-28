@@ -5,13 +5,13 @@ import {
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import type { MemoryV3DialogueMessage } from '../../supabase/functions/_shared/memoryV3/messages.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3DialogueExtractorRequest } from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
-  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
-  getLifecycleHistoryBackfillProfile,
-  type LifecycleHistoryBackfillProfile,
-} from './lifecycle-history-backfill-profile.ts';
+  DIALOGUE_HISTORY_BACKFILL_PROFILE_ID,
+  getDialogueHistoryBackfillProfile,
+  type DialogueHistoryBackfillProfile,
+} from './dialogue-history-backfill-profile.ts';
 
 export interface DialogueHistoryConversationInput {
   conversationId: string;
@@ -44,7 +44,7 @@ export interface DialogueHistoryPreparedChunk {
 
 export interface DialogueHistoryBackfillManifest {
   schemaVersion: 'memory-v3-dialogue-history-manifest-v1';
-  profileId: typeof LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID;
+  profileId: typeof DIALOGUE_HISTORY_BACKFILL_PROFILE_ID;
   sourceCutoff: string;
   sourceSnapshotDigest: string;
   conversationCount: number;
@@ -443,7 +443,7 @@ function serializeExtractorRequest(
     caseId: `memory-v3-shadow:${source.userId}:${conversation.conversationId}`,
     messages,
   });
-  const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+  const serialized = JSON.stringify(buildMemoryV3DialogueExtractorRequest(dialogue));
   return {
     bytes: new TextEncoder().encode(serialized).byteLength,
     sha256: createHash('sha256').update(serialized, 'utf8').digest('hex'),
@@ -451,7 +451,7 @@ function serializeExtractorRequest(
 }
 
 function chunkOneConversation(input: {
-  profile: LifecycleHistoryBackfillProfile;
+  profile: DialogueHistoryBackfillProfile;
   source: DialogueHistorySourceSnapshotInput;
   conversation: DialogueHistoryConversationInput;
   conversationOrdinal: number;
@@ -554,7 +554,7 @@ function comparePreparedChunks(
 }
 
 function projectManifest(
-  profile: LifecycleHistoryBackfillProfile,
+  profile: DialogueHistoryBackfillProfile,
   source: DialogueHistorySourceSnapshotInput,
   conversations: DialogueHistoryConversationInput[],
   chunks: DialogueHistoryPreparedChunk[],
@@ -627,7 +627,7 @@ export function prepareDialogueHistoryBackfill(input: {
 }): PreparedDialogueHistoryBackfill {
   return boundary((token) => {
     const root = projectRecord(token, input, INPUT_FIELDS);
-    const profile = getLifecycleHistoryBackfillProfile(root.profileId);
+    const profile = getDialogueHistoryBackfillProfile(root.profileId);
     const source = validateAndCloneSourceSnapshot(token, root.snapshot);
     const conversations = canonicalizeConversations(source);
     const chunks = conversations.flatMap((conversation, conversationOrdinal) =>

@@ -9,7 +9,11 @@ import {
   runMemoryV3DialogueShadow,
   runMemoryV3DialogueShadowBackgroundSafely,
 } from "./dialogueShadowRunner.ts";
-import { buildMemoryV3ExtractorRequest } from "./prompt.ts";
+import {
+  MEMORY_V3_DIALOGUE_EXTRACTOR_SYSTEM_INSTRUCTION,
+  MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
+  buildMemoryV3DialogueExtractorRequest,
+} from "./dialogueExtractorPrompt.ts";
 
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CONVERSATION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -62,6 +66,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const reserveInputs: unknown[] = [];
   const casInputs: unknown[] = [];
+  const extractorRequests: unknown[] = [];
   let active = 0;
   let maxActive = 0;
   const store: MemoryV3DialogueStore = {
@@ -95,8 +100,9 @@ function harness(overrides: Record<string, unknown> = {}) {
     store,
     extractorAdapterFactory() {
       calls.push("extractorFactory");
-      return async () => {
+      return async (request: unknown) => {
         calls.push("extractor");
+        extractorRequests.push(request);
         active += 1;
         maxActive = Math.max(maxActive, active);
         await Promise.resolve();
@@ -117,7 +123,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
-  return { options, calls, store, reserveInputs, casInputs, get maxActive() { return maxActive; } };
+  return { options, calls, store, reserveInputs, casInputs, extractorRequests, get maxActive() { return maxActive; } };
 }
 
 describe("Memory V3 dialogue shadow runner gates", () => {
@@ -192,7 +198,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     const original = structuredClone(messages);
     const caseId = `memory-v3-shadow:${USER_ID}:${CONVERSATION_ID}`;
     assert.equal(
-      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages }))).byteLength > 20_000,
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3DialogueExtractorRequest({ caseId, messages }))).byteLength > 20_000,
       true,
     );
 
@@ -224,7 +230,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
 
     const oneMore = messages.slice(messages.length - input.messages.length - 1);
     assert.equal(
-      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages: oneMore }))).byteLength > 20_000,
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3DialogueExtractorRequest({ caseId, messages: oneMore }))).byteLength > 20_000,
       true,
     );
     assert.equal((test.reserveInputs[0] as { messageCount: number }).messageCount, input.messages.length);
@@ -251,7 +257,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
       userId: USER_ID,
       conversationId: CONVERSATION_ID,
       pipelineVersion: "memory-v3-dialogue-v1",
-      extractorVersion: "memory-v3-openrouter-gemini-3.7-flash-shadow-v2",
+      extractorVersion: MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
       reconcilerVersion: "memory-v3-dialogue-reconciler-v1",
       model: "google/gemini-3.7-flash",
       inputHash: (test.reserveInputs[0] as { inputHash: string }).inputHash,
@@ -261,6 +267,10 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
       userMessageCount: 1,
     });
     assert.match((test.reserveInputs[0] as { inputHash: string }).inputHash, /^[0-9a-f]{64}$/);
+    assert.equal(
+      (test.extractorRequests[0] as { system: string }).system,
+      MEMORY_V3_DIALOGUE_EXTRACTOR_SYSTEM_INSTRUCTION,
+    );
     assert.equal(test.casInputs.length, 1);
     const cas = test.casInputs[0] as Record<string, unknown>;
     assert.equal(cas.expectedStateRevision, 0);
@@ -612,6 +622,9 @@ describe("Memory V3 dialogue background isolation", () => {
 describe("Memory V3 dialogue source isolation", () => {
   it("passes an empty trusted-forget list and never imports a legacy writer", () => {
     const source = readFileSync(new URL("./dialogueShadowRunner.ts", import.meta.url), "utf8");
+    assert.match(source, /from "\.\/dialogueExtractorPrompt\.ts"/);
+    assert.doesNotMatch(source, /from "\.\/prompt\.ts"/);
+    assert.doesNotMatch(source, /lifecycleExtractorPrompt/);
     assert.match(source, /trustedForgetMemoryKeys:\s*\[\]/);
     assert.equal(source.includes("conversation_summary"), false);
     assert.equal(source.includes("user_memory"), false);

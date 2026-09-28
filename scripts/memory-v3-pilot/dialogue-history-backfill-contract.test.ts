@@ -4,14 +4,14 @@ import { describe, it } from 'node:test';
 
 import { validateMemoryV3Dialogue } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import type { MemoryV3DialogueMessage } from '../../supabase/functions/_shared/memoryV3/messages.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3DialogueExtractorRequest } from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
   canonicalDialogueHistoryDigest,
   prepareDialogueHistoryBackfill,
 } from './dialogue-history-backfill-contract.ts';
 
-const PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
+const PROFILE_ID = 'memory-v3-dialogue-history-backfill-v1';
 const SOURCE_CUTOFF = '2026-09-21T23:59:59.000Z';
 
 function syntheticUuid(index: number): string {
@@ -65,7 +65,7 @@ function requestBytes(
     messages,
   });
   return new TextEncoder().encode(
-    JSON.stringify(buildMemoryV3ExtractorRequest(dialogue)),
+    JSON.stringify(buildMemoryV3DialogueExtractorRequest(dialogue)),
   ).byteLength;
 }
 
@@ -408,7 +408,7 @@ describe('history digests and public manifest', () => {
       caseId: `memory-v3-shadow:${source.userId}:${chunk.conversationId}`,
       messages: chunk.messages,
     });
-    const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+    const serialized = JSON.stringify(buildMemoryV3DialogueExtractorRequest(dialogue));
     const expected = createHash('sha256').update(serialized, 'utf8').digest('hex');
     assert.equal(chunk.extractorRequestSha256, expected);
 

@@ -413,6 +413,14 @@ The current live loader covers one conversation and at
 most 60 recent messages; backfill inspection instead reads the complete eligible
 history up to an explicit cutoff with zero provider calls.
 
+Lifecycle and dialogue backfills now own separate extractor prompts, versions,
+and profile ids. Lifecycle commands use
+`memory-v3-lifecycle-history-backfill-v1`; dialogue commands use
+`memory-v3-dialogue-history-backfill-v1`. A cross-scope profile is rejected
+before environment, network, or output-file work. Older artifacts remain
+audit evidence under the identity recorded inside them and must not be imported
+as if they were produced by the new scope-owned profile.
+
 Historical backfill allows an exact extractor request of at most 40,000 UTF-8
 bytes so that one indivisible older user message is not truncated. This is a
 history-only envelope: the normal live lifecycle path remains capped at 20,000

@@ -18,10 +18,8 @@ import {
   LIFECYCLE_HISTORY_PRIMARY_MODEL,
 } from './lifecycle-history-backfill-profile.ts';
 import { validateMemoryV3Dialogue } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import {
-  buildMemoryV3ExtractorRequest,
-  type MemoryV3ExtractorRequest,
-} from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/extractorRequest.ts';
+import { buildMemoryV3LifecycleExtractorRequest } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import type { MemoryV3LifecycleReconcileRequest } from '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
 import { createLifecycleHistoryRoutedAdapters } from './lifecycle-history-backfill-provider.ts';
 import { canonicalStringify } from './contracts.mjs';
@@ -212,7 +210,7 @@ function rehashPreparedChunk(value: PreparedLifecycleHistoryBackfill, index: num
     caseId: `memory-v3-shadow:${value.userId}:${chunk.conversationId}`,
     messages: chunk.messages,
   });
-  const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+  const serialized = JSON.stringify(buildMemoryV3LifecycleExtractorRequest(dialogue));
   chunk.firstCreatedAt = chunk.messages[0].createdAt;
   chunk.lastCreatedAt = chunk.messages[chunk.messages.length - 1].createdAt;
   chunk.firstMessageId = chunk.messages[0].id;
@@ -1127,7 +1125,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         caseId: `memory-v3-shadow:${userId}:${conversationId}`,
         messages,
       });
-      return new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest(dialogue))).byteLength;
+      return new TextEncoder().encode(JSON.stringify(buildMemoryV3LifecycleExtractorRequest(dialogue))).byteLength;
     };
     const seedBytes = requestBytesFor([first, secondSeed]);
     const second = { ...secondSeed, text: 'x'.repeat(1 + 40_000 - seedBytes) };

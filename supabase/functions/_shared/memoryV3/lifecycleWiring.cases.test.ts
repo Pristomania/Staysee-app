@@ -24,7 +24,7 @@ describe("staysee-chat lifecycle shadow composition", () => {
     }
   });
 
-  it("dispatches exactly one mutually exclusive runner independently of the summary refresh gate", () => {
+  it("dispatches the lifecycle or legacy runner independently of dialogue and summary refresh", () => {
     const text = source();
     const gate = text.indexOf("if (!bgShould)");
     const promise = text.indexOf("const memoryV3ShadowPromise = conversationId &&");
@@ -40,11 +40,14 @@ describe("staysee-chat lifecycle shadow composition", () => {
     assert.equal(settle > legacy && settle > lifecycle, true);
     assert.equal((text.match(/\brunMemoryV3Shadow\s*\(\{/g) ?? []).length, 1);
     assert.equal((text.match(/\brunMemoryV3LifecycleShadow\s*\(\{/g) ?? []).length, 1);
-    const dispatch = text.slice(mode, settle);
+    const dispatch = text.slice(promise, settle);
+    assert.match(dispatch, /const dialogueMemoryPromise/);
+    assert.match(dispatch, /const lifecycleMemoryPromise/);
     assert.match(
       dispatch,
-      /return \(memoryV3Mode === "lifecycle_shadow" \|\|[\s\S]*?memoryV3Mode === "lifecycle_all"\)[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
+      /const lifecycleMemoryPromise\s*=\s*\(memoryV3Mode === "lifecycle_shadow" \|\|[\s\S]*?memoryV3Mode === "lifecycle_all"\)[\s\S]*?: memoryV3Mode === "shadow"[\s\S]*?: Promise\.resolve\(\);/,
     );
+    assert.match(dispatch, /return Promise\.all\(\[dialogueMemoryPromise, lifecycleMemoryPromise\]\);/);
     assert.match(text.slice(settle), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
   });
 

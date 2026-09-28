@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3DialogueExtractorRequest as buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
 import { MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION } from
   '../../supabase/functions/_shared/memoryV3/dialoguePrompt.ts';
 import type { MemoryV3DialogueReconcileRequest } from
@@ -10,10 +10,10 @@ import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
 import { createMemoryV3DialogueOpenRouterAdapter } from
   '../../supabase/functions/_shared/memoryV3/dialogueTransport.ts';
 import {
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_MODEL_ROUTE,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  HISTORY_BACKFILL_FALLBACK_MODEL as LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  HISTORY_BACKFILL_MODEL_ROUTE as LIFECYCLE_HISTORY_MODEL_ROUTE,
+  HISTORY_BACKFILL_PRIMARY_MODEL as LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 import { createDialogueHistoryRoutedAdapters } from
   './dialogue-history-backfill-provider.ts';
 

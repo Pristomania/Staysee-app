@@ -8,22 +8,24 @@ import {
   type PreparedDialogueHistoryBackfill,
 } from './dialogue-history-backfill-contract.ts';
 import {
-  calculateLifecycleHistoryBudget,
-  getLifecycleHistoryBackfillProfile,
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_MODEL_ROUTE,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-  validateLifecycleHistoryPriceSnapshot,
-  type LifecycleHistoryBackfillProfile,
-  type LifecycleHistoryPriceSnapshot,
-  type LifecycleHistoryResolvedModel as DialogueHistoryResolvedModel,
-} from './lifecycle-history-backfill-profile.ts';
+  getDialogueHistoryBackfillProfile,
+  type DialogueHistoryBackfillProfile,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  calculateHistoryBackfillBudget,
+  HISTORY_BACKFILL_FALLBACK_MODEL,
+  HISTORY_BACKFILL_MODEL_ROUTE,
+  HISTORY_BACKFILL_PRIMARY_MODEL,
+  validateHistoryBackfillPriceSnapshot,
+  type HistoryBackfillPriceSnapshot,
+  type HistoryBackfillResolvedModel as DialogueHistoryResolvedModel,
+} from './history-backfill-provider-profile.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3DialogueExtractorRequest } from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
 import type {
   MemoryV3ModelAdapter,
   MemoryV3TransportResult,
@@ -88,7 +90,7 @@ export interface DialogueHistoryBackfillResult {
     'mistralai/mistral-medium-3-5',
   ];
   manifest: DialogueHistoryBackfillManifest;
-  priceSnapshot: LifecycleHistoryPriceSnapshot;
+  priceSnapshot: HistoryBackfillPriceSnapshot;
   budget: {
     maxRequests: number;
     reservedInputTokensPerCall: 32_768;
@@ -385,7 +387,7 @@ function assertExtractorRequestDigest(request: unknown, expected: string): void 
   }
 }
 
-function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfillProfile): PreparedDialogueHistoryBackfill {
+function validatePreparedUnsafe(value: unknown, profile: DialogueHistoryBackfillProfile): PreparedDialogueHistoryBackfill {
   const cloned = cloneJsonData(value, null, 'prepared_invalid') as JsonRecord;
   const root = strictRecord(cloned, PREPARED_FIELDS, PREPARED_FIELDS, null, 'prepared_invalid');
   if (typeof root.userId !== 'string' || !UUID.test(root.userId)) fail(null, 'prepared_invalid');
@@ -523,7 +525,7 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
           caseId: `memory-v3-shadow:${root.userId}:${grouped[0].conversationId}`,
           messages: candidate,
         });
-        const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+        const serialized = JSON.stringify(buildMemoryV3DialogueExtractorRequest(dialogue));
         if (new TextEncoder().encode(serialized).byteLength > profile.maxExtractorRequestBytes) break;
         selectedEnd = end;
       }
@@ -611,7 +613,7 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
   return { userId: root.userId, manifest, chunks };
 }
 
-function validatePrepared(value: unknown, profile: LifecycleHistoryBackfillProfile): PreparedDialogueHistoryBackfill {
+function validatePrepared(value: unknown, profile: DialogueHistoryBackfillProfile): PreparedDialogueHistoryBackfill {
   try {
     return validatePreparedUnsafe(value, profile);
   } catch (error) {
@@ -658,7 +660,7 @@ function inspectResolvedModel(
   value: unknown,
   stage: 'extractor_transport' | 'reconciler_transport',
 ): DialogueHistoryResolvedModel {
-  if (value !== LIFECYCLE_HISTORY_PRIMARY_MODEL && value !== LIFECYCLE_HISTORY_FALLBACK_MODEL) {
+  if (value !== HISTORY_BACKFILL_PRIMARY_MODEL && value !== HISTORY_BACKFILL_FALLBACK_MODEL) {
     fail(stage, `${stage}_invalid`);
   }
   return value;
@@ -738,9 +740,9 @@ export function __testOnlyCreateDialogueHistoryProviderCallGate(maxRequests: num
 }
 
 function buildBaseResult(
-  profile: LifecycleHistoryBackfillProfile,
+  profile: DialogueHistoryBackfillProfile,
   prepared: PreparedDialogueHistoryBackfill,
-  priceSnapshot: LifecycleHistoryPriceSnapshot,
+  priceSnapshot: HistoryBackfillPriceSnapshot,
   hardMaxUsd: string,
   ceilingUsd: string,
   maxRequests: number,
@@ -751,7 +753,7 @@ function buildBaseResult(
     schemaVersion: 'memory-v3-dialogue-history-result-v1',
     profileId: 'memory-v3-dialogue-history-backfill-v1',
     model: profile.model,
-    modelRoute: LIFECYCLE_HISTORY_MODEL_ROUTE,
+    modelRoute: HISTORY_BACKFILL_MODEL_ROUTE,
     manifest: prepared.manifest,
     priceSnapshot,
     budget: {
@@ -789,23 +791,23 @@ export async function runDialogueHistoryBackfill(input: {
   if (!profileDescriptor || !('value' in profileDescriptor) || profileDescriptor.enumerable !== true) {
     fail(null, 'profile_invalid');
   }
-  let profile: LifecycleHistoryBackfillProfile;
+  let profile: DialogueHistoryBackfillProfile;
   try {
-    profile = getLifecycleHistoryBackfillProfile(root.profileId);
+    profile = getDialogueHistoryBackfillProfile(root.profileId);
   } catch {
     fail(null, 'profile_invalid');
   }
   const prepared = validatePrepared(root.prepared, profile);
-  let priceSnapshot: LifecycleHistoryPriceSnapshot;
+  let priceSnapshot: HistoryBackfillPriceSnapshot;
   try {
-    priceSnapshot = validateLifecycleHistoryPriceSnapshot(root.priceSnapshot, root.nowMs as number);
+    priceSnapshot = validateHistoryBackfillPriceSnapshot(root.priceSnapshot, root.nowMs as number);
   } catch {
     fail(null, 'price_snapshot_invalid');
   }
   if (typeof root.maxBudgetUsd !== 'string') fail(null, 'budget_invalid');
-  let budget: ReturnType<typeof calculateLifecycleHistoryBudget>;
+  let budget: ReturnType<typeof calculateHistoryBackfillBudget>;
   try {
-    budget = calculateLifecycleHistoryBudget({
+    budget = calculateHistoryBackfillBudget({
       chunkCount: prepared.chunks.length,
       priceSnapshot,
       maxBudgetUsd: root.maxBudgetUsd,
@@ -821,7 +823,7 @@ export async function runDialogueHistoryBackfill(input: {
         caseId: `memory-v3-shadow:${prepared.userId}:${chunk.conversationId}`,
         messages: chunk.messages,
       });
-      request = buildMemoryV3ExtractorRequest(dialogue);
+      request = buildMemoryV3DialogueExtractorRequest(dialogue);
     } catch {
       fail(null, 'prepared_invalid');
     }
@@ -862,7 +864,7 @@ export async function runDialogueHistoryBackfill(input: {
   let successfulTransportCount = 0;
   const resolvedModelCounts = { primary: 0, fallback: 0 };
   const recordResolvedModel = (model: DialogueHistoryResolvedModel) => {
-    if (model === LIFECYCLE_HISTORY_PRIMARY_MODEL) resolvedModelCounts.primary += 1;
+    if (model === HISTORY_BACKFILL_PRIMARY_MODEL) resolvedModelCounts.primary += 1;
     else resolvedModelCounts.fallback += 1;
   };
   const callExtractorOnce = async (request: Parameters<MemoryV3ModelAdapter>[0]) => {
@@ -946,7 +948,7 @@ export async function runDialogueHistoryBackfill(input: {
           caseId: `memory-v3-shadow:${prepared.userId}:${chunk.conversationId}`,
           messages: chunk.messages,
         });
-        const extractorRequest = buildMemoryV3ExtractorRequest(dialogue);
+        const extractorRequest = buildMemoryV3DialogueExtractorRequest(dialogue);
         assertUtf8BytesAtMost(
           extractorRequest,
           profile.maxExtractorRequestBytes,

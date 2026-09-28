@@ -4,12 +4,14 @@ import { describe, it } from 'node:test';
 import { buildDialogueHistoryReviewPacket, runDialogueHistoryBackfill } from './dialogue-history-backfill-engine.ts';
 import { prepareDialogueHistoryBackfill } from './dialogue-history-backfill-contract.ts';
 import {
-  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  DIALOGUE_HISTORY_BACKFILL_PROFILE_ID as LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  HISTORY_BACKFILL_FALLBACK_MODEL as LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  HISTORY_BACKFILL_PRIMARY_MODEL as LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 import { main } from './dialogue-history-backfill-import-run.ts';
-import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import type { MemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/extractorRequest.ts';
 import type { MemoryV3DialogueReconcileRequest } from '../../supabase/functions/_shared/memoryV3/dialoguePrompt.ts';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';

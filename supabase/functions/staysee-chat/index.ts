@@ -1653,8 +1653,8 @@ Deno.serve(async (req: Request) => {
               rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
               userId,
             });
-            if (dialogueEligibility.eligible) {
-              return runMemoryV3DialogueShadowBackgroundSafely(
+            const dialogueMemoryPromise = dialogueEligibility.eligible
+              ? runMemoryV3DialogueShadowBackgroundSafely(
                 () => runMemoryV3DialogueShadow({
                   userId,
                   conversationId,
@@ -1672,12 +1672,12 @@ Deno.serve(async (req: Request) => {
                 }, (code) => console.error("[memory-v3-dialogue-transport]", code),
                   (usage) => logMemoryV3LifecycleUsage(svc, usage)),
                 (code) => console.error("[memory-v3-dialogue-shadow]", code),
-              );
-            }
+              )
+              : Promise.resolve();
             const memoryV3Mode = parseMemoryV3ShadowMode(
               Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
             );
-            return (memoryV3Mode === "lifecycle_shadow" ||
+            const lifecycleMemoryPromise = (memoryV3Mode === "lifecycle_shadow" ||
                 memoryV3Mode === "lifecycle_all")
               ? runMemoryV3LifecycleShadowBackgroundSafely(
                   () => runMemoryV3LifecycleShadow({
@@ -1721,6 +1721,7 @@ Deno.serve(async (req: Request) => {
                   (code) => console.error("[memory-v3-shadow]", code),
                 )
               : Promise.resolve();
+            return Promise.all([dialogueMemoryPromise, lifecycleMemoryPromise]);
           })()
         : Promise.resolve();
 
