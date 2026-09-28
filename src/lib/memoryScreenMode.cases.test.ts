@@ -12,6 +12,7 @@ function assertDeepEqual(actual: unknown, expected: unknown, message: string): v
 assertDeepEqual(resolveMemoryScreenCapabilities('profile'), {
   canChooseConversation: true,
   showAccountWideMemory: true,
+  showAccountWidePreview: false,
   showProfileBulkControl: true,
   showConversationControl: false,
 }, 'profile mode capabilities');
@@ -19,6 +20,7 @@ assertDeepEqual(resolveMemoryScreenCapabilities('profile'), {
 assertDeepEqual(resolveMemoryScreenCapabilities('chat'), {
   canChooseConversation: false,
   showAccountWideMemory: false,
+  showAccountWidePreview: true,
   showProfileBulkControl: false,
   showConversationControl: true,
 }, 'chat mode capabilities');
