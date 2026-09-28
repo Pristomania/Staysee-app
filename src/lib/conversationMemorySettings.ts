@@ -1,9 +1,3 @@
-export function isCrossMemoryEnabled(
-  profile: { cross_memory_enabled?: boolean | null } | null | undefined,
-): boolean {
-  return profile?.cross_memory_enabled !== false;
-}
-
 type RpcInvoker = (
   name: string,
   args: Record<string, unknown>,
@@ -18,16 +12,18 @@ async function invokeSupabaseRpc(
   return { error };
 }
 
-export async function setCrossMemoryEnabledForAll(
+export async function setConversationCrossMemoryEnabled(
+  conversationId: string,
   enabled: boolean,
   rpc: RpcInvoker = invokeSupabaseRpc,
 ): Promise<{ ok: boolean }> {
-  const { error } = await rpc('set_cross_memory_enabled_for_all', {
+  const { error } = await rpc('set_conversation_cross_memory_enabled', {
+    p_conversation_id: conversationId,
     p_enabled: enabled,
   });
 
   if (error) {
-    console.error('[profile] bulk cross-memory update failed');
+    console.error('[conversation] cross-memory update failed');
     return { ok: false };
   }
   return { ok: true };

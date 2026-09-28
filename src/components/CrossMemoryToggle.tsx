@@ -2,35 +2,43 @@ import { useState } from 'react';
 import { Link2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { isCrossMemoryEnabled, setCrossMemoryEnabled } from '../lib/profileSettings';
+import {
+  isCrossMemoryEnabled,
+  setCrossMemoryEnabledForAll,
+} from '../lib/profileSettings';
 
 const COPY = {
   title: 'Сквозная память',
-  on: 'Включена — StaySee может опираться на фразы из разных бесед.',
-  off: 'Выключена — в чат подставляется только память этой беседы.',
-  aria: 'Сквозная память между беседами',
+  on: 'Включена для всех бесед и будет включаться в новых.',
+  off: 'Выключена для всех бесед и новых чатов. Отдельный чат можно включить внутри него.',
+  aria: 'Сквозная память для всех бесед',
 } as const;
 
 export function CrossMemoryToggle({
   cardClass,
   embedded = false,
+  onChanged,
 }: {
   cardClass: string;
   /** Inline row without card chrome — for Memory screen header area */
   embedded?: boolean;
+  onChanged?: () => void;
 }) {
-  const { user, profile, refreshProfile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const { theme } = useTheme();
   const [busy, setBusy] = useState(false);
 
   const enabled = isCrossMemoryEnabled(profile);
 
   async function toggle() {
-    if (!user || busy) return;
+    if (busy) return;
     setBusy(true);
     const next = !enabled;
-    const { ok } = await setCrossMemoryEnabled(user.id, next);
-    if (ok) await refreshProfile();
+    const { ok } = await setCrossMemoryEnabledForAll(next);
+    if (ok) {
+      await refreshProfile();
+      onChanged?.();
+    }
     setBusy(false);
   }
 
