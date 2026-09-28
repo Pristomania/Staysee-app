@@ -45,7 +45,7 @@ The response must match this exact field shape (values are form examples, not di
 Each layerDecisions row has exactly kind, decision, itemRefs. Decide layers in order: event, recurrence, hypothesis.
 decision is emit or omit. emit requires at least one matching itemRef; omit requires an empty itemRefs array.
 Each item has exactly itemRef, kind, claim, status, sensitivity, eventTimeStart, eventTimeEnd, alternative.
-Sensitivity is normal or sensitive. Hypothesis requires a non-empty cautious alternative; every non-hypothesis uses alternative null.
+Sensitivity is normal or sensitive: mark an item sensitive when its claim concerns mental health, self-harm or suicidality, trauma, abuse, sexual health or intimacy, substance use, a medical condition, grief, or content the user asked to keep private or called embarrassing or shameful; every other claim is normal. A claim can be sensitive even when phrased neutrally or briefly. Hypothesis requires a non-empty cautious alternative; every non-hypothesis uses alternative null.
 Dates are YYYY-MM-DD or null. Never infer a more precise date than the user's words support.
 Each evidence row has exactly itemRef, sourceMessageId, relation, supportType, episodeKey.
 For recurrence supports, supportType is episode_observation, pattern_confirmation, or scope_boundary. For every other row it is null.
