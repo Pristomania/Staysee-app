@@ -470,12 +470,14 @@ field; that provider-routing field is not an application retry. The artifact
 contains normalized personal memory and must remain untracked. It must never be
 committed, printed to logs, or copied into test fixtures.
 
-The import is initial-only, service-role-only, and atomic. It revalidates the
-complete artifact and human decision, re-inspects the source, binds every fresh
-chunk to its actual messages, requires an empty revision-zero target, and then
-uses one database RPC. The read canary remains off until a separate activation.
-Rollback means turning the read mode off, not destructive deletion of the
-imported lifecycle state.
+The import is service-role-only and atomic. It revalidates the complete artifact
+and human decision, re-inspects the source, binds every fresh chunk to its actual
+messages, locks the current head at the exact observed revision, and then uses
+one database RPC to replace the prior shadow state. The resulting revision is
+advanced past both the paid artifact and replaced live state, preventing stale
+reserved work from applying afterward. The read canary remains off until a
+separate activation. Rollback means turning the read mode off, not destructive
+deletion of the imported lifecycle state.
 
 Provider-free source-inspection command shape (non-executable placeholders):
 
