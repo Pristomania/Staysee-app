@@ -43,6 +43,28 @@ describe("Memory V3 dialogue live wiring", () => {
     assert.equal(lifecycleReadBlock.includes("resolveMemoryV3DialogueEligibility"), false);
   });
 
+  it("keeps this dialogue's read and write active when cross-memory is off", () => {
+    const source = indexSource();
+
+    const dialogueReadStart = source.indexOf(
+      "Additive, independent of the legacy lifecycle read",
+    );
+    const dialogueReadEnd = source.indexOf("let contextPrompt", dialogueReadStart);
+    assert.ok(dialogueReadStart >= 0 && dialogueReadEnd > dialogueReadStart);
+    const dialogueReadBlock = source.slice(dialogueReadStart, dialogueReadEnd);
+    assert.doesNotMatch(dialogueReadBlock, /fetchCrossMemoryEnabled/);
+
+    const writeBlockStart = source.indexOf("const memoryV3ShadowPromise");
+    const writeBlockEnd = source.indexOf("EdgeRuntime.waitUntil(", writeBlockStart);
+    assert.ok(writeBlockStart >= 0 && writeBlockEnd > writeBlockStart);
+    const writeBlock = source.slice(writeBlockStart, writeBlockEnd);
+    assert.doesNotMatch(writeBlock, /if \(!crossMemoryOnForWrite\) return/);
+    assert.match(
+      writeBlock,
+      /const lifecycleMemoryPromise = crossMemoryOnForWrite\s*&&/,
+    );
+  });
+
   it("shares the same canary env var pair between the write and read paths", () => {
     const source = indexSource();
     assert.equal(
