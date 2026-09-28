@@ -527,18 +527,19 @@ export async function runMemoryV3DialogueShadow(
       transitions: reduced.transitions, extractorUsage: extractor.usage, reconcilerUsage: reconciler.usage,
     } as never);
   } catch {
-    return failed(runId, "state_write_failed");
+    return await persistFailure(failStore, runId, userId, "state_write_failed");
   }
   try {
     const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
     if (status === "state_conflict") {
       inspectExactRecord(cas, ["status"], "state_write_failed");
-      return failed(runId, "state_conflict");
+      return await persistFailure(failStore, runId, userId, "state_conflict");
     }
     const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
     if (result.status !== "succeeded" || result.resultingStateRevision !== resultingState.stateRevision) throw fail("state_write_failed");
-  } catch {
-    return failed(runId, "state_write_failed");
+  } catch (error) {
+    const code = ownDiagnostic(error) ?? "state_write_failed";
+    return await persistFailure(failStore, runId, userId, code);
   }
   return {
     status: "succeeded",
