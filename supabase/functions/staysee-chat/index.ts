@@ -994,10 +994,9 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // Additive, independent of the legacy lifecycle read above: a
-        // canary account keeps seeing the frozen account-wide snapshot
-        // unconditionally, plus this conversation's own dialogue-scoped
-        // notebook alongside it -- never a replacement.
+        // Additive, independent of the legacy lifecycle read above: this
+        // conversation keeps its own dialogue-scoped notebook even when the
+        // user disables account-wide cross-memory for other conversations.
         let dialogueMemory: MemoryV3DialogueReadContext | undefined;
         const dialogueReadEligibility = resolveMemoryV3DialogueEligibility({
           rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),
@@ -1005,19 +1004,13 @@ Deno.serve(async (req: Request) => {
           userId,
         });
         if (dialogueReadEligibility.eligible && conversationId) {
-          const crossMemoryOnForDialogueRead = await fetchCrossMemoryEnabled(
-            makeServiceClient(),
-            dialogueReadEligibility.userId,
-          );
-          if (crossMemoryOnForDialogueRead) {
-            try {
-              const loadedDialogue = await createMemoryV3DialogueReadStore(
-                makeServiceClient(),
-              ).load(dialogueReadEligibility.userId, conversationId);
-              if (loadedDialogue !== null) dialogueMemory = loadedDialogue;
-            } catch {
-              console.error("[staysee-chat] dialogue read load_failed");
-            }
+          try {
+            const loadedDialogue = await createMemoryV3DialogueReadStore(
+              makeServiceClient(),
+            ).load(dialogueReadEligibility.userId, conversationId);
+            if (loadedDialogue !== null) dialogueMemory = loadedDialogue;
+          } catch {
+            console.error("[staysee-chat] dialogue read load_failed");
           }
         }
 
@@ -1647,7 +1640,6 @@ Deno.serve(async (req: Request) => {
               svc,
               userId,
             );
-            if (!crossMemoryOnForWrite) return;
             const dialogueEligibility = resolveMemoryV3DialogueEligibility({
               rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),
               rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
@@ -1677,8 +1669,9 @@ Deno.serve(async (req: Request) => {
             const memoryV3Mode = parseMemoryV3ShadowMode(
               Deno.env.get("STAYSEE_MEMORY_V3_MODE"),
             );
-            const lifecycleMemoryPromise = (memoryV3Mode === "lifecycle_shadow" ||
-                memoryV3Mode === "lifecycle_all")
+            const lifecycleMemoryPromise = crossMemoryOnForWrite &&
+                (memoryV3Mode === "lifecycle_shadow" ||
+                  memoryV3Mode === "lifecycle_all")
               ? runMemoryV3LifecycleShadowBackgroundSafely(
                   () => runMemoryV3LifecycleShadow({
                     rawMode: memoryV3Mode,
@@ -1703,7 +1696,7 @@ Deno.serve(async (req: Request) => {
                     scheduleMemoryV3TelegramAlert("write", code);
                   },
                 )
-              : memoryV3Mode === "shadow"
+              : crossMemoryOnForWrite && memoryV3Mode === "shadow"
               ? runMemoryV3ShadowBackgroundSafely(
                   () => runMemoryV3Shadow({
                     rawMode: memoryV3Mode,
