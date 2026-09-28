@@ -328,10 +328,6 @@ export function MemoryScreen() {
   const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
   const [sectionOpen, setSectionOpen] = useState(initialSectionOpenState);
-  const activeCrossMemoryOn = memoryReturnScreen === 'chat'
-    ? conversationCrossMemoryOn
-    : crossMemoryOn;
-
   const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
     () => partitionCrossMemoryRows(globalRows),
     [globalRows],
@@ -457,7 +453,9 @@ export function MemoryScreen() {
 
       const memoryV3 = await fetchMemoryV3Items(activeConvId ?? undefined);
       setMemoryV3AccountWide(
-        capabilities.showAccountWideMemory ? memoryV3.accountWide : [],
+        capabilities.showAccountWideMemory || capabilities.showAccountWidePreview
+          ? memoryV3.accountWide
+          : [],
       );
       setMemoryV3Dialogue(memoryV3.dialogue);
     } catch (err) {
@@ -476,6 +474,7 @@ export function MemoryScreen() {
   }, [
     capabilities.canChooseConversation,
     capabilities.showAccountWideMemory,
+    capabilities.showAccountWidePreview,
     showLegacyCompatibility,
     currentConversation?.id,
     memoryReturnScreen,
@@ -631,18 +630,12 @@ export function MemoryScreen() {
           onBack={goBack}
           title="Память"
           subtitle={memoryReturnScreen === 'chat'
-            ? 'Что StaySee запоминает в этой беседе'
-            : 'Что StaySee запоминает о вас и о беседах'}
+            ? 'Эта беседа'
+            : 'Факты и беседы'}
           backLabel={memoryReturnScreen === 'chat' ? 'Назад в беседу' : 'В контекст'}
         />
       )}
     >
-        <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-4 opacity-90`}>
-          {memoryReturnScreen === 'chat'
-            ? 'Здесь показана только память текущей беседы. Другие чаты и общие факты профиля сюда не смешиваются.'
-            : 'Здесь можно выбрать беседу, проверить её память и управлять общими фактами профиля.'}
-        </p>
-
         <div className={`relative overflow-hidden rounded-2xl border px-5 py-5 mb-6 ${theme.border} ${theme.surface}`}>
           <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#c9a96e]/10 blur-2xl" />
           <div className="relative flex items-start gap-3.5">
@@ -651,26 +644,21 @@ export function MemoryScreen() {
             </div>
             <div className="min-w-0 flex-1">
               <p className={`${theme.textPrimary} text-[15px] font-light`}>
-                Память, которой можно доверять
+                Что помнит StaySee
               </p>
               <p className={`${theme.textMuted} mt-1 text-xs font-light leading-relaxed`}>
-                {memoryReturnScreen === 'chat'
-                  ? 'Здесь остаётся только контекст этой беседы. Общая память управляется отдельно.'
-                  : 'StaySee разделяет память бесед и устойчивые факты о тебе — они больше не смешиваются.'}
+                Здесь можно посмотреть сохранённые записи.
               </p>
               {!loading && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${theme.textSecondary}`}>
                     Эта беседа · {memoryV3Dialogue.length}
                   </span>
-                  {capabilities.showAccountWideMemory && (
+                  {(capabilities.showAccountWideMemory || capabilities.showAccountWidePreview) && (
                     <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${theme.textSecondary}`}>
                       Обо мне · {memoryV3AccountWide.length}
                     </span>
                   )}
-                  <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${activeCrossMemoryOn ? 'text-[#c9a96e]' : theme.textMuted}`}>
-                    Сквозная · {activeCrossMemoryOn ? 'включена' : 'выключена'}
-                  </span>
                 </div>
               )}
             </div>
@@ -688,7 +676,7 @@ export function MemoryScreen() {
             <section className="mb-8">
               <p className={sectionLabel}>Память этой беседы</p>
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-                Устойчивые факты и ориентиры по этой беседе — без лишних деталей диалога.
+                Помогает продолжать разговор с учётом сказанного раньше.
               </p>
               {capabilities.canChooseConversation ? (
                 <div className="mb-4">
@@ -807,6 +795,36 @@ export function MemoryScreen() {
               )}
             </section>
 
+            {capabilities.showAccountWidePreview && (
+              <section className="mb-8">
+                <p className={sectionLabel}>Сквозная память</p>
+                <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
+                  {conversationCrossMemoryOn
+                    ? 'Общие факты, которые StaySee учитывает в этой беседе.'
+                    : 'Сейчас не используется в этой беседе.'}
+                </p>
+                <details open className={`${cardBase} overflow-hidden ${conversationCrossMemoryOn ? '' : 'opacity-70'}`}>
+                  <summary className={`cursor-pointer list-none px-4 py-3.5 flex items-center gap-3 ${theme.surfaceHover}`}>
+                    <Brain className={`w-4 h-4 ${theme.textMuted} shrink-0`} strokeWidth={1.5} />
+                    <span className={`${theme.textSecondary} text-sm font-light flex-1`}>
+                      Обо мне · {memoryV3AccountWide.length}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
+                  </summary>
+                  <div className="px-3 pb-3 pt-2">
+                    <MemoryV3ItemList
+                      items={memoryV3AccountWide}
+                      theme={theme}
+                      cardBase={cardBase}
+                      readOnly
+                      emptyMessage="Пока ничего не запомнено."
+                      topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
+                    />
+                  </div>
+                </details>
+              </section>
+            )}
+
             {capabilities.showAccountWideMemory && (
             <section>
               <p className={sectionLabel}>Обо мне</p>
@@ -815,11 +833,11 @@ export function MemoryScreen() {
                   <CrossMemoryToggle cardClass={cardBase} onChanged={() => void load()} />
                 </div>
               )}
-              <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-                {crossMemoryOn
-                  ? GLOBAL_MEMORY_HINT
-                  : 'Сейчас выключено: в новых сообщениях StaySee не подставляет записи отсюда. Память беседы выше — по-прежнему для этого чата.'}
-              </p>
+              {crossMemoryOn && (
+                <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
+                  {GLOBAL_MEMORY_HINT}
+                </p>
+              )}
 
               <MemoryV3ItemList
                 items={memoryV3AccountWide}
@@ -883,19 +901,7 @@ export function MemoryScreen() {
                   <Plus className="w-3.5 h-3.5" strokeWidth={1.5} />
                   Добавить в сквозную память
                 </button>
-              ) : (
-                <p className={`${theme.textMuted} text-sm font-light mb-3 leading-relaxed`}>
-                  Сквозная память выключена — записи ниже не подставляются в новые сообщения.
-                </p>
-              )}
-
-              {!crossMemoryOn && globalRows.length > 0 && (
-                <div className={`${cardBase} px-4 py-4 mb-3 opacity-80`}>
-                  <p className={`${theme.textMuted} text-sm font-light leading-relaxed`}>
-                    Сохранённые записи (не используются в чате, пока выключено).
-                  </p>
-                </div>
-              )}
+              ) : null}
 
               {activeGlobalRows.length === 0 && crossMemoryOn && deprecatedGlobalRows.length === 0 ? (
                 <div className={`${cardBase} px-4 py-4 flex gap-3 items-start`}>

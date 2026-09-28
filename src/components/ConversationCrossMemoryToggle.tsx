@@ -57,12 +57,12 @@ export function ConversationCrossMemoryToggle({
           </p>
           <p className={`${theme.textMuted} text-xs font-light mt-1 leading-relaxed opacity-90`}>
             {confirmedEnabled
-              ? 'StaySee может учитывать общие факты и сохранять новые из этого чата.'
-              : 'Этот чат не читает и не пополняет сквозную память. Его собственная память продолжает работать.'}
+              ? 'Учитывает общие факты и может сохранять новые.'
+              : 'Использует только память этой беседы.'}
           </p>
           {isException && (
             <p className={`${theme.textSecondary} text-xs font-light mt-2 leading-relaxed`}>
-              Это исключение только для этого чата. Для остальных и новых бесед память остаётся выключенной.
+              Включена только здесь.
             </p>
           )}
           {failed && (

@@ -3,6 +3,7 @@ export type MemoryScreenOrigin = 'profile' | 'chat';
 export interface MemoryScreenCapabilities {
   canChooseConversation: boolean;
   showAccountWideMemory: boolean;
+  showAccountWidePreview: boolean;
   showProfileBulkControl: boolean;
   showConversationControl: boolean;
 }
@@ -16,6 +17,7 @@ export function isLegacyMemoryCompatibilityEnabled(
 const PROFILE_CAPABILITIES: MemoryScreenCapabilities = Object.freeze({
   canChooseConversation: true,
   showAccountWideMemory: true,
+  showAccountWidePreview: false,
   showProfileBulkControl: true,
   showConversationControl: false,
 });
@@ -23,6 +25,7 @@ const PROFILE_CAPABILITIES: MemoryScreenCapabilities = Object.freeze({
 const CHAT_CAPABILITIES: MemoryScreenCapabilities = Object.freeze({
   canChooseConversation: false,
   showAccountWideMemory: false,
+  showAccountWidePreview: true,
   showProfileBulkControl: false,
   showConversationControl: true,
 });

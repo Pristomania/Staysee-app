@@ -34,7 +34,7 @@ export const GLOBAL_MEMORY_PLACEHOLDER =
   'Устойчивый факт или предпочтение контакта: «предпочитает прямой тон», «есть сын», «живёт в…»';
 
 export const GLOBAL_MEMORY_HINT =
-  'Сквозная память — только стабильный профиль и как с вами говорить. Темы и эмоции бесед остаются в каждом чате отдельно.';
+  'Общие факты, которые StaySee может учитывать в беседах.';
 
 export function emptyMemory(): StructuredMemory {
   return {

@@ -19,13 +19,15 @@ export function MemoryV3ItemList({
   theme,
   cardBase,
   onDelete,
+  readOnly = false,
   emptyMessage,
   topicLabels,
 }: {
   items: MemoryV3ViewerItem[];
   theme: Theme;
   cardBase: string;
-  onDelete: (item: MemoryV3ViewerItem) => void;
+  onDelete?: (item: MemoryV3ViewerItem) => void;
+  readOnly?: boolean;
   emptyMessage: string;
   topicLabels: Record<string, string>;
 }) {
@@ -83,7 +85,9 @@ export function MemoryV3ItemList({
                     ) : (
                       <p className={`${theme.textPrimary} text-sm font-light flex-1`}>{item.claim}</p>
                     )}
-                    <ConfirmDeleteButton theme={theme} onConfirm={() => onDelete(item)} />
+                    {!readOnly && onDelete && (
+                      <ConfirmDeleteButton theme={theme} onConfirm={() => onDelete(item)} />
+                    )}
                   </li>
                 );
               })}

@@ -32,10 +32,10 @@ describe("MemoryScreen legacy visibility", () => {
     assert.ok(accountList >= 0 && accountList < legacyAccount);
   });
 
-  it("shows the active conversation setting in the chat status badge", () => {
+  it("uses the active conversation setting for the chat preview", () => {
     assert.match(
       screen,
-      /memoryReturnScreen === 'chat'\s*\? conversationCrossMemoryOn\s*:\s*crossMemoryOn/u,
+      /conversationCrossMemoryOn\s*\? 'Общие факты, которые StaySee учитывает в этой беседе\.'/u,
     );
   });
 });
