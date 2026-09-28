@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3LifecycleExtractorRequest } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import { MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION } from
   '../../supabase/functions/_shared/memoryV3/lifecyclePrompt.ts';
 import type { MemoryV3LifecycleReconcileRequest } from
@@ -35,7 +35,7 @@ const EXTRACTED = {
 const RECONCILED = { operations: [] };
 
 function extractorRequest() {
-  return buildMemoryV3ExtractorRequest({
+  return buildMemoryV3LifecycleExtractorRequest({
     caseId: 'memory-v3-shadow:00000000-0000-4000-8000-000000000001:00000000-0000-4000-8000-000000000002',
     messages: [{
       id: '00000000-0000-4000-8000-000000000003',

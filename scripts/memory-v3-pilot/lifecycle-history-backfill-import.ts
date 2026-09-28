@@ -13,10 +13,12 @@ import {
   canonicalLifecycleHistoryDigest,
 } from './lifecycle-history-backfill-contract.ts';
 import {
-  MEMORY_V3_EXTRACTOR_VERSION,
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import {
+  MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+  buildMemoryV3LifecycleExtractorRequest,
+} from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import {
   MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
   MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
@@ -48,7 +50,7 @@ export interface LifecycleHistoryImportClient {
     sourceCutoff: string;
     profileId: string;
     pipelineVersion: string;
-    extractorVersion: typeof MEMORY_V3_EXTRACTOR_VERSION;
+    extractorVersion: typeof MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION;
     reconcilerVersion: string;
     state: MemoryV3LifecycleState;
   }): Promise<unknown>;
@@ -486,7 +488,7 @@ function validateFreshSource(value: unknown, artifact: ReturnType<typeof validat
       chunk.conversationOrdinal,
       chunk.chunkOrdinal,
     ]);
-    const requestText = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+    const requestText = JSON.stringify(buildMemoryV3LifecycleExtractorRequest(dialogue));
     const requestBytes = new TextEncoder().encode(requestText).byteLength;
     const requestSha256 = sha256Text(requestText);
     if (
@@ -596,7 +598,7 @@ export async function importReviewedLifecycleHistory(input: {
       sourceCutoff: artifact.manifest.sourceCutoff as string,
       profileId: artifact.benchmarkResult.profileId as string,
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
-      extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+      extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       state: cloneJson(artifact.state) as MemoryV3LifecycleState,
     });

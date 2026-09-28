@@ -22,7 +22,7 @@ import {
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3LifecycleExtractorRequest } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import type {
   MemoryV3ModelAdapter,
   MemoryV3TransportResult,
@@ -513,7 +513,7 @@ function validatePreparedUnsafe(value: unknown, profile: LifecycleHistoryBackfil
           caseId: `memory-v3-shadow:${root.userId}:${grouped[0].conversationId}`,
           messages: candidate,
         });
-        const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+        const serialized = JSON.stringify(buildMemoryV3LifecycleExtractorRequest(dialogue));
         if (new TextEncoder().encode(serialized).byteLength > profile.maxExtractorRequestBytes) break;
         selectedEnd = end;
       }
@@ -900,7 +900,7 @@ export async function runLifecycleHistoryBackfill(input: {
         caseId: `memory-v3-shadow:${prepared.userId}:${chunk.conversationId}`,
         messages: chunk.messages,
       });
-      request = buildMemoryV3ExtractorRequest(dialogue);
+      request = buildMemoryV3LifecycleExtractorRequest(dialogue);
     } catch {
       fail(null, 'prepared_invalid');
     }
@@ -987,7 +987,7 @@ export async function runLifecycleHistoryBackfill(input: {
         caseId: `memory-v3-shadow:${prepared.userId}:${chunk.conversationId}`,
         messages: chunk.messages,
       });
-      const extractorRequest = buildMemoryV3ExtractorRequest(dialogue);
+      const extractorRequest = buildMemoryV3LifecycleExtractorRequest(dialogue);
       assertUtf8BytesAtMost(
         extractorRequest,
         profile.maxExtractorRequestBytes,

@@ -5,7 +5,7 @@ import {
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
 import type { MemoryV3DialogueMessage } from '../../supabase/functions/_shared/memoryV3/messages.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import { buildMemoryV3LifecycleExtractorRequest } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
@@ -443,7 +443,7 @@ function serializeExtractorRequest(
     caseId: `memory-v3-shadow:${source.userId}:${conversation.conversationId}`,
     messages,
   });
-  const serialized = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+  const serialized = JSON.stringify(buildMemoryV3LifecycleExtractorRequest(dialogue));
   return {
     bytes: new TextEncoder().encode(serialized).byteLength,
     sha256: createHash('sha256').update(serialized, 'utf8').digest('hex'),
