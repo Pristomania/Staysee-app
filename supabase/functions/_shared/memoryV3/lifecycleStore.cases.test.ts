@@ -304,6 +304,56 @@ describe("Memory V3 lifecycle store", () => {
     }
   });
 
+  it("writes a real create operation through with its topic, not just empty operations", async () => {
+    // Regression coverage: every happy-path test above uses operations: [],
+    // which never exercises projectOperations' per-item field check -- that's
+    // exactly how a production-only bug (operations objects gained a `topic`
+    // field for the topic-classification feature, but this store's own
+    // independent field-shape check was never updated to expect it) shipped
+    // without any test catching it. Every real write always failed here.
+    const memoryKey = "a".repeat(64);
+    const mentionTime = "2026-09-14T10:00:00.000Z";
+    const extraction: MemoryV3Extraction = {
+      run: emptyExtraction().run,
+      items: [{
+        localItemKey: memoryKey, kind: "event", claim: "Любит утренние прогулки",
+        scope: "cross_conversation", conversationId: null,
+        eventTimeStart: null, eventTimeEnd: null, status: "active",
+        sensitivity: "normal", alternative: null,
+      } as MemoryV3Extraction["items"][number]],
+      evidence: [{
+        itemKey: memoryKey, sourceMessageId: MESSAGE_ID, relation: "supports",
+        supportType: null, episodeKey: "episode:1", provenanceRole: "user", mentionTime,
+      } as MemoryV3Extraction["evidence"][number]],
+    };
+    const input = {
+      ...successWrite(true),
+      extraction,
+      operations: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context" }],
+      transitions: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, resultingMemoryKey: memoryKey }],
+      state: {
+        ...emptyState(1),
+        items: [{
+          memoryKey, kind: "event", claim: "Любит утренние прогулки", status: "active",
+          sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, alternative: null,
+          topic: "life_context", firstSeenAt: mentionTime, updatedAt: mentionTime, revision: 1,
+          evidence: [{
+            conversationId: CONVERSATION_ID, sourceMessageId: MESSAGE_ID, relation: "supports",
+            supportType: null, episodeKey: "episode:1", provenanceRole: "user", mentionTime,
+          }],
+        }],
+      },
+    };
+    const fake = fakeClient([{ data: [{ result: "succeeded", resulting_state_revision: 1 }], error: null }]);
+    const result = await createMemoryV3LifecycleStore(fake.client).compareAndSwap(input as never);
+    assert.deepEqual(result, { status: "succeeded", resultingStateRevision: 1 });
+    assert.equal(fake.calls.length, 1);
+    const sentOperations = fake.calls[0].args.p_operations as Array<Record<string, unknown>>;
+    assert.deepEqual(sentOperations, [
+      { type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context" },
+    ]);
+  });
+
   it("returns state_conflict only with a null resulting revision", async () => {
     const fake = fakeClient([{ data: [{ result: "state_conflict", resulting_state_revision: null }], error: null }]);
     assert.deepEqual(await createMemoryV3LifecycleStore(fake.client).compareAndSwap(successWrite()), { status: "state_conflict" });
