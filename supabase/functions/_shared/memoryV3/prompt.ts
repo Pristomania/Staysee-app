@@ -204,6 +204,12 @@ User-only evidence:
 Assistant and system messages are context only.
 assistant and system messages cannot confirm the user's biography.
 
+Sensitivity classification:
+- sensitive: the claim concerns mental health, self-harm or suicidality, trauma, abuse, sexual health or intimacy, substance use, a diagnosed or suspected medical condition, grief, or a fact the user explicitly asked to keep private or described as embarrassing or shameful.
+- normal: every other claim.
+- Classify by the claim's own content, not by the surrounding conversation's general tone.
+- A claim can be sensitive even when phrased neutrally or briefly; do not require explicit emotional language to classify it as sensitive.
+
 Durable future-use gate:
 - Isolated current difficulty or task-specific problem is not automatically long-term memory.
 - If all candidate items fail durable future-use admission, return exactly empty items/evidence.

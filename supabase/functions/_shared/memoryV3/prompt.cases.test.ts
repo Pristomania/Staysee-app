@@ -60,6 +60,17 @@ describe("Memory V3 production prompt boundary", () => {
     );
   });
 
+  it("gives concrete criteria for sensitivity, not just the bare enum", () => {
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /sensitive: the claim concerns mental health, self-harm or suicidality, trauma, abuse, sexual health or intimacy, substance use, a diagnosed or suspected medical condition, grief, or a fact the user explicitly asked to keep private or described as embarrassing or shameful\./,
+    );
+    assert.match(
+      MEMORY_V3_SYSTEM_INSTRUCTION,
+      /A claim can be sensitive even when phrased neutrally or briefly; do not require explicit emotional language to classify it as sensitive\./,
+    );
+  });
+
   it("forbids writing a claim with 'пользователь', a name, or a pronoun as its subject", () => {
     assert.match(
       MEMORY_V3_SYSTEM_INSTRUCTION,
