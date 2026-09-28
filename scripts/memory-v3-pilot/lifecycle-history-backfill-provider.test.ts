@@ -326,8 +326,8 @@ describe('history provider isolation', () => {
     assert.equal(source.includes('node:fs'), false);
 
     for (const [relative, expected] of [
-      ['../../supabase/functions/_shared/memoryV3/transport.ts', '8FA07F500CE2E20A736549CF05B4BC1B274C8F1AC477B24C8EE6389069FAC567'],
-      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', 'B298AE34C15CD6FBE83138CA353D28ABCD56FA220D918FDD15A824A4BD70F126'],
+      ['../../supabase/functions/_shared/memoryV3/transport.ts', '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D'],
+      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', '6E4E5B37A09E50649F01665353B8363CD519B797150D32159E887E668B7598F9'],
     ] as const) {
       const bytes = await readFile(fileURLToPath(new URL(relative, import.meta.url)));
       assert.equal(createHash('sha256').update(bytes).digest('hex').toUpperCase(), expected);

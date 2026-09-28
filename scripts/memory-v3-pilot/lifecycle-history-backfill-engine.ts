@@ -620,6 +620,95 @@ function parseJsonDataOnly(raw: unknown, stage: 'extractor_parse' | 'reconciler_
   }
 }
 
+async function omitUnderSupportedBackfillRecurrences(
+  raw: unknown,
+  dialogue: ReturnType<typeof validateMemoryV3Dialogue>,
+  extractorVersion: string,
+): Promise<unknown> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
+  const root = raw as JsonRecord;
+  if (!Array.isArray(root.items) || !Array.isArray(root.evidence) ||
+    !Array.isArray(root.layerDecisions)) return raw;
+
+  const omittedRefs = new Set<string>();
+  const validationEvidence: JsonRecord[] = [];
+  const userMessageIds = dialogue.messages
+    .filter((message) => message.role === 'user')
+    .map((message) => message.id);
+  for (const item of root.items) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
+    const record = item as JsonRecord;
+    if (record.kind !== 'recurrence' ||
+      (record.status !== 'candidate' && record.status !== 'active') ||
+      typeof record.itemRef !== 'string') continue;
+    const episodes = new Set<string>();
+    for (const evidence of root.evidence) {
+      if (typeof evidence !== 'object' || evidence === null || Array.isArray(evidence)) continue;
+      const row = evidence as JsonRecord;
+      if (row.itemRef === record.itemRef && row.relation === 'supports' &&
+        row.supportType === 'episode_observation' && typeof row.episodeKey === 'string' &&
+        row.episodeKey.length > 0) episodes.add(row.episodeKey);
+    }
+    if (episodes.size !== 1) continue;
+    const sourceMessageId = userMessageIds.find((messageId) =>
+      !root.evidence.some((evidence) =>
+        typeof evidence === 'object' && evidence !== null && !Array.isArray(evidence) &&
+        (evidence as JsonRecord).itemRef === record.itemRef &&
+        (evidence as JsonRecord).sourceMessageId === messageId &&
+        (evidence as JsonRecord).relation === 'supports'));
+    if (sourceMessageId === undefined) continue;
+    omittedRefs.add(record.itemRef);
+    validationEvidence.push(Object.assign(Object.create(null), {
+      itemRef: record.itemRef,
+      sourceMessageId,
+      relation: 'supports',
+      supportType: 'episode_observation',
+      episodeKey: `episode:${sourceMessageId}`,
+    }));
+  }
+  if (omittedRefs.size === 0) return raw;
+
+  try {
+    await normalizeMemoryV3LayeredResponse(
+      Object.assign(Object.create(null), root, {
+        evidence: [...root.evidence, ...validationEvidence],
+      }),
+      dialogue,
+      extractorVersion,
+      'cross_conversation',
+    );
+  } catch {
+    return raw;
+  }
+
+  const recurrenceDecision = root.layerDecisions.find((decision) =>
+    typeof decision === 'object' && decision !== null && !Array.isArray(decision) &&
+    (decision as JsonRecord).kind === 'recurrence');
+  if (typeof recurrenceDecision !== 'object' || recurrenceDecision === null ||
+    !Array.isArray((recurrenceDecision as JsonRecord).itemRefs)) return raw;
+
+  const layerDecisions = root.layerDecisions.map((decision) => {
+    if (decision !== recurrenceDecision) return decision;
+    const itemRefs = ((decision as JsonRecord).itemRefs as unknown[])
+      .filter((itemRef) => typeof itemRef !== 'string' || !omittedRefs.has(itemRef));
+    return Object.assign(Object.create(null), decision, {
+      decision: itemRefs.length === 0 ? 'omit' : 'emit',
+      itemRefs,
+    });
+  });
+  return Object.assign(Object.create(null), root, {
+    layerDecisions,
+    items: root.items.filter((item) =>
+      typeof item !== 'object' || item === null || Array.isArray(item) ||
+      typeof (item as JsonRecord).itemRef !== 'string' ||
+      !omittedRefs.has((item as JsonRecord).itemRef as string)),
+    evidence: root.evidence.filter((row) =>
+      typeof row !== 'object' || row === null || Array.isArray(row) ||
+      typeof (row as JsonRecord).itemRef !== 'string' ||
+      !omittedRefs.has((row as JsonRecord).itemRef as string)),
+  });
+}
+
 function inspectUsage(value: unknown, stage: 'extractor_transport' | 'reconciler_transport'): Usage | null {
   if (value === null) return null;
   const usage = strictRecord(value, USAGE_FIELDS, USAGE_FIELDS, stage, `${stage}_invalid`);
@@ -907,7 +996,11 @@ export async function runLifecycleHistoryBackfill(input: {
       );
       assertExtractorRequestDigest(extractorRequest, chunk.extractorRequestSha256);
       const extractorTransport = await callExtractorOnce(extractorRequest);
-      const parsedExtraction = parseJsonDataOnly(extractorTransport.content, 'extractor_parse');
+      const parsedExtraction = await omitUnderSupportedBackfillRecurrences(
+        parseJsonDataOnly(extractorTransport.content, 'extractor_parse'),
+        dialogue,
+        profile.extractorVersion,
+      );
       let extraction;
       try {
         // scopeMode is 'cross_conversation' (not dialogue's 'conversation'): this

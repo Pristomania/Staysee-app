@@ -113,9 +113,21 @@ Memory item admission requires all of the following at once:
 - Not a forbidden or redundant inference.
 
 Event:
-- discrete user-lived occurrence, transition, milestone, bounded biographical episode, or an explicit standing decision the user reported as fact;
+- discrete user-lived occurrence, transition, milestone, bounded biographical episode, explicit standing decision, or stable profile/communication fact admitted below;
 - not a current difficulty, mood, ability, denial of an assistant guess, invented opposite biography, or disposable recurrence-only example;
 - preserve source uncertainty (including "вроде"/maybe/seems); never emit a tentative report as a certain event.
+
+Stable profile and communication facts:
+- Emit an active event for a current stable profile fact or durable communication preference that is useful beyond the present conversation.
+- One clear user statement is sufficient for a stable profile fact or durable communication preference; never require repetition for these event items.
+- Stable profile facts include name, age, occupation or field of activity, current family relationships and identifying details, stable close friendships, pets, current living situation, current geography, and long-term ongoing projects or roles.
+- Durable communication preferences include preferred form of address, grammatical gender used for addressing them, tone, directness, and what helps or does not help in contact.
+- Infer grammatical gender for addressing only from an explicit first-person self-reference in user evidence; never infer it from a name, assistant wording, or stereotype.
+- When a stable fact appears inside a larger story, conflict, past event, or third-party situation, extract only the current stable fact and not the surrounding narrative.
+- An explicit user request to remember is sufficient evidence of future usefulness, but it never overrides safety, user-only evidence, or forbidden-content rules.
+- These are event items, not recurrence items; the two-episode recurrence rule does not apply.
+- Never admit health, medical conditions, religion, or beliefs through this stable-fact rule.
+- Do not admit incidental details, temporary states, or third-party biography as the user's stable profile.
 
 Recurrence:
 - at least two different real episodes;

@@ -325,7 +325,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream',
     ]);
     assert.deepEqual(Object.keys(JSON.parse(String(reconcilerFetch.calls[0].init.body))).sort(), [
-      'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream',
+      'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream', 'usage',
     ]);
   });
 
@@ -358,6 +358,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
             type: 'create',
             candidateRef: candidate.candidateRef,
             targetMemoryRef: null,
+            topic: 'life_context',
           })),
         }),
         usage: { promptTokens: 20, completionTokens: 3, costUsd: 0.002 },
@@ -549,6 +550,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
                 targetMemoryRef: type === 'create' || type === 'ignore'
                   ? null
                   : request.input.currentItems[0].memoryRef,
+                topic: type === 'create' || type === 'revise' ? 'life_context' : null,
               }],
             }),
             usage: null,
@@ -829,6 +831,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         rawContent: JSON.stringify({
           operations: request.input.candidates.map((candidate) => ({
             type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
+            topic: 'life_context',
           })),
         }),
         usage: null,
@@ -1162,7 +1165,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
     // call site was never updated, so `scopeMode` came through as `undefined`
     // and every real execution failed 'extractor_contract_invalid' on its
     // very first chunk regardless of content -- caught only when
-    // day_and_night33's real paid run hit it for the first time.
+    // A real paid history run hit this provider behavior for the first time.
     const result = await runLifecycleHistoryBackfill(options({
       prepared: prepared(1),
       execute: true,
@@ -1187,5 +1190,127 @@ describe('Memory V3 lifecycle history backfill engine', () => {
 
     assert.equal(result.failureCount, 0);
     assert.equal(result.finalState?.items.length, 1);
+  });
+
+  it('keeps one-mention facts while omitting an under-supported recurrence in history backfill', async () => {
+    const preparedInput = scriptedPrepared([['fact mention', 'unrelated context']]);
+    const result = await runLifecycleHistoryBackfill(options({
+      prepared: preparedInput,
+      execute: true,
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => {
+        const message = request.input.messages[0];
+        return {
+          content: JSON.stringify({
+            layerDecisions: [
+              { kind: 'event', decision: 'emit', itemRefs: ['fact-1'] },
+              { kind: 'recurrence', decision: 'emit', itemRefs: ['pattern-1'] },
+              { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+            ],
+            items: [{
+              itemRef: 'fact-1', kind: 'event', claim: 'Has a son', status: 'active',
+              sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null, alternative: null,
+            }, {
+              itemRef: 'pattern-1', kind: 'recurrence', claim: 'Avoids commitments', status: 'active',
+              sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null, alternative: null,
+            }],
+            evidence: [{
+              itemRef: 'fact-1', sourceMessageId: message.id, relation: 'supports',
+              supportType: null, episodeKey: `episode:${message.id}`,
+            }, {
+              itemRef: 'pattern-1', sourceMessageId: message.id, relation: 'supports',
+              supportType: 'episode_observation', episodeKey: `episode:${message.id}`,
+            }],
+          }),
+          usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        };
+      },
+      reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
+        rawContent: JSON.stringify({
+          operations: request.input.candidates.map((candidate) => ({
+            type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
+            topic: 'life_context',
+          })),
+        }),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+    }));
+
+    assert.equal(result.failureCount, 0);
+    assert.equal(result.finalState?.items.length, 1);
+    assert.equal(result.finalState?.items[0].kind, 'event');
+    assert.equal(result.finalState?.items[0].claim, 'Has a son');
+  });
+
+  it('keeps a recurrence supported by two distinct episodes in history backfill', async () => {
+    const preparedInput = scriptedPrepared([['episode one', 'episode two']]);
+    const result = await runLifecycleHistoryBackfill(options({
+      prepared: preparedInput,
+      execute: true,
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => ({
+        content: authoredRaw(request, {
+          kind: 'recurrence',
+          claim: 'Repeated pattern',
+          status: 'active',
+          alternative: null,
+          relation: 'supports',
+        }),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+      reconcilerAdapter: async (request: MemoryV3LifecycleReconcileRequest) => ({
+        rawContent: JSON.stringify({
+          operations: request.input.candidates.map((candidate) => ({
+            type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
+            topic: 'life_context',
+          })),
+        }),
+        usage: null,
+        resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+      }),
+    }));
+
+    assert.equal(result.failureCount, 0);
+    assert.equal(result.finalState?.items.length, 1);
+    assert.equal(result.finalState?.items[0].kind, 'recurrence');
+    assert.equal(result.finalState?.items[0].claim, 'Repeated pattern');
+  });
+
+  it('does not hide another contract violation on an under-supported recurrence', async () => {
+    const result = await runLifecycleHistoryBackfill(options({
+      prepared: prepared(1),
+      execute: true,
+      extractorAdapter: async (request: MemoryV3ExtractorRequest) => {
+        const message = request.input.messages[0];
+        return {
+          content: JSON.stringify({
+            layerDecisions: [
+              { kind: 'event', decision: 'omit', itemRefs: [] },
+              { kind: 'recurrence', decision: 'emit', itemRefs: ['pattern-1'] },
+              { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
+            ],
+            items: [{
+              itemRef: 'pattern-1', kind: 'recurrence', claim: 'Avoids commitments',
+              status: 'active', sensitivity: 'normal', eventTimeStart: null,
+              eventTimeEnd: null, alternative: null, unexpectedField: true,
+            }],
+            evidence: [{
+              itemRef: 'pattern-1', sourceMessageId: message.id, relation: 'supports',
+              supportType: 'episode_observation', episodeKey: `episode:${message.id}`,
+            }],
+          }),
+          usage: null,
+          resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
+        };
+      },
+      reconcilerAdapter: async () => {
+        assert.fail('reconciler must not run after another extractor contract violation');
+      },
+    }));
+
+    assert.equal(result.failureCount, 1);
+    assert.equal(result.failures[0].stage, 'extractor_contract');
+    assert.equal(result.finalState, null);
   });
 });

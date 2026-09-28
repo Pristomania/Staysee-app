@@ -33,16 +33,30 @@ const SOURCE_READER_FIELDS = ['listConversationsPage', 'listMessagesPage'] as co
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const OWN_ERRORS = new WeakSet<object>();
+type TrustedFailureDetails = {
+  stage: LifecycleHistoryBackfillResult['failures'][number]['stage'];
+  diagnosticCode: string;
+  attemptedChunkCount: number;
+  providerCallCount: number;
+};
+const ERROR_DETAILS = new WeakMap<object, TrustedFailureDetails>();
 
-function fail(): never {
+function fail(details?: TrustedFailureDetails): never {
   const error = new Error(`${PREFIX} command failed`);
   error.name = ERROR_NAME;
   OWN_ERRORS.add(error);
+  if (details !== undefined) ERROR_DETAILS.set(error, details);
   throw error;
 }
 
 function isOwnError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && OWN_ERRORS.has(error);
+}
+
+export function getLifecycleHistoryBackfillCliFailure(error: unknown): TrustedFailureDetails | null {
+  if (!isOwnError(error)) return null;
+  const details = ERROR_DETAILS.get(error as object);
+  return details === undefined ? null : Object.freeze({ ...details });
 }
 
 async function boundary<T>(operation: () => Promise<T>): Promise<T> {
@@ -344,7 +358,16 @@ export async function runLifecycleHistoryBackfillFromArgv(input: {
       extractorAdapter,
       reconcilerAdapter,
     });
-    if (benchmarkResult.failureCount !== 0 || benchmarkResult.finalState === null) return fail();
+    if (benchmarkResult.failureCount !== 0 || benchmarkResult.finalState === null) {
+      const firstFailure = benchmarkResult.failures[0];
+      if (firstFailure === undefined) return fail();
+      return fail({
+        stage: firstFailure.stage,
+        diagnosticCode: firstFailure.diagnosticCode,
+        attemptedChunkCount: benchmarkResult.attemptedChunkCount,
+        providerCallCount: benchmarkResult.providerCallCount,
+      });
+    }
     const semanticReviewPacket = buildLifecycleHistoryReviewPacket(benchmarkResult);
     return { benchmarkResult, semanticReviewPacket };
   });
