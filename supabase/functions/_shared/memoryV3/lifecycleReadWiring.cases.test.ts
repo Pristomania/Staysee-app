@@ -375,6 +375,10 @@ describe("Memory V3 lifecycle read context wiring", () => {
   test("staysee-chat composes the exact lifecycle read imports and environment gate", () => {
     assert.match(
       STAYSEE_CHAT_SOURCE,
+      /import \{[\s\S]*?fetchConversationCrossMemoryEnabled[\s\S]*?\} from "\.\.\/_shared\/profilePrefs\.ts";/u,
+    );
+    assert.match(
+      STAYSEE_CHAT_SOURCE,
       /import \{\s*resolveMemoryV3LifecycleReadEligibility\s*\} from "\.\.\/_shared\/memoryV3\/lifecycleReadMode\.ts";/,
     );
     assert.match(
@@ -400,6 +404,10 @@ describe("Memory V3 lifecycle read context wiring", () => {
     assert.equal(
       readComposition.includes("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
       false,
+    );
+    assert.match(
+      readComposition,
+      /fetchConversationCrossMemoryEnabled\(\s*makeServiceClient\(\),\s*lifecycleReadEligibility\.userId,\s*conversationId\s*\)/u,
     );
     assert.match(readComposition, /memoryItemIds\s*=\s*\[\]/);
   });

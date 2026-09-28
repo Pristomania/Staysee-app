@@ -7,7 +7,7 @@ import {
 } from "../_shared/conversationRetrieval.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { buildContextPacket, buildContextPrompt, stampMemoryUsed } from "../_shared/context.ts";
-import { fetchCrossMemoryEnabled } from "../_shared/profilePrefs.ts";
+import { fetchConversationCrossMemoryEnabled } from "../_shared/profilePrefs.ts";
 import {
   buildMemoryContinuityPrompt,
   buildRecallGroundingPrompt,
@@ -978,9 +978,10 @@ Deno.serve(async (req: Request) => {
           userId,
         });
         if (lifecycleReadEligibility.eligible) {
-          const crossMemoryOnForRead = await fetchCrossMemoryEnabled(
+          const crossMemoryOnForRead = await fetchConversationCrossMemoryEnabled(
             makeServiceClient(),
             lifecycleReadEligibility.userId,
+            conversationId
           );
           if (crossMemoryOnForRead) {
             try {
@@ -1636,9 +1637,10 @@ Deno.serve(async (req: Request) => {
           result.content &&
           !isCalmFallbackContent
         ? (async () => {
-            const crossMemoryOnForWrite = await fetchCrossMemoryEnabled(
+            const crossMemoryOnForWrite = await fetchConversationCrossMemoryEnabled(
               svc,
               userId,
+              conversationId
             );
             const dialogueEligibility = resolveMemoryV3DialogueEligibility({
               rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),

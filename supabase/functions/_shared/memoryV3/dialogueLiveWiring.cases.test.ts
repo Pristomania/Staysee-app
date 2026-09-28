@@ -26,6 +26,10 @@ describe("Memory V3 dialogue live wiring", () => {
       block,
       /if \(dialogueEligibility\.eligible\) \{\s*return runMemoryV3DialogueShadowBackgroundSafely/s,
     );
+    assert.match(
+      block,
+      /const dialogueMemoryPromise\s*=\s*dialogueEligibility\.eligible/u,
+    );
   });
 
   it("loads dialogue memory additively, independent of the lifecycle read gate", () => {
