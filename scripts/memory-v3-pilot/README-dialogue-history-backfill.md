@@ -44,9 +44,7 @@
   тот, кто технически запускает разбор (Cursor), формат тот же, что и для
   прошлого разбора по всей истории.
 - Все команды ниже — это **реальные, работающие** названия файлов и флагов,
-  проверенные по актуальному коду на момент написания этой инструкции. Не
-  меняй в них ничего "на глаз" — особенно флаг `--profile` (см. отдельное
-  предупреждение перед шагом 2).
+  проверенные по актуальному коду на момент написания этой инструкции.
 
 В примерах команд ниже используется один и тот же условный путь для файла
 результата — `C:\stay-backfill\dialogue-history-backfill.json`. Замени его
@@ -82,7 +80,7 @@ git: либо храни его вне папки проекта (как в пр
 это не ошибка и не опасно, просто раньше это не требовалось).
 
 ```
-npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --inspect-source --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <ДАТА-СРЕЗА> --price-snapshot-file <ПУТЬ-К-ФАЙЛУ-С-ЦЕНАМИ.json> --max-budget-usd <ПОТОЛОК-БЮДЖЕТА>
+npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --inspect-source --profile memory-v3-dialogue-history-backfill-v1 --source-cutoff <ДАТА-СРЕЗА> --price-snapshot-file <ПУТЬ-К-ФАЙЛУ-С-ЦЕНАМИ.json> --max-budget-usd <ПОТОЛОК-БЮДЖЕТА>
 ```
 
 Про плейсхолдеры:
@@ -109,20 +107,16 @@ npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --inspect-sourc
 **Скопируй из вывода команды значение `sourceSnapshotDigest`** — оно
 понадобится дальше как есть, без изменений.
 
-### ⚠️ Про флаг `--profile` — не пугайся и не исправляй
+### ⚠️ Профили двух видов памяти нельзя смешивать
 
-Команда просит написать `--profile memory-v3-lifecycle-history-backfill-v1`
-— со словом **lifecycle** внутри, хотя весь этот инструмент про диалоги, а
-не про lifecycle. **Это не ошибка и не опечатка.** Техническая часть,
-отвечающая за лимиты запроса к нейросети и цены, была переиспользована без
-переименования от старого инструмента. При этом результат разбора везде
-правильно помечен как `profileId: memory-v3-dialogue-history-backfill-v1` —
-то есть сам итог посчитан и подписан правильно для диалогового инструмента,
-просто название технического профиля в команде выглядит "от другого
-инструмента". **Если кто-то технический захочет "поправить" эту строку на
-что-то со словом dialogue — не надо: тогда команда перестанет работать
-вообще**, она проверяет именно эту точную строку. Эта же строка нужна и
-в следующем, платном шаге.
+Диалоговый инструмент принимает только
+`--profile memory-v3-dialogue-history-backfill-v1`. Профиль сквозной памяти
+`memory-v3-lifecycle-history-backfill-v1` здесь намеренно отвергается ещё до
+чтения окружения, файлов результата и обращения к сети. У каждого вида памяти
+свои правила отбора, версия экстрактора и идентичность результата.
+
+Артефакты, созданные старым инструментом под другой идентичностью, остаются
+полезными только для аудита: их нельзя переносить как новый диалоговый результат.
 
 ## Шаг 2. Настоящий платный запуск
 
@@ -130,7 +124,7 @@ npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --inspect-sourc
 шаге 1, и `sourceSnapshotDigest` из его вывода:
 
 ```
-npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <ТА-ЖЕ-ДАТА-СРЕЗА> --expected-source-sha256 <sourceSnapshotDigest-ИЗ-ШАГА-1> --price-snapshot-file <ПУТЬ-К-ФАЙЛУ-С-ЦЕНАМИ.json> --max-budget-usd <ПОТОЛОК-БЮДЖЕТА> --safe-output-file C:\stay-backfill\dialogue-history-backfill.json
+npx tsx scripts/memory-v3-pilot/dialogue-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-dialogue-history-backfill-v1 --source-cutoff <ТА-ЖЕ-ДАТА-СРЕЗА> --expected-source-sha256 <sourceSnapshotDigest-ИЗ-ШАГА-1> --price-snapshot-file <ПУТЬ-К-ФАЙЛУ-С-ЦЕНАМИ.json> --max-budget-usd <ПОТОЛОК-БЮДЖЕТА> --safe-output-file C:\stay-backfill\dialogue-history-backfill.json
 ```
 
 `--safe-output-file` — обязательно абсолютный путь, обязательно
