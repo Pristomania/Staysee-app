@@ -9,6 +9,10 @@ const sql = readFileSync(
   join(here, "..", "..", "..", "migrations", "20260928050000_055_memory_v3_lifecycle_backfill_reimport.sql"),
   "utf8",
 );
+const constraintFixSql = readFileSync(
+  join(here, "..", "..", "..", "migrations", "20260928060000_056_memory_v3_lifecycle_backfill_revision_constraint.sql"),
+  "utf8",
+);
 
 describe("Memory V3 lifecycle backfill replacement migration", () => {
   it("accepts the lifecycle-owned extractor and nonnegative observed revisions", () => {
@@ -67,5 +71,13 @@ describe("Memory V3 lifecycle backfill replacement migration", () => {
     assert.match(sql, /expected_state_revision >= 0/);
     assert.match(sql, /extractor_version IN \(/);
     assert.doesNotMatch(sql, /CREATE TABLE/);
+  });
+
+  it("drops PostgreSQL's actual truncated legacy revision constraint", () => {
+    assert.match(
+      constraintFixSql,
+      /DROP CONSTRAINT IF EXISTS memory_v3_lifecycle_backfill_impo_expected_state_revision_check/,
+    );
+    assert.doesNotMatch(constraintFixSql, /CREATE TABLE|CREATE OR REPLACE FUNCTION/);
   });
 });
