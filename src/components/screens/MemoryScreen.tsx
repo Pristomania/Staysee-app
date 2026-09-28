@@ -701,6 +701,36 @@ export function MemoryScreen() {
                 </div>
               )}
 
+              {capabilities.showAccountWidePreview && (
+                <div className="mb-4">
+                  <p className={sectionLabel}>Сквозная память</p>
+                  <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
+                    {conversationCrossMemoryOn
+                      ? 'Общие факты, которые StaySee учитывает в этой беседе.'
+                      : 'Сейчас не используется в этой беседе.'}
+                  </p>
+                  <details className={`${cardBase} overflow-hidden ${conversationCrossMemoryOn ? '' : 'opacity-70'}`}>
+                    <summary className={`cursor-pointer list-none px-4 py-3.5 flex items-center gap-3 ${theme.surfaceHover}`}>
+                      <Brain className={`w-4 h-4 ${theme.textMuted} shrink-0`} strokeWidth={1.5} />
+                      <span className={`${theme.textSecondary} text-sm font-light flex-1`}>
+                        Обо мне · {memoryV3AccountWide.length}
+                      </span>
+                      <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
+                    </summary>
+                    <div className="px-3 pb-3 pt-2">
+                      <MemoryV3ItemList
+                        items={memoryV3AccountWide}
+                        theme={theme}
+                        cardBase={cardBase}
+                        readOnly
+                        emptyMessage="Пока ничего не запомнено."
+                        topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
+                      />
+                    </div>
+                  </details>
+                </div>
+              )}
+
               {selectedConvId && (
                 <div className="space-y-4">
                   <MemoryV3ItemList
@@ -785,36 +815,6 @@ export function MemoryScreen() {
                 </div>
               )}
             </section>
-
-            {capabilities.showAccountWidePreview && (
-              <section className="mb-8">
-                <p className={sectionLabel}>Сквозная память</p>
-                <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
-                  {conversationCrossMemoryOn
-                    ? 'Общие факты, которые StaySee учитывает в этой беседе.'
-                    : 'Сейчас не используется в этой беседе.'}
-                </p>
-                <details open className={`${cardBase} overflow-hidden ${conversationCrossMemoryOn ? '' : 'opacity-70'}`}>
-                  <summary className={`cursor-pointer list-none px-4 py-3.5 flex items-center gap-3 ${theme.surfaceHover}`}>
-                    <Brain className={`w-4 h-4 ${theme.textMuted} shrink-0`} strokeWidth={1.5} />
-                    <span className={`${theme.textSecondary} text-sm font-light flex-1`}>
-                      Обо мне · {memoryV3AccountWide.length}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 ${theme.textMuted}`} strokeWidth={1.5} />
-                  </summary>
-                  <div className="px-3 pb-3 pt-2">
-                    <MemoryV3ItemList
-                      items={memoryV3AccountWide}
-                      theme={theme}
-                      cardBase={cardBase}
-                      readOnly
-                      emptyMessage="Пока ничего не запомнено."
-                      topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
-                    />
-                  </div>
-                </details>
-              </section>
-            )}
 
             {capabilities.showAccountWideMemory && (
             <section>

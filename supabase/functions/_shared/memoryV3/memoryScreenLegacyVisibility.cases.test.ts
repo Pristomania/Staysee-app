@@ -39,6 +39,21 @@ describe("MemoryScreen legacy visibility", () => {
     );
   });
 
+  it("places the collapsed cross-memory preview directly after the chat toggle", () => {
+    const toggle = screen.indexOf("<ConversationCrossMemoryToggle");
+    const preview = screen.indexOf("capabilities.showAccountWidePreview && (");
+    const dialogueList = screen.indexOf("items={memoryV3Dialogue}");
+    assert.ok(toggle >= 0 && toggle < preview && preview < dialogueList);
+    assert.match(
+      screen,
+      /capabilities\.showAccountWidePreview && \([\s\S]*?<details className=\{`\$\{cardBase\} overflow-hidden/u,
+    );
+    assert.doesNotMatch(
+      screen,
+      /capabilities\.showAccountWidePreview && \([\s\S]*?<details open className=/u,
+    );
+  });
+
   it("keeps the chat memory copy free of repeated conversation labels", () => {
     assert.doesNotMatch(screen, /Текущая беседа/u);
     assert.match(
