@@ -9,7 +9,7 @@ function indexSource(): string {
 }
 
 describe("Memory V3 dialogue live wiring", () => {
-  it("branches to the dialogue runner before the lifecycle runner, mutually exclusively", () => {
+  it("schedules dialogue and lifecycle memory independently", () => {
     const source = indexSource();
     const writeBlockStart = source.indexOf("const memoryV3ShadowPromise");
     assert.ok(writeBlockStart >= 0, "write block must exist");
@@ -17,20 +17,14 @@ describe("Memory V3 dialogue live wiring", () => {
     assert.ok(writeBlockEnd > writeBlockStart, "write block must be bounded");
     const block = source.slice(writeBlockStart, writeBlockEnd);
     assert.match(block, /resolveMemoryV3DialogueEligibility/);
-    assert.ok(
-      block.indexOf("dialogueEligibility.eligible") < block.indexOf("parseMemoryV3ShadowMode"),
-      "dialogue eligibility must be checked, and return, before the lifecycle mode branch",
-    );
     assert.match(block, /runMemoryV3DialogueShadowBackgroundSafely/);
     assert.match(block, /runMemoryV3DialogueShadow\(/);
-    // Mutually exclusive: the dialogue branch must `return` before the
-    // lifecycle branch is ever reached for an eligible user.
-    const dialogueIfIndex = block.indexOf("if (dialogueEligibility.eligible)");
-    const dialogueReturnIndex = block.indexOf("return runMemoryV3DialogueShadowBackgroundSafely", dialogueIfIndex);
-    const dialogueBlockCloseIndex = block.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode", dialogueIfIndex);
-    assert.ok(
-      dialogueIfIndex >= 0 && dialogueReturnIndex > dialogueIfIndex && dialogueReturnIndex < dialogueBlockCloseIndex,
-      "dialogue branch must return before the lifecycle mode branch",
+    assert.match(block, /const dialogueMemoryPromise/);
+    assert.match(block, /const lifecycleMemoryPromise/);
+    assert.match(block, /Promise\.all\(\[dialogueMemoryPromise, lifecycleMemoryPromise\]\)/);
+    assert.doesNotMatch(
+      block,
+      /if \(dialogueEligibility\.eligible\) \{\s*return runMemoryV3DialogueShadowBackgroundSafely/s,
     );
   });
 
