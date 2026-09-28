@@ -27,17 +27,21 @@ export function CrossMemoryToggle({
   const { profile, refreshProfile } = useAuth();
   const { theme } = useTheme();
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const enabled = isCrossMemoryEnabled(profile);
 
   async function toggle() {
     if (busy) return;
     setBusy(true);
+    setFailed(false);
     const next = !enabled;
     const { ok } = await setCrossMemoryEnabledForAll(next);
     if (ok) {
       await refreshProfile();
       onChanged?.();
+    } else {
+      setFailed(true);
     }
     setBusy(false);
   }
@@ -70,11 +74,18 @@ export function CrossMemoryToggle({
 
   if (embedded) {
     return (
-      <div className="flex items-center justify-between gap-3 py-1">
-        <p className={`${theme.textMuted} text-xs font-light`}>
-          Статус: <span className={theme.textSecondary}>{statusShort}</span>
-        </p>
-        {toggleButton}
+      <div className="py-1">
+        <div className="flex items-center justify-between gap-3">
+          <p className={`${theme.textMuted} text-xs font-light`}>
+            Статус: <span className={theme.textSecondary}>{statusShort}</span>
+          </p>
+          {toggleButton}
+        </div>
+        {failed && (
+          <p className="text-red-400/90 text-xs font-light mt-2" role="status">
+            Не удалось сохранить. Нажми ещё раз.
+          </p>
+        )}
       </div>
     );
   }
@@ -91,6 +102,11 @@ export function CrossMemoryToggle({
           <p className={`${theme.textMuted} text-xs font-light mt-1 leading-relaxed opacity-90`}>
             {enabled ? COPY.on : COPY.off}
           </p>
+          {failed && (
+            <p className="text-red-400/90 text-xs font-light mt-2" role="status">
+              Не удалось сохранить. Нажми ещё раз.
+            </p>
+          )}
         </div>
         {toggleButton}
       </div>
