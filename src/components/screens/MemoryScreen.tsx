@@ -9,6 +9,7 @@ import { ensureUserProfile } from '../../lib/ensureProfile';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
 import { CrossMemoryToggle } from '../CrossMemoryToggle';
+import { ConversationCrossMemoryToggle } from '../ConversationCrossMemoryToggle';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { isCrossMemoryEnabled } from '../../lib/profileSettings';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
@@ -47,6 +48,7 @@ import {
 } from '../../lib/normalizeMemoryForDisplay';
 import { normalizeMemoryTextForDisplay } from '../../lib/memoryDisplayNormalize';
 import { deleteMemoryV3Item, fetchMemoryV3Items, type MemoryV3ViewerItem } from '../../lib/memoryV3Viewer';
+import { resolveMemoryScreenCapabilities } from '../../lib/memoryScreenMode';
 import { MemoryV3ItemList } from '../MemoryV3ItemList';
 import type { Conversation, UserMemory } from '../../types';
 
@@ -70,7 +72,7 @@ const MEMORY_V3_LIFECYCLE_TOPIC_LABELS: Record<string, string> = {
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
-type ConvOption = Pick<Conversation, 'id' | 'title'>;
+type ConvOption = Pick<Conversation, 'id' | 'title' | 'cross_memory_enabled'>;
 
 function sectionLabelForField(field: MemoryFieldKey): string {
   const section = MEMORY_DISPLAY_SECTIONS.find((s) => ADD_FIELD_FOR_SECTION[s.id] === field);
@@ -306,12 +308,16 @@ export function MemoryScreen() {
     memoryReturnScreen,
     navigateBack,
   } = useApp();
+  const capabilities = resolveMemoryScreenCapabilities(memoryReturnScreen);
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
 
   const [convOptions, setConvOptions] = useState<ConvOption[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(
     currentConversation?.id ?? null,
+  );
+  const [conversationCrossMemoryOn, setConversationCrossMemoryOn] = useState(
+    currentConversation?.cross_memory_enabled !== false,
   );
   const [convMemory, setConvMemory] = useState<StructuredMemory | null>(null);
   const [legacyRaw, setLegacyRaw] = useState<string | null>(null);
@@ -357,38 +363,60 @@ export function MemoryScreen() {
   }
 
   useEffect(() => {
-    if (currentConversation?.id) setSelectedConvId(currentConversation.id);
-  }, [currentConversation?.id]);
+    if (memoryReturnScreen === 'chat' && currentConversation?.id) {
+      setSelectedConvId(currentConversation.id);
+      setConversationCrossMemoryOn(currentConversation.cross_memory_enabled !== false);
+    }
+  }, [currentConversation, memoryReturnScreen]);
 
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
       return;
     }
+    if (memoryReturnScreen === 'chat' && !currentConversation?.id) {
+      setLoading(false);
+      navigateBack();
+      return;
+    }
     setLoading(true);
     let activeConvId: string | null = null;
     try {
-      const { data: convs } = await supabase
-        .from('conversations')
-        .select('id, title')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .order('last_message_at', { ascending: false });
-      const list = (convs ?? []) as ConvOption[];
-      setConvOptions(list);
+      let list: ConvOption[] = [];
+      let convId: string | null = currentConversation?.id ?? null;
+      if (capabilities.canChooseConversation) {
+        const { data: convs, error: conversationsError } = await supabase
+          .from('conversations')
+          .select('id, title, cross_memory_enabled')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('last_message_at', { ascending: false });
+        if (conversationsError) throw conversationsError;
+        list = (convs ?? []) as ConvOption[];
+        setConvOptions(list);
+        convId = selectedConvId && list.some((conversation) => conversation.id === selectedConvId)
+          ? selectedConvId
+          : list[0]?.id ?? null;
+      } else {
+        setConvOptions([]);
+      }
 
-      const convId = selectedConvId ?? currentConversation?.id ?? list[0]?.id ?? null;
       activeConvId = convId;
-      if (!selectedConvId && convId) setSelectedConvId(convId);
+      if (selectedConvId !== convId) setSelectedConvId(convId);
 
       if (convId) {
         const { data, error } = await supabase
           .from('conversations')
-          .select('conversation_summary')
+          .select('conversation_summary, cross_memory_enabled')
           .eq('id', convId)
           .eq('user_id', user.id)
           .maybeSingle();
         if (error) throw error;
+        if (!data && memoryReturnScreen === 'chat') {
+          navigateBack();
+          return;
+        }
+        setConversationCrossMemoryOn(data?.cross_memory_enabled !== false);
         const raw = (data?.conversation_summary as string | null) ?? null;
         const parsed = parseConversationMemory(raw);
         if (parsed) {
@@ -408,16 +436,22 @@ export function MemoryScreen() {
         setLegacyRaw(null);
       }
 
-      const { data: mem, error: memErr } = await supabase
-        .from('user_memory')
-        .select('id, user_id, memory_type, content, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      if (memErr) throw memErr;
-      setGlobalRows((mem ?? []) as UserMemory[]);
+      if (capabilities.showAccountWideMemory) {
+        const { data: mem, error: memErr } = await supabase
+          .from('user_memory')
+          .select('id, user_id, memory_type, content, created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+        if (memErr) throw memErr;
+        setGlobalRows((mem ?? []) as UserMemory[]);
+      } else {
+        setGlobalRows([]);
+      }
 
       const memoryV3 = await fetchMemoryV3Items(activeConvId ?? undefined);
-      setMemoryV3AccountWide(memoryV3.accountWide);
+      setMemoryV3AccountWide(
+        capabilities.showAccountWideMemory ? memoryV3.accountWide : [],
+      );
       setMemoryV3Dialogue(memoryV3.dialogue);
     } catch (err) {
       console.error('[memory] load failed:', err);
@@ -432,7 +466,15 @@ export function MemoryScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user, selectedConvId, currentConversation?.id]);
+  }, [
+    capabilities.canChooseConversation,
+    capabilities.showAccountWideMemory,
+    currentConversation?.id,
+    memoryReturnScreen,
+    navigateBack,
+    selectedConvId,
+    user,
+  ]);
 
   useEffect(() => {
     void load();
@@ -580,14 +622,17 @@ export function MemoryScreen() {
           pinned
           onBack={goBack}
           title="Память"
-          subtitle="Что StaySee запоминает о вас и о беседах"
+          subtitle={memoryReturnScreen === 'chat'
+            ? 'Что StaySee запоминает в этой беседе'
+            : 'Что StaySee запоминает о вас и о беседах'}
           backLabel={memoryReturnScreen === 'chat' ? 'Назад в беседу' : 'В контекст'}
         />
       )}
     >
         <p className={`${theme.textMuted} text-xs font-light leading-relaxed mb-4 opacity-90`}>
-          Память помогает держать общую линию диалога. Вы можете просмотреть, исправить или удалить
-          любую запись — AI будет опираться на то, что осталось.
+          {memoryReturnScreen === 'chat'
+            ? 'Здесь показана только память текущей беседы. Другие чаты и общие факты профиля сюда не смешиваются.'
+            : 'Здесь можно выбрать беседу, проверить её память и управлять общими фактами профиля.'}
         </p>
 
         <ConversationHubNav active="memory" show={memoryReturnScreen === 'chat' && !!selectedConvId} />
@@ -603,14 +648,37 @@ export function MemoryScreen() {
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
                 Устойчивые факты и ориентиры по этой беседе — без лишних деталей диалога.
               </p>
-              <div className="mb-4">
-                <ConversationScopePicker
-                  cardClass={cardBase}
-                  options={convOptions}
-                  selectedId={selectedConvId}
-                  onSelect={setSelectedConvId}
-                />
-              </div>
+              {capabilities.canChooseConversation ? (
+                <div className="mb-4">
+                  <ConversationScopePicker
+                    cardClass={cardBase}
+                    options={convOptions}
+                    selectedId={selectedConvId}
+                    onSelect={setSelectedConvId}
+                  />
+                </div>
+              ) : (
+                <div className={`${cardBase} px-4 py-3.5 mb-3`}>
+                  <p className={`${theme.textMuted} text-[11px] font-light mb-1 opacity-80`}>
+                    Текущая беседа
+                  </p>
+                  <p className={`${theme.textPrimary} text-sm font-light truncate`}>
+                    {currentConversation?.title || 'Без названия'}
+                  </p>
+                </div>
+              )}
+
+              {capabilities.showConversationControl && selectedConvId && (
+                <div className="mb-4">
+                  <ConversationCrossMemoryToggle
+                    conversationId={selectedConvId}
+                    enabled={conversationCrossMemoryOn}
+                    profileDefaultEnabled={crossMemoryOn}
+                    cardClass={cardBase}
+                    onChanged={setConversationCrossMemoryOn}
+                  />
+                </div>
+              )}
 
               {selectedConvId && (
                 <>
@@ -688,11 +756,14 @@ export function MemoryScreen() {
               )}
             </section>
 
+            {capabilities.showAccountWideMemory && (
             <section>
               <p className={sectionLabel}>Сквозная память</p>
-              <div className="mb-3">
-                <CrossMemoryToggle cardClass={cardBase} />
-              </div>
+              {capabilities.showProfileBulkControl && (
+                <div className="mb-3">
+                  <CrossMemoryToggle cardClass={cardBase} onChanged={() => void load()} />
+                </div>
+              )}
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
                 {crossMemoryOn
                   ? GLOBAL_MEMORY_HINT
@@ -839,6 +910,7 @@ export function MemoryScreen() {
                 />
               )}
             </section>
+            )}
 
             {!isNewAccount && (
               <section className="mt-8">
@@ -847,7 +919,8 @@ export function MemoryScreen() {
                   Подтверждённые события и повторяющиеся паттерны, которые StaySee сама заметила.
                   Догадки, которые ещё не подтвердились, здесь не показываются.
                 </p>
-                {selectedConvId && memoryV3Dialogue.length > 0 && (
+                {selectedConvId &&
+                  (memoryV3Dialogue.length > 0 || !capabilities.showAccountWideMemory) && (
                   <div className="mb-4">
                     <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Эта беседа</p>
                     <MemoryV3ItemList
@@ -860,15 +933,19 @@ export function MemoryScreen() {
                     />
                   </div>
                 )}
-                <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Обо мне в целом</p>
-                <MemoryV3ItemList
-                  items={memoryV3AccountWide}
-                  theme={theme}
-                  cardBase={cardBase}
-                  onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
-                  emptyMessage="Пока ничего не запомнено."
-                  topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
-                />
+                {capabilities.showAccountWideMemory && (
+                  <>
+                    <p className={`${theme.textMuted} text-xs font-light mb-1.5 opacity-70`}>Обо мне в целом</p>
+                    <MemoryV3ItemList
+                      items={memoryV3AccountWide}
+                      theme={theme}
+                      cardBase={cardBase}
+                      onDelete={(item) => void deleteMemoryV3AccountWideItem(item)}
+                      emptyMessage="Пока ничего не запомнено."
+                      topicLabels={MEMORY_V3_LIFECYCLE_TOPIC_LABELS}
+                    />
+                  </>
+                )}
               </section>
             )}
           </>

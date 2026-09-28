@@ -19,7 +19,6 @@ import {
 import { ThemePicker } from '../ThemePicker';
 import { fetchUsageTier, tierLabel } from '../../lib/usageTier';
 import { ROOM_COPY } from '../../lib/roomCopy';
-import { CrossMemoryToggle } from '../CrossMemoryToggle';
 import { DeleteRoomSection } from '../DeleteRoomSection';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -171,7 +170,6 @@ export function ProfileScreen() {
               navigateTo('memory', { memoryReturnScreen: 'profile' });
             }}
           />
-          <CrossMemoryToggle cardClass={card} />
         </div>
       </section>
 
