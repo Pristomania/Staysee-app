@@ -587,7 +587,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.equal(test.calls.filter((entry) => entry === "fail").length, 1);
   });
 
-  it("returns state conflict without calling fail after the terminal CAS", async () => {
+  it("persists state_conflict via fail after the terminal CAS, so the run never sits stuck", async () => {
     const test = harness({
       store: {
         ...harness().store,
@@ -603,8 +603,10 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
       status: "failed", runId: RUN_ID, diagnosticCode: "state_conflict",
     });
-    assert.equal(test.calls.at(-1), "cas");
-    assert.equal(test.calls.some((entry) => entry.startsWith("fail:")), false);
+    // A terminal CAS outcome must always be written back via fail(), even for
+    // state_conflict -- otherwise the run row is left at "reserved" forever
+    // with no diagnostic, indistinguishable from a genuinely stuck pipeline.
+    assert.equal(test.calls.at(-1), "fail:state_conflict");
   });
 
   it("sanitizes reservation and state-write failures", async () => {
