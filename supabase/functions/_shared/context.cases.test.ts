@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+
+const contextSource = await readFile(new URL("./context.ts", import.meta.url), "utf8");
 
 // context.ts imports the real "npm:" Supabase client (createClient) at its
 // top level -- Deno-only, unresolvable under plain Node/tsx (same reason
@@ -116,5 +119,14 @@ describe("inspectContextPromptOptions (mirrored)", () => {
     });
     assert.throws(() => inspectContextPromptOptions(accessor), ContextPromptOptionsError);
     assert.equal(getterCalls, 0);
+  });
+});
+
+describe("conversation-scoped cross-memory", () => {
+  it("passes both the authenticated user and current conversation to the preference reader", () => {
+    assert.match(
+      contextSource,
+      /fetchConversationCrossMemoryEnabled\(\s*supabase,\s*input\.userId,\s*input\.conversationId\s*\)/u,
+    );
   });
 });

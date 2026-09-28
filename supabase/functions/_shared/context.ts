@@ -37,7 +37,7 @@ import {
   type ArchiveExcerpt,
   type UserEvidenceQuote,
 } from "./conversationRetrieval.ts";
-import { fetchCrossMemoryEnabled } from "./profilePrefs.ts";
+import { fetchConversationCrossMemoryEnabled } from "./profilePrefs.ts";
 import { formatCrossMemoryForPrompt } from "./userLifeMemory.ts";
 import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
@@ -434,7 +434,11 @@ export async function buildContextPacket(
     await Promise.all([
       fetchConversationMeta(supabase, input.conversationId),
       fetchRecentMessages(supabase, input.conversationId),
-      fetchCrossMemoryEnabled(supabase, input.userId),
+      fetchConversationCrossMemoryEnabled(
+        supabase,
+        input.userId,
+        input.conversationId
+      ),
       fetchWeeklyReflections(supabase, input.conversationId),
     ]);
 
