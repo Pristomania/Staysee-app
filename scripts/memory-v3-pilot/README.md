@@ -458,8 +458,9 @@ The workflow has five deliberately separate gates:
 2. Before any paid execution, approve a fresh price snapshot, the exact source
    digest, the explicit execute flag, and the hard budget.
 3. Run the model sequentially and save one digest-bound artifact for review.
-4. Record a human PASS tied to the payload digest, with one explicit PASS row
-   for every final memory.
+4. Record a completed human review tied to the payload digest, with one explicit
+   PASS or REJECT row for every final memory. Rejected rows require a note and
+   are excluded from the imported state without changing the paid artifact.
 5. Deploy the import migration, perform the reviewed initial import, and later
    activate reading only under separate approvals.
 
@@ -487,6 +488,7 @@ not authorization to run them:
 
 ```text
 npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-run.ts --execute-history-backfill-paid-requests --profile memory-v3-lifecycle-history-backfill-v1 --source-cutoff <approved-cutoff> --expected-source-sha256 <approved-digest> --price-snapshot-file <reviewed-price-snapshot.json> --max-budget-usd <approved-hard-budget> --safe-output-file <untracked-history-backfill.json>
+node --import tsx scripts/memory-v3-pilot/lifecycle-history-backfill-approval.ts --generate-approval --artifact-file <untracked-history-backfill.json> [--reject-memory-key <rejected-memory-key>]
 npx tsx scripts/memory-v3-pilot/lifecycle-history-backfill-import-run.ts --import-reviewed-history --artifact-file <untracked-history-backfill.json> --review-file <review-decision.json> --import-id <new-import-uuid>
 ```
 

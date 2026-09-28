@@ -33,6 +33,24 @@ describe("lifecycle history backfill approval generator", () => {
     assert.ok(decision.items.every((item) => item.semanticVerdict === "PASS" && item.reviewerNotes === null));
   });
 
+  it("marks only explicitly selected memory keys as rejected", () => {
+    const decision = generateApprovalDecision(successfulArtifact(), ["b".repeat(64)]);
+    assert.deepEqual(decision.items, [{
+      memoryKey: "a".repeat(64),
+      semanticVerdict: "PASS",
+      reviewerNotes: null,
+    }, {
+      memoryKey: "b".repeat(64),
+      semanticVerdict: "REJECT",
+      reviewerNotes: "Не одобрено для сквозной памяти",
+    }]);
+  });
+
+  it("rejects unknown or duplicate rejection memory keys", () => {
+    assert.throws(() => generateApprovalDecision(successfulArtifact(), ["c".repeat(64)]));
+    assert.throws(() => generateApprovalDecision(successfulArtifact(), ["b".repeat(64), "b".repeat(64)]));
+  });
+
   it("refuses to approve an artifact with a nonzero failureCount", () => {
     const artifact = successfulArtifact();
     artifact.benchmarkResult.failureCount = 1;
@@ -118,6 +136,33 @@ describe("lifecycle history backfill approval generator", () => {
       assert.equal(decision.payloadSha256, "d".repeat(64));
       assert.equal(decision.schemaVersion, "memory-v3-lifecycle-history-review-v1");
       assert.deepEqual(decision.items.map((item: { memoryKey: string }) => item.memoryKey), ["a".repeat(64), "b".repeat(64)]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("the direct() CLI writes a selective review with an explicit rejected memory key", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "lifecycle-approval-selective-cli-test-"));
+    try {
+      const artifactPath = join(tempDir, "artifact.json");
+      await writeFile(artifactPath, JSON.stringify(successfulArtifact()), "utf8");
+
+      await execFileAsync(process.execPath, [
+        "--import",
+        "tsx",
+        fileURLToPath(APPROVAL_PATH),
+        "--generate-approval",
+        "--artifact-file",
+        artifactPath,
+        "--reject-memory-key",
+        "b".repeat(64),
+      ], { cwd: process.cwd(), windowsHide: true });
+
+      const reviewPath = artifactPath.replace(/\.json$/, ".review.json");
+      const decision = JSON.parse(await readFile(reviewPath, "utf8"));
+      assert.deepEqual(decision.items.map((item: { semanticVerdict: string }) => item.semanticVerdict), [
+        "PASS", "REJECT",
+      ]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

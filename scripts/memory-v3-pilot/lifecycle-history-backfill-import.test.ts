@@ -60,7 +60,7 @@ function prepared() {
   });
 }
 
-async function fixture() {
+async function fixture(itemCount = 1) {
   const freshPreparedSource = prepared();
   const benchmarkResult = await runLifecycleHistoryBackfill({
     profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
@@ -71,22 +71,35 @@ async function fixture() {
     execute: true,
     extractorAdapter: async (request: MemoryV3ExtractorRequest) => {
       const message = request.input.messages[0];
+      const items = [{
+        itemRef: 'i1', kind: 'event', claim: message.text, status: 'active',
+        sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null,
+        alternative: null,
+      }];
+      const evidence = [{
+        itemRef: 'i1', sourceMessageId: message.id, relation: 'supports',
+        supportType: null, episodeKey: `episode:${message.id}`,
+      }];
+      if (itemCount === 2) {
+        items.push({
+          itemRef: 'i2', kind: 'event', claim: 'Имя — Настя', status: 'active',
+          sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null,
+          alternative: null,
+        });
+        evidence.push({
+          itemRef: 'i2', sourceMessageId: message.id, relation: 'supports',
+          supportType: null, episodeKey: `episode:${message.id}`,
+        });
+      }
       return {
         content: JSON.stringify({
           layerDecisions: [
-            { kind: 'event', decision: 'emit', itemRefs: ['i1'] },
+            { kind: 'event', decision: 'emit', itemRefs: items.map((item) => item.itemRef) },
             { kind: 'recurrence', decision: 'omit', itemRefs: [] },
             { kind: 'hypothesis', decision: 'omit', itemRefs: [] },
           ],
-          items: [{
-            itemRef: 'i1', kind: 'event', claim: message.text, status: 'active',
-            sensitivity: 'normal', eventTimeStart: null, eventTimeEnd: null,
-            alternative: null,
-          }],
-          evidence: [{
-            itemRef: 'i1', sourceMessageId: message.id, relation: 'supports',
-            supportType: null, episodeKey: `episode:${message.id}`,
-          }],
+          items,
+          evidence,
         }),
         usage: null,
         resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
@@ -124,7 +137,7 @@ type MutableReview = {
   verdict: string;
   reviewer: string;
   reviewedAt: string;
-  items: Array<{ semanticVerdict: string; reviewerNotes: string | null }>;
+  items: Array<{ memoryKey: string; semanticVerdict: string; reviewerNotes: string | null }>;
 };
 
 type MutableFresh = {
@@ -198,6 +211,44 @@ describe('reviewed lifecycle history import', () => {
       itemCount: 1,
       evidenceCount: 1,
     });
+  });
+
+  it('imports only PASS items while preserving the original artifact digest and state revision', async () => {
+    const data = await fixture(2);
+    data.reviewDecision.items[1].semanticVerdict = 'REJECT';
+    data.reviewDecision.items[1].reviewerNotes = 'Не одобрено для сквозной памяти';
+    const stateRevision = data.artifact.benchmarkResult.finalState.stateRevision;
+    const fake = clientFor(stateRevision);
+
+    const result = await importReviewedLifecycleHistory({
+      ...data, userId: USER_ID, importId: IMPORT_ID, client: fake.client,
+    });
+
+    assert.equal(fake.calls.length, 1);
+    const rpc = fake.calls[0] as { artifactDigest: string; state: { stateRevision: number; items: unknown[] } };
+    assert.equal(rpc.artifactDigest, data.artifact.semanticReviewPacket.payloadSha256);
+    assert.equal(rpc.state.stateRevision, stateRevision);
+    assert.equal(
+      canonicalStringify(rpc.state.items),
+      canonicalStringify([data.artifact.benchmarkResult.finalState.items[0]]),
+    );
+    assert.equal(result.itemCount, 1);
+    assert.equal(result.evidenceCount, 1);
+  });
+
+  it('rejects a rejected item without notes and refuses a review that rejects every item', async () => {
+    for (const rejectAll of [false, true]) {
+      const data = await fixture(rejectAll ? 1 : 2);
+      data.reviewDecision.items[0].semanticVerdict = 'REJECT';
+      data.reviewDecision.items[0].reviewerNotes = rejectAll
+        ? 'Не одобрено для сквозной памяти'
+        : null;
+      const fake = clientFor(data.artifact.benchmarkResult.finalState.stateRevision);
+      await assert.rejects(() => importReviewedLifecycleHistory({
+        ...data, userId: USER_ID, importId: IMPORT_ID, client: fake.client,
+      }));
+      assert.equal(fake.calls.length, 0);
+    }
   });
 
   it('recomputes the canonical payload digest and rejects artifact tampering before mutation', async () => {

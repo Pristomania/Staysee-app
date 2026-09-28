@@ -34,7 +34,7 @@ export interface LifecycleHistoryReviewDecision {
   reviewer: 'Nastya';
   items: Array<{
     memoryKey: string;
-    semanticVerdict: 'PASS';
+    semanticVerdict: 'PASS' | 'REJECT';
     reviewerNotes: string | null;
   }>;
 }
@@ -419,7 +419,10 @@ function validateArtifact(value: unknown): {
   return { benchmarkResult: result, packet, state, payloadSha256: computed, manifest };
 }
 
-function validateDecision(value: unknown, artifact: ReturnType<typeof validateArtifact>): LifecycleHistoryReviewDecision {
+function validateDecision(
+  value: unknown,
+  artifact: ReturnType<typeof validateArtifact>,
+): MemoryV3LifecycleState {
   const decision = record(value, [
     'schemaVersion', 'payloadSha256', 'verdict', 'reviewedAt', 'reviewer', 'items',
   ]);
@@ -433,16 +436,25 @@ function validateDecision(value: unknown, artifact: ReturnType<typeof validateAr
     record(entry, ['memoryKey', 'semanticVerdict', 'reviewerNotes'])
   );
   if (rows.length !== artifact.state.items.length) return fail();
+  const approvedItems = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     if (
       row.memoryKey !== artifact.state.items[index].memoryKey ||
-      row.semanticVerdict !== 'PASS' ||
-      !(row.reviewerNotes === null ||
-        (typeof row.reviewerNotes === 'string' && row.reviewerNotes.length <= MAX_REVIEWER_NOTES))
+      (row.semanticVerdict !== 'PASS' && row.semanticVerdict !== 'REJECT') ||
+      (row.semanticVerdict === 'PASS' && !(row.reviewerNotes === null ||
+        (typeof row.reviewerNotes === 'string' && row.reviewerNotes.length <= MAX_REVIEWER_NOTES))) ||
+      (row.semanticVerdict === 'REJECT' && !(typeof row.reviewerNotes === 'string' &&
+        row.reviewerNotes.length > 0 && row.reviewerNotes.length <= MAX_REVIEWER_NOTES))
     ) return fail();
+    if (row.semanticVerdict === 'PASS') approvedItems.push(artifact.state.items[index]);
   }
-  return decision as unknown as LifecycleHistoryReviewDecision;
+  if (approvedItems.length === 0) return fail();
+  try {
+    return validateMemoryV3LifecycleState({ ...artifact.state, items: approvedItems });
+  } catch {
+    return fail();
+  }
 }
 
 function validateFreshSource(value: unknown, artifact: ReturnType<typeof validateArtifact>): JsonRecord {
@@ -585,7 +597,7 @@ export async function importReviewedLifecycleHistory(input: {
       typeof root.importId !== 'string' || !UUID.test(root.importId)) return fail();
     const artifact = validateArtifact(root.artifact);
     if (artifact.state.userId !== root.userId) return fail();
-    validateDecision(root.reviewDecision, artifact);
+    const approvedState = validateDecision(root.reviewDecision, artifact);
     validateFreshSource(root.freshPreparedSource, artifact);
     const client = validateClient(root.client);
     validateHead(await client.loadCurrentHead(root.userId));
@@ -600,7 +612,7 @@ export async function importReviewedLifecycleHistory(input: {
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
       extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
-      state: cloneJson(artifact.state) as MemoryV3LifecycleState,
+      state: cloneJson(approvedState) as MemoryV3LifecycleState,
     });
     const resultingStateRevision = validateResponse(response, artifact.state.stateRevision);
     return Object.freeze({
@@ -608,8 +620,8 @@ export async function importReviewedLifecycleHistory(input: {
       artifactDigest: artifact.payloadSha256,
       sourceSnapshotDigest: artifact.manifest.sourceSnapshotDigest as string,
       resultingStateRevision,
-      itemCount: artifact.state.items.length,
-      evidenceCount: countEvidence(artifact.state),
+      itemCount: approvedState.items.length,
+      evidenceCount: countEvidence(approvedState),
     });
   } catch (error) {
     if (typeof error === 'object' && error !== null && OWN_ERRORS.has(error)) {
