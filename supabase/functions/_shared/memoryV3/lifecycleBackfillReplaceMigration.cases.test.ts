@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(
-  join(here, "..", "..", "..", "migrations", "20260928040000_054_memory_v3_lifecycle_backfill_replace_sql_fix.sql"),
+  join(here, "..", "..", "..", "migrations", "20260928050000_055_memory_v3_lifecycle_backfill_reimport.sql"),
   "utf8",
 );
 
@@ -45,8 +45,19 @@ describe("Memory V3 lifecycle backfill replacement migration", () => {
     assert.doesNotMatch(sql, /pg_catalog\.greatest/);
   });
 
-  it("keeps one reviewed import per user and service-role-only execution", () => {
-    assert.match(sql, /memory_v3_lifecycle_backfill_imports[\s\S]*WHERE user_id = p_user_id/);
+  it("keeps import history while blocking duplicate artifacts", () => {
+    assert.match(
+      sql,
+      /DROP CONSTRAINT IF EXISTS memory_v3_lifecycle_backfill_imports_user_id_key/,
+    );
+    assert.doesNotMatch(
+      sql,
+      /OR EXISTS \(\s*SELECT 1 FROM public\.memory_v3_lifecycle_backfill_imports\s*WHERE user_id = p_user_id\s*\)/,
+    );
+    assert.match(sql, /WHERE artifact_digest = p_artifact_digest/);
+  });
+
+  it("keeps service-role-only execution", () => {
     assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.import_memory_v3_lifecycle_backfill_state\([\s\S]*TO service_role;/);
     assert.doesNotMatch(sql, /GRANT EXECUTE[\s\S]*TO (?:anon|authenticated)/);
   });
