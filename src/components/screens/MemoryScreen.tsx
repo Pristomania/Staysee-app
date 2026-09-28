@@ -630,7 +630,7 @@ export function MemoryScreen() {
           onBack={goBack}
           title="Память"
           subtitle={memoryReturnScreen === 'chat'
-            ? 'Эта беседа'
+            ? (currentConversation?.title || 'Эта беседа')
             : 'Факты и беседы'}
           backLabel={memoryReturnScreen === 'chat' ? 'Назад в беседу' : 'В контекст'}
         />
@@ -649,7 +649,7 @@ export function MemoryScreen() {
               <p className={`${theme.textMuted} mt-1 text-xs font-light leading-relaxed`}>
                 Здесь можно посмотреть сохранённые записи.
               </p>
-              {!loading && (
+              {!loading && capabilities.canChooseConversation && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <span className={`rounded-full border px-2.5 py-1 text-[11px] font-light ${theme.border} ${theme.textSecondary}`}>
                     Эта беседа · {memoryV3Dialogue.length}
@@ -687,16 +687,7 @@ export function MemoryScreen() {
                     onSelect={setSelectedConvId}
                   />
                 </div>
-              ) : (
-                <div className={`${cardBase} px-4 py-3.5 mb-3`}>
-                  <p className={`${theme.textMuted} text-[11px] font-light mb-1 opacity-80`}>
-                    Текущая беседа
-                  </p>
-                  <p className={`${theme.textPrimary} text-sm font-light truncate`}>
-                    {currentConversation?.title || 'Без названия'}
-                  </p>
-                </div>
-              )}
+              ) : null}
 
               {capabilities.showConversationControl && selectedConvId && (
                 <div className="mb-4">
