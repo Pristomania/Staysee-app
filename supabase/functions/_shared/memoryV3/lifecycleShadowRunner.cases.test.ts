@@ -9,7 +9,11 @@ import {
   runMemoryV3LifecycleShadow,
   runMemoryV3LifecycleShadowBackgroundSafely,
 } from "./lifecycleShadowRunner.ts";
-import { buildMemoryV3ExtractorRequest } from "./prompt.ts";
+import {
+  MEMORY_V3_LIFECYCLE_EXTRACTOR_SYSTEM_INSTRUCTION,
+  MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+  buildMemoryV3LifecycleExtractorRequest,
+} from "./lifecycleExtractorPrompt.ts";
 
 const USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -63,6 +67,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const reserveInputs: unknown[] = [];
   const casInputs: unknown[] = [];
+  const extractorRequests: unknown[] = [];
   let active = 0;
   let maxActive = 0;
   const store: MemoryV3LifecycleStore = {
@@ -98,8 +103,9 @@ function harness(overrides: Record<string, unknown> = {}) {
     store,
     extractorAdapterFactory() {
       calls.push("extractorFactory");
-      return async () => {
+      return async (request: unknown) => {
         calls.push("extractor");
+        extractorRequests.push(request);
         active += 1;
         maxActive = Math.max(maxActive, active);
         await Promise.resolve();
@@ -120,7 +126,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
-  return { options, calls, store, reserveInputs, casInputs, get maxActive() { return maxActive; } };
+  return { options, calls, store, reserveInputs, casInputs, extractorRequests, get maxActive() { return maxActive; } };
 }
 
 describe("Memory V3 lifecycle shadow runner gates", () => {
@@ -246,7 +252,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     const original = structuredClone(messages);
     const caseId = `memory-v3-shadow:${USER_ID}:${CONVERSATION_ID}`;
     assert.equal(
-      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages }))).byteLength > 20_000,
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3LifecycleExtractorRequest({ caseId, messages }))).byteLength > 20_000,
       true,
     );
 
@@ -278,7 +284,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
 
     const oneMore = messages.slice(messages.length - input.messages.length - 1);
     assert.equal(
-      new TextEncoder().encode(JSON.stringify(buildMemoryV3ExtractorRequest({ caseId, messages: oneMore }))).byteLength > 20_000,
+      new TextEncoder().encode(JSON.stringify(buildMemoryV3LifecycleExtractorRequest({ caseId, messages: oneMore }))).byteLength > 20_000,
       true,
     );
     assert.equal((test.reserveInputs[0] as { messageCount: number }).messageCount, input.messages.length);
@@ -305,7 +311,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
       userId: USER_ID,
       conversationId: CONVERSATION_ID,
       pipelineVersion: "memory-v3-lifecycle-shadow-v1",
-      extractorVersion: "memory-v3-openrouter-gemini-3.7-flash-shadow-v2",
+      extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: "memory-v3-lifecycle-reconciler-v1",
       model: "google/gemini-3.7-flash",
       inputHash: (test.reserveInputs[0] as { inputHash: string }).inputHash,
@@ -315,6 +321,10 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
       userMessageCount: 1,
     });
     assert.match((test.reserveInputs[0] as { inputHash: string }).inputHash, /^[0-9a-f]{64}$/);
+    assert.equal(
+      (test.extractorRequests[0] as { system: string }).system,
+      MEMORY_V3_LIFECYCLE_EXTRACTOR_SYSTEM_INSTRUCTION,
+    );
     assert.equal(test.casInputs.length, 1);
     const cas = test.casInputs[0] as Record<string, unknown>;
     assert.equal(cas.expectedStateRevision, 0);
@@ -666,6 +676,9 @@ describe("Memory V3 lifecycle background isolation", () => {
 describe("Memory V3 lifecycle source isolation", () => {
   it("passes an empty trusted-forget list and never imports a legacy writer", () => {
     const source = readFileSync(new URL("./lifecycleShadowRunner.ts", import.meta.url), "utf8");
+    assert.match(source, /from "\.\/lifecycleExtractorPrompt\.ts"/);
+    assert.doesNotMatch(source, /from "\.\/prompt\.ts"/);
+    assert.doesNotMatch(source, /dialogueExtractorPrompt/);
     assert.match(source, /trustedForgetMemoryKeys:\s*\[\]/);
     assert.equal(source.includes("conversation_summary"), false);
     assert.equal(source.includes("user_memory"), false);

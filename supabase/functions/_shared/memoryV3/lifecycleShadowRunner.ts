@@ -1,5 +1,4 @@
 import {
-  MEMORY_V3_EXTRACTOR_VERSION,
   MEMORY_V3_MAX_PROMPT_BYTES,
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
@@ -7,7 +6,10 @@ import {
   type MemoryV3Extraction,
 } from "./contract.ts";
 import type { MemoryV3DialogueMessage } from "./messages.ts";
-import { buildMemoryV3ExtractorRequest } from "./prompt.ts";
+import {
+  MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+  buildMemoryV3LifecycleExtractorRequest,
+} from "./lifecycleExtractorPrompt.ts";
 import {
   projectSafeMemoryV3TransportDiagnostic,
   type MemoryV3ModelAdapter,
@@ -99,7 +101,7 @@ function ownDiagnostic(error: unknown): MemoryV3LifecycleShadowDiagnostic | null
 
 function fitExtractorDialogueToByteCap(
   dialogue: MemoryV3DialogueInput,
-): { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3ExtractorRequest> } {
+): { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> } {
   const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES);
   for (let start = 0; start < dialogue.messages.length; start += 1) {
     const messages = dialogue.messages.slice(start);
@@ -107,7 +109,7 @@ function fitExtractorDialogueToByteCap(
     const candidate = start === 0
       ? dialogue
       : validateMemoryV3Dialogue({ caseId: dialogue.caseId, messages });
-    const request = buildMemoryV3ExtractorRequest(candidate);
+    const request = buildMemoryV3LifecycleExtractorRequest(candidate);
     if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
       return { dialogue: candidate, request };
     }
@@ -360,7 +362,7 @@ export async function runMemoryV3LifecycleShadow(
     reservation = await reserve({
       userId, conversationId,
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
-      extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+      extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       model: MEMORY_V3_LIFECYCLE_MODEL,
       inputHash: hash,
@@ -439,7 +441,12 @@ export async function runMemoryV3LifecycleShadow(
   }
   let extraction: MemoryV3Extraction;
   try {
-    extraction = await normalizeMemoryV3LayeredResponse(parsedExtraction, dialogue, MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation");
+    extraction = await normalizeMemoryV3LayeredResponse(
+      parsedExtraction,
+      dialogue,
+      MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+      "cross_conversation",
+    );
   } catch {
     return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
   }
