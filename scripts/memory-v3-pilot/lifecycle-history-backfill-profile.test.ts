@@ -15,7 +15,7 @@ import {
   MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_SCHEMA_VERSION,
 } from '../../supabase/functions/_shared/memoryV3/lifecycleContract.ts';
-import { MEMORY_V3_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/contract.ts';
+import { MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import {
   LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,
   LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
@@ -143,7 +143,7 @@ describe('history backfill profile', () => {
       profileId: 'memory-v3-lifecycle-history-backfill-v1',
       schemaVersion: MEMORY_V3_LIFECYCLE_SCHEMA_VERSION,
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
-      extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+      extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
       model: MEMORY_V3_LIFECYCLE_MODEL,
       modelRoute: [PRIMARY_MODEL, FALLBACK_MODEL],

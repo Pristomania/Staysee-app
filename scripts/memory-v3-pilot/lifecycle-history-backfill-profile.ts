@@ -1,6 +1,6 @@
 import { isProxy } from 'node:util/types';
 
-import { MEMORY_V3_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/contract.ts';
+import { MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION } from '../../supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts';
 import {
   MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,
   MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
@@ -33,7 +33,7 @@ export interface LifecycleHistoryBackfillProfile {
   profileId: typeof LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID;
   schemaVersion: 'memory-v3-lifecycle-state-v1';
   pipelineVersion: 'memory-v3-lifecycle-shadow-v1';
-  extractorVersion: 'memory-v3-openrouter-gemini-3.7-flash-shadow-v2';
+  extractorVersion: typeof MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION;
   reconcilerVersion: 'memory-v3-lifecycle-reconciler-v1';
   model: 'google/gemini-3.7-flash';
   modelRoute: readonly [
@@ -143,7 +143,7 @@ const PROFILE = deepFreeze<LifecycleHistoryBackfillProfile>({
   profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
   schemaVersion: MEMORY_V3_LIFECYCLE_SCHEMA_VERSION,
   pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
-  extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+  extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
   reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
   model: MEMORY_V3_LIFECYCLE_MODEL,
   modelRoute: LIFECYCLE_HISTORY_MODEL_ROUTE,
