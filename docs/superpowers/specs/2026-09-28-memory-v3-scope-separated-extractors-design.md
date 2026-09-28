@@ -1,7 +1,7 @@
 # Memory V3 Scope-Separated Extractors Design
 
 **Date:** 2026-09-28
-**Status:** concept approved in chat; written spec awaiting review; implementation not started
+**Status:** concept approved; lead-reviewed against current code; ready for implementation planning
 **Owner:** StaySEE AI
 
 ## Problem
@@ -16,7 +16,7 @@ This shared first stage caused scope mixing in the 2026-09-28 lifecycle history 
 
 The lifecycle reconciler can only accept or ignore a candidate. It is contractually forbidden to rewrite the claim, so it cannot retain `Есть сын` while moving the son's plans into dialogue memory. A stricter reconciler prompt alone cannot reliably repair a mixed candidate.
 
-Lifecycle and dialogue memory are separate product functions. They have separate user controls, storage, timing, retention, and semantic responsibilities. Their extraction must therefore be separate before reconciliation.
+Lifecycle and dialogue memory are separate product functions. They already have separate storage, reservations, retention, and semantic responsibilities, while user-facing scope controls are still incomplete. Their extraction must therefore be separate before reconciliation.
 
 ## Decision
 
@@ -67,9 +67,9 @@ Dialogue memory may retain context useful when the same conversation continues:
 - preferences for how that conversation should proceed;
 - user-originated sensitive context when it is relevant and allowed by the existing safety contract.
 
-Dialogue-only details never become lifecycle candidates merely because they remain true. Dialogue memory remains isolated by `userId + conversationId` and follows the dialogue-memory toggle and retention rules.
+Dialogue-only details never become lifecycle candidates merely because they remain true. Dialogue memory remains isolated by `userId + conversationId` and follows its own reservation and retention rules. In this change both scopes remain behind the existing profile master-memory gate; separate user-facing scope controls are a follow-up.
 
-It is acceptable for a minimal profile fact to exist in both scopes when both independent features are enabled. This is not scope mixing: the dialogue copy is isolated to its conversation, while the lifecycle copy is the deliberately minimal global fact. Turning lifecycle memory off must not disable dialogue memory, and turning dialogue memory off must not disable lifecycle memory.
+It is acceptable for a minimal profile fact to exist in both scopes when both pipelines are eligible. This is not scope mixing: the dialogue copy is isolated to its conversation, while the lifecycle copy is the deliberately minimal global fact. Within the current canary wiring, one scope being ineligible, skipped, or failed must not suppress the other; the later controls change will expose this independence to users.
 
 ### Explicit remember requests
 
@@ -90,23 +90,47 @@ It is acceptable for a minimal profile fact to exist in both scopes when both in
 
 2. `supabase/functions/_shared/memoryV3/lifecycleExtractorPrompt.ts`
    - owns `MEMORY_V3_LIFECYCLE_EXTRACTOR_SYSTEM_INSTRUCTION`;
+   - owns `MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION`;
    - exports `buildMemoryV3LifecycleExtractorRequest`;
    - contains the lifecycle-only semantic rules above.
 
 3. `supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts`
    - owns `MEMORY_V3_DIALOGUE_EXTRACTOR_SYSTEM_INSTRUCTION`;
+   - owns `MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION`;
    - exports `buildMemoryV3DialogueExtractorRequest`;
    - contains the dialogue-only semantic rules above.
 
+The version constants live beside the policy they identify, so changing one scope cannot silently change the recorded identity of the other.
+
 ### Existing modules
 
-- `contract.ts` continues to own the shared JSON/evidence contract and normalization.
+- `contract.ts` continues to own the shared JSON/evidence contract and normalization. Its existing `MEMORY_V3_EXTRACTOR_VERSION` remains the identity of the legacy generic extractor only; scope-owned production code must not import that constant.
 - `transport.ts` continues to own the shared provider boundary.
 - `lifecyclePrompt.ts` remains the lifecycle reconciler and receives only lifecycle extraction.
 - `dialoguePrompt.ts` remains the dialogue reconciler and receives only dialogue extraction.
 - `prompt.ts` becomes legacy-only compatibility for the old generic shadow/offline benchmark path. Production lifecycle, production dialogue, and both history-backfill stacks must not import it.
 
 No production runner imports both scope-owned extractor modules.
+
+`supabase/functions/staysee-chat/index.ts` must schedule the eligible dialogue and lifecycle background paths independently. The current early return from the dialogue branch prevents the lifecycle branch from running for a dialogue-enabled account. The replacement computes both eligibility decisions and awaits both safe background wrappers together; one scope being eligible, skipped, or failed cannot suppress the other. The legacy generic shadow path remains mutually exclusive with lifecycle production mode.
+
+### Historical profile boundaries
+
+The existing dialogue history stack currently imports lifecycle profile configuration, including the lifecycle profile id and shared extractor identity. That coupling must also be removed.
+
+1. `scripts/memory-v3-pilot/history-backfill-provider-profile.ts`
+   - owns only shared provider route constants, price-snapshot validation, and budget arithmetic;
+   - contains no lifecycle/dialogue prompt, extractor version, profile id, result schema, or import rule.
+
+2. `scripts/memory-v3-pilot/lifecycle-history-backfill-profile.ts`
+   - owns `memory-v3-lifecycle-history-backfill-v1` and the lifecycle extractor version;
+   - imports only the provider/budget primitives from the common profile module.
+
+3. `scripts/memory-v3-pilot/dialogue-history-backfill-profile.ts`
+   - owns `memory-v3-dialogue-history-backfill-v1` and the dialogue extractor version;
+   - imports only the provider/budget primitives from the common profile module.
+
+The dialogue CLI no longer accepts the lifecycle profile id as an alias. Supplying a lifecycle profile to the dialogue command, or a dialogue profile to the lifecycle command, fails before environment reads, provider calls, or output writes. Existing completed artifacts remain readable by audit tooling but cannot pass a new scope-owned approval/import gate.
 
 ## Versions and Identity
 
@@ -117,13 +141,13 @@ Add independent immutable version constants:
 
 The version is selected by the importing runner, never by input data or environment variables.
 
-Lifecycle reservations, diagnostics, historical manifests, request digests, review packets, and import approvals use the lifecycle version. Dialogue equivalents use the dialogue version. Existing completed artifacts retain their original version and remain readable for audit, but they are not eligible for import through a mismatched scope/version approval.
+Lifecycle reservations, diagnostics, historical manifests, request digests, review packets, and import approvals use the lifecycle version. Dialogue equivalents use the dialogue version. Import validators reconstruct the request with the scope-owned builder and require the matching scope-owned profile id and extractor version. Existing completed artifacts retain their original version and remain readable for audit, but they are not eligible for import through a mismatched scope/version approval.
 
 ## Live Data Flow and Timing
 
 ### Dialogue path
 
-1. The dialogue-memory eligibility check evaluates its own toggle and account rules.
+1. The dialogue-memory eligibility check evaluates its scope-specific canary mode and reservation rules behind the existing profile master-memory gate.
 2. `dialogueShadowRunner` loads only that conversation.
 3. It builds a request with `buildMemoryV3DialogueExtractorRequest`.
 4. The dialogue extractor and dialogue reconciler run.
@@ -131,7 +155,7 @@ Lifecycle reservations, diagnostics, historical manifests, request digests, revi
 
 ### Lifecycle path
 
-1. The lifecycle eligibility/reservation check evaluates its own toggle and daily account reservation.
+1. The lifecycle eligibility/reservation check evaluates its scope-specific mode and daily account reservation behind the existing profile master-memory gate.
 2. `lifecycleShadowRunner` loads the eligible source conversation.
 3. It builds a request with `buildMemoryV3LifecycleExtractorRequest`.
 4. The lifecycle extractor and lifecycle reconciler run.
@@ -139,10 +163,13 @@ Lifecycle reservations, diagnostics, historical manifests, request digests, revi
 
 The two paths may be scheduled at different times and may independently run, skip, fail, or fall back. Neither path consumes the other path's candidate list or state.
 
+The current `cross_memory_enabled` profile preference remains a master gate for both Memory V3 scopes in this change. Separate end-user controls for lifecycle memory, the default dialogue-memory behavior, and a per-conversation dialogue override require their own persisted preference schema and UI design. They are a required follow-up before the memory feature is described as fully user-configurable, but they are not folded into this semantic-isolation change.
+
 ## Historical Backfill
 
 - lifecycle history backfill imports only `buildMemoryV3LifecycleExtractorRequest` and records the lifecycle extractor version;
 - dialogue history backfill imports only `buildMemoryV3DialogueExtractorRequest` and records the dialogue extractor version;
+- lifecycle and dialogue CLI, contract, engine, approval, review-packet, and import modules use their own profile module and reject the other scope's profile id;
 - request-byte calculations and SHA-256 manifests are rebuilt from the scope-owned prompt;
 - scope/version mismatches fail before provider calls and before filesystem writes;
 - existing safe-output, budget, no-retry, sequential-call, and privacy guarantees remain unchanged.
@@ -154,7 +181,7 @@ The three artifacts produced on 2026-09-28 are audit evidence only. They are not
 - The shared model response schema remains unchanged.
 - The shared transport and provider model route remain unchanged.
 - Lifecycle and dialogue database schemas remain unchanged.
-- Read paths and user-facing toggles remain unchanged.
+- Read paths and the existing profile master-memory toggle remain unchanged.
 - The legacy generic shadow runner may retain `prompt.ts`; it cannot feed lifecycle or dialogue production stores.
 - Existing production fallback and Telegram alert behavior remains unchanged.
 
@@ -165,12 +192,15 @@ The three artifacts produced on 2026-09-28 are audit evidence only. They are not
 - lifecycle live runner and lifecycle backfill import only the lifecycle extractor builder;
 - dialogue live runner and dialogue backfill import only the dialogue extractor builder;
 - neither scope runner imports `prompt.ts` or the other scope's extractor module;
+- dialogue history source, CLI, engine, approval, review, and import code do not import `lifecycle-history-backfill-profile.ts`, and lifecycle equivalents do not import the dialogue profile;
+- live-wiring tests prove that dialogue eligibility does not return before lifecycle eligibility is evaluated, both safe runners can be scheduled in one turn, and one failure cannot suppress the other;
 - source-lock tests count import specifiers and reject dynamic or side-effect imports that bypass the boundary.
 
 ### Prompt and identity tests
 
 - each builder returns its exact fixed instruction and does not mutate input;
 - each runner records the correct scope-owned extractor version;
+- each history command accepts only its own exact profile id and rejects the other scope before environment, network, or filesystem side effects;
 - a mismatched version, prompt digest, or backfill manifest is rejected before network access;
 - getters, proxies, symbols, sparse arrays, and unknown fields remain rejected without executing accessors.
 
@@ -187,7 +217,7 @@ The same synthetic conversation is evaluated against both scope policies:
 | long sobriety motivated by health fear | omit | may keep locally if relevant and safe |
 | personal/group therapy plus professional training | omit personal therapy; emit professional role/training only if separately evidenced | may keep therapy context if relevant and safe |
 | prefers direct communication | global communication preference | local preference may also exist |
-| explicit `запомни здесь` | omit unless independently globally admissible | admit |
+| explicit `запомни здесь` | omit, respecting the explicit conversation-only boundary | admit |
 | unqualified `запомни: у меня есть сын` | `Есть сын` | may also retain the fact locally |
 | unqualified `запомни` followed by a long conflict story | omit the story; emit only a separately evidenced allowlisted core, if any | may retain relevant local narrative |
 | explicit `для всех разговоров` | admit only minimal safe fact | dialogue path is unaffected |
@@ -210,6 +240,7 @@ Tests also prove that one scope failing or being disabled does not suppress the 
 
 - No database migration.
 - No change to retention periods or purge jobs.
+- No new lifecycle/dialogue/per-conversation preference columns or UI controls; those form the next separately designed product-control change.
 - No automatic import of any existing artifact.
 - No change to model provider, fallback provider, or paid-call limits.
 - No keyword-based semantic filter pretending to understand arbitrary stories.
