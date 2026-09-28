@@ -1,7 +1,7 @@
 # Memory V3 Scope-Separated Extractors Design
 
-**Date:** 2026-09-28  
-**Status:** concept approved in chat; written spec awaiting review; implementation not started  
+**Date:** 2026-09-28
+**Status:** concept approved in chat; written spec awaiting review; implementation not started
 **Owner:** StaySEE AI
 
 ## Problem
