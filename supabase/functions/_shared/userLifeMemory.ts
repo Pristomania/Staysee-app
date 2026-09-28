@@ -4,7 +4,10 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { fetchCrossMemoryEnabled } from "./profilePrefs.ts";
+import {
+  fetchConversationCrossMemoryEnabled,
+  fetchCrossMemoryEnabled,
+} from "./profilePrefs.ts";
 import type { StructuredMemory } from "./memory.ts";
 import {
   MEMORY_COHABIT_CONFLICT_RE,
@@ -239,7 +242,15 @@ export async function refreshUserLifeMemory(
   durableCorrections: DurableMemoryCorrection[] = [],
   diag?: MemoryDiagContext
 ): Promise<void> {
-  if (!(await fetchCrossMemoryEnabled(supabase, userId))) {
+  const crossMemoryOn = conversationId
+    ? await fetchConversationCrossMemoryEnabled(
+        supabase,
+        userId,
+        conversationId
+      )
+    : await fetchCrossMemoryEnabled(supabase, userId);
+
+  if (!crossMemoryOn) {
     return;
   }
 

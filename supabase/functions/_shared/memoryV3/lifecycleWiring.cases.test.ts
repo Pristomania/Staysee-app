@@ -41,6 +41,10 @@ describe("staysee-chat lifecycle shadow composition", () => {
     assert.equal((text.match(/\brunMemoryV3Shadow\s*\(\{/g) ?? []).length, 1);
     assert.equal((text.match(/\brunMemoryV3LifecycleShadow\s*\(\{/g) ?? []).length, 1);
     const dispatch = text.slice(promise, settle);
+    assert.match(
+      dispatch,
+      /fetchConversationCrossMemoryEnabled\(\s*svc,\s*userId,\s*conversationId\s*\)/u,
+    );
     assert.match(dispatch, /const dialogueMemoryPromise/);
     assert.match(dispatch, /const lifecycleMemoryPromise/);
     assert.match(
@@ -49,6 +53,16 @@ describe("staysee-chat lifecycle shadow composition", () => {
     );
     assert.match(dispatch, /return Promise\.all\(\[dialogueMemoryPromise, lifecycleMemoryPromise\]\);/);
     assert.match(text.slice(settle), /Promise\.all\(\[[\s\S]*?memoryV3ShadowPromise,/);
+  });
+
+  it("resolves the current conversation preference before lifecycle background work", () => {
+    const text = source();
+    const start = text.indexOf("const memoryV3ShadowPromise");
+    const end = text.indexOf("EdgeRuntime.waitUntil(", start);
+    const block = text.slice(start, end);
+    const preference = block.indexOf("fetchConversationCrossMemoryEnabled(");
+    const lifecycle = block.indexOf("const lifecycleMemoryPromise");
+    assert.ok(preference >= 0 && lifecycle > preference);
   });
 
   it("does not require the summary context packet before dispatching lifecycle shadow", () => {

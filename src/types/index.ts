@@ -17,6 +17,8 @@ export interface Conversation {
   user_id: string;
   title: string;
   is_active: boolean;
+  /** Effective cross-conversation memory setting for this chat. */
+  cross_memory_enabled?: boolean;
   created_at: string;
   last_message_at: string;
 }
