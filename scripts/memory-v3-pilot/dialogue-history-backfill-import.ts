@@ -32,20 +32,24 @@ import { isProxy } from 'node:util/types';
 
 import { canonicalStringify } from './contracts.mjs';
 import {
-  getLifecycleHistoryBackfillProfile,
-  LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_MODEL_ROUTE,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  DIALOGUE_HISTORY_BACKFILL_PROFILE_ID,
+  getDialogueHistoryBackfillProfile,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  HISTORY_BACKFILL_FALLBACK_MODEL,
+  HISTORY_BACKFILL_MODEL_ROUTE,
+  HISTORY_BACKFILL_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 import {
   canonicalDialogueHistoryDigest,
 } from './dialogue-history-backfill-contract.ts';
 import {
-  MEMORY_V3_EXTRACTOR_VERSION,
   validateMemoryV3Dialogue,
 } from '../../supabase/functions/_shared/memoryV3/contract.ts';
-import { buildMemoryV3ExtractorRequest } from '../../supabase/functions/_shared/memoryV3/prompt.ts';
+import {
+  buildMemoryV3DialogueExtractorRequest,
+  MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
+} from '../../supabase/functions/_shared/memoryV3/dialogueExtractorPrompt.ts';
 import {
   MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
   MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
@@ -78,7 +82,7 @@ export interface DialogueHistoryImportClient {
     sourceCutoff: string;
     profileId: string;
     pipelineVersion: string;
-    extractorVersion: typeof MEMORY_V3_EXTRACTOR_VERSION;
+    extractorVersion: typeof MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION;
     reconcilerVersion: string;
     state: MemoryV3DialogueState;
   }): Promise<unknown>;
@@ -280,7 +284,7 @@ function validateManifest(value: unknown): JsonRecord {
   const manifest = record(value, MANIFEST_FIELDS);
   if (
     manifest.schemaVersion !== 'memory-v3-dialogue-history-manifest-v1' ||
-    manifest.profileId !== LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID ||
+    manifest.profileId !== DIALOGUE_HISTORY_BACKFILL_PROFILE_ID ||
     !isValidDateTime(manifest.sourceCutoff) ||
     typeof manifest.sourceSnapshotDigest !== 'string' || !SHA256.test(manifest.sourceSnapshotDigest) ||
     !positiveInteger(manifest.conversationCount) || !positiveInteger(manifest.messageCount) ||
@@ -293,7 +297,7 @@ function validateManifest(value: unknown): JsonRecord {
   const chunks = denseArray(manifest.chunks).map((entry) => record(entry, MANIFEST_CHUNK_FIELDS));
   if (conversations.length !== manifest.conversationCount || chunks.length !== manifest.chunkCount ||
     manifest.maxProviderCalls !== (manifest.chunkCount as number) *
-      getLifecycleHistoryBackfillProfile(LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID).maxCallsPerChunk) {
+      getDialogueHistoryBackfillProfile(DIALOGUE_HISTORY_BACKFILL_PROFILE_ID).maxCallsPerChunk) {
     return fail();
   }
   for (let index = 0; index < conversations.length; index += 1) {
@@ -365,8 +369,8 @@ function validateArtifact(value: unknown): {
     result.profileId !== 'memory-v3-dialogue-history-backfill-v1' ||
     result.model !== 'google/gemini-3.7-flash' ||
     modelRoute.length !== 2 ||
-    modelRoute[0] !== LIFECYCLE_HISTORY_PRIMARY_MODEL ||
-    modelRoute[1] !== LIFECYCLE_HISTORY_FALLBACK_MODEL ||
+    modelRoute[0] !== HISTORY_BACKFILL_PRIMARY_MODEL ||
+    modelRoute[1] !== HISTORY_BACKFILL_FALLBACK_MODEL ||
     priceRoute.length !== 2 ||
     budget.maxRequests !== manifest.maxProviderCalls ||
     budget.reservedInputTokensPerCall !== 32_768 || budget.maxOutputTokensPerCall !== 4_096 ||
@@ -388,7 +392,7 @@ function validateArtifact(value: unknown): {
   ) return fail();
   for (let index = 0; index < priceRoute.length; index += 1) {
     const endpoint = priceRoute[index];
-    const expectedModel = LIFECYCLE_HISTORY_MODEL_ROUTE[index];
+    const expectedModel = HISTORY_BACKFILL_MODEL_ROUTE[index];
     const parameters = denseArray(endpoint.supportedParameters);
     if (
       endpoint.model !== expectedModel ||
@@ -452,8 +456,8 @@ function validateArtifact(value: unknown): {
         !nonNegativeInteger(chunkRow.itemCount) || !nonNegativeInteger(chunkRow.evidenceCount) ||
         transitions.some((entry) => typeof entry !== 'string' || entry.length === 0)) return fail();
       for (const resolvedModel of [chunkRow.extractorResolvedModel, chunkRow.reconcilerResolvedModel]) {
-        if (resolvedModel === LIFECYCLE_HISTORY_PRIMARY_MODEL) recomputedPrimary += 1;
-        else if (resolvedModel === LIFECYCLE_HISTORY_FALLBACK_MODEL) recomputedFallback += 1;
+        if (resolvedModel === HISTORY_BACKFILL_PRIMARY_MODEL) recomputedPrimary += 1;
+        else if (resolvedModel === HISTORY_BACKFILL_FALLBACK_MODEL) recomputedFallback += 1;
         else return fail();
       }
     }
@@ -602,12 +606,12 @@ function validateFreshSource(value: unknown, artifact: ReturnType<typeof validat
       messages: dialogue.messages,
     });
     const chunkId = canonicalDialogueHistoryDigest([
-      LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      DIALOGUE_HISTORY_BACKFILL_PROFILE_ID,
       sourceDigest,
       chunk.conversationOrdinal,
       chunk.chunkOrdinal,
     ]);
-    const requestText = JSON.stringify(buildMemoryV3ExtractorRequest(dialogue));
+    const requestText = JSON.stringify(buildMemoryV3DialogueExtractorRequest(dialogue));
     const requestBytes = new TextEncoder().encode(requestText).byteLength;
     const requestSha256 = sha256Text(requestText);
     if (
@@ -785,7 +789,7 @@ export async function importReviewedDialogueHistory(input: {
           sourceCutoff: artifact.manifest.sourceCutoff as string,
           profileId: artifact.benchmarkResult.profileId as string,
           pipelineVersion: MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
-          extractorVersion: MEMORY_V3_EXTRACTOR_VERSION,
+          extractorVersion: MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
           reconcilerVersion: MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
           state: cloneJson(conversation.state) as MemoryV3DialogueState,
         });

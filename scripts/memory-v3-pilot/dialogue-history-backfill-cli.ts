@@ -13,10 +13,12 @@ import {
   type DialogueHistoryConversationInput,
 } from './dialogue-history-backfill-contract.ts';
 import {
-  getLifecycleHistoryBackfillProfile,
-  validateLifecycleHistoryPriceSnapshot,
-  type LifecycleHistoryPriceSnapshot,
-} from './lifecycle-history-backfill-profile.ts';
+  getDialogueHistoryBackfillProfile,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  validateHistoryBackfillPriceSnapshot,
+  type HistoryBackfillPriceSnapshot,
+} from './history-backfill-provider-profile.ts';
 import {
   inspectLifecycleHistorySource,
   type LifecycleHistorySourceReader,
@@ -43,6 +45,7 @@ const OPTIONS_FIELDS = [
 ] as const;
 const SOURCE_READER_FIELDS = ['listConversationsPage', 'listMessagesPage'] as const;
 const MEMORY_V3_DIALOGUE_HEADS_TABLE = 'memory_v3_dialogue_heads';
+const SHARED_SOURCE_READER_PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const OWN_ERRORS = new WeakSet<object>();
@@ -175,7 +178,7 @@ function parseArgv(value: unknown): {
   }
   let profile;
   try {
-    profile = getLifecycleHistoryBackfillProfile(argv[2]);
+    profile = getDialogueHistoryBackfillProfile(argv[2]);
   } catch {
     return fail();
   }
@@ -237,7 +240,7 @@ function httpsUrl(value: string): string {
   return value;
 }
 
-function parsePriceSnapshot(text: string, nowMs: number): LifecycleHistoryPriceSnapshot {
+function parsePriceSnapshot(text: string, nowMs: number): HistoryBackfillPriceSnapshot {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -245,7 +248,7 @@ function parsePriceSnapshot(text: string, nowMs: number): LifecycleHistoryPriceS
     return fail();
   }
   try {
-    return validateLifecycleHistoryPriceSnapshot(parsed, nowMs);
+    return validateHistoryBackfillPriceSnapshot(parsed, nowMs);
   } catch {
     return fail();
   }
@@ -514,7 +517,7 @@ export async function runDialogueHistoryBackfillFromArgv(input: {
     const revisionClient = resolveRevisionClient(root.revisionClient, supabaseUrl, serviceKey);
 
     const preparedLifecycle = await inspectLifecycleHistorySource({
-      profileId: parsed.profileId,
+      profileId: SHARED_SOURCE_READER_PROFILE_ID,
       userId,
       sourceCutoff: parsed.sourceCutoff,
       reader,

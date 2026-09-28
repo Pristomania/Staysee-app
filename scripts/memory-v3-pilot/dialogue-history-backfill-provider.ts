@@ -1,11 +1,13 @@
 import { isProxy } from 'node:util/types';
 
 import {
-  LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
-  LIFECYCLE_HISTORY_MODEL_ROUTE,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-  type LifecycleHistoryResolvedModel,
-} from './lifecycle-history-backfill-profile.ts';
+  DIALOGUE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
+} from './dialogue-history-backfill-profile.ts';
+import {
+  HISTORY_BACKFILL_MODEL_ROUTE,
+  HISTORY_BACKFILL_PRIMARY_MODEL,
+  type HistoryBackfillResolvedModel,
+} from './history-backfill-provider-profile.ts';
 import { createOpenRouterAdapter } from './openrouter-adapter.mjs';
 import { createOpenRouterFetchTransport } from './openrouter-fetch-transport.mjs';
 import type {
@@ -19,11 +21,11 @@ import {
 } from '../../supabase/functions/_shared/memoryV3/dialogueTransport.ts';
 
 export type DialogueHistoryExtractorResult = MemoryV3TransportResult & {
-  resolvedModel: LifecycleHistoryResolvedModel;
+  resolvedModel: HistoryBackfillResolvedModel;
 };
 
 export type DialogueHistoryReconcilerResult = MemoryV3DialogueTransportResult & {
-  resolvedModel: LifecycleHistoryResolvedModel;
+  resolvedModel: HistoryBackfillResolvedModel;
 };
 
 export type DialogueHistoryExtractorAdapter = (
@@ -128,7 +130,7 @@ function assertHeaders(value: unknown): void {
 function rewriteBody(raw: unknown): string {
   const body = parseRequestBody(raw);
   if (
-    body.model !== LIFECYCLE_HISTORY_PRIMARY_MODEL ||
+    body.model !== HISTORY_BACKFILL_PRIMARY_MODEL ||
     Object.hasOwn(body, 'models')
   ) fail();
   const provider = projectRecord(body.provider, PROVIDER_FIELDS);
@@ -139,14 +141,14 @@ function rewriteBody(raw: unknown): string {
     provider.zdr !== true
   ) fail();
   delete body.model;
-  body.models = [...LIFECYCLE_HISTORY_MODEL_ROUTE];
+  body.models = [...HISTORY_BACKFILL_MODEL_ROUTE];
   return JSON.stringify(body);
 }
 
 function projectResolvedModel(value: unknown): LifecycleHistoryResolvedModel {
   if (
-    value !== LIFECYCLE_HISTORY_MODEL_ROUTE[0] &&
-    value !== LIFECYCLE_HISTORY_MODEL_ROUTE[1]
+    value !== HISTORY_BACKFILL_MODEL_ROUTE[0] &&
+    value !== HISTORY_BACKFILL_MODEL_ROUTE[1]
   ) fail();
   return value;
 }
@@ -335,8 +337,8 @@ export function createDialogueHistoryRoutedAdapters(input: {
     const extract = createOpenRouterAdapter({
       transport: extractorTransport,
       apiKey: config.apiKey,
-      model: LIFECYCLE_HISTORY_PRIMARY_MODEL,
-      maxOutputTokens: LIFECYCLE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
+      model: HISTORY_BACKFILL_PRIMARY_MODEL,
+      maxOutputTokens: DIALOGUE_HISTORY_BACKFILL_MAX_OUTPUT_TOKENS_PER_CALL,
       reasoningEffort: 'low',
       responseContract: 'v2-layered',
       allowFallbacks: true,

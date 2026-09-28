@@ -8,13 +8,13 @@ import { main } from './dialogue-history-backfill-run.ts';
 import { buildReadableReport } from './dialogue-history-backfill-report.ts';
 import { canonicalStringify } from './contracts.mjs';
 import {
-  LIFECYCLE_HISTORY_FALLBACK_MODEL,
-  LIFECYCLE_HISTORY_PRIMARY_MODEL,
-} from './lifecycle-history-backfill-profile.ts';
+  HISTORY_BACKFILL_FALLBACK_MODEL as LIFECYCLE_HISTORY_FALLBACK_MODEL,
+  HISTORY_BACKFILL_PRIMARY_MODEL as LIFECYCLE_HISTORY_PRIMARY_MODEL,
+} from './history-backfill-provider-profile.ts';
 
 // The shared profile both the lifecycle and dialogue tools use for their
 // limits (see dialogue-history-backfill-cli.test.ts's own PROFILE_ID note).
-const PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
+const PROFILE_ID = 'memory-v3-dialogue-history-backfill-v1';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
 const MESSAGE_ID = '33333333-3333-4333-8333-333333333333';

@@ -14,7 +14,7 @@ import {
   inspectLifecycleHistorySource,
   type LifecycleHistorySourceReader,
 } from './lifecycle-history-backfill-source.ts';
-import { LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID } from './lifecycle-history-backfill-profile.ts';
+import { DIALOGUE_HISTORY_BACKFILL_PROFILE_ID } from './dialogue-history-backfill-profile.ts';
 import { prepareDialogueHistoryBackfill } from './dialogue-history-backfill-contract.ts';
 // reconstructDialogueConversations bridges inspectLifecycleHistorySource's
 // LIFECYCLE-shaped result (that reader is reused unchanged across both
@@ -28,6 +28,7 @@ import { reconstructDialogueConversations } from './dialogue-history-backfill-cl
 type JsonRecord = Record<string, unknown>;
 
 const PREFIX = '[memory-v3:dialogue-history-backfill-import-run]';
+const SHARED_SOURCE_READER_PROFILE_ID = 'memory-v3-lifecycle-history-backfill-v1';
 const REQUIRED_FIELDS = [
   'argv', 'readFileImpl', 'readEnvText', 'createSourceReader', 'createImportClient',
   'writeStdout', 'writeStderr',
@@ -208,13 +209,13 @@ export async function main(input: {
     // exactly the way Task 5's CLI does, rather than feeding it to
     // validateFreshSource directly.
     const preparedLifecycle = await inspectLifecycleHistorySource({
-      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      profileId: SHARED_SOURCE_READER_PROFILE_ID,
       userId,
       sourceCutoff: identity.sourceCutoff,
       reader,
     });
     const freshPreparedSource = prepareDialogueHistoryBackfill({
-      profileId: LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID,
+      profileId: DIALOGUE_HISTORY_BACKFILL_PROFILE_ID,
       snapshot: {
         userId,
         sourceCutoff: identity.sourceCutoff,

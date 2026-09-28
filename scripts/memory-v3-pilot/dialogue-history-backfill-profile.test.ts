@@ -26,4 +26,21 @@ describe('dialogue history backfill profile', () => {
     const source = readFileSync(new URL('./dialogue-history-backfill-profile.ts', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /lifecycle-history-backfill-profile/);
   });
+
+  it('keeps every dialogue history production module isolated from lifecycle and legacy extractor modules', () => {
+    const productionModules = [
+      'dialogue-history-backfill-cli.ts',
+      'dialogue-history-backfill-contract.ts',
+      'dialogue-history-backfill-engine.ts',
+      'dialogue-history-backfill-provider.ts',
+      'dialogue-history-backfill-import.ts',
+      'dialogue-history-backfill-import-run.ts',
+    ];
+    for (const moduleName of productionModules) {
+      const source = readFileSync(new URL(`./${moduleName}`, import.meta.url), 'utf8');
+      assert.doesNotMatch(source, /lifecycle-history-backfill-profile\.ts/u, moduleName);
+      assert.doesNotMatch(source, /memoryV3\/prompt\.ts/u, moduleName);
+      assert.doesNotMatch(source, /lifecycleExtractorPrompt\.ts/u, moduleName);
+    }
+  });
 });
