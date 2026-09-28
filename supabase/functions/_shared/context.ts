@@ -37,7 +37,10 @@ import {
   type ArchiveExcerpt,
   type UserEvidenceQuote,
 } from "./conversationRetrieval.ts";
-import { fetchConversationCrossMemoryEnabled } from "./profilePrefs.ts";
+import {
+  fetchConversationCrossMemoryEnabled,
+  fetchLegacyMemoryCompatibilityEnabled,
+} from "./profilePrefs.ts";
 import { formatCrossMemoryForPrompt } from "./userLifeMemory.ts";
 import { filterCrossMemoryRowsForInjection } from "./crossMemoryPolicy.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
@@ -442,7 +445,9 @@ export async function buildContextPacket(
       fetchWeeklyReflections(supabase, input.conversationId),
     ]);
 
-  const memoryItems = crossMemoryOn
+  const legacyMemoryCompatibilityEnabled =
+    await fetchLegacyMemoryCompatibilityEnabled(supabase, input.userId);
+  const memoryItems = crossMemoryOn && legacyMemoryCompatibilityEnabled
     ? await fetchMemoryItems(supabase, input.userId)
     : [];
 

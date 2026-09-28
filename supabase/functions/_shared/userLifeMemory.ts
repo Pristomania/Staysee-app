@@ -7,6 +7,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   fetchConversationCrossMemoryEnabled,
   fetchCrossMemoryEnabled,
+  fetchLegacyMemoryCompatibilityEnabled,
 } from "./profilePrefs.ts";
 import type { StructuredMemory } from "./memory.ts";
 import {
@@ -242,6 +243,12 @@ export async function refreshUserLifeMemory(
   durableCorrections: DurableMemoryCorrection[] = [],
   diag?: MemoryDiagContext
 ): Promise<void> {
+  const legacyCompatibilityEnabled =
+    await fetchLegacyMemoryCompatibilityEnabled(supabase, userId);
+  if (!legacyCompatibilityEnabled) {
+    return;
+  }
+
   const crossMemoryOn = conversationId
     ? await fetchConversationCrossMemoryEnabled(
         supabase,

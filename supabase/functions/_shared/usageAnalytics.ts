@@ -38,6 +38,8 @@ export interface UsageAuditFields {
 
 /** Distinguishes background/system calls from the main chat reply (undefined = chat reply). */
 export type UsageCallKind =
+  | "legacy_conversation_summary"
+  | "legacy_cross_memory_synthesis"
   | "memory_lifecycle_extractor"
   | "memory_lifecycle_reconciler";
 
@@ -240,6 +242,7 @@ export async function logSummaryGenerationUsage(
     usage: input.usage,
     memoryTokens: 0,
     summaryTokens,
+    callKind: "legacy_conversation_summary",
   });
 
   await logOpenRouterUsage(supabase, row);
@@ -272,6 +275,7 @@ export async function logLifeMemorySynthesisUsage(
     usage: input.usage,
     memoryTokens,
     summaryTokens: 0,
+    callKind: "legacy_cross_memory_synthesis",
   });
 
   await logOpenRouterUsage(supabase, row);
