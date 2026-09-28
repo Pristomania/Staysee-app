@@ -6,7 +6,26 @@ on:
       - main
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
   deploy:
+    needs: verify
     runs-on: ubuntu-latest
 
     steps:
@@ -37,14 +56,14 @@ jobs:
           port: ${{ secrets.STAYSEE_PORT }}
           script: |
             set -euo pipefail
-            # Build frontend / sync dist. May still call reload; tolerate inactive nginx.
-            set +e
+            # Build frontend / sync dist. A failure here (build error, bad
+            # bundle, sync failure) must stop the deploy -- it used to be
+            # swallowed with only a warning so a broken build could still
+            # report success. Nginx being briefly inactive is not a reason
+            # to tolerate this: reload-or-start-nginx.sh below already
+            # starts nginx on its own if it isn't running, and fails loudly
+            # if that doesn't work either.
             deploy-staysee
-            DS_RC=$?
-            set -e
-            if [ "$DS_RC" -ne 0 ]; then
-              echo "WARN: deploy-staysee exited $DS_RC — continuing with nginx apply helper"
-            fi
             NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
             sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
