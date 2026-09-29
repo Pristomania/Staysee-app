@@ -90,5 +90,13 @@ describe("Memory V3 full-product wiring", () => {
     const writeBlock = text.slice(writeStart, writeEnd);
     assert.match(writeBlock, /scheduleMemoryV3TelegramAlert\("write", code\)/);
     assert.doesNotMatch(writeBlock, /daily_cap|duplicate/);
+
+    // Dialogue's own write path must alert the same way lifecycle's does --
+    // it silently only logged to console until this was found missing during
+    // a live test with a genuinely failing run producing no alert.
+    const dialogueWriteStart = text.indexOf("runMemoryV3DialogueShadowBackgroundSafely(");
+    const dialogueWriteEnd = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode", dialogueWriteStart);
+    const dialogueWriteBlock = text.slice(dialogueWriteStart, dialogueWriteEnd);
+    assert.match(dialogueWriteBlock, /scheduleMemoryV3TelegramAlert\("write", code\)/);
   });
 });
