@@ -4,9 +4,11 @@ import {
   MEMORY_V3_LIFECYCLE_MAX_CANDIDATE_EVIDENCE,
   MEMORY_V3_LIFECYCLE_MODEL,
   MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
+  MEMORY_V3_LIFECYCLE_TOPICS,
   type MemoryV3LifecycleOperationType,
   type MemoryV3LifecycleProposal,
   type MemoryV3LifecycleState,
+  type MemoryV3LifecycleTopic,
   validateMemoryV3LifecycleState,
 } from "./lifecycleContract.ts";
 
@@ -298,10 +300,14 @@ function projectExtraction(value: unknown, userId: string): MemoryV3Extraction {
 
 function projectOperations(value: unknown): MemoryV3LifecycleProposal {
   return array(value, MEMORY_V3_LIFECYCLE_MAX_CANDIDATES).map((raw) => {
-    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey"]);
+    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey", "topic"]);
     if (!OPERATION_TYPES.has(operation.type as string) || !nonEmpty(operation.candidateLocalItemKey)) throw fail();
     const hasTarget = typeof operation.targetMemoryKey === "string" && MEMORY_KEY.test(operation.targetMemoryKey);
     if (operation.type === "create" || operation.type === "ignore" ? operation.targetMemoryKey !== null : !hasTarget) throw fail();
+    const requiresTopic = operation.type === "create" || operation.type === "revise";
+    if (requiresTopic
+      ? (operation.topic === null || !MEMORY_V3_LIFECYCLE_TOPICS.includes(operation.topic as MemoryV3LifecycleTopic))
+      : operation.topic !== null) throw fail();
     return { ...operation } as MemoryV3LifecycleProposal[number];
   });
 }

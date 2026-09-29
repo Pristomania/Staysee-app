@@ -3,9 +3,11 @@ import {
   MEMORY_V3_DIALOGUE_MAX_CANDIDATES,
   MEMORY_V3_DIALOGUE_MAX_CANDIDATE_EVIDENCE,
   MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
+  MEMORY_V3_DIALOGUE_TOPICS,
   type MemoryV3DialogueOperationType,
   type MemoryV3DialogueProposal,
   type MemoryV3DialogueState,
+  type MemoryV3DialogueTopic,
   validateMemoryV3DialogueState,
 } from "./dialogueContract.ts";
 
@@ -298,10 +300,14 @@ function projectExtraction(value: unknown, userId: string, conversationId: strin
 
 function projectOperations(value: unknown): MemoryV3DialogueProposal {
   return array(value, MEMORY_V3_DIALOGUE_MAX_CANDIDATES).map((raw) => {
-    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey"]);
+    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey", "topic"]);
     if (!OPERATION_TYPES.has(operation.type as string) || !nonEmpty(operation.candidateLocalItemKey)) throw fail();
     const hasTarget = typeof operation.targetMemoryKey === "string" && MEMORY_KEY.test(operation.targetMemoryKey);
     if (operation.type === "create" || operation.type === "ignore" ? operation.targetMemoryKey !== null : !hasTarget) throw fail();
+    const requiresTopic = operation.type === "create" || operation.type === "revise";
+    if (requiresTopic
+      ? (operation.topic === null || !MEMORY_V3_DIALOGUE_TOPICS.includes(operation.topic as MemoryV3DialogueTopic))
+      : operation.topic !== null) throw fail();
     return { ...operation } as MemoryV3DialogueProposal[number];
   });
 }
