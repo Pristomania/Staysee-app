@@ -1705,7 +1705,10 @@ Deno.serve(async (req: Request) => {
                   }),
                 }, (code) => console.error("[memory-v3-dialogue-transport]", code),
                   (usage) => logMemoryV3LifecycleUsage(svc, usage)),
-                (code) => console.error("[memory-v3-dialogue-shadow]", code),
+                (code) => {
+                  console.error("[memory-v3-dialogue-shadow]", code);
+                  scheduleMemoryV3TelegramAlert("write", code);
+                },
               )
               : Promise.resolve();
             const memoryV3Mode = parseMemoryV3ShadowMode(
