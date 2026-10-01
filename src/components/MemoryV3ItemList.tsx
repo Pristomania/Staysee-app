@@ -11,7 +11,7 @@ const UNCATEGORIZED_LABEL = 'Разное';
  * со согласованием чисел (1 день / 2 дня / 5 дней). Совпадает по
  * формулировке с тем, что видит сам ИИ в своей версии памяти
  * (lifecycleReadPrompt.ts / dialogueReadPrompt.ts). */
-function formatMemoryAge(isoDate: string): string | null {
+export function formatMemoryAge(isoDate: string): string | null {
   const then = new Date(isoDate).getTime();
   const now = Date.now();
   if (!Number.isFinite(then) || now < then) return null;
@@ -29,7 +29,7 @@ function formatMemoryAge(isoDate: string): string | null {
  * a plain re-confirmation leaves updatedAt untouched. So comparing it to
  * firstSeenAt reliably tells "recorded once, never changed since" apart
  * from "has genuinely evolved" -- that's the dynamic Настя asked to see. */
-function formatMemoryRecordedOrUpdated(item: { firstSeenAt: string; updatedAt: string }): string | null {
+export function formatMemoryRecordedOrUpdated(item: { firstSeenAt: string; updatedAt: string }): string | null {
   const wasRevised = new Date(item.firstSeenAt).getTime() !== new Date(item.updatedAt).getTime();
   const age = formatMemoryAge(wasRevised ? item.updatedAt : item.firstSeenAt);
   if (!age) return null;
