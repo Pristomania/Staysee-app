@@ -6,6 +6,7 @@ export interface MemoryV3ViewerSourceItem {
   eventTimeEnd: string | null;
   sensitivity: "normal" | "sensitive";
   topic: string | null;
+  firstSeenAt: string;
   updatedAt: string;
 }
 
@@ -17,6 +18,7 @@ export interface MemoryV3ViewerItem {
   eventTimeEnd: string | null;
   sensitivity: "normal" | "sensitive";
   topic: string | null;
+  firstSeenAt: string;
   updatedAt: string;
 }
 
@@ -49,6 +51,7 @@ export function projectMemoryV3ViewerItems(
       eventTimeEnd: item.eventTimeEnd,
       sensitivity: item.sensitivity,
       topic: item.topic,
+      firstSeenAt: item.firstSeenAt,
       updatedAt: item.updatedAt,
     }));
 }

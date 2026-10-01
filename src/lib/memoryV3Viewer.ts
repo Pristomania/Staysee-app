@@ -9,6 +9,7 @@ export interface MemoryV3ViewerItem {
   eventTimeEnd: string | null;
   sensitivity: 'normal' | 'sensitive';
   topic: string | null;
+  firstSeenAt: string;
   updatedAt: string;
 }
 
