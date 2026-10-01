@@ -8,6 +8,7 @@ export interface MemoryV3ViewerSourceItem {
   topic: string | null;
   firstSeenAt: string;
   updatedAt: string;
+  alternative: string | null;
 }
 
 export interface MemoryV3ViewerItem {
@@ -20,6 +21,19 @@ export interface MemoryV3ViewerItem {
   topic: string | null;
   firstSeenAt: string;
   updatedAt: string;
+}
+
+export interface MemoryV3ExportItem {
+  memoryKey: string;
+  kind: "event" | "recurrence" | "hypothesis";
+  claim: string;
+  eventTimeStart: string | null;
+  eventTimeEnd: string | null;
+  sensitivity: "normal" | "sensitive";
+  topic: string | null;
+  firstSeenAt: string;
+  updatedAt: string;
+  alternative: string | null;
 }
 
 // The extractor prompt now tells the model never to write "пользователь"/
@@ -54,4 +68,25 @@ export function projectMemoryV3ViewerItems(
       firstSeenAt: item.firstSeenAt,
       updatedAt: item.updatedAt,
     }));
+}
+
+/** Curates raw Memory V3 items for a full data export: every kind,
+ * including hypotheses with their alternative explanation -- unlike the
+ * day-to-day viewer, this is meant to be a complete, transparent copy of
+ * what the account holds, not a curated read. */
+export function projectMemoryV3ExportItems(
+  items: MemoryV3ViewerSourceItem[],
+): MemoryV3ExportItem[] {
+  return items.map((item) => ({
+    memoryKey: item.memoryKey,
+    kind: item.kind,
+    claim: stripLeadingSubjectWord(item.claim),
+    eventTimeStart: item.eventTimeStart,
+    eventTimeEnd: item.eventTimeEnd,
+    sensitivity: item.sensitivity,
+    topic: item.topic,
+    firstSeenAt: item.firstSeenAt,
+    updatedAt: item.updatedAt,
+    alternative: item.alternative,
+  }));
 }
