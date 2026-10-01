@@ -159,7 +159,7 @@ import {
   logReplyCompletion,
   logSegmentMerge,
 } from "../_shared/replyCompletionLog.ts";
-import { buildTimeGapPrompt, classifyTimeGap, type TimeGapMeta } from "../_shared/timeGap.ts";
+import { buildCurrentDateTimePrompt, buildTimeGapPrompt, classifyTimeGap, type TimeGapMeta } from "../_shared/timeGap.ts";
 import {
   AI_AUDIT_COGNITIVE_SIGNATURE_VERSION,
   AI_AUDIT_CONSTITUTION_VERSION,
@@ -1155,6 +1155,11 @@ Deno.serve(async (req: Request) => {
     );
     if (genderGuidance) {
       systemPrompt = [systemPrompt, genderGuidance].join("\n\n");
+    }
+
+    const currentDateTimePrompt = buildCurrentDateTimePrompt(timeGap);
+    if (currentDateTimePrompt) {
+      systemPrompt = [systemPrompt, currentDateTimePrompt].join("\n\n");
     }
 
     const timeGapPrompt = buildTimeGapPrompt(timeGap);
