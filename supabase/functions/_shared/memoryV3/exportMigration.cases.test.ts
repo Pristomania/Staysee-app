@@ -32,12 +32,26 @@ describe("Memory V3 export migration", () => {
     assert.equal((sql.match(/'updatedAt', i\.updated_at/g) ?? []).length, 3);
   });
 
-  it("defines load_memory_v3_dialogue_viewer_items_all with alternative and no conversation filter", () => {
+  it("adds status to all three functions' returned JSON, so the export can tell a rejected hypothesis from a supported one", () => {
+    assert.equal((sql.match(/'status', i\.status/g) ?? []).length, 3);
+  });
+
+  it("adds topic to all three functions' returned JSON", () => {
+    assert.equal((sql.match(/'topic', i\.topic/g) ?? []).length, 3);
+  });
+
+  it("defines load_memory_v3_dialogue_viewer_items_all with alternative, status, conversationId, and no conversation filter", () => {
     const body = bodyOf("load_memory_v3_dialogue_viewer_items_all");
     assert.match(body, /'alternative', i\.alternative/);
+    assert.match(body, /'status', i\.status/);
+    assert.match(body, /'conversationId', i\.conversation_id/);
     assert.doesNotMatch(body, /p_conversation_id/);
     assert.doesNotMatch(body, /conversation_id = /);
     assert.match(body, /WHERE i\.user_id = p_user_id;/);
+  });
+
+  it("only the all-conversations RPC returns conversationId -- the other two don't need it", () => {
+    assert.equal((sql.match(/'conversationId', i\.conversation_id/g) ?? []).length, 1);
   });
 
   it("restricts the new function's EXECUTE to service_role only", () => {

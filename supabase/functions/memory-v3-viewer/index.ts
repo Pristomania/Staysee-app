@@ -140,6 +140,13 @@ Deno.serve(async (req) => {
         rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
         userId,
       });
+      // Distinct from "genuinely zero dialogue memory": when the rollout
+      // flag says this account isn't eligible, rows can still exist (an
+      // earlier canary window, a backfill import) -- reporting an empty
+      // array here would be indistinguishable from "nothing to export" and
+      // is exactly the kind of silent partial truth a data-export feature
+      // must never produce.
+      const dialogueAvailable = eligibility.eligible;
       if (eligibility.eligible) {
         const { data: dialogueRaw, error: dialogueError } = await svc.rpc(
           "load_memory_v3_dialogue_viewer_items_all",
@@ -156,7 +163,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      return new Response(JSON.stringify({ accountWide, dialogue }), {
+      return new Response(JSON.stringify({ accountWide, dialogue, dialogueAvailable }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

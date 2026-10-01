@@ -82,4 +82,17 @@ describe("memory-v3-viewer wiring", () => {
     const exportBody = source.slice(exportIndex, readIndex);
     assert.equal((exportBody.match(/error: "internal"/g) ?? []).length, 2);
   });
+
+  it("tells the export caller when dialogue memory was omitted for eligibility reasons, instead of returning an indistinguishable empty array", () => {
+    const source = indexSource();
+    const exportIndex = source.indexOf('body.action === "export"');
+    const readIndex = source.indexOf('action === "read" (default)');
+    const exportBody = source.slice(exportIndex, readIndex);
+    assert.match(exportBody, /dialogueAvailable/);
+    const eligibilityIndex = exportBody.indexOf("eligibility.eligible");
+    const availableAssignIndex = exportBody.indexOf("dialogueAvailable");
+    const responseIndex = exportBody.lastIndexOf("accountWide, dialogue");
+    assert.ok(eligibilityIndex >= 0 && availableAssignIndex >= 0 && responseIndex > availableAssignIndex);
+    assert.match(exportBody, /dialogueAvailable[\s\S]*accountWide, dialogue, dialogueAvailable/);
+  });
 });
