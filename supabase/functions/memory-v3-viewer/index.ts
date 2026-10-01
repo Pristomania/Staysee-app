@@ -5,6 +5,7 @@ import { makeServiceClient } from "../_shared/cost.ts";
 import { resolveMemoryV3DialogueEligibility } from "../_shared/memoryV3/dialogueMode.ts";
 import {
   projectMemoryV3ViewerItems,
+  projectMemoryV3ExportItems,
   type MemoryV3ViewerSourceItem,
 } from "../_shared/memoryV3/viewerProjection.ts";
 
@@ -114,6 +115,55 @@ Deno.serve(async (req) => {
         });
       }
       return new Response(JSON.stringify({ deleted: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (body.action === "export") {
+      const { data: lifecycleRaw, error: lifecycleError } = await svc.rpc(
+        "load_memory_v3_lifecycle_viewer_items",
+        { p_user_id: userId },
+      );
+      if (lifecycleError) {
+        console.error("[memory-v3-viewer] export load_lifecycle_viewer_items:", lifecycleError.message);
+        return new Response(JSON.stringify({ error: "internal" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const accountWide = projectMemoryV3ExportItems(
+        (Array.isArray(lifecycleRaw) ? lifecycleRaw : []) as MemoryV3ViewerSourceItem[],
+      );
+
+      let dialogue: ReturnType<typeof projectMemoryV3ExportItems> = [];
+      const eligibility = resolveMemoryV3DialogueEligibility({
+        rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),
+        rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_ALLOWED_USER_ID"),
+        userId,
+      });
+      // Distinct from "genuinely zero dialogue memory": when the rollout
+      // flag says this account isn't eligible, rows can still exist (an
+      // earlier canary window, a backfill import) -- reporting an empty
+      // array here would be indistinguishable from "nothing to export" and
+      // is exactly the kind of silent partial truth a data-export feature
+      // must never produce.
+      const dialogueAvailable = eligibility.eligible;
+      if (eligibility.eligible) {
+        const { data: dialogueRaw, error: dialogueError } = await svc.rpc(
+          "load_memory_v3_dialogue_viewer_items_all",
+          { p_user_id: userId },
+        );
+        if (dialogueError) {
+          console.error("[memory-v3-viewer] export load_dialogue_viewer_items_all:", dialogueError.message);
+          return new Response(JSON.stringify({ error: "internal" }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        dialogue = projectMemoryV3ExportItems(
+          (Array.isArray(dialogueRaw) ? dialogueRaw : []) as MemoryV3ViewerSourceItem[],
+        );
+      }
+
+      return new Response(JSON.stringify({ accountWide, dialogue, dialogueAvailable }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

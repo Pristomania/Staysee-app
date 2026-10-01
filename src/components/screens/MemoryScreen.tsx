@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Brain, ChevronDown, History, Pencil, Plus, Sparkles, Trash2, X, Check } from 'lucide-react';
+import { Brain, ChevronDown, Download, History, Pencil, Plus, Sparkles, Trash2, X, Check } from 'lucide-react';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -47,7 +47,14 @@ import {
   normalizeMemoryForDisplay,
 } from '../../lib/normalizeMemoryForDisplay';
 import { normalizeMemoryTextForDisplay } from '../../lib/memoryDisplayNormalize';
-import { deleteMemoryV3Item, fetchMemoryV3Items, type MemoryV3ViewerItem } from '../../lib/memoryV3Viewer';
+import {
+  deleteMemoryV3Item,
+  downloadMemoryV3ExportAsJson,
+  exportMemoryV3Data,
+  fetchMemoryV3Items,
+  type MemoryV3ViewerItem,
+} from '../../lib/memoryV3Viewer';
+import { downloadMemoryV3ExportAsPdf } from '../../lib/memoryV3ExportPdf';
 import {
   isLegacyMemoryCompatibilityEnabled,
   resolveMemoryScreenCapabilities,
@@ -328,6 +335,9 @@ export function MemoryScreen() {
   const [deprecatedOpen, setDeprecatedOpen] = useState(false);
   const [globalSaveError, setGlobalSaveError] = useState<string | null>(null);
   const [sectionOpen, setSectionOpen] = useState(initialSectionOpenState);
+  const [exportChoiceOpen, setExportChoiceOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const { active: activeGlobalRows, deprecated: deprecatedGlobalRows } = useMemo(
     () => partitionCrossMemoryRows(globalRows),
     [globalRows],
@@ -535,6 +545,28 @@ export function MemoryScreen() {
     await saveConversationMemory(null);
   }
 
+  async function handleExport(format: 'json' | 'pdf') {
+    setExportBusy(true);
+    setExportError(null);
+    try {
+      const result = await exportMemoryV3Data();
+      if (result.error) {
+        setExportError('Не удалось сохранить. Нажмите ещё раз.');
+        return;
+      }
+      if (format === 'json') {
+        downloadMemoryV3ExportAsJson(result);
+      } else {
+        await downloadMemoryV3ExportAsPdf(result);
+      }
+      setExportChoiceOpen(false);
+    } catch {
+      setExportError('Не удалось сохранить. Нажмите ещё раз.');
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   async function updateGlobalRow(id: string, content: string) {
     if (!content.trim()) return;
     setGlobalBusy(id);
@@ -673,6 +705,53 @@ export function MemoryScreen() {
           </div>
         ) : (
           <>
+            <div className={`${cardBase} px-4 py-3.5 mb-4`}>
+              {!exportChoiceOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setExportChoiceOpen(true)}
+                  className={`inline-flex items-center gap-1.5 text-sm font-light ${theme.textSecondary}`}
+                >
+                  <Download className="w-4 h-4" strokeWidth={1.5} />
+                  Скачать мои данные
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className={`${theme.textMuted} text-xs font-light`}>
+                    Выгрузка памяти по всем беседам — выберите формат:
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={exportBusy}
+                      onClick={() => void handleExport('pdf')}
+                      className={`px-3 py-1.5 rounded-lg text-xs ${theme.surfaceHover} ${theme.textSecondary} disabled:opacity-50`}
+                    >
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      disabled={exportBusy}
+                      onClick={() => void handleExport('json')}
+                      className={`px-3 py-1.5 rounded-lg text-xs ${theme.surfaceHover} ${theme.textSecondary} disabled:opacity-50`}
+                    >
+                      JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setExportChoiceOpen(false); setExportError(null); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs ${theme.textMuted}`}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                  {exportError && (
+                    <p className="text-red-400/80 text-xs font-light">{exportError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <section className="mb-8">
               <p className={sectionLabel}>Память этой беседы</p>
               <p className={`${theme.textMuted} text-xs font-light mb-3 leading-relaxed opacity-85`}>
