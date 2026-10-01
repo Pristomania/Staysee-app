@@ -363,10 +363,10 @@ export function buildContextPrompt(
 ): string {
   const inspectedOptions = inspectContextPromptOptions(options);
   const lifecycleCrossMemoryBlock = inspectedOptions?.lifecycleCrossMemory
-    ? formatMemoryV3LifecycleReadPrompt(inspectedOptions.lifecycleCrossMemory)
+    ? formatMemoryV3LifecycleReadPrompt(inspectedOptions.lifecycleCrossMemory, packet.now)
     : "";
   const dialogueMemoryBlock = inspectedOptions?.dialogueMemory
-    ? formatMemoryV3DialoguePromptBlock(inspectedOptions.dialogueMemory)
+    ? formatMemoryV3DialoguePromptBlock(inspectedOptions.dialogueMemory, packet.now)
     : "";
   const meta = packet.conversationMeta;
   const memoryBlock = injectSummaryIntoPrompt({

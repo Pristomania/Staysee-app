@@ -65,6 +65,43 @@ const CORE_RULES = [
   "Do not interrupt emotional flow with mechanical check-ins.",
 ];
 
+function formatCurrentDateForPrompt(date: Date, timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat("ru-RU", {
+      timeZone: timeZone || "UTC",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Internal prompt block grounding the model in today's real calendar date --
+ * without this, the model has no reliable reference point for relative time
+ * expressions the user makes ("на прошлой неделе", "через три дня") or for
+ * judging how old a stored memory fact is. Always included (unlike
+ * buildTimeGapPrompt below, which is empty for short gaps) since this
+ * grounding is useful on every turn, not just after a pause.
+ */
+export function buildCurrentDateTimePrompt(
+  meta: TimeGapMeta | undefined,
+  serverNow: Date = new Date()
+): string {
+  const nowIso = meta?.clientNowIso ?? serverNow.toISOString();
+  const now = new Date(nowIso);
+  if (Number.isNaN(now.getTime())) return "";
+  const formatted = formatCurrentDateForPrompt(now, meta?.timezone);
+  return [
+    "ВНУТРЕННЕЕ (не для прямой цитаты пользователю): сегодня — " + formatted + ".",
+    "Используй это только для понимания относительных выражений времени пользователя («на прошлой неделе», «через три дня», «в прошлом месяце») и для сопоставления с данными из памяти.",
+    "Не объявляй точную дату или день недели пользователю без явного повода. Если расчёт дат не очевиден — говори обобщённо, не утверждай точную дату с ложной уверенностью.",
+  ].join("\n");
+}
+
 /**
  * Internal prompt block for the model. Empty when pause < 2 hours or first message.
  */
