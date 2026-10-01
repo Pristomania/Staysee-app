@@ -21,7 +21,13 @@ import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
 import type { Message } from '../../types';
 import { dedupeMessages, mergeFetchedWithPending } from '../../lib/messages';
-import { deleteChatMessage, fetchTurnMessages, insertChatMessage, normalizeMessageRow } from '../../lib/chatMessages';
+import {
+  deleteChatMessage,
+  fetchMessagesBefore,
+  fetchRecentMessages,
+  fetchTurnMessages,
+  insertChatMessage,
+} from '../../lib/chatMessages';
 import { contextBodyTextClass, LAYOUT_CONTAINER_CLASS } from '../layout';
 import {
   buildRevealSteps,
@@ -89,6 +95,11 @@ export function formatRelativeTime(dateStr: string): string {
 }
 
 const SCROLL_BOTTOM_THRESHOLD = 80;
+const SCROLL_TOP_THRESHOLD = 120;
+/** Opening a long conversation only fetches its most recent messages --
+ * older ones load on scroll-up (loadOlderMessages) or all at once when
+ * in-dialog search needs the full history (loadAllHistoryForSearch). */
+const MESSAGE_PAGE_SIZE = 100;
 
 function computeInitialDelay(fullText: string): number {
   const len = fullText.length;
@@ -149,6 +160,19 @@ export function ChatScreen() {
   } | { kind: 'memory_saved'; snippet: string } | null>(null);
   /** Space below last message so tail is not hidden under the composer. */
   const [composerPadPx, setComposerPadPx] = useState(128);
+  /** True once we know there's older history this conversation's initial
+   * page didn't load -- see MESSAGE_PAGE_SIZE. */
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
+  /** Mirrors loadingMoreHistory synchronously -- rapid scroll events near
+   * the top can fire loadOlderMessages several times before React commits
+   * the state update, and a stale closure would pass the state check on
+   * every one of them. The ref is set/cleared immediately, so only the
+   * first call proceeds. */
+  const loadingMoreHistoryRef = useRef(false);
+  /** Set right before prepending older messages so the scroll-restore
+   * layout effect knows to keep the reading position stable. */
+  const pendingScrollAdjustRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
 
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -255,6 +279,86 @@ export function ChatScreen() {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
   }, []);
 
+  function oldestLoadedRealMessage(): Message | undefined {
+    return roomMessagesRef.current.find(
+      (m) => m.id !== 'greeting' && !m.id.startsWith('temp-') && !m.id.startsWith('stream-'),
+    );
+  }
+
+  /** One older page on scroll-to-top -- keeps the visible reading position
+   * stable via the scroll-restore layout effect below. */
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingMoreHistoryRef.current || !hasMoreHistory) return;
+    const convId = activeConvIdRef.current;
+    const oldest = oldestLoadedRealMessage();
+    if (!convId || !oldest) return;
+
+    loadingMoreHistoryRef.current = true;
+    setLoadingMoreHistory(true);
+    const el = messagesScrollRef.current;
+    if (el) {
+      pendingScrollAdjustRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+    }
+
+    const { messages: older, reachedLimit, error } = await fetchMessagesBefore(
+      convId, oldest.created_at, MESSAGE_PAGE_SIZE,
+    );
+
+    if (activeConvIdRef.current !== convId) {
+      loadingMoreHistoryRef.current = false;
+      setLoadingMoreHistory(false);
+      return;
+    }
+    if (error) {
+      pendingScrollAdjustRef.current = null;
+      loadingMoreHistoryRef.current = false;
+      setLoadingMoreHistory(false);
+      return;
+    }
+
+    setHasMoreHistory(reachedLimit);
+    if (older.length > 0) {
+      patchMessages((prev) => [...older, ...prev]);
+    } else {
+      pendingScrollAdjustRef.current = null;
+    }
+    loadingMoreHistoryRef.current = false;
+    setLoadingMoreHistory(false);
+  }, [hasMoreHistory, patchMessages]);
+
+  /** In-dialog search filters whatever is already loaded (see
+   * findMatchingMessageIds) -- a paginated open must not let it silently
+   * miss older messages, so opening search loads everything still missing
+   * in one background call instead of waiting for scroll-driven pages. */
+  const loadAllHistoryForSearch = useCallback(async () => {
+    if (loadingMoreHistoryRef.current || !hasMoreHistory) return;
+    const convId = activeConvIdRef.current;
+    const oldest = oldestLoadedRealMessage();
+    if (!convId || !oldest) return;
+
+    loadingMoreHistoryRef.current = true;
+    setLoadingMoreHistory(true);
+    const { messages: older, error } = await fetchMessagesBefore(convId, oldest.created_at);
+
+    if (activeConvIdRef.current !== convId) {
+      loadingMoreHistoryRef.current = false;
+      setLoadingMoreHistory(false);
+      return;
+    }
+    if (error) {
+      loadingMoreHistoryRef.current = false;
+      setLoadingMoreHistory(false);
+      return;
+    }
+
+    setHasMoreHistory(false);
+    if (older.length > 0) {
+      patchMessages((prev) => [...older, ...prev]);
+    }
+    loadingMoreHistoryRef.current = false;
+    setLoadingMoreHistory(false);
+  }, [hasMoreHistory, patchMessages]);
+
   // ── Effects ───────────────────────────────────────────────────────────────────
 
   // Instant restore when returning from notes/memory (before DB fetch completes).
@@ -273,10 +377,27 @@ export function ChatScreen() {
     const onScroll = () => {
       if (programmaticScrollRef.current) return;
       scrollFollowRef.current = isNearBottom();
+      if (el.scrollTop <= SCROLL_TOP_THRESHOLD) {
+        void loadOlderMessages();
+      }
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
-  }, [isNearBottom, loading, roomMessages.length]);
+  }, [isNearBottom, loading, roomMessages.length, loadOlderMessages]);
+
+  /** Keeps the visible reading position stable when loadOlderMessages
+   * prepends older messages -- without this the browser keeps scrollTop
+   * fixed, which visually yanks the user down past what they were reading
+   * by however tall the newly-inserted messages are. No-op whenever no
+   * prepend is pending (every other roomMessages change). */
+  useLayoutEffect(() => {
+    const pending = pendingScrollAdjustRef.current;
+    if (!pending) return;
+    pendingScrollAdjustRef.current = null;
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight - pending.scrollHeight + pending.scrollTop;
+  }, [roomMessages]);
 
   useEffect(() => {
     const bar = inputBarRef.current;
@@ -302,25 +423,21 @@ export function ChatScreen() {
     const convId = currentConversation.id;
     activeConvIdRef.current = convId;
     setLoading(true);
+    setHasMoreHistory(false);
 
     let active = true;
 
     (async () => {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('id, conversation_id, sender, content, created_at')
-        .eq('conversation_id', convId)
-        .order('created_at', { ascending: true });
+      const { messages: rows, reachedLimit, error } = await fetchRecentMessages(convId, MESSAGE_PAGE_SIZE);
 
       if (!active || activeConvIdRef.current !== convId) return;
 
       if (error) {
-        console.error('[chat] fetch messages:', error.message);
         setLoading(false);
         return;
       }
 
-      const rows = (data ?? []).map((row) => normalizeMessageRow(row));
+      setHasMoreHistory(reachedLimit);
       const cached = messagesForConversation(appMessages, convId);
       const prev =
         roomMessagesRef.current.length > 0
@@ -812,7 +929,8 @@ export function ChatScreen() {
   const openSearch = useCallback(() => {
     setSearchOpen(true);
     requestAnimationFrame(() => searchInputRef.current?.focus());
-  }, []);
+    void loadAllHistoryForSearch();
+  }, [loadAllHistoryForSearch]);
 
   useEffect(() => {
     setActiveMatchIndex(0);
@@ -1001,6 +1119,11 @@ export function ChatScreen() {
           className={`${LAYOUT_CONTAINER_CLASS} py-4 space-y-5`}
           style={{ paddingBottom: composerPadPx }}
         >
+          {loadingMoreHistory && (
+            <p className={`${theme.textMuted} text-center text-xs font-light`}>
+              Загружаю более раннюю историю…
+            </p>
+          )}
           {visibleMessages.map((msg, index) => (
             <MessageRow
               key={msg.id}

@@ -123,6 +123,65 @@ export async function insertChatMessage(
   return { message: normalizeMessageRow(data as MessageRow), error: null };
 }
 
+export interface MessagePageResult {
+  messages: Message[];
+  /** True if `limit` was passed and exactly that many rows came back -- a
+   * signal (not a guarantee) that older messages may still exist. */
+  reachedLimit: boolean;
+  /** Set when the query itself failed -- distinct from a conversation that
+   * genuinely has no messages (yet) in that range, which is `error: null`
+   * with an empty `messages` array. Callers must not treat the two the
+   * same: a fetch failure should leave existing state alone, while a truly
+   * empty conversation is a real, displayable state (e.g. the greeting). */
+  error: string | null;
+}
+
+/** Load a conversation's most recent messages, ascending. Opening a long
+ * conversation only needs recent context, not its entire history -- see
+ * fetchMessagesBefore for loading the rest on demand. */
+export async function fetchRecentMessages(
+  conversationId: string,
+  limit: number,
+): Promise<MessagePageResult> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('id, conversation_id, sender, content, created_at')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error('[chat] fetch recent messages failed:', error.message);
+    return { messages: [], reachedLimit: false, error: error.message };
+  }
+  const rows = (data ?? []).map((row) => normalizeMessageRow(row as MessageRow)).reverse();
+  return { messages: rows, reachedLimit: (data ?? []).length >= limit, error: null };
+}
+
+/** Load a conversation's messages older than `beforeIso`, ascending. Pass
+ * no `limit` to fetch everything older in one call -- used when in-dialog
+ * search needs the full history a paginated open hasn't loaded yet. */
+export async function fetchMessagesBefore(
+  conversationId: string,
+  beforeIso: string,
+  limit?: number,
+): Promise<MessagePageResult> {
+  let query = supabase
+    .from('messages')
+    .select('id, conversation_id, sender, content, created_at')
+    .eq('conversation_id', conversationId)
+    .lt('created_at', beforeIso)
+    .order('created_at', { ascending: false });
+  if (limit) query = query.limit(limit);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('[chat] fetch older messages failed:', error.message);
+    return { messages: [], reachedLimit: false, error: error.message };
+  }
+  const rows = (data ?? []).map((row) => normalizeMessageRow(row as MessageRow)).reverse();
+  return { messages: rows, reachedLimit: limit != null && (data ?? []).length >= limit, error: null };
+}
+
 /** Remove a message row (e.g. rollback after Stop). RLS must allow delete own messages. */
 export async function deleteChatMessage(
   messageId: string,
