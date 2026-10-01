@@ -7,21 +7,33 @@ const VISIBLE_PER_GROUP = 5;
 const UNCATEGORIZED_GROUP_KEY = '__uncategorized__';
 const UNCATEGORIZED_LABEL = 'Разное';
 
-/** "Когда это в последний раз подтвердилось" — фиксированная, не склоняемая
- * единица ("5 дн. назад"), чтобы не возиться со согласованием чисел
- * (1 день / 2 дня / 5 дней). Совпадает по формулировке с тем, что видит сам
- * ИИ в своей версии памяти (lifecycleReadPrompt.ts / dialogueReadPrompt.ts). */
-function formatMemoryAge(updatedAtIso: string): string | null {
-  const updated = new Date(updatedAtIso).getTime();
+/** Фиксированная, не склоняемая единица ("5 дн. назад"), чтобы не возиться
+ * со согласованием чисел (1 день / 2 дня / 5 дней). Совпадает по
+ * формулировке с тем, что видит сам ИИ в своей версии памяти
+ * (lifecycleReadPrompt.ts / dialogueReadPrompt.ts). */
+function formatMemoryAge(isoDate: string): string | null {
+  const then = new Date(isoDate).getTime();
   const now = Date.now();
-  if (!Number.isFinite(updated) || now < updated) return null;
-  const days = Math.floor((now - updated) / 86_400_000);
+  if (!Number.isFinite(then) || now < then) return null;
+  const days = Math.floor((now - then) / 86_400_000);
   if (days < 1) return 'сегодня';
   if (days < 2) return 'вчера';
   if (days < 7) return `${days} дн. назад`;
   if (days < 30) return `${Math.floor(days / 7)} нед. назад`;
   if (days < 365) return `${Math.floor(days / 30)} мес. назад`;
   return `${Math.floor(days / 365)} г. назад`;
+}
+
+/** The reducer only ever bumps updatedAt on a real material change (a revise
+ * that actually changes content, or a status transition like mark_stale) --
+ * a plain re-confirmation leaves updatedAt untouched. So comparing it to
+ * firstSeenAt reliably tells "recorded once, never changed since" apart
+ * from "has genuinely evolved" -- that's the dynamic Настя asked to see. */
+function formatMemoryRecordedOrUpdated(item: { firstSeenAt: string; updatedAt: string }): string | null {
+  const wasRevised = new Date(item.firstSeenAt).getTime() !== new Date(item.updatedAt).getTime();
+  const age = formatMemoryAge(wasRevised ? item.updatedAt : item.firstSeenAt);
+  if (!age) return null;
+  return wasRevised ? `Обновлено: ${age}` : `Записано: ${age}`;
 }
 
 /** Список подтверждённых записей "умной" памяти, сгруппированный по теме
@@ -89,7 +101,7 @@ export function MemoryV3ItemList({
               {visibleItems.map((item) => {
                 const isSensitive = item.sensitivity === 'sensitive';
                 const isRevealed = revealed.has(item.memoryKey);
-                const age = formatMemoryAge(item.updatedAt);
+                const timing = formatMemoryRecordedOrUpdated(item);
                 return (
                   <li key={item.memoryKey} className={`${cardBase} px-4 py-3 flex items-center justify-between gap-2`}>
                     <div className="flex-1 min-w-0">
@@ -104,9 +116,9 @@ export function MemoryV3ItemList({
                       ) : (
                         <p className={`${theme.textPrimary} text-sm font-light`}>{item.claim}</p>
                       )}
-                      {age && (
+                      {timing && (
                         <p className={`${theme.textMuted} text-[11px] font-light opacity-70 mt-0.5`}>
-                          Обновлено: {age}
+                          {timing}
                         </p>
                       )}
                     </div>
