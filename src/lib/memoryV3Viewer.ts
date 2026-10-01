@@ -9,6 +9,7 @@ export interface MemoryV3ViewerItem {
   eventTimeEnd: string | null;
   sensitivity: 'normal' | 'sensitive';
   topic: string | null;
+  updatedAt: string;
 }
 
 async function callMemoryV3Viewer<T>(body: Record<string, unknown>): Promise<T | { error: string }> {

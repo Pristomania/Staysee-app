@@ -24,6 +24,7 @@ const item = {
   eventTimeEnd: null,
   sensitivity: 'normal' as const,
   topic: 'communication',
+  updatedAt: '2026-09-01T00:00:00Z',
 };
 
 const html = renderToStaticMarkup(
