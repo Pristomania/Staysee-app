@@ -557,7 +557,7 @@ export function MemoryScreen() {
       if (format === 'json') {
         downloadMemoryV3ExportAsJson(result);
       } else {
-        downloadMemoryV3ExportAsPdf(result);
+        await downloadMemoryV3ExportAsPdf(result);
       }
       setExportChoiceOpen(false);
     } catch {
