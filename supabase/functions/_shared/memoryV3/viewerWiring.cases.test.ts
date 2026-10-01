@@ -17,9 +17,9 @@ describe("memory-v3-viewer wiring", () => {
     assert.ok(verifyIndex >= 0 && rpcIndex > verifyIndex, "must verify identity before any RPC call");
   });
 
-  it("scopes both delete RPC calls to the verified caller's own userId, never a client-supplied one", () => {
+  it("scopes every RPC call to the verified caller's own userId, never a client-supplied one", () => {
     const source = indexSource();
-    assert.equal((source.match(/p_user_id:\s*userId/g) ?? []).length, 5);
+    assert.equal((source.match(/p_user_id:\s*userId/g) ?? []).length, 7);
   });
 
   it("exposes delete_all for both Memory V3 scopes and rejects any other scope", () => {
@@ -51,5 +51,35 @@ describe("memory-v3-viewer wiring", () => {
   it("filters out hypotheses on both read branches via projectMemoryV3ViewerItems", () => {
     const source = indexSource();
     assert.equal((source.match(/projectMemoryV3ViewerItems\(/g) ?? []).length, 2);
+  });
+
+  it("uses projectMemoryV3ExportItems (not the viewer projection) on both export branches", () => {
+    const source = indexSource();
+    assert.equal((source.match(/projectMemoryV3ExportItems\(/g) ?? []).length, 2);
+  });
+
+  it("never calls the all-conversations dialogue RPC without checking eligibility first", () => {
+    const source = indexSource();
+    const exportIndex = source.indexOf('body.action === "export"');
+    const eligibilityIndex = source.indexOf("resolveMemoryV3DialogueEligibility", exportIndex);
+    const dialogueAllIndex = source.indexOf("load_memory_v3_dialogue_viewer_items_all", exportIndex);
+    assert.ok(exportIndex >= 0 && eligibilityIndex > exportIndex && eligibilityIndex < dialogueAllIndex);
+  });
+
+  it("export calls the all-conversations dialogue RPC, never the per-conversation one", () => {
+    const source = indexSource();
+    const exportIndex = source.indexOf('body.action === "export"');
+    const readIndex = source.indexOf('action === "read" (default)');
+    const exportBody = source.slice(exportIndex, readIndex);
+    assert.doesNotMatch(exportBody, /"load_memory_v3_dialogue_viewer_items"/);
+    assert.match(exportBody, /"load_memory_v3_dialogue_viewer_items_all"/);
+  });
+
+  it("fails loudly on an export RPC error instead of silently returning partial data", () => {
+    const source = indexSource();
+    const exportIndex = source.indexOf('body.action === "export"');
+    const readIndex = source.indexOf('action === "read" (default)');
+    const exportBody = source.slice(exportIndex, readIndex);
+    assert.equal((exportBody.match(/error: "internal"/g) ?? []).length, 2);
   });
 });
