@@ -207,6 +207,13 @@ export function createBrowserVoiceDictationAdapter(
         if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
         startTimeoutId = null;
         callbacks.onStart();
+        // Only request the waveform's own microphone stream once
+        // recognition has actually started. Requesting it in parallel
+        // raced the browser's own internal microphone capture for
+        // recognition -- in Chrome specifically, the two tried to use the
+        // device at once and recognition's own capture lost, surfacing as
+        // "cannot record now as Chrome is recording" and no transcript.
+        void startWaveform();
       };
       recognition.onresult = (event) => {
         if (active) callbacks.onTranscript(readRecognitionEvent(event));
@@ -231,7 +238,6 @@ export function createBrowserVoiceDictationAdapter(
         cleanup(false);
         throw new Error('voice_dictation_start_failed');
       }
-      void startWaveform();
 
       return {
         stop() {
