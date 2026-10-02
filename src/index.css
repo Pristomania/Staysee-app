@@ -128,6 +128,24 @@
   animation: featherNudge 2.4s ease-in-out infinite;
 }
 
+/* ── Voice dictation — calm fallback when live amplitude is unavailable ───── */
+
+@keyframes voiceWaveFallback {
+  0%, 100% { transform: scaleY(0.72); opacity: 0.45; }
+  50% { transform: scaleY(1); opacity: 0.8; }
+}
+
+.voice-wave-fallback {
+  animation: voiceWaveFallback 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-wave-fallback {
+    animation: none;
+    transform: scaleY(0.85);
+  }
+}
+
 @keyframes captureChipIn {
   from {
     opacity: 0;
