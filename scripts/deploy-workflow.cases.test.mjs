@@ -20,6 +20,8 @@ describe('production deployment gate', () => {
   it('runs verification for pull requests and pushes to main', () => {
     assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- main/u);
     assert.match(workflow, /push:\s*\n\s*branches:\s*\n\s*- main/u);
+    assert.match(workflow, /VITE_SUPABASE_URL: https:\/\/staysee\.ru\/supabase/u);
+    assert.match(workflow, /VITE_SUPABASE_ANON_KEY: ci-public-build-placeholder/u);
   });
 
   it('runs every required offline gate in order', () => {

@@ -1,5 +1,9 @@
 name: Deploy StaySee
 
+env:
+  VITE_SUPABASE_URL: https://staysee.ru/supabase
+  VITE_SUPABASE_ANON_KEY: ci-public-build-placeholder
+
 on:
   push:
     branches:
