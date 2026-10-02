@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   verify:
@@ -24,7 +27,23 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Offline tests
+        run: npm run test:offline
+
+      - name: Production build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Smoke-test built site
+        run: npm run smoke:bundle
+
   deploy:
+    if: github.event_name == 'push'
     needs: verify
     runs-on: ubuntu-latest
 
@@ -73,3 +92,6 @@ jobs:
             export STAYSEE_NGINX_SRC
             bash "$NGINX_SCRIPTS/apply-on-vps.sh"
             bash "$NGINX_SCRIPTS/reload-or-start-nginx.sh"
+
+      - name: Verify production site
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 3 --max-time 20 https://staysee.ru/ > /dev/null
