@@ -8,9 +8,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 jobs:
   verify:
@@ -71,7 +68,6 @@ jobs:
         run: npm run smoke:bundle
 
   deploy:
-    if: github.event_name == 'push'
     needs: [verify, verify-linux-build]
     runs-on: ubuntu-latest
 
