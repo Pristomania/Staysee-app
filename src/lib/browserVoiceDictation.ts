@@ -28,7 +28,6 @@ export interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
-  processLocally?: boolean;
   onstart: (() => void) | null;
   onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
@@ -70,13 +69,10 @@ export interface BrowserVoicePlatform {
   cancelAnimationFrame(id: number): void;
   setTimeout(callback: () => void, ms: number): number;
   clearTimeout(id: number): void;
-  prepareLocalRecognition: (() => Promise<boolean>) | null;
 }
 
 interface RecognitionConstructor {
   new (): SpeechRecognitionLike;
-  available?(options: { langs: string[]; processLocally: boolean }): Promise<string>;
-  install?(options: { langs: string[]; processLocally: boolean }): Promise<boolean>;
 }
 type AudioContextConstructor = new () => AudioContextLike;
 
@@ -90,7 +86,6 @@ function browserPlatform(): BrowserVoicePlatform {
       cancelAnimationFrame: () => undefined,
       setTimeout: () => 0,
       clearTimeout: () => undefined,
-      prepareLocalRecognition: null,
     };
   }
 
@@ -102,19 +97,6 @@ function browserPlatform(): BrowserVoicePlatform {
   const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
   const AudioContextValue = window.AudioContext as unknown as AudioContextConstructor | undefined
     ?? speechWindow.webkitAudioContext;
-  const prepareLocalRecognition = Recognition?.available && Recognition.install
-    ? async () => {
-        try {
-          const options = { langs: ['ru-RU'], processLocally: true };
-          const status = await Recognition.available!(options);
-          if (status === 'available') return true;
-          if (status === 'unavailable') return false;
-          return await Recognition.install!(options);
-        } catch {
-          return false;
-        }
-      }
-    : null;
 
   return {
     createRecognition: Recognition ? () => new Recognition() : null,
@@ -126,7 +108,6 @@ function browserPlatform(): BrowserVoicePlatform {
     cancelAnimationFrame: (id) => window.cancelAnimationFrame(id),
     setTimeout: (callback, ms) => window.setTimeout(callback, ms),
     clearTimeout: (id) => window.clearTimeout(id),
-    prepareLocalRecognition,
   };
 }
 
@@ -221,9 +202,6 @@ export function createBrowserVoiceDictationAdapter(
       recognition.lang = 'ru-RU';
       recognition.continuous = true;
       recognition.interimResults = true;
-      if (platform.prepareLocalRecognition && await platform.prepareLocalRecognition()) {
-        recognition.processLocally = true;
-      }
       recognition.onstart = () => {
         if (!active) return;
         if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
