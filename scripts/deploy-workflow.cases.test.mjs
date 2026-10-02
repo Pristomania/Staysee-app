@@ -23,6 +23,7 @@ describe('production deployment gate', () => {
   });
 
   it('runs every required offline gate in order', () => {
+    assert.match(workflow, /node-version: 22/u);
     const commands = [
       'npm ci',
       'npm run typecheck',
