@@ -45,7 +45,7 @@ describe('production deployment gate', () => {
   it('keeps the complete offline suite and bundle smoke behind package scripts', () => {
     assert.equal(
       packageJson.scripts['test:offline'],
-      'npx tsx --test "supabase/functions/_shared/**/*.cases.test.ts" && npx tsx --test "src/**/*.cases.test.ts" && npx tsx --test "scripts/**/*.test.ts" && node --test "scripts/**/*.test.mjs"',
+      'node scripts/run-offline-tests.mjs',
     );
     assert.equal(packageJson.scripts['smoke:bundle'], 'node scripts/smoke-built-site.mjs');
   });
