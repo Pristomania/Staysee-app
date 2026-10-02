@@ -39,20 +39,17 @@ export function MainScreen() {
   useEffect(() => {
     if (!conversations.length) return;
     (async () => {
-      const results: Record<string, string> = {};
-      await Promise.all(
-        conversations.map(async (conv) => {
-          const { data } = await supabase
-            .from('messages')
-            .select('content')
-            .eq('conversation_id', conv.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          if (data) results[conv.id] = data.content;
-        })
-      );
-      setPreviews(results);
+      // One round trip for every conversation's preview instead of one
+      // query per conversation -- see load_conversation_last_messages
+      // (migration 063) for why.
+      const { data, error } = await supabase.rpc('load_conversation_last_messages', {
+        p_conversation_ids: conversations.map((conv) => conv.id),
+      });
+      if (error) {
+        console.error('[main] load_conversation_last_messages:', error.message);
+        return;
+      }
+      setPreviews((data ?? {}) as Record<string, string>);
     })();
   }, [conversations]);
 
