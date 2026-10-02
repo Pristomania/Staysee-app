@@ -17,9 +17,12 @@ function position(fragment) {
 }
 
 describe('production deployment gate', () => {
-  it('runs verification for pull requests and pushes to main', () => {
-    assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- main/u);
+  it('runs verification once, on push to main -- not duplicated on pull requests too', () => {
+    // A PR and the push that merges it carry the exact same tree, so
+    // verifying both doubled the wait on every change without catching
+    // anything a single run on push wouldn't already catch.
     assert.match(workflow, /push:\s*\n\s*branches:\s*\n\s*- main/u);
+    assert.doesNotMatch(workflow, /pull_request:/u);
     assert.match(workflow, /VITE_SUPABASE_URL: https:\/\/staysee\.ru\/supabase/u);
     assert.match(workflow, /VITE_SUPABASE_ANON_KEY: ci-public-build-placeholder/u);
   });
@@ -41,9 +44,11 @@ describe('production deployment gate', () => {
     assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
   });
 
-  it('deploys only a verified push and checks production afterwards', () => {
-    assert.match(workflow, /deploy:\s*\n\s*if: github\.event_name == 'push'/u);
-    assert.match(workflow, /needs: \[verify, verify-linux-build\]/u);
+  it('deploys only after both verification jobs pass, and checks production afterwards', () => {
+    // No separate `if: github.event_name == 'push'` guard is needed any
+    // more -- push is the workflow's only trigger now, so every run that
+    // reaches this job already is one.
+    assert.match(workflow, /deploy:\s*\n\s*needs: \[verify, verify-linux-build\]/u);
     assert.match(workflow, /curl[^\n]*https:\/\/staysee\.ru\//u);
   });
 
