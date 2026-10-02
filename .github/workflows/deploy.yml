@@ -10,7 +10,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
@@ -42,9 +42,33 @@ jobs:
       - name: Smoke-test built site
         run: npm run smoke:bundle
 
+  verify-linux-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Smoke-test built site
+        run: npm run smoke:bundle
+
   deploy:
     if: github.event_name == 'push'
-    needs: verify
+    needs: [verify, verify-linux-build]
     runs-on: ubuntu-latest
 
     steps:

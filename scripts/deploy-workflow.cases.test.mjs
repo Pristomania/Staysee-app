@@ -24,6 +24,8 @@ describe('production deployment gate', () => {
 
   it('runs every required offline gate in order', () => {
     assert.match(workflow, /node-version: 22/u);
+    assert.match(workflow, /verify:\s*\n\s*runs-on: windows-latest/u);
+    assert.match(workflow, /verify-linux-build:\s*\n\s*runs-on: ubuntu-latest/u);
     const commands = [
       'npm ci',
       'npm run typecheck',
@@ -39,7 +41,7 @@ describe('production deployment gate', () => {
 
   it('deploys only a verified push and checks production afterwards', () => {
     assert.match(workflow, /deploy:\s*\n\s*if: github\.event_name == 'push'/u);
-    assert.match(workflow, /needs: verify/u);
+    assert.match(workflow, /needs: \[verify, verify-linux-build\]/u);
     assert.match(workflow, /curl[^\n]*https:\/\/staysee\.ru\//u);
   });
 
