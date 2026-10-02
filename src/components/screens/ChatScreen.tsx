@@ -48,6 +48,10 @@ import {
 import type { SelfNoteKind } from '../../lib/reflectionCopy';
 import { messagesForConversation } from '../../lib/chatNavigation';
 import {
+  collectOlderMessageHistory,
+  shouldLoadFullHistoryForSearch,
+} from '../../lib/chatHistoryPagination';
+import {
   isPrivacyNoticeAccepted,
   markPrivacyNoticeAccepted,
 } from '../../lib/privacyNotice';
@@ -338,7 +342,11 @@ export function ChatScreen() {
 
     loadingMoreHistoryRef.current = true;
     setLoadingMoreHistory(true);
-    const { messages: older, error } = await fetchMessagesBefore(convId, oldest.created_at);
+    const { messages: older, error } = await collectOlderMessageHistory(
+      oldest.created_at,
+      MESSAGE_PAGE_SIZE,
+      (beforeIso, limit) => fetchMessagesBefore(convId, beforeIso, limit),
+    );
 
     if (activeConvIdRef.current !== convId) {
       loadingMoreHistoryRef.current = false;
@@ -929,8 +937,12 @@ export function ChatScreen() {
   const openSearch = useCallback(() => {
     setSearchOpen(true);
     requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!shouldLoadFullHistoryForSearch({ searchOpen, hasMoreHistory, loadingMoreHistory })) return;
     void loadAllHistoryForSearch();
-  }, [loadAllHistoryForSearch]);
+  }, [searchOpen, hasMoreHistory, loadingMoreHistory, loadAllHistoryForSearch]);
 
   useEffect(() => {
     setActiveMatchIndex(0);
