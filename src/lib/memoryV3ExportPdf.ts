@@ -1,6 +1,6 @@
 import type { jsPDF } from 'jspdf';
 import ptSansFontUrl from '../assets/fonts/PTSans-Regular.ttf';
-import { formatMemoryRecordedOrUpdated } from '../components/MemoryV3ItemList';
+import { formatMemoryRecordedOrUpdated } from './memoryV3Formatting';
 import type { MemoryV3ExportData, MemoryV3ExportItem } from './memoryV3Viewer';
 
 const PAGE_MARGIN = 15;

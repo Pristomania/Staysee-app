@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { User, Plus } from 'lucide-react';
 import type { Conversation } from '../../types';
-import { formatRelativeTime, GREETING } from './ChatScreen';
+import { GREETING } from './ChatScreen';
+import { formatRelativeTime } from '../../lib/chatPresentation';
 import { AppContainer } from '../layout';
 import { filterVisibleConversations } from '../../lib/conversationFilters';
 import {
@@ -32,9 +33,22 @@ export function MainScreen() {
   const [renameValue, setRenameValue] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const fetchConversations = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .order('last_message_at', { ascending: false })
+      .limit(getConversationFetchLimit(user.id));
+    setConversations(filterVisibleConversations(data || []));
+    setLoading(false);
+  }, [setConversations, user]);
+
   useEffect(() => {
-    if (user) fetchConversations();
-  }, [user]);
+    void fetchConversations();
+  }, [fetchConversations]);
 
   useEffect(() => {
     if (!conversations.length) return;
@@ -64,18 +78,6 @@ export function MainScreen() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [openMenuId]);
-
-  async function fetchConversations() {
-    const { data } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', user!.id)
-      .eq('is_active', true)
-      .order('last_message_at', { ascending: false })
-      .limit(getConversationFetchLimit(user!.id));
-    setConversations(filterVisibleConversations(data || []));
-    setLoading(false);
-  }
 
   function greetingFor(convId: string) {
     return {

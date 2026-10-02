@@ -37,6 +37,7 @@ export function StickyScreenLayout({
   const rootRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLDivElement>(null);
+  const hasDock = Boolean(dock);
 
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
@@ -78,7 +79,7 @@ export function StickyScreenLayout({
 
     root.addEventListener('wheel', onWheel, { passive: false });
     return () => root.removeEventListener('wheel', onWheel);
-  }, [Boolean(dock)]);
+  }, [hasDock]);
 
   return (
     <div
