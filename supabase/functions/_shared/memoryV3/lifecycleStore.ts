@@ -43,6 +43,12 @@ export interface MemoryV3LifecycleFailureWrite {
   runId: string;
   userId: string;
   diagnosticCode: MemoryV3LifecycleStoredDiagnostic;
+  /** The specific transport-level reason (e.g. "provider_http_5xx",
+   * "transport_timeout"), when the shadow runner has one -- a free-text
+   * diagnostic detail, not a closed enum like diagnosticCode, since the
+   * transport modules' own code sets evolve independently of this store.
+   * null when no specific transport diagnostic applies. */
+  transportDetail: string | null;
 }
 
 export interface MemoryV3LifecycleUsage {
@@ -367,10 +373,12 @@ export function createMemoryV3LifecycleStore(clientValue: MemoryV3LifecycleRpcCl
     },
 
     async fail(inputValue) {
-      const input = record(inputValue, ["runId", "userId", "diagnosticCode"]);
+      const input = record(inputValue, ["runId", "userId", "diagnosticCode", "transportDetail"]);
       if (typeof input.runId !== "string" || !UUID.test(input.runId) || typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.diagnosticCode !== "string" || !DIAGNOSTICS.has(input.diagnosticCode as MemoryV3LifecycleStoredDiagnostic)) throw fail();
+      if (input.transportDetail !== null && !nonEmpty(input.transportDetail)) throw fail();
       const data = await callRpc(client, "fail_memory_v3_lifecycle_shadow_run", {
         p_run_id: input.runId, p_user_id: input.userId, p_diagnostic_code: input.diagnosticCode,
+        p_transport_detail: input.transportDetail,
       });
       if (data !== null) throw fail();
     },

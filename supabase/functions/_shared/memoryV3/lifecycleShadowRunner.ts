@@ -279,9 +279,10 @@ async function persistFailure(
   runId: string,
   userId: string,
   diagnosticCode: MemoryV3LifecycleShadowDiagnostic,
+  transportDetail: string | null = null,
 ): Promise<MemoryV3LifecycleShadowResult> {
   try {
-    await failStore({ runId, userId, diagnosticCode } as never);
+    await failStore({ runId, userId, diagnosticCode, transportDetail } as never);
     return failed(runId, diagnosticCode);
   } catch {
     return failed(runId, "state_write_failed");
@@ -414,8 +415,8 @@ export async function runMemoryV3LifecycleShadow(
     extractor = transportResult(await adapter(extractorRequest));
   } catch (error) {
     const transportCode = projectSafeMemoryV3TransportDiagnostic(error);
-    const code = ownDiagnostic(error) ?? (transportCode ? "extractor_transport_failed" : "extractor_transport_failed");
-    return await persistFailure(failStore, runId, userId, code);
+    const code = ownDiagnostic(error) ?? "extractor_transport_failed";
+    return await persistFailure(failStore, runId, userId, code, transportCode);
   }
   // Logged as soon as the response is in, regardless of whether the run
   // later succeeds -- the extractor call's cost is already spent either way.
@@ -480,7 +481,7 @@ export async function runMemoryV3LifecycleShadow(
         // Safe diagnostics must never affect lifecycle persistence or the reply path.
       }
     }
-    return await persistFailure(failStore, runId, userId, "reconciler_transport_failed");
+    return await persistFailure(failStore, runId, userId, "reconciler_transport_failed", transportDiagnostic);
   }
   // Same as the extractor call above: logged now, independent of whether
   // the run later succeeds.

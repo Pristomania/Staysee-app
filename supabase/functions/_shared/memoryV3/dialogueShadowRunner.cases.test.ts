@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { createEmptyMemoryV3DialogueState } from "./dialogueReducer.ts";
 import type { MemoryV3DialogueStore } from "./dialogueStore.ts";
 import { createMemoryV3DialogueOpenRouterAdapter } from "./dialogueTransport.ts";
+import { createMemoryV3OpenRouterAdapter } from "./transport.ts";
 import {
   runMemoryV3DialogueShadow,
   runMemoryV3DialogueShadowBackgroundSafely,
@@ -66,6 +67,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const reserveInputs: unknown[] = [];
   const casInputs: unknown[] = [];
+  const failInputs: unknown[] = [];
   const extractorRequests: unknown[] = [];
   let active = 0;
   let maxActive = 0;
@@ -82,6 +84,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     async fail(input) {
       calls.push(`fail:${input.diagnosticCode}`);
+      failInputs.push(input);
     },
     async compareAndSwap(input) {
       calls.push("cas");
@@ -123,7 +126,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
-  return { options, calls, store, reserveInputs, casInputs, extractorRequests, get maxActive() { return maxActive; } };
+  return { options, calls, store, reserveInputs, casInputs, failInputs, extractorRequests, get maxActive() { return maxActive; } };
 }
 
 describe("Memory V3 dialogue shadow runner gates", () => {
@@ -380,9 +383,28 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "extractor_transport_failed" });
     assert.deepEqual(test.calls, ["messages", "reserve", "extractor", "fail:extractor_transport_failed"]);
     assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
+    // The spoofed diagnosticCode isn't a real transport.ts-branded error, so
+    // there's no trustworthy specific reason to persist -- transportDetail
+    // stays null rather than echoing anything attacker-controlled.
+    assert.equal((test.failInputs[0] as { transportDetail: unknown }).transportDetail, null);
   });
 
-  it("reports only a branded safe reconciler transport diagnostic while persisting the generic failure", async () => {
+  it("persists the specific extractor transport diagnostic (not just the generic bucket) when the error is a real branded one", async () => {
+    const test = harness({
+      extractorAdapterFactory: () => createMemoryV3OpenRouterAdapter({
+        apiKey: "test-key",
+        fetchImpl: async () => new Response(RAW_SECRET, { status: 500 }),
+      }),
+    });
+    const result = await runMemoryV3DialogueShadow(test.options);
+    assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "extractor_transport_failed" });
+    assert.deepEqual(test.failInputs, [{
+      runId: RUN_ID, userId: USER_ID, diagnosticCode: "extractor_transport_failed", transportDetail: "provider_http_5xx",
+    }]);
+    assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
+  });
+
+  it("reports only a branded safe reconciler transport diagnostic while persisting the generic failure, now with the specific reason attached", async () => {
     const reported: string[] = [];
     const test = harness({
       reconcilerAdapterFactory: () => createMemoryV3DialogueOpenRouterAdapter({
@@ -401,6 +423,9 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(reported, ["provider_http_400"]);
     assert.equal(JSON.stringify({ result, reported }).includes(RAW_SECRET), false);
     assert.equal(test.calls.at(-1), "fail:reconciler_transport_failed");
+    assert.deepEqual(test.failInputs, [{
+      runId: RUN_ID, userId: USER_ID, diagnosticCode: "reconciler_transport_failed", transportDetail: "provider_http_400",
+    }]);
   });
 
   it("maps extractor parse, shape, and contract failures without retry", async () => {

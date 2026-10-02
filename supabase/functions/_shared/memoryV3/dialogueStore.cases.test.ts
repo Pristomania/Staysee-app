@@ -285,25 +285,48 @@ describe("Memory V3 dialogue store", () => {
   it("writes every allowlisted failure with exactly one RPC", async () => {
     for (const diagnosticCode of DIAGNOSTICS) {
       const fake = fakeClient([{ data: null, error: null }]);
-      await createMemoryV3DialogueStore(fake.client).fail({ runId: RUN_ID, userId: USER_ID, diagnosticCode });
+      await createMemoryV3DialogueStore(fake.client).fail({
+        runId: RUN_ID, userId: USER_ID, diagnosticCode, transportDetail: null,
+      });
       assert.deepEqual(fake.calls, [{
         name: "fail_memory_v3_dialogue_run",
-        args: { p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: diagnosticCode },
+        args: { p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: diagnosticCode, p_transport_detail: null },
       }]);
+    }
+  });
+
+  it("writes transportDetail through to the RPC when a specific transport diagnostic is known", async () => {
+    const fake = fakeClient([{ data: null, error: null }]);
+    await createMemoryV3DialogueStore(fake.client).fail({
+      runId: RUN_ID, userId: USER_ID, diagnosticCode: "extractor_transport_failed", transportDetail: "provider_http_5xx",
+    });
+    assert.deepEqual(fake.calls, [{
+      name: "fail_memory_v3_dialogue_run",
+      args: { p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: "extractor_transport_failed", p_transport_detail: "provider_http_5xx" },
+    }]);
+  });
+
+  it("rejects a transportDetail that is not null and not a non-empty string", async () => {
+    for (const bad of ["", "   ", 123, {}]) {
+      const local = fakeClient([]);
+      await captureStoreError(() => createMemoryV3DialogueStore(local.client).fail({
+        runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure", transportDetail: bad as never,
+      }));
+      assert.equal(local.calls.length, 0);
     }
   });
 
   it("rejects unlisted failure diagnostics and malformed completion responses without retry", async () => {
     const local = fakeClient([]);
     await captureStoreError(() => createMemoryV3DialogueStore(local.client).fail({
-      runId: RUN_ID, userId: USER_ID, diagnosticCode: "RAW_NOT_ALLOWLISTED" as never,
+      runId: RUN_ID, userId: USER_ID, diagnosticCode: "RAW_NOT_ALLOWLISTED" as never, transportDetail: null,
     }));
     assert.equal(local.calls.length, 0);
 
     for (const response of [{ data: {}, error: null }, { data: null, error: { detail: RAW_SECRET } }, new Error(RAW_SECRET)]) {
       const fake = fakeClient([response]);
       await captureStoreError(() => createMemoryV3DialogueStore(fake.client).fail({
-        runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure",
+        runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure", transportDetail: null,
       }));
       assert.equal(fake.calls.length, 1);
     }
