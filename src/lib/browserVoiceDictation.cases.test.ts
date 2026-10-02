@@ -45,7 +45,6 @@ function callbacks(overrides: Partial<{
 function createFakePlatform(options: {
   recognition?: boolean;
   getUserMediaRejects?: boolean;
-  localRecognition?: boolean;
 } = {}) {
   let getUserMediaCalls = 0;
   let cancelAnimationFrameCalls = 0;
@@ -77,7 +76,6 @@ function createFakePlatform(options: {
     lang: '',
     continuous: false,
     interimResults: false,
-    processLocally: false,
     onstart: null,
     onresult: null,
     onerror: null,
@@ -117,9 +115,6 @@ function createFakePlatform(options: {
     clearTimeout(id) {
       timers.delete(id);
     },
-    prepareLocalRecognition: options.localRecognition === undefined
-      ? null
-      : async () => options.localRecognition === true,
   };
 
   return {
@@ -178,14 +173,6 @@ await runCase('starts one Russian recognition and emits final and interim text',
     { text: ' как дела', final: false },
   ]);
   assertDeepEqual(events[events.length - 1], { finalText: 'Привет', interimText: ' как дела' });
-  session.dispose();
-});
-
-await runCase('prefers prepared on-device Russian recognition when available', async () => {
-  const platform = createFakePlatform({ localRecognition: true });
-  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks());
-  assertEqual(platform.recognition.processLocally, true);
-  assertEqual(platform.recognition.startCalls, 1);
   session.dispose();
 });
 
