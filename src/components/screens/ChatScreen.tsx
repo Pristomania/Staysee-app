@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -56,6 +56,14 @@ import {
   markPrivacyNoticeAccepted,
 } from '../../lib/privacyNotice';
 import { generateTitle } from '../../lib/chatPresentation';
+import { resizeChatComposer } from '../../lib/chatComposerLayout';
+import { useVoiceDictation } from '../../hooks/useVoiceDictation';
+import { VoiceDictationBar } from '../chat/VoiceDictationBar';
+import { voiceDictationErrorCopy } from '../../lib/voiceDictationContract';
+import {
+  canStartVoiceDictation,
+  shouldStopVoiceDictation,
+} from '../../lib/chatVoiceIntegration';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -166,6 +174,12 @@ export function ChatScreen() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationEpochRef = useRef(0);
   const [sendError, setSendError] = useState<string | null>(null);
+  const voice = useVoiceDictation({
+    disabled: sending,
+    draft: inputValue,
+    onDraftChange: setInputValue,
+    conversationId: currentConversation?.id ?? null,
+  });
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -642,6 +656,10 @@ export function ChatScreen() {
   // ── Send handler ───────────────────────────────────────────────────────────────
 
   async function handleSend() {
+    if (shouldStopVoiceDictation(voice.snapshot.phase)) {
+      voice.stop();
+      return;
+    }
     if (!inputValue.trim() || sending || sendLockRef.current || !user || !currentConversation) {
       return;
     }
@@ -866,27 +884,29 @@ export function ChatScreen() {
   }
 
   function handleInputChange(e: ChangeEvent<HTMLTextAreaElement>) {
+    voice.clearError();
     setInputValue(e.target.value);
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-    }
+    resizeChatComposer(inputRef.current);
   }
 
   function insertGuidedPhrase(phrase: string) {
+    voice.clearError();
     setInputValue(phrase);
     setGuidedOpen(false);
     requestAnimationFrame(() => {
       if (inputRef.current) {
         inputRef.current.focus();
-        inputRef.current.style.height = 'auto';
-        inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+        resizeChatComposer(inputRef.current);
       }
     });
   }
 
   const roomTitle = currentConversation?.title || 'Новая беседа';
   const isWaiting = sending && !stream.isStreaming;
+  const voiceActive = shouldStopVoiceDictation(voice.snapshot.phase);
+  useLayoutEffect(() => {
+    resizeChatComposer(inputRef.current);
+  }, [inputValue, voiceActive]);
   const suppressAiMessageId =
     stream.isStreaming ? persistedTurnRef.current?.aiId ?? null : null;
   const visibleMessages = suppressAiMessageId
@@ -1262,41 +1282,77 @@ export function ChatScreen() {
               </p>
             )}
 
+            {voice.snapshot.errorCode && (
+              <p className={`text-xs font-light mb-2 px-1 ${theme.textMuted}`} role="status">
+                {voiceDictationErrorCopy(voice.snapshot.errorCode)}
+              </p>
+            )}
+
             {/* Input field */}
             <div className={`flex items-end gap-3 rounded-xl px-4 py-3 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
-              <textarea
-                ref={inputRef}
-                value={inputValue}
-                onChange={handleInputChange}
-                placeholder="Напишите как есть…"
-                rows={1}
-                enterKeyHint="enter"
-                className={`chat-compose-input flex-1 bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
-                style={{ maxHeight: '120px' }}
-              />
-              {sending ? (
-                <button
-                  type="button"
-                  onClick={handleStop}
-                  aria-label="Остановить ответ"
-                  className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 border border-[#c9a96e]/25 bg-[#c9a96e]/8 hover:bg-[#c9a96e]/14`}
-                >
-                  <Square
-                    className="w-3.5 h-3.5 text-[#c9a96e]/85"
-                    strokeWidth={1.5}
-                    fill="currentColor"
-                  />
-                </button>
+              {voiceActive ? (
+                <VoiceDictationBar
+                  elapsedMs={voice.snapshot.elapsedMs}
+                  level={voice.snapshot.level}
+                  phase={voice.snapshot.phase}
+                  onStop={voice.stop}
+                  textClass={theme.inputText}
+                  mutedClass={theme.textMuted}
+                />
               ) : (
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                  aria-label="Отправить"
-                  className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
-                >
-                  <Send className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
-                </button>
+                <>
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    placeholder="Напишите как есть…"
+                    rows={1}
+                    enterKeyHint="enter"
+                    className={`chat-compose-input flex-1 bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
+                    style={{ maxHeight: '120px' }}
+                  />
+                  {!sending && (
+                    <button
+                      type="button"
+                      onClick={() => { void voice.start(); }}
+                      disabled={!canStartVoiceDictation({
+                        sending,
+                        phase: voice.snapshot.phase,
+                      })}
+                      aria-label="Начать голосовой ввод"
+                      title={voice.snapshot.supported
+                        ? 'Голосовой ввод'
+                        : 'В этом браузере голосовой ввод пока недоступен'}
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
+                    >
+                      <Mic className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                    </button>
+                  )}
+                  {sending ? (
+                    <button
+                      type="button"
+                      onClick={handleStop}
+                      aria-label="Остановить ответ"
+                      className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 border border-[#c9a96e]/25 bg-[#c9a96e]/8 hover:bg-[#c9a96e]/14`}
+                    >
+                      <Square
+                        className="w-3.5 h-3.5 text-[#c9a96e]/85"
+                        strokeWidth={1.5}
+                        fill="currentColor"
+                      />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={!inputValue.trim()}
+                      aria-label="Отправить"
+                      className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
+                    >
+                      <Send className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                    </button>
+                  )}
+                </>
               )}
             </div>
 
