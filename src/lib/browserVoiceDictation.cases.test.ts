@@ -246,6 +246,27 @@ await runCase('silently restarts on a transient aborted error instead of surfaci
   session.dispose();
 });
 
+await runCase('reports an error instead of hanging when a retry cannot even start', async () => {
+  // The retry runs from inside a bare setTimeout callback with nothing to
+  // catch a synchronous throw from the fresh recognition instance's
+  // start() -- a real Chrome InvalidStateError here (the previous session
+  // not fully released yet) must not leave the UI frozen with a Stop
+  // button that silently does nothing.
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+  }));
+  platform.emitError('aborted');
+  platform.recognition.start = () => {
+    throw new Error('InvalidStateError');
+  };
+  platform.runTimers();
+  assertDeepEqual(errors, ['recognition-failed'], 'a retry that cannot start reports an error instead of hanging');
+  session.stop();
+  session.dispose();
+});
+
 await runCase('gives up and reports an error after repeated aborted retries are exhausted', async () => {
   const platform = createFakePlatform();
   const errors: VoiceDictationErrorCode[] = [];
