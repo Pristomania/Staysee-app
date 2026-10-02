@@ -129,6 +129,21 @@ function readRecognitionEvent(event: SpeechRecognitionResultEventLike): VoiceRec
   return { finalText, interimText };
 }
 
+// Chrome occasionally aborts a freshly started recognition within
+// milliseconds for reasons outside page code's visibility or control (seen
+// directly: a bare `new webkitSpeechRecognition(); r.start();` typed into
+// DevTools, with none of this file's code involved at all, still ended in
+// `onerror('aborted')`). Good dictation UIs treat this the way they treat
+// Chrome's well-documented habit of ending `continuous: true` recognition
+// after a pause: silently start a fresh attempt instead of surfacing a
+// failure the user did nothing to cause. RETRYABLE_ERRORS deliberately
+// excludes codes that mean something real happened (`not-allowed` needs the
+// user to grant permission, `no-speech` means they should just try again
+// knowing nothing was heard) -- only truly inexplicable aborts get retried.
+const RETRYABLE_ERRORS = new Set(['aborted', 'network']);
+const MAX_AUTO_RESTARTS = 3;
+const RESTART_DELAY_MS = 250;
+
 export function createBrowserVoiceDictationAdapter(
   platform: BrowserVoicePlatform = browserPlatform(),
 ): VoiceDictationAdapter {
@@ -137,33 +152,47 @@ export function createBrowserVoiceDictationAdapter(
     async start(callbacks) {
       if (!platform.createRecognition) throw new Error('voice_dictation_unsupported');
 
-      const recognition = platform.createRecognition();
+      let recognition: SpeechRecognitionLike | null = null;
       let active = true;
       let stopRequested = false;
+      let restartsLeft = MAX_AUTO_RESTARTS;
       let stream: MediaStreamLike | null = null;
       let audioContext: AudioContextLike | null = null;
       let frameId: number | null = null;
       let startTimeoutId: number | null = null;
       let stopTimeoutId: number | null = null;
+      let restartTimeoutId: number | null = null;
 
-      const cleanup = (abortRecognition: boolean) => {
-        if (!active) return;
-        active = false;
+      const detachRecognition = () => {
+        if (!recognition) return;
         recognition.onstart = null;
         recognition.onresult = null;
         recognition.onerror = null;
         recognition.onend = null;
-        if (abortRecognition) recognition.abort();
+      };
+
+      const releaseWaveform = () => {
         if (frameId !== null) platform.cancelAnimationFrame(frameId);
         frameId = null;
-        if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
-        startTimeoutId = null;
-        if (stopTimeoutId !== null) platform.clearTimeout(stopTimeoutId);
-        stopTimeoutId = null;
         for (const track of stream?.getTracks() ?? []) track.stop();
         stream = null;
         if (audioContext) void audioContext.close().catch(() => undefined);
         audioContext = null;
+      };
+
+      const cleanup = (abortRecognition: boolean) => {
+        if (!active) return;
+        active = false;
+        const current = recognition;
+        detachRecognition();
+        if (abortRecognition) current?.abort();
+        if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
+        startTimeoutId = null;
+        if (stopTimeoutId !== null) platform.clearTimeout(stopTimeoutId);
+        stopTimeoutId = null;
+        if (restartTimeoutId !== null) platform.clearTimeout(restartTimeoutId);
+        restartTimeoutId = null;
+        releaseWaveform();
       };
 
       const startWaveform = async () => {
@@ -199,51 +228,98 @@ export function createBrowserVoiceDictationAdapter(
         }
       };
 
-      recognition.lang = 'ru-RU';
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.onstart = () => {
-        if (!active) return;
-        if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
-        startTimeoutId = null;
-        callbacks.onStart();
-        // Only request the waveform's own microphone stream once
-        // recognition has actually started. Requesting it in parallel
-        // raced the browser's own internal microphone capture for
-        // recognition -- in Chrome specifically, the two tried to use the
-        // device at once and recognition's own capture lost, surfacing as
-        // "cannot record now as Chrome is recording" and no transcript.
-        void startWaveform();
-      };
-      recognition.onresult = (event) => {
-        if (active) callbacks.onTranscript(readRecognitionEvent(event));
-      };
-      recognition.onerror = (event) => {
-        if (active) callbacks.onError(mapRecognitionError(event.error));
-      };
-      recognition.onend = () => {
-        if (!active) return;
-        cleanup(false);
-        callbacks.onEnd();
-      };
+      // Declared with `function` (not const) so attemptStart can reference
+      // itself for a retry before its own initializer has finished running.
+      function attemptStart(): void {
+        const next = platform.createRecognition!();
+        recognition = next;
+        next.lang = 'ru-RU';
+        next.continuous = true;
+        next.interimResults = true;
+        next.onstart = () => {
+          if (!active || recognition !== next) return;
+          restartsLeft = MAX_AUTO_RESTARTS;
+          if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
+          startTimeoutId = null;
+          callbacks.onStart();
+          // Only request the waveform's own microphone stream once
+          // recognition has actually started. Requesting it in parallel
+          // raced the browser's own internal microphone capture for
+          // recognition -- in Chrome specifically, the two tried to use
+          // the device at once and recognition's own capture lost,
+          // surfacing as "cannot record now as Chrome is recording" and
+          // no transcript.
+          void startWaveform();
+        };
+        next.onresult = (event) => {
+          if (active && recognition === next) callbacks.onTranscript(readRecognitionEvent(event));
+        };
+        next.onerror = (event) => {
+          if (!active || recognition !== next) return;
+          // Once onerror has fired, this attempt's own "never started"
+          // watchdog is moot either way -- clear it before branching, or
+          // it can fire later on its original 5s schedule and report a
+          // failure behind whatever happens next (a retry, or onend).
+          if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
+          startTimeoutId = null;
+          if (RETRYABLE_ERRORS.has(event.error) && restartsLeft > 0) {
+            restartsLeft -= 1;
+            releaseWaveform();
+            restartTimeoutId = platform.setTimeout(() => {
+              restartTimeoutId = null;
+              if (active) attemptStart();
+            }, RESTART_DELAY_MS);
+            return;
+          }
+          // Matches the original behavior: report the error but don't tear
+          // the session down here -- the browser always fires onend right
+          // after onerror, and that's what actually ends the session.
+          callbacks.onError(mapRecognitionError(event.error));
+        };
+        next.onend = () => {
+          if (!active || recognition !== next) return;
+          // A retry is already queued from onerror above -- let it run
+          // rather than reporting the session over.
+          if (restartTimeoutId !== null) return;
+          cleanup(false);
+          callbacks.onEnd();
+        };
 
-      startTimeoutId = platform.setTimeout(() => {
-        if (!active) return;
-        cleanup(true);
-        callbacks.onError('recognition-failed');
-      }, 5_000);
-      try {
-        recognition.start();
-      } catch {
-        cleanup(false);
-        throw new Error('voice_dictation_start_failed');
+        if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
+        startTimeoutId = platform.setTimeout(() => {
+          if (!active || recognition !== next) return;
+          // Unlike a quick onerror('aborted'), recognition sitting silent
+          // for a full 5 seconds without even onstart firing isn't the
+          // kind of momentary blip auto-restart is for -- report it
+          // straightaway rather than making the user wait through retries
+          // for something a restart is unlikely to fix.
+          cleanup(true);
+          callbacks.onError('recognition-failed');
+        }, 5_000);
+        try {
+          next.start();
+        } catch {
+          cleanup(false);
+          throw new Error('voice_dictation_start_failed');
+        }
       }
+
+      attemptStart();
 
       return {
         stop() {
           if (!active || stopRequested) return;
           stopRequested = true;
-          recognition.stop();
+          if (restartTimeoutId !== null) {
+            // A restart was queued but the user stopped first -- end the
+            // session instead of starting a new attempt they didn't ask for.
+            platform.clearTimeout(restartTimeoutId);
+            restartTimeoutId = null;
+            cleanup(true);
+            callbacks.onEnd();
+            return;
+          }
+          recognition?.stop();
           stopTimeoutId = platform.setTimeout(() => {
             if (!active) return;
             cleanup(true);

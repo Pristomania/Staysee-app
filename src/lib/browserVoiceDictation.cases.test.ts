@@ -232,6 +232,64 @@ await runCase('maps browser errors to safe allowlisted codes', async () => {
   session.dispose();
 });
 
+await runCase('silently restarts on a transient aborted error instead of surfacing it', async () => {
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+  }));
+  assertEqual(platform.recognition.startCalls, 1);
+  platform.emitError('aborted');
+  platform.runTimers();
+  assertDeepEqual(errors, [], 'a transient abort is not shown to the user');
+  assertEqual(platform.recognition.startCalls, 2, 'recognition was restarted automatically');
+  session.dispose();
+});
+
+await runCase('gives up and reports an error after repeated aborted retries are exhausted', async () => {
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+  }));
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    platform.emitError('aborted');
+    platform.runTimers();
+  }
+  assertDeepEqual(errors, ['recognition-failed']);
+  session.dispose();
+});
+
+await runCase('resets the retry budget once a restart genuinely starts listening again', async () => {
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+  }));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    platform.emitError('aborted');
+    platform.runTimers();
+    platform.emitStart();
+  }
+  platform.emitError('aborted');
+  platform.runTimers();
+  assertDeepEqual(errors, [], 'still has retry budget because each attempt above actually started');
+  session.dispose();
+});
+
+await runCase('stop cancels a pending auto-restart instead of starting a new attempt', async () => {
+  const platform = createFakePlatform();
+  let endCalls = 0;
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onEnd: () => { endCalls += 1; },
+  }));
+  platform.emitError('aborted');
+  session.stop();
+  platform.runTimers();
+  assertEqual(platform.recognition.startCalls, 1, 'no new attempt was started after stop');
+  assertEqual(endCalls, 1);
+});
+
 await runCase('dispose releases resources and ignores late browser events', async () => {
   const platform = createFakePlatform();
   let transcriptCalls = 0;
