@@ -309,8 +309,17 @@ export function createBrowserVoiceDictationAdapter(
         try {
           next.start();
         } catch {
+          // A retry runs from inside a bare setTimeout callback with no
+          // promise or caller to catch a throw -- it would simply vanish as
+          // an unhandled exception, leaving the session marked inactive
+          // internally (so a later Stop becomes a silent no-op) while the
+          // controller is never told anything ended. Reporting through the
+          // callback instead works uniformly for the first attempt too: by
+          // the time this runs synchronously inside start(), the caller
+          // already holds the callbacks object regardless of whether its
+          // own promise has resolved yet.
           cleanup(false);
-          throw new Error('voice_dictation_start_failed');
+          callbacks.onError('recognition-failed');
         }
       }
 
