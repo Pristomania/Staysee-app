@@ -86,4 +86,4 @@ assert(
   'zero level uses calm fallback animation',
 );
 
-console.log('VoiceDictationBar.cases.test.tsx — all passed');
+console.log('VoiceDictationBar.cases.test.ts — all passed');

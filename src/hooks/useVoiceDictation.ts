@@ -4,6 +4,7 @@ import {
   createVoiceDictationController,
   type VoiceDictationController,
 } from '../lib/voiceDictationController';
+import { shouldApplyVoicePreview } from '../lib/chatVoiceIntegration';
 
 export function useVoiceDictation(options: {
   disabled: boolean;
@@ -33,10 +34,10 @@ export function useVoiceDictation(options: {
   useEffect(() => () => controller.dispose(), [controller]);
 
   useEffect(() => {
-    if (snapshot.phase !== 'idle' && snapshot.previewDraft !== draft) {
+    if (shouldApplyVoicePreview(snapshot) && snapshot.previewDraft !== draft) {
       onDraftChange(snapshot.previewDraft);
     }
-  }, [draft, onDraftChange, snapshot.phase, snapshot.previewDraft]);
+  }, [draft, onDraftChange, snapshot]);
 
   const start = useCallback(async () => {
     controller.clearError();
