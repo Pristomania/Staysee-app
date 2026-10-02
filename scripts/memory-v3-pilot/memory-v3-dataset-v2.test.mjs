@@ -452,8 +452,11 @@ describe('Memory V3 Russian golden dataset V2', () => {
     assert.match(prose, /fresh two-model price and endpoint snapshots are required/i);
     assert.match(prose, /paid execution still requires separate Nastya authorization/i);
     assert.match(prose, /normalized personal memory.*must remain untracked/i);
-    assert.match(prose, /human PASS.*payload digest.*one explicit PASS row.*every final memory/i);
-    assert.match(prose, /initial-only.*service-role-only.*atomic/i);
+    assert.match(
+      prose,
+      /completed human review.*payload digest.*one explicit PASS or REJECT row.*every final memory/i,
+    );
+    assert.match(prose, /service-role-only.*atomic/i);
     assert.match(prose, /read canary remains off.*separate activation/i);
     assert.match(prose, /rollback.*read mode off.*not destructive deletion/i);
     assert.match(prose, /source inspection.*paid execution.*migration deployment.*import.*activation.*separate approvals/i);

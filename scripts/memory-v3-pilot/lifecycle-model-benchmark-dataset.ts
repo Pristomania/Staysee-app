@@ -381,7 +381,10 @@ function translateProposal(
 export function stripTopicForEvaluator(
   items: MemoryV3LifecycleState['items'],
 ): Array<Omit<MemoryV3LifecycleState['items'][number], 'topic'>> {
-  return items.map(({ topic: _topic, ...rest }) => rest);
+  return items.map(({ topic, ...rest }) => {
+    void topic;
+    return rest;
+  });
 }
 
 function refreshedGoldMap(expectedItems: ExpectedGoldItem[], state: MemoryV3LifecycleState): Map<string, string> {

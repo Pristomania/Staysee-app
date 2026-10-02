@@ -135,9 +135,9 @@ function revisionClientFactory(
     return {
       from(table: string) {
         return {
-          select(_columns: string) {
+          select() {
             return {
-              eq(_col1: string, _userIdArg: string) {
+              eq() {
                 return {
                   eq(_col2: string, conversationIdArg: string) {
                     return {
@@ -748,14 +748,14 @@ describe('Memory V3 dialogue history backfill CLI', () => {
   });
 
   it('rejects a revision lookup response whose success field is false, even when data/error look otherwise fine', async () => {
-    const hostileRevisionClient = (_url: string, _serviceKey: string) => ({
-      from(_table: string) {
+    const hostileRevisionClient = () => ({
+      from() {
         return {
-          select(_columns: string) {
+          select() {
             return {
-              eq(_col1: string, _userIdArg: string) {
+              eq() {
                 return {
-                  eq(_col2: string, _conversationIdArg: string) {
+                  eq() {
                     return {
                       async maybeSingle() {
                         return { data: null, error: null, count: null, status: 200, statusText: 'OK', success: false };

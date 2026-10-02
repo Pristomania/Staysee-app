@@ -140,9 +140,9 @@ function revisionClient(log: string[]) {
   return {
     from(table: string) {
       return {
-        select(_columns: string) {
+        select() {
           return {
-            eq(_col1: string, _userIdArg: string) {
+            eq() {
               return {
                 eq(_col2: string, conversationIdArg: string) {
                   return {

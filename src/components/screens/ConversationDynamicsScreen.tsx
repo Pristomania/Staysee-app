@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Pencil, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
@@ -320,6 +320,12 @@ export function ConversationDynamicsScreen() {
     repeating: false,
     alive: false,
   });
+  const conversationsRef = useRef(conversations);
+  const selectedConvIdRef = useRef(selectedConvId);
+  const currentConversationIdRef = useRef(currentConversation?.id);
+  conversationsRef.current = conversations;
+  selectedConvIdRef.current = selectedConvId;
+  currentConversationIdRef.current = currentConversation?.id;
 
   const convId = fromProfile ? selectedConvId : currentConversation?.id;
   const convTitle =
@@ -335,7 +341,7 @@ export function ConversationDynamicsScreen() {
     if (!fromProfile || !user) return;
     async function loadConversations() {
       setConvsLoading(true);
-      let list = conversations.filter((c) => c.is_active);
+      let list = conversationsRef.current.filter((c) => c.is_active);
       if (list.length === 0) {
         const { data } = await supabase
           .from('conversations')
@@ -347,7 +353,7 @@ export function ConversationDynamicsScreen() {
         setConversations(list);
       }
       setConvOptions(list.map((c) => ({ id: c.id, title: c.title || 'Без названия' })));
-      const initial = selectedConvId ?? currentConversation?.id ?? list[0]?.id ?? null;
+      const initial = selectedConvIdRef.current ?? currentConversationIdRef.current ?? list[0]?.id ?? null;
       if (initial) {
         setSelectedConvId(initial);
         const conv = list.find((c) => c.id === initial);
@@ -356,7 +362,7 @@ export function ConversationDynamicsScreen() {
       setConvsLoading(false);
     }
     void loadConversations();
-  }, [fromProfile, user]);
+  }, [fromProfile, setConversations, setCurrentConversation, user]);
 
   const load = useCallback(async () => {
     if (!user || !convId) {

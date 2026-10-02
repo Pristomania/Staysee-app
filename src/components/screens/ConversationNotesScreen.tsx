@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Feather, Pencil, Plus, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
@@ -336,6 +336,12 @@ export function ConversationNotesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notesTab, setNotesTab] = useState<NotesTab>('insight');
   const [writeSheetOpen, setWriteSheetOpen] = useState(false);
+  const conversationsRef = useRef(conversations);
+  const selectedConvIdRef = useRef(selectedConvId);
+  const currentConversationIdRef = useRef(currentConversation?.id);
+  conversationsRef.current = conversations;
+  selectedConvIdRef.current = selectedConvId;
+  currentConversationIdRef.current = currentConversation?.id;
 
   const convId = fromProfile ? selectedConvId : currentConversation?.id;
   const convTitle =
@@ -354,7 +360,7 @@ export function ConversationNotesScreen() {
 
     async function loadConversations() {
       setConvsLoading(true);
-      let list = conversations.filter((c) => c.is_active);
+      let list = conversationsRef.current.filter((c) => c.is_active);
       if (list.length === 0) {
         const { data } = await supabase
           .from('conversations')
@@ -369,8 +375,8 @@ export function ConversationNotesScreen() {
         list.map((c) => ({ id: c.id, title: c.title || 'Без названия' })),
       );
       const initial =
-        selectedConvId
-        ?? currentConversation?.id
+        selectedConvIdRef.current
+        ?? currentConversationIdRef.current
         ?? list[0]?.id
         ?? null;
       if (initial) {
@@ -382,7 +388,7 @@ export function ConversationNotesScreen() {
     }
 
     void loadConversations();
-  }, [fromProfile, user]);
+  }, [fromProfile, setConversations, setCurrentConversation, user]);
 
   function handleSelectConversation(id: string) {
     setSelectedConvId(id);

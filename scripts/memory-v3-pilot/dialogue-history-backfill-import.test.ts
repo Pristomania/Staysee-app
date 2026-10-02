@@ -659,6 +659,9 @@ describe('reviewed dialogue history import', () => {
     const client = {
       async loadCurrentHead(userId: string, conversationId: string) {
         assert.equal(userId, USER_ID);
+        assert.ok(
+          conversationId === conversationIdA || conversationId === conversationIdB,
+        );
         return { stateRevision: 0, itemCount: 0 };
       },
       async importInitialState(input: unknown) {

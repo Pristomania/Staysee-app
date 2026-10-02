@@ -2,39 +2,11 @@ import { useState } from 'react';
 import type { Theme } from '../context/ThemeContext';
 import { ConfirmDeleteButton } from './ConfirmDeleteButton';
 import type { MemoryV3ViewerItem } from '../lib/memoryV3Viewer';
+import { formatMemoryRecordedOrUpdated } from '../lib/memoryV3Formatting';
 
 const VISIBLE_PER_GROUP = 5;
 const UNCATEGORIZED_GROUP_KEY = '__uncategorized__';
 const UNCATEGORIZED_LABEL = 'Разное';
-
-/** Фиксированная, не склоняемая единица ("5 дн. назад"), чтобы не возиться
- * со согласованием чисел (1 день / 2 дня / 5 дней). Совпадает по
- * формулировке с тем, что видит сам ИИ в своей версии памяти
- * (lifecycleReadPrompt.ts / dialogueReadPrompt.ts). */
-export function formatMemoryAge(isoDate: string): string | null {
-  const then = new Date(isoDate).getTime();
-  const now = Date.now();
-  if (!Number.isFinite(then) || now < then) return null;
-  const days = Math.floor((now - then) / 86_400_000);
-  if (days < 1) return 'сегодня';
-  if (days < 2) return 'вчера';
-  if (days < 7) return `${days} дн. назад`;
-  if (days < 30) return `${Math.floor(days / 7)} нед. назад`;
-  if (days < 365) return `${Math.floor(days / 30)} мес. назад`;
-  return `${Math.floor(days / 365)} г. назад`;
-}
-
-/** The reducer only ever bumps updatedAt on a real material change (a revise
- * that actually changes content, or a status transition like mark_stale) --
- * a plain re-confirmation leaves updatedAt untouched. So comparing it to
- * firstSeenAt reliably tells "recorded once, never changed since" apart
- * from "has genuinely evolved" -- that's the dynamic Настя asked to see. */
-export function formatMemoryRecordedOrUpdated(item: { firstSeenAt: string; updatedAt: string }): string | null {
-  const wasRevised = new Date(item.firstSeenAt).getTime() !== new Date(item.updatedAt).getTime();
-  const age = formatMemoryAge(wasRevised ? item.updatedAt : item.firstSeenAt);
-  if (!age) return null;
-  return wasRevised ? `Обновлено: ${age}` : `Записано: ${age}`;
-}
 
 /** Список подтверждённых записей "умной" памяти, сгруппированный по теме
  * (переданной вызывающим экраном через topicLabels, свой набор для памяти

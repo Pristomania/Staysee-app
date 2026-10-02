@@ -129,7 +129,10 @@ function assertNoDiagnostics(items: string[]): void {
   assert(block.includes("Признаки роста:"), "growth section");
   assert(block.includes("Парадоксы:"), "paradoxes section");
   assert(block.includes("ДВИЖЕНИЕ ЖИЗНИ (поведение):"), "behavior rules");
-  assert(block.includes("не только на последнее сообщение"), "narrative rule");
+  assert(
+    block.includes("текущую реплику с учётом уже известного контекста"),
+    "narrative rule",
+  );
   console.log("✓ prompt formatting");
 }
 

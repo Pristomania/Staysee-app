@@ -55,6 +55,7 @@ import {
   isPrivacyNoticeAccepted,
   markPrivacyNoticeAccepted,
 } from '../../lib/privacyNotice';
+import { generateTitle } from '../../lib/chatPresentation';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -68,35 +69,6 @@ const GUIDED_CATEGORIES = [
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-export function generateTitle(text: string): string {
-  const t = text.toLowerCase();
-  if (t.includes('грустно') || t.includes('грусть')) return 'Когда грустно';
-  if (t.includes('тревожно') || t.includes('тревога') || t.includes('тревог')) return 'Про тревогу';
-  if (t.includes('устала') || t.includes('усталость') || t.includes('устал')) return 'Про усталость';
-  if (t.includes('отношения') || t.includes('отношениях') || t.includes('отношений')) return 'Про отношения';
-  if (t.includes('радость') || t.includes('радостно') || t.includes('счастлива') || t.includes('хорошо')) return 'Про радость';
-  if (t.includes('злость') || t.includes('злюсь') || t.includes('злой')) return 'Про злость';
-  if (t.includes('одинок') || t.includes('одиноко')) return 'Про одиночество';
-  if (t.includes('страх') || t.includes('боюсь') || t.includes('страшно')) return 'Про страх';
-  return text.trim().split(/\s+/).slice(0, 5).join(' ');
-}
-
-export function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 2) return 'только что';
-  if (diffMins < 60) return `${diffMins} мин назад`;
-  if (diffHours < 2) return 'час назад';
-  if (diffHours < 24) return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  if (diffDays === 1) return 'вчера';
-  if (diffDays < 7) return date.toLocaleDateString('ru-RU', { weekday: 'long' });
-  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-}
 
 const SCROLL_BOTTOM_THRESHOLD = 80;
 const SCROLL_TOP_THRESHOLD = 120;
@@ -205,7 +177,9 @@ export function ChatScreen() {
   const persistedTurnRef = useRef<{ userId?: string; aiId?: string } | null>(null);
   const activeConvIdRef = useRef<string | null>(null);
   const roomMessagesRef = useRef<Message[]>([]);
+  const appMessagesRef = useRef(appMessages);
   roomMessagesRef.current = roomMessages;
+  appMessagesRef.current = appMessages;
   streamActiveRef.current = stream.isStreaming;
 
   const applyMessages = useCallback((next: Message[]) => {
@@ -422,13 +396,13 @@ export function ChatScreen() {
     if (currentScreen !== 'chat') return;
 
     // Never create or auto-select a conversation inside ChatScreen.
-    if (!currentConversation) {
+    const convId = currentConversation?.id;
+    if (!convId) {
       setLoading(false);
       setCurrentScreen('main');
       return;
     }
 
-    const convId = currentConversation.id;
     activeConvIdRef.current = convId;
     setLoading(true);
     setHasMoreHistory(false);
@@ -446,7 +420,7 @@ export function ChatScreen() {
       }
 
       setHasMoreHistory(reachedLimit);
-      const cached = messagesForConversation(appMessages, convId);
+      const cached = messagesForConversation(appMessagesRef.current, convId);
       const prev =
         roomMessagesRef.current.length > 0
           ? roomMessagesRef.current
