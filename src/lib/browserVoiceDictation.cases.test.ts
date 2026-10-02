@@ -45,11 +45,14 @@ function callbacks(overrides: Partial<{
 function createFakePlatform(options: {
   recognition?: boolean;
   getUserMediaRejects?: boolean;
+  localRecognition?: boolean;
 } = {}) {
   let getUserMediaCalls = 0;
   let cancelAnimationFrameCalls = 0;
   let nextFrameId = 1;
   const frames = new Map<number, FrameRequestCallback>();
+  let nextTimerId = 1;
+  const timers = new Map<number, () => void>();
   const track = { stopCalls: 0, stop() { this.stopCalls += 1; } };
   const stream = { getTracks: () => [track] };
   const analyser = {
@@ -74,6 +77,7 @@ function createFakePlatform(options: {
     lang: '',
     continuous: false,
     interimResults: false,
+    processLocally: false,
     onstart: null,
     onresult: null,
     onerror: null,
@@ -104,6 +108,18 @@ function createFakePlatform(options: {
       cancelAnimationFrameCalls += 1;
       frames.delete(id);
     },
+    setTimeout(callback) {
+      const id = nextTimerId;
+      nextTimerId += 1;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+    prepareLocalRecognition: options.localRecognition === undefined
+      ? null
+      : async () => options.localRecognition === true,
   };
 
   return {
@@ -132,6 +148,11 @@ function createFakePlatform(options: {
       frames.delete(entry[0]);
       entry[1](0);
     },
+    runTimers() {
+      const callbacks = [...timers.values()];
+      timers.clear();
+      for (const callback of callbacks) callback();
+    },
   };
 }
 
@@ -157,6 +178,14 @@ await runCase('starts one Russian recognition and emits final and interim text',
     { text: ' как дела', final: false },
   ]);
   assertDeepEqual(events[events.length - 1], { finalText: 'Привет', interimText: ' как дела' });
+  session.dispose();
+});
+
+await runCase('prefers prepared on-device Russian recognition when available', async () => {
+  const platform = createFakePlatform({ localRecognition: true });
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks());
+  assertEqual(platform.recognition.processLocally, true);
+  assertEqual(platform.recognition.startCalls, 1);
   session.dispose();
 });
 
@@ -233,6 +262,30 @@ await runCase('manual stop is idempotent and natural end is reported once', asyn
   platform.emitEnd();
   assertEqual(endCalls, 1);
   session.dispose();
+});
+
+await runCase('reports a safe error when the browser never starts recognition', async () => {
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+  }));
+  platform.runTimers();
+  assertDeepEqual(errors, ['recognition-failed']);
+  assertEqual(platform.recognition.abortCalls, 1, 'hung recognition is released');
+});
+
+await runCase('manual stop completes when the browser never emits end', async () => {
+  const platform = createFakePlatform();
+  let endCalls = 0;
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onEnd: () => { endCalls += 1; },
+  }));
+  platform.emitStart();
+  session.stop();
+  platform.runTimers();
+  assertEqual(endCalls, 1, 'stop watchdog completes the session');
+  assertEqual(platform.recognition.abortCalls, 1, 'hung recognition is released');
 });
 
 console.log('browserVoiceDictation.cases.test.ts — all passed');

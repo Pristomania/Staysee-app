@@ -1,5 +1,6 @@
 import {
   canStartVoiceDictation,
+  shouldApplyVoiceSnapshot,
   shouldApplyVoicePreview,
   shouldStopVoiceDictation,
 } from './chatVoiceIntegration';
@@ -43,6 +44,20 @@ assert(
 assert(
   !shouldApplyVoicePreview({ phase: 'idle', finalText: '', interimText: '' }),
   'initial idle snapshot cannot erase an existing draft',
+);
+
+const completedSnapshot = {
+  phase: 'idle' as const,
+  finalText: 'голосовой текст',
+  interimText: '',
+};
+assert(
+  shouldApplyVoiceSnapshot({ previous: null, current: completedSnapshot }),
+  'a newly completed voice snapshot reaches the draft once',
+);
+assert(
+  !shouldApplyVoiceSnapshot({ previous: completedSnapshot, current: completedSnapshot }),
+  'editing or clearing the draft cannot replay an unchanged voice snapshot',
 );
 
 console.log('chatVoiceIntegration.cases.test.ts — all passed');

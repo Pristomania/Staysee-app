@@ -4,7 +4,8 @@ import {
   createVoiceDictationController,
   type VoiceDictationController,
 } from '../lib/voiceDictationController';
-import { shouldApplyVoicePreview } from '../lib/chatVoiceIntegration';
+import { shouldApplyVoiceSnapshot } from '../lib/chatVoiceIntegration';
+import { createDeferredVoiceDisposer } from '../lib/voiceDictationLifecycle';
 
 export function useVoiceDictation(options: {
   disabled: boolean;
@@ -20,24 +21,39 @@ export function useVoiceDictation(options: {
     });
   }
   const controller = controllerRef.current;
+  const disposerRef = useRef<ReturnType<typeof createDeferredVoiceDisposer> | null>(null);
+  if (!disposerRef.current) {
+    disposerRef.current = createDeferredVoiceDisposer({
+      dispose: controller.dispose,
+      schedule: (callback) => window.setTimeout(callback, 0),
+      cancel: (id) => window.clearTimeout(id),
+    });
+  }
+  const disposer = disposerRef.current;
   const snapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
     controller.getSnapshot,
   );
+  const previousSnapshotRef = useRef<typeof snapshot | null>(null);
 
   useEffect(() => {
     if (disabled) controller.stop();
   }, [controller, disabled]);
 
   useEffect(() => () => controller.stop(), [controller, conversationId]);
-  useEffect(() => () => controller.dispose(), [controller]);
+  useEffect(() => {
+    disposer.mount();
+    return () => disposer.unmount();
+  }, [disposer]);
 
   useEffect(() => {
-    if (shouldApplyVoicePreview(snapshot) && snapshot.previewDraft !== draft) {
+    const previous = previousSnapshotRef.current;
+    previousSnapshotRef.current = snapshot;
+    if (shouldApplyVoiceSnapshot({ previous, current: snapshot })) {
       onDraftChange(snapshot.previewDraft);
     }
-  }, [draft, onDraftChange, snapshot]);
+  }, [onDraftChange, snapshot]);
 
   const start = useCallback(async () => {
     controller.clearError();

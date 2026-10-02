@@ -80,6 +80,7 @@ const fallbackTree = VoiceDictationBar({
   textClass: 'text-test',
   mutedClass: 'muted-test',
 });
+assert(includesText(fallbackTree, 'Подготавливаю…'), 'starting state does not claim to be listening');
 assert(
   findByProp(fallbackTree, 'data-voice-wave', 'fallback').props.className
     ?.toString().includes('voice-wave-fallback'),

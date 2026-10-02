@@ -27,7 +27,9 @@ export function VoiceDictationBar(props: {
       aria-label={phase === 'starting' ? 'Голосовой ввод запускается' : 'Идёт голосовой ввод'}
     >
       <Mic className="h-4 w-4 shrink-0 text-[#c9a96e]" strokeWidth={1.6} />
-      <span className={`shrink-0 text-sm font-light ${textClass}`}>Слушаю…</span>
+      <span className={`shrink-0 text-sm font-light ${textClass}`}>
+        {phase === 'starting' ? 'Подготавливаю…' : 'Слушаю…'}
+      </span>
       <div
         className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1 ${fallback ? 'voice-wave-fallback' : ''}`}
         data-voice-wave={fallback ? 'fallback' : 'live'}

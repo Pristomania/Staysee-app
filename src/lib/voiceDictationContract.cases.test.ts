@@ -40,5 +40,9 @@ assert(
   !voiceDictationErrorCopy('recognition-failed').includes('NotAllowedError'),
   'raw errors never leak',
 );
+assert(
+  voiceDictationErrorCopy('recognition-failed').includes('Microsoft Edge'),
+  'failed browser points to the verified fallback',
+);
 
 console.log('voiceDictationContract.cases.test.ts — all passed');

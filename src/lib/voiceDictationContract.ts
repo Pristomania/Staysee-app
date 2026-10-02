@@ -64,5 +64,5 @@ export function voiceDictationErrorCopy(code: VoiceDictationErrorCode): string {
   if (code === 'no-speech') {
     return 'Не удалось расслышать. Попробуй ещё раз';
   }
-  return 'Голосовой ввод прервался. Текст сохранён';
+  return 'Не удалось распознать голос в этом браузере. Попробуй Microsoft Edge';
 }

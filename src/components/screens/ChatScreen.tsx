@@ -56,6 +56,7 @@ import {
   markPrivacyNoticeAccepted,
 } from '../../lib/privacyNotice';
 import { generateTitle } from '../../lib/chatPresentation';
+import { resizeChatComposer } from '../../lib/chatComposerLayout';
 import { useVoiceDictation } from '../../hooks/useVoiceDictation';
 import { VoiceDictationBar } from '../chat/VoiceDictationBar';
 import { voiceDictationErrorCopy } from '../../lib/voiceDictationContract';
@@ -885,10 +886,7 @@ export function ChatScreen() {
   function handleInputChange(e: ChangeEvent<HTMLTextAreaElement>) {
     voice.clearError();
     setInputValue(e.target.value);
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-    }
+    resizeChatComposer(inputRef.current);
   }
 
   function insertGuidedPhrase(phrase: string) {
@@ -898,8 +896,7 @@ export function ChatScreen() {
     requestAnimationFrame(() => {
       if (inputRef.current) {
         inputRef.current.focus();
-        inputRef.current.style.height = 'auto';
-        inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+        resizeChatComposer(inputRef.current);
       }
     });
   }
@@ -907,6 +904,9 @@ export function ChatScreen() {
   const roomTitle = currentConversation?.title || 'Новая беседа';
   const isWaiting = sending && !stream.isStreaming;
   const voiceActive = shouldStopVoiceDictation(voice.snapshot.phase);
+  useLayoutEffect(() => {
+    resizeChatComposer(inputRef.current);
+  }, [inputValue, voiceActive]);
   const suppressAiMessageId =
     stream.isStreaming ? persistedTurnRef.current?.aiId ?? null : null;
   const visibleMessages = suppressAiMessageId
