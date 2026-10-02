@@ -182,9 +182,26 @@ await runCase('waveform failure does not stop recognition', async () => {
   const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
     onError: (code) => errors.push(code),
   }));
+  platform.emitStart();
   await Promise.resolve();
   assertEqual(platform.recognition.startCalls, 1);
   assertDeepEqual(errors, []);
+  session.dispose();
+});
+
+await runCase('does not request the microphone for the waveform until recognition actually starts', async () => {
+  // Chrome's own speech recognition negotiates microphone access
+  // internally; requesting it again in parallel for the decorative
+  // waveform raced that negotiation and made recognition fail there
+  // (reported: mic permission prompt appears, then an error) while Edge
+  // tolerated the race. Sequencing removes the race in every browser.
+  const platform = createFakePlatform();
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks());
+  await Promise.resolve();
+  assertEqual(platform.getUserMediaCalls, 0);
+  platform.emitStart();
+  await Promise.resolve();
+  assertEqual(platform.getUserMediaCalls, 1);
   session.dispose();
 });
 
@@ -194,6 +211,7 @@ await runCase('emits normalized waveform levels', async () => {
   const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
     onLevel: (level) => levels.push(level),
   }));
+  platform.emitStart();
   await Promise.resolve();
   platform.runFrame();
   assertEqual(levels.length, 1);
@@ -222,6 +240,7 @@ await runCase('dispose releases resources and ignores late browser events', asyn
     onTranscript: () => { transcriptCalls += 1; },
     onEnd: () => { endCalls += 1; },
   }));
+  platform.emitStart();
   await Promise.resolve();
   platform.runFrame();
   session.dispose();
