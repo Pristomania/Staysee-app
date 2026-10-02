@@ -44,5 +44,9 @@ assert(
   voiceDictationErrorCopy('recognition-failed').includes('Microsoft Edge'),
   'failed browser points to the verified fallback',
 );
+assert(
+  voiceDictationErrorCopy('connection-blocked').includes('блокировщики'),
+  'repeated connection failures point at the likely environmental cause',
+);
 
 console.log('voiceDictationContract.cases.test.ts — all passed');

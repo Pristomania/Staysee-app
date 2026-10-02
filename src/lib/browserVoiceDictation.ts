@@ -262,13 +262,23 @@ export function createBrowserVoiceDictationAdapter(
           // failure behind whatever happens next (a retry, or onend).
           if (startTimeoutId !== null) platform.clearTimeout(startTimeoutId);
           startTimeoutId = null;
-          if (RETRYABLE_ERRORS.has(event.error) && restartsLeft > 0) {
-            restartsLeft -= 1;
-            releaseWaveform();
-            restartTimeoutId = platform.setTimeout(() => {
-              restartTimeoutId = null;
-              if (active) attemptStart();
-            }, RESTART_DELAY_MS);
+          if (RETRYABLE_ERRORS.has(event.error)) {
+            if (restartsLeft > 0) {
+              restartsLeft -= 1;
+              releaseWaveform();
+              restartTimeoutId = platform.setTimeout(() => {
+                restartTimeoutId = null;
+                if (active) attemptStart();
+              }, RESTART_DELAY_MS);
+              return;
+            }
+            // Several fresh attempts in a row all failed to even connect --
+            // this isn't recognition rejecting the audio, it's recognition
+            // never reaching Chrome's cloud speech service at all. A code
+            // fix can't do anything further here; the most useful thing
+            // left is telling the person what in their own environment
+            // (an extension, a VPN) is the likely blocker.
+            callbacks.onError('connection-blocked');
             return;
           }
           // Matches the original behavior: report the error but don't tear

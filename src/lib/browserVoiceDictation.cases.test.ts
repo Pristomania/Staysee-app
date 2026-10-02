@@ -256,7 +256,7 @@ await runCase('gives up and reports an error after repeated aborted retries are 
     platform.emitError('aborted');
     platform.runTimers();
   }
-  assertDeepEqual(errors, ['recognition-failed']);
+  assertDeepEqual(errors, ['connection-blocked']);
   session.dispose();
 });
 

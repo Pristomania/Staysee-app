@@ -4,7 +4,8 @@ export type VoiceDictationErrorCode =
   | 'permission-denied'
   | 'unsupported'
   | 'no-speech'
-  | 'recognition-failed';
+  | 'recognition-failed'
+  | 'connection-blocked';
 
 export interface VoiceRecognitionEvent {
   finalText: string;
@@ -63,6 +64,9 @@ export function voiceDictationErrorCopy(code: VoiceDictationErrorCode): string {
   }
   if (code === 'no-speech') {
     return 'Не удалось расслышать. Попробуй ещё раз';
+  }
+  if (code === 'connection-blocked') {
+    return 'Браузер не может подключиться к сервису распознавания речи. Проверь блокировщики рекламы/приватности и VPN, или попробуй Microsoft Edge';
   }
   return 'Не удалось распознать голос в этом браузере. Попробуй Microsoft Edge';
 }
