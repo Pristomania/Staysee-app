@@ -1,49 +1,46 @@
 name: Nginx read-only audit
+
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - name: Isolated CPU speech benchmark
+      - name: Read-only voice capacity audit on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAYSEE_HOST }}
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          command_timeout: 12m
+          command_timeout: 2m
           script: |
             set -eu
-            test "$(awk '/MemAvailable/ {print $2}' /proc/meminfo)" -gt 1200000
-            test "$(df -Pk / | awk 'NR==2 {print $4}')" -gt 5000000
-            systemctl is-active nginx
+            printf '\nCPU\n'
+            lscpu | grep -E 'Architecture|CPU\(s\)|Model name|Thread|Core|Socket|Hypervisor' || true
+            printf '\nCPU_FLAGS\n'
+            lscpu | grep -E '^Flags:' || true
+            printf '\nBENCH_CONTAINER_REMAINS\n'
+            docker ps -a --filter label=staysee.purpose=voice-benchmark --format '{{.Names}} {{.Status}}'
+            printf '\nMEMORY_MIB\n'
             free -m
-            name=staysee-voice-bench-${{ github.run_id }}
-            trap 'docker stop -t 2 "$name" >/dev/null 2>&1 || true; systemctl is-active nginx; free -m; df -h /' EXIT
-            timeout 600 docker run --rm --name "$name" --label staysee.purpose=voice-benchmark --cpus=0.5 --memory=1g --memory-swap=1g --pids-limit=128 --cap-drop=ALL --security-opt=no-new-privileges --log-driver=none -i python:3.12-slim-bookworm sh -eu <<'CONTAINER'
-            export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 HF_HUB_DISABLE_TELEMETRY=1
-            pip install --no-cache-dir --only-binary=:all: faster-whisper==1.2.1
-            python -u - <<'PY'
-            import json, time, urllib.request, resource
-            from faster_whisper import WhisperModel
-            url='https://raw.githubusercontent.com/ggml-org/whisper.cpp/master/samples/jfk.wav'
-            urllib.request.urlretrieve(url, '/tmp/voice-public-jfk.wav')
-            import wave
-            with wave.open('/tmp/voice-public-jfk.wav') as w:
-                seconds=w.getnframes()/w.getframerate()
-            print('BENCH_FIXTURE', json.dumps({'public_source':url,'language':'en','seconds':seconds,'purpose':'capacity only, not Russian quality'},ensure_ascii=False),flush=True)
-            t=time.monotonic()
-            model=WhisperModel('base', device='cpu', compute_type='int8',cpu_threads=1,num_workers=1)
-            print('BENCH_LOAD_SECONDS', round(time.monotonic()-t,3),flush=True)
-            for run in range(2):
-                t=time.monotonic()
-                segments, info=model.transcribe('/tmp/voice-public-jfk.wav',language='en',beam_size=1,temperature=0,condition_on_previous_text=False)
-                text=' '.join(s.text for s in segments).strip()
-                elapsed=time.monotonic()-t
-                print('BENCH_RESULT',json.dumps({'run':run+1,'audio_seconds':seconds,'elapsed_seconds':round(elapsed,3),'realtime_factor':round(elapsed/seconds,3),'rss_peak_mib':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),'characters':len(text),'public_transcript':text}),flush=True)
-            PY
-            CONTAINER
+            printf '\nROOT_DISK\n'
+            df -h /
+            printf '\nLOAD\n'
+            uptime
+            printf '\nCPU_MEMORY_SAMPLE\n'
+            vmstat 1 5
+            printf '\nTOP_PROCESSES_NO_ARGUMENTS\n'
+            ps -eo comm,pcpu,pmem,rss --sort=-rss | head -n 12
+            printf '\nRUNTIMES\n'
+            python3 --version || true
+            docker --version || true
+            command -v ffmpeg || true
+            command -v nvidia-smi || true
+            printf '\nNGINX_STATUS\n'
+            systemctl is-active nginx || true
