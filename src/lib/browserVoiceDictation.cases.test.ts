@@ -349,6 +349,29 @@ await runCase('manual stop is idempotent and natural end is reported once', asyn
   session.dispose();
 });
 
+await runCase('stopping does not get reinterpreted as a retryable error', async () => {
+  // Chrome can surface a user-requested stop as onerror('aborted') just
+  // before the matching onend. Without checking for an in-flight stop,
+  // that looked identical to a transient abort and silently restarted
+  // recognition right after the user asked it to stop -- from the
+  // outside, pressing Stop appeared to do nothing at all.
+  const platform = createFakePlatform();
+  const errors: VoiceDictationErrorCode[] = [];
+  let endCalls = 0;
+  const session = await createBrowserVoiceDictationAdapter(platform.value).start(callbacks({
+    onError: (code) => errors.push(code),
+    onEnd: () => { endCalls += 1; },
+  }));
+  assertEqual(platform.recognition.startCalls, 1);
+  session.stop();
+  platform.emitError('aborted');
+  assertEqual(platform.recognition.startCalls, 1, 'a stop-triggered abort must not start a new attempt');
+  assertDeepEqual(errors, [], 'the user asked to stop -- this is not a failure to report');
+  platform.emitEnd();
+  assertEqual(endCalls, 1, 'the session ends cleanly once the browser confirms it stopped');
+  session.dispose();
+});
+
 await runCase('reports a safe error when the browser never starts recognition', async () => {
   const platform = createFakePlatform();
   const errors: VoiceDictationErrorCode[] = [];
