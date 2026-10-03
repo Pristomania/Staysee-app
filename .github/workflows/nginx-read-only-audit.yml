@@ -1,46 +1,39 @@
 name: Nginx read-only audit
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 16
     steps:
-      - name: Read-only voice capacity audit on VPS
+      - name: Isolated generic CPU whisper compatibility benchmark
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAYSEE_HOST }}
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          command_timeout: 2m
+          command_timeout: 14m
           script: |
             set -eu
-            printf '\nCPU\n'
-            lscpu | grep -E 'Architecture|CPU\(s\)|Model name|Thread|Core|Socket|Hypervisor' || true
-            printf '\nCPU_FLAGS\n'
-            lscpu | grep -E '^Flags:' || true
-            printf '\nBENCH_CONTAINER_REMAINS\n'
-            docker ps -a --filter label=staysee.purpose=voice-benchmark --format '{{.Names}} {{.Status}}'
-            printf '\nMEMORY_MIB\n'
-            free -m
-            printf '\nROOT_DISK\n'
-            df -h /
-            printf '\nLOAD\n'
-            uptime
-            printf '\nCPU_MEMORY_SAMPLE\n'
-            vmstat 1 5
-            printf '\nTOP_PROCESSES_NO_ARGUMENTS\n'
-            ps -eo comm,pcpu,pmem,rss --sort=-rss | head -n 12
-            printf '\nRUNTIMES\n'
-            python3 --version || true
-            docker --version || true
-            command -v ffmpeg || true
-            command -v nvidia-smi || true
-            printf '\nNGINX_STATUS\n'
-            systemctl is-active nginx || true
+            test "$(awk '/MemAvailable/ {print $2}' /proc/meminfo)" -gt 1200000
+            test "$(df -Pk / | awk 'NR==2 {print $4}')" -gt 5000000
+            systemctl is-active nginx
+            name=staysee-voice-bench-${{ github.run_id }}
+            trap 'docker stop -t 2 "$name" >/dev/null 2>&1 || true; systemctl is-active nginx; free -m' EXIT
+            timeout 780 docker run --rm --name "$name" --label staysee.purpose=voice-benchmark --cpus=0.5 --memory=1g --memory-swap=1g --pids-limit=128 --cap-drop=ALL --security-opt=no-new-privileges --log-driver=none -i python:3.12-slim-bookworm sh -eu <<'CONTAINER'
+            apt-get update -qq
+            apt-get install -y --no-install-recommends build-essential cmake curl ca-certificates time
+            cd /tmp
+            curl -fL --max-time 90 https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.3.tar.gz -o source.tar.gz
+            tar xzf source.tar.gz
+            cd whisper.cpp-1.8.3
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF -DGGML_OPENMP=OFF -DGGML_BLAS=OFF -DGGML_LLAMAFILE=OFF -DWHISPER_BUILD_TESTS=OFF -DCMAKE_C_FLAGS='-march=x86-64 -mtune=generic' -DCMAKE_CXX_FLAGS='-march=x86-64 -mtune=generic'
+            cmake --build build --target whisper-cli -j 1
+            echo COMPATIBILITY_BUILD_OK
+            curl -fL --max-time 180 https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /tmp/tiny.bin
+            echo BENCH_PUBLIC_ENGLISH_FIXTURE_JFK_NOT_RUSSIAN_QUALITY
+            /usr/bin/time -f 'BENCH elapsed=%e peak_rss_kb=%M' timeout 180 build/bin/whisper-cli -m /tmp/tiny.bin -f samples/jfk.wav -l en -t 1 -bs 1 -bo 1
+            CONTAINER
