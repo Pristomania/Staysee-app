@@ -6,34 +6,48 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 9
     steps:
-      - name: Isolated generic CPU whisper compatibility benchmark
+      - name: Isolated Vosk CPU compatibility benchmark
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.STAYSEE_HOST }}
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          command_timeout: 14m
+          command_timeout: 7m
           script: |
             set -eu
+            test -z "$(docker ps -q --filter label=staysee.purpose=voice-benchmark)"
             test "$(awk '/MemAvailable/ {print $2}' /proc/meminfo)" -gt 1200000
-            test "$(df -Pk / | awk 'NR==2 {print $4}')" -gt 5000000
             systemctl is-active nginx
             name=staysee-voice-bench-${{ github.run_id }}
             trap 'docker stop -t 2 "$name" >/dev/null 2>&1 || true; systemctl is-active nginx; free -m' EXIT
-            timeout 780 docker run --rm --name "$name" --label staysee.purpose=voice-benchmark --cpus=0.5 --memory=1g --memory-swap=1g --pids-limit=128 --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --log-driver=none -i python:3.12-slim-bookworm sh -eu <<'CONTAINER'
-            apt-get update -qq
-            apt-get install -y --no-install-recommends build-essential cmake curl ca-certificates time
-            cd /tmp
-            curl -fL --max-time 90 https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.8.3.tar.gz -o source.tar.gz
-            tar xzf source.tar.gz
-            cd whisper.cpp-1.8.3
-            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_SSE42=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF -DGGML_OPENMP=OFF -DGGML_BLAS=OFF -DGGML_LLAMAFILE=OFF -DWHISPER_BUILD_TESTS=OFF -DCMAKE_C_FLAGS='-march=x86-64 -mtune=generic' -DCMAKE_CXX_FLAGS='-march=x86-64 -mtune=generic'
-            cmake --build build --target whisper-cli -j 1
-            echo COMPATIBILITY_BUILD_OK
-            curl -fL --max-time 180 https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -o /tmp/tiny.bin
-            echo BENCH_PUBLIC_ENGLISH_FIXTURE_JFK_NOT_RUSSIAN_QUALITY
-            /usr/bin/time -f 'BENCH elapsed=%e peak_rss_kb=%M' timeout 180 build/bin/whisper-cli -m /tmp/tiny.bin -f samples/jfk.wav -l en -t 1 -bs 1 -bo 1
+            timeout 360 docker run --rm --name "$name" --label staysee.purpose=voice-benchmark --cpus=0.5 --memory=1g --memory-swap=1g --pids-limit=128 --cap-drop=ALL --security-opt=no-new-privileges --log-driver=none -i python:3.12-slim-bookworm sh -eu <<'CONTAINER'
+            export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+            pip install --no-cache-dir vosk==0.3.45
+            python -u - <<'PY'
+            import time, urllib.request, zipfile, wave, json, resource
+            import vosk
+            print('VOSK_IMPORT_OK', flush=True)
+            urllib.request.urlretrieve('https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip', '/tmp/model.zip')
+            with zipfile.ZipFile('/tmp/model.zip') as z:
+                z.extractall('/tmp')
+            started=time.monotonic()
+            model=vosk.Model('/tmp/vosk-model-small-ru-0.22')
+            print('VOSK_RUSSIAN_MODEL_LOADED', round(time.monotonic()-started,3), flush=True)
+            # Public English fixture checks execution/speed, NOT Russian recognition quality.
+            urllib.request.urlretrieve('https://raw.githubusercontent.com/ggml-org/whisper.cpp/v1.8.3/samples/jfk.wav', '/tmp/test.wav')
+            with wave.open('/tmp/test.wav') as w:
+                print('FIXTURE',w.getnchannels(),w.getsampwidth(),w.getframerate(),w.getnframes()/w.getframerate(),flush=True)
+                assert w.getnchannels()==1 and w.getsampwidth()==2
+                rec=vosk.KaldiRecognizer(model,w.getframerate())
+                started=time.monotonic()
+                while True:
+                    data=w.readframes(4000)
+                    if not data: break
+                    rec.AcceptWaveform(data)
+                result=rec.FinalResult()
+            print('VOSK_BENCH',json.dumps({'seconds':round(time.monotonic()-started,3),'peak_rss_mib':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1),'result_returned':bool(result),'quality_test':False}),flush=True)
+            PY
             CONTAINER
