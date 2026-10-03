@@ -256,6 +256,14 @@ export function createBrowserVoiceDictationAdapter(
         };
         next.onerror = (event) => {
           if (!active || recognition !== next) return;
+          // Chrome can surface a user-requested stop as onerror('aborted')
+          // just before the matching onend. Treating that like a transient
+          // failure silently restarted recognition right after the user
+          // asked it to stop, and suppressed the onend that follows (onend
+          // defers to a pending retry) -- from the outside, Stop appeared
+          // to do nothing at all. The browser's own onend (or stop()'s own
+          // watchdog, if onend never comes) finishes the session from here.
+          if (stopRequested) return;
           // Once onerror has fired, this attempt's own "never started"
           // watchdog is moot either way -- clear it before branching, or
           // it can fire later on its original 5s schedule and report a
