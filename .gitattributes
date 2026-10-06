@@ -1,3 +1,10 @@
 # Shell scripts and nginx templates must use LF (VPS runs bash/nginx on Linux).
 *.sh text eol=lf
 deploy/nginx/*.conf text eol=lf
+
+# Vendored third-party engine files: exact byte count is load-bearing
+# (scripts/verify-prod-bundle.mjs checks it). Must never be line-ending
+# converted on checkout, regardless of the checking-out machine's git
+# config -- this broke the Windows CI runner (LF -> CRLF added 1534
+# bytes, one per line) while the Linux runner was unaffected.
+public/voice-engine/*.js binary
