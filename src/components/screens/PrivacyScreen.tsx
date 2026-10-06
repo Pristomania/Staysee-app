@@ -2,13 +2,28 @@
  * PrivacyScreen — Конфиденциальность и управление данными
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
 import { isLegacyMemoryCompatibilityEnabled } from '../../lib/memoryScreenMode';
+import {
+  browserVoiceModelCacheDeps,
+  deleteVoiceModelPackage,
+  isVoiceModelCached,
+} from '../../lib/voiceModelCache';
+import {
+  browserVoiceConsentStorage,
+  forgetVoiceDownloadConsent,
+} from '../../lib/voiceDownloadConsent';
+import {
+  VOICE_ENGINE_CREDITS,
+  VOICE_ENGINE_LICENCE_NOTE,
+  VOICE_ENGINE_NOTICE_BODY,
+  VOICE_ENGINE_NOTICE_TITLE,
+} from '../../content/legal/voiceEngineNotice';
 import { Lock, Eye, Shield, Trash2, Database } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -114,6 +129,18 @@ export function PrivacyScreen() {
   const [deleteDialogueState, setDeleteDialogueState] = useState<DeleteState>('idle');
   const [deleteMemoryV3State, setDeleteMemoryV3State] = useState<DeleteState>('idle');
 
+  /** `null` until the Cache Storage probe answers. */
+  const [voicePackagePresent, setVoicePackagePresent] = useState<boolean | null>(null);
+  const [deleteVoiceState, setDeleteVoiceState] = useState<DeleteState>('idle');
+
+  useEffect(() => {
+    let cancelled = false;
+    void isVoiceModelCached(browserVoiceModelCacheDeps()).then((cached) => {
+      if (!cancelled) setVoicePackagePresent(cached);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   async function handleDeleteAllConversations() {
     if (!user) return;
     if (deleteAllState === 'idle') {
@@ -208,6 +235,33 @@ export function PrivacyScreen() {
       setDeleteMemoryV3State('done');
     } catch {
       setDeleteMemoryV3State('error');
+    }
+  }
+
+  async function handleDeleteVoicePackage() {
+    // Deliberately no `if (!user) return;`, unlike every handler above: the
+    // voice package is data in this browser, not data in an account, and
+    // this screen is reachable without being signed in.
+    if (deleteVoiceState === 'idle') {
+      setDeleteVoiceState('confirming');
+      return;
+    }
+    if (deleteVoiceState !== 'confirming') return;
+    setDeleteVoiceState('loading');
+    try {
+      // Removes exactly one named cache and enumerates nothing, so the
+      // account, the conversations, the memory and every other site cache
+      // are untouched. A `false` return means there was nothing to remove
+      // (no Cache Storage in this context) -- not a failure.
+      await deleteVoiceModelPackage(browserVoiceModelCacheDeps());
+      // Deleting the package withdraws the agreement to download it.
+      // Without this, the next press of the microphone would start an 83 MB
+      // download with no question asked.
+      forgetVoiceDownloadConsent(browserVoiceConsentStorage());
+      setVoicePackagePresent(false);
+      setDeleteVoiceState('done');
+    } catch {
+      setDeleteVoiceState('error');
     }
   }
 
@@ -308,6 +362,58 @@ export function PrivacyScreen() {
               onConfirm={handleDeleteMemoryV3}
             />
           </div>
+        </section>
+
+        <section className="mb-8">
+          <p className={sectionLabel}>Голосовой ввод</p>
+
+          <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5 mb-2.5`}>
+            <p className={`${theme.textPrimary} text-sm font-light mb-1.5`}>
+              {VOICE_ENGINE_NOTICE_TITLE}
+            </p>
+            <p className={`${theme.textSecondary} text-[13px] font-light leading-[1.75] opacity-85 mb-3`}>
+              {VOICE_ENGINE_NOTICE_BODY}
+            </p>
+
+            <div className="space-y-2.5">
+              {VOICE_ENGINE_CREDITS.map((credit) => (
+                <div key={credit.title}>
+                  <p className={`${theme.textSecondary} text-xs font-light`}>{credit.title}</p>
+                  <p className={`${theme.textMuted} text-xs font-light leading-relaxed`}>
+                    {`${credit.detail} · ${credit.licence}`}
+                  </p>
+                  <a
+                    href={credit.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className={`${ACCENT_TEXT_CLASS} text-xs font-light underline underline-offset-2 break-all`}
+                  >
+                    {credit.url}
+                  </a>
+                </div>
+              ))}
+            </div>
+
+            <p className={`${theme.textMuted} text-[11px] font-light leading-relaxed opacity-70 mt-3`}>
+              {VOICE_ENGINE_LICENCE_NOTE}
+            </p>
+          </div>
+
+          {voicePackagePresent === true ? (
+            <DeleteAction
+              title="Удалить голосовой пакет"
+              description="Удалит скачанный пакет распознавания речи из этого браузера. Аккаунт, беседы и память не затрагиваются. Перед следующей загрузкой мы снова спросим согласие."
+              doneText="Голосовой пакет удалён."
+              state={deleteVoiceState}
+              onStart={handleDeleteVoicePackage}
+              onCancel={() => setDeleteVoiceState('idle')}
+              onConfirm={handleDeleteVoicePackage}
+            />
+          ) : voicePackagePresent === false ? (
+            <p className={`${theme.textMuted} text-xs font-light px-1`}>
+              Голосовой пакет не скачан — удалять нечего.
+            </p>
+          ) : null}
         </section>
 
         <section className="mb-6">
