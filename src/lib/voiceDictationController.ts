@@ -2,6 +2,7 @@ import {
   appendDictationToDraft,
   normalizeVoiceLevel,
   type VoiceDictationAdapter,
+  type VoiceDictationPrepareProgress,
   type VoiceDictationSnapshot,
   type VoiceDictationSession,
 } from './voiceDictationContract';
@@ -71,7 +72,7 @@ export function createVoiceDictationController(options: {
     session = null;
     startPromise = null;
     stopRequested = false;
-    publish({ phase: 'idle', level: 0, interimText: '', errorCode: null });
+    publish({ phase: 'idle', level: 0, interimText: '', prepareProgress: null, errorCode: null });
   };
 
   const fail = (token: number, errorCode: VoiceDictationSnapshot['errorCode']) => {
@@ -82,7 +83,7 @@ export function createVoiceDictationController(options: {
     session = null;
     startPromise = null;
     stopRequested = false;
-    publish({ phase: 'error', level: 0, interimText: '', errorCode });
+    publish({ phase: 'error', level: 0, interimText: '', prepareProgress: null, errorCode });
   };
 
   return {
@@ -93,7 +94,12 @@ export function createVoiceDictationController(options: {
     },
     start(nextBaseDraft) {
       if (disposed) return Promise.resolve();
-      if (snapshot.phase === 'starting' || snapshot.phase === 'listening' || snapshot.phase === 'stopping') {
+      if (
+        snapshot.phase === 'starting'
+        || snapshot.phase === 'preparing'
+        || snapshot.phase === 'listening'
+        || snapshot.phase === 'stopping'
+      ) {
         return startPromise ?? Promise.resolve();
       }
 
@@ -121,17 +127,26 @@ export function createVoiceDictationController(options: {
         interimText: '',
         elapsedMs: 0,
         level: 0,
+        prepareProgress: null,
         errorCode: null,
       });
 
       startPromise = adapter.start({
         onStart() {
-          if (disposed || token !== sessionToken || snapshot.phase !== 'starting') return;
+          if (disposed || token !== sessionToken) return;
+          // The on-device adapter reaches `listening` from `preparing`;
+          // the browser adapter still reaches it from `starting`.
+          if (snapshot.phase !== 'starting' && snapshot.phase !== 'preparing') return;
           startedAt = clock.now();
-          publish({ phase: 'listening' });
+          publish({ phase: 'listening', prepareProgress: null });
           timer = clock.setInterval(() => {
             if (token === sessionToken) publish({ elapsedMs: clock.now() - startedAt });
           }, 250);
+        },
+        onPrepareProgress(progress: VoiceDictationPrepareProgress | null) {
+          if (disposed || token !== sessionToken) return;
+          if (snapshot.phase !== 'starting' && snapshot.phase !== 'preparing') return;
+          publish({ phase: 'preparing', prepareProgress: progress });
         },
         onTranscript(event) {
           if (disposed || token !== sessionToken) return;
@@ -165,7 +180,14 @@ export function createVoiceDictationController(options: {
       return startPromise;
     },
     stop() {
-      if (disposed || (snapshot.phase !== 'starting' && snapshot.phase !== 'listening')) return;
+      if (
+        disposed
+        || (snapshot.phase !== 'starting'
+          && snapshot.phase !== 'preparing'
+          && snapshot.phase !== 'listening')
+      ) {
+        return;
+      }
       stopRequested = true;
       publish({ phase: 'stopping', level: 0 });
       session?.stop();

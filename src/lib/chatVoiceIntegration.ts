@@ -8,7 +8,12 @@ export function canStartVoiceDictation(input: {
 }
 
 export function shouldStopVoiceDictation(phase: VoiceDictationPhase): boolean {
-  return phase === 'starting' || phase === 'listening' || phase === 'stopping';
+  return (
+    phase === 'starting'
+    || phase === 'preparing'
+    || phase === 'listening'
+    || phase === 'stopping'
+  );
 }
 
 export function shouldApplyVoicePreview(input: {

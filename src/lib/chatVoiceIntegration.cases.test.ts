@@ -60,4 +60,10 @@ assert(
   'editing or clearing the draft cannot replay an unchanged voice snapshot',
 );
 
+assert(shouldStopVoiceDictation('preparing'), 'a downloading session is an active session to stop');
+assert(
+  !canStartVoiceDictation({ sending: false, phase: 'preparing' }),
+  'the mic cannot be pressed again while the package downloads',
+);
+
 console.log('chatVoiceIntegration.cases.test.ts — all passed');

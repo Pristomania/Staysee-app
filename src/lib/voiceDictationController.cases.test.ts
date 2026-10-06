@@ -1,6 +1,7 @@
 import type {
   VoiceDictationAdapter,
   VoiceDictationErrorCode,
+  VoiceDictationPrepareProgress,
   VoiceDictationSession,
   VoiceRecognitionEvent,
 } from './voiceDictationContract';
@@ -71,6 +72,12 @@ function fakeAdapter(options: { supported?: boolean; deferred?: boolean } = {}) 
     emitLevel(level: number, index = 0) { callbacks[index].onLevel(level); },
     emitError(code: VoiceDictationErrorCode, index = 0) { callbacks[index].onError(code); },
     emitEnd(index = 0) { callbacks[index].onEnd(); },
+    emitPrepareProgress(progress: VoiceDictationPrepareProgress | null, index = 0) {
+      // onPrepareProgress is optional on the adapter contract (Task 1 ruling),
+      // but the controller always supplies it; the fake adapter's caller
+      // never reaches here without it being set.
+      callbacks[index].onPrepareProgress!(progress);
+    },
   };
 }
 
@@ -185,6 +192,81 @@ await runCase('subscription and dispose are deterministic', async () => {
   equal(adapter.sessions[0].disposeCalls, 1, 'session disposed once');
   equal(clock.activeTimers, 0, 'timer removed');
   equal(notifications, beforeDispose, 'unsubscribed listener remains quiet');
+});
+
+await runCase('reports preparing with byte progress and clears it when listening starts', async () => {
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('Черновик');
+  adapter.emitPrepareProgress({ loadedBytes: 0, totalBytes: 83_239_825 });
+  equal(controller.getSnapshot().phase, 'preparing', 'phase');
+  adapter.emitPrepareProgress({ loadedBytes: 1_000, totalBytes: 83_239_825 });
+  equal(controller.getSnapshot().prepareProgress?.loadedBytes, 1_000, 'progress updates');
+  adapter.emitStart();
+  equal(controller.getSnapshot().phase, 'listening', 'preparing hands over to listening');
+  equal(controller.getSnapshot().prepareProgress, null, 'progress is cleared once listening');
+  equal(controller.getSnapshot().previewDraft, 'Черновик', 'the draft survives preparation');
+  controller.dispose();
+});
+
+await runCase('indeterminate preparation is a preparing phase without a byte bar', async () => {
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('');
+  adapter.emitPrepareProgress(null);
+  equal(controller.getSnapshot().phase, 'preparing', 'phase');
+  equal(controller.getSnapshot().prepareProgress, null, 'no bar is claimed');
+  controller.dispose();
+});
+
+await runCase('a second start while preparing reuses the in-flight session', async () => {
+  // Review Focus 2: a person pressing the mic again during an 83 MB
+  // download must not start a second download in the same tab.
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('');
+  adapter.emitPrepareProgress({ loadedBytes: 10, totalBytes: 83_239_825 });
+  await controller.start('');
+  equal(adapter.startCalls, 1, 'only one adapter session exists');
+  controller.dispose();
+});
+
+await runCase('stop during preparing cancels the session', async () => {
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('');
+  adapter.emitPrepareProgress({ loadedBytes: 10, totalBytes: 83_239_825 });
+  controller.stop();
+  equal(controller.getSnapshot().phase, 'stopping', 'stopping phase');
+  equal(adapter.sessions[0].stopCalls, 1, 'the adapter was asked to stop');
+  adapter.emitEnd();
+  equal(controller.getSnapshot().phase, 'idle', 'back to idle');
+  equal(controller.getSnapshot().prepareProgress, null, 'progress is cleared');
+  controller.dispose();
+});
+
+await runCase('a prepare failure becomes an error phase and keeps the draft', async () => {
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('Мой текст');
+  adapter.emitPrepareProgress({ loadedBytes: 10, totalBytes: 83_239_825 });
+  adapter.emitError('prepare-failed');
+  equal(controller.getSnapshot().phase, 'error', 'error phase');
+  equal(controller.getSnapshot().errorCode, 'prepare-failed', 'safe code');
+  equal(controller.getSnapshot().prepareProgress, null, 'progress is cleared');
+  equal(controller.getSnapshot().previewDraft, 'Мой текст', 'draft preserved');
+  controller.dispose();
+});
+
+await runCase('prepare progress from a superseded session is ignored', async () => {
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('');
+  adapter.emitError('prepare-failed');
+  adapter.emitPrepareProgress({ loadedBytes: 99, totalBytes: 83_239_825 });
+  equal(controller.getSnapshot().phase, 'error', 'a stale progress event cannot resurrect preparing');
+  equal(controller.getSnapshot().prepareProgress, null, 'and cannot resurrect the bar');
+  controller.dispose();
 });
 
 console.log('voiceDictationController.cases.test.ts — all passed');
