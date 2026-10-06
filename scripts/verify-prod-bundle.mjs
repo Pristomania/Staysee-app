@@ -42,4 +42,27 @@ if (!bundled.includes(requiredProxy)) {
   process.exit(1);
 }
 
+/**
+ * The on-device voice engine is served from public/ and is not referenced
+ * from index.html, so nothing else in the build would notice if it went
+ * missing. Without these two files local dictation cannot start at all.
+ * Replacing the engine means updating these byte counts on purpose.
+ */
+const engineFiles = [
+  ['sherpa-onnx-asr.js', 41274],
+  ['sherpa-onnx-wasm-main-asr.js', 92139],
+];
+for (const [name, expectedBytes] of engineFiles) {
+  const enginePath = path.join(process.cwd(), 'dist', 'voice-engine', name);
+  if (!fs.existsSync(enginePath)) {
+    console.error(`[verify-prod-bundle] dist/voice-engine/${name} is missing — on-device voice input cannot start`);
+    process.exit(1);
+  }
+  const actualBytes = fs.statSync(enginePath).size;
+  if (actualBytes !== expectedBytes) {
+    console.error(`[verify-prod-bundle] dist/voice-engine/${name} is ${actualBytes} bytes, expected ${expectedBytes}`);
+    process.exit(1);
+  }
+}
+
 console.log('[verify-prod-bundle] OK — no direct supabase.co / openrouter in dist');
