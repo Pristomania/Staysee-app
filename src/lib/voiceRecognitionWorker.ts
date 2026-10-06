@@ -84,6 +84,13 @@ let recognizer: (VoiceRecognizerLike & { handle?: unknown }) | null = null;
 let session: VoiceRecognitionSession | null = null;
 let diagnostics: string[] = [];
 let draining = false;
+// Set when `session.feed()` throws mid-drain (a real WASM/ONNX decode
+// exception). Nothing awaits `drainQueue()` (it is invoked as `void
+// drainQueue()`), so a throw there would otherwise become a silent unhandled
+// rejection: the queue would stop draining with no reply ever reaching the
+// main thread. Once set, `start` and `finish` refuse to use the now-broken
+// recognizer instead of pretending it still works.
+let decodeFailed = false;
 
 /**
  * This is a module worker, so `importScripts` does not exist -- it has to be
@@ -147,10 +154,25 @@ async function drainQueue(): Promise<void> {
   draining = true;
   try {
     for (;;) {
-      if (!session) break;
+      // Once a decode exception has been reported, every later `audio`
+      // message would just hit the same broken session again; stop quietly
+      // instead of posting a duplicate partial for each one.
+      if (!session || decodeFailed) break;
       const chunk = queue.shift();
       if (!chunk) break;
-      scope.postMessage({ type: 'partial', text: session.feed(chunk.sampleRate, chunk.samples) });
+      let text: string;
+      try {
+        text = session.feed(chunk.sampleRate, chunk.samples);
+      } catch {
+        // A real decode exception. Report whatever text the session already
+        // has so the main thread does not lose it, then stop draining --
+        // `start`/`finish` below will refuse to use this session from here
+        // on rather than silently going quiet.
+        decodeFailed = true;
+        scope.postMessage({ type: 'partial', text: session.text });
+        break;
+      }
+      scope.postMessage({ type: 'partial', text });
       // Yield a whole macrotask so that queued `audio` messages actually
       // reach onmessage and the bounded queue. Decoding synchronously
       // inside onmessage -- as the prototype did -- let the backlog pile up
@@ -189,11 +211,16 @@ scope.onmessage = (event) => {
       if (request.type === 'load') {
         await load(request);
       } else if (request.type === 'start') {
+        if (decodeFailed) throw new Error('decode_failed');
         if (!recognizer) throw new Error('engine_not_loaded');
         queue.clear();
+        // A fresh recording gets a clean slate even if the previous one
+        // ended in a decode exception.
+        decodeFailed = false;
         if (session && !session.done) session.finish();
         session = createVoiceRecognitionSession(recognizer);
       } else {
+        if (decodeFailed) throw new Error('decode_failed');
         if (!session) throw new Error('session_not_started');
         feedRemaining();
         scope.postMessage({ id: request.id, ok: true, text: session.finish() });

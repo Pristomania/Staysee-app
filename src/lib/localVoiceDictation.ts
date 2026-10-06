@@ -510,6 +510,17 @@ export function createLocalVoiceDictationAdapter(
       };
       next.onerror = () => {
         if (!active || worker !== next) return;
+        // While finishing, a `finish` request is already in flight. Settling
+        // it here lets stopSession()'s own catch block run to completion and
+        // fall back to `latestText` -- the same path the finish-timeout case
+        // already takes -- instead of this handler pre-empting it with an
+        // immediate cleanup() that would flip `active` to false first and
+        // make that catch block's own `if (!active) return;` guard discard
+        // the fallback.
+        if (stage === 'finishing') {
+          settleAll(new Error('worker_crashed'));
+          return;
+        }
         settleAll(new Error('worker_crashed'));
         stopWithError(stage === 'preparing' ? 'prepare-failed' : 'recognition-failed');
       };

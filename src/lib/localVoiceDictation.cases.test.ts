@@ -504,6 +504,24 @@ await runCase('a finish the worker never answers keeps the partial text instead 
   assertDeepEqual(sink.log.errors, []);
 });
 
+await runCase('a worker crash while finishing keeps the partial text instead of losing it', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  platform.emitPartial('почти всё');
+  session.stop();
+  await settle();
+  platform.emitWorkerError();
+  await settle();
+  assertDeepEqual(
+    sink.log.transcripts[sink.log.transcripts.length - 1],
+    { finalText: 'почти всё', interimText: '' },
+    'a crash during tail-decode keeps the dictation the person already saw',
+  );
+  assertEqual(sink.log.ends, 1);
+  assertDeepEqual(sink.log.errors, [], 'the fallback to partial text must not also report recognition-failed');
+});
+
 await runCase('silence reports no-speech and never advises another browser', async () => {
   const platform = createFakePlatform();
   const sink = recorder();
