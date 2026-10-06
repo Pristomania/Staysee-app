@@ -6,6 +6,10 @@ import type {
 import { VOICE_MODEL_BASE_URL, VOICE_MODEL_TOTAL_BYTES, type VoiceModelPackage } from './voiceModelCache';
 import {
   createLocalVoiceDictationAdapter,
+  CAPTURE_PROCESSOR_NAME,
+  MAX_RECORDING_MS,
+  WORKER_CONTROL_TIMEOUT_MS,
+  WORKER_FINISH_TIMEOUT_MS,
   WORKER_INIT_TIMEOUT_MS,
   type LocalVoicePlatform,
   type MessagePortLike,
@@ -39,6 +43,14 @@ interface Recorded {
   order: string[];
 }
 
+// Set by the most recently created fake platform (below), so that
+// `recorder()` — created with no knowledge of which platform it is paired
+// with — can still record `onLevel` calls onto that platform's own
+// `order` log. This is what lets a case assert the real call order between
+// a callback (onLevel) and a platform effect (postMessage) across the two
+// otherwise-separate fakes, without changing either fake's public shape.
+let currentCaptureOrder: string[] | null = null;
+
 function recorder() {
   const log: Recorded = {
     levels: [], transcripts: [], prepare: [], errors: [], starts: 0, ends: 0, order: [],
@@ -49,7 +61,11 @@ function recorder() {
       onStart() { log.starts += 1; log.order.push('start'); },
       onPrepareProgress(progress: VoiceDictationPrepareProgress | null) { log.prepare.push(progress); },
       onTranscript(event: VoiceRecognitionEvent) { log.transcripts.push(event); },
-      onLevel(level: number) { log.levels.push(level); log.order.push('level'); },
+      onLevel(level: number) {
+        log.levels.push(level);
+        log.order.push('level');
+        currentCaptureOrder?.push('level');
+      },
       onError(code: VoiceDictationErrorCode) { log.errors.push(code); },
       onEnd() { log.ends += 1; },
     },
@@ -73,6 +89,9 @@ function createFakePlatform(options: {
   let graphProcessorName: string | null = null;
   const posted: Array<Record<string, unknown>> = [];
   const order: string[] = [];
+  // See `currentCaptureOrder` above: this platform's `order` becomes the
+  // shared timeline that `recorder()`'s `onLevel` also writes into.
+  currentCaptureOrder = order;
   const track = { stopCalls: 0, stop() { this.stopCalls += 1; } };
   const stream = { getTracks: () => [track] };
   let progressSink: ((progress: VoiceDictationPrepareProgress) => void) | null = null;
@@ -345,6 +364,233 @@ await runCase('one adapter start creates exactly one worker', async () => {
   platform.emitProgress(2);
   assertEqual(platform.workerCalls, 1);
   session.dispose();
+});
+
+/** Drives a fake session all the way to listening. */
+async function startListening(platform: ReturnType<typeof createFakePlatform>, sink: ReturnType<typeof recorder>) {
+  const session = await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+  await settle();
+  platform.finishLoad();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('load'), ok: true });
+  await settle();
+  platform.reply({ id: platform.lastRequestId('start'), ok: true });
+  await settle();
+  return session;
+}
+
+await runCase('loads the worklet module and reports listening once capture is wired', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  assertEqual(platform.getUserMediaCalls, 1, 'one microphone stream for recognition and the level alike');
+  assertEqual(platform.addedModuleUrl, 'blob:worklet', 'the AudioWorklet module is registered');
+  assertEqual(platform.graphProcessorName, CAPTURE_PROCESSOR_NAME);
+  assertEqual(sink.log.starts, 1, 'listening is announced only after capture is live');
+  session.dispose();
+});
+
+await runCase('microphone refusal reports permission-denied without leaking the raw error', async () => {
+  const platform = createFakePlatform({ getUserMediaRejects: true });
+  const sink = recorder();
+  await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+  await settle();
+  platform.finishLoad();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('load'), ok: true });
+  await settle();
+  assertDeepEqual(sink.log.errors, ['permission-denied']);
+  assert(!JSON.stringify(sink.log).includes('RAW_MEDIA_SENTINEL'));
+});
+
+await runCase('a context without AudioWorklet reports unsupported', async () => {
+  const platform = createFakePlatform({ workletRejects: true });
+  const sink = recorder();
+  await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+  await settle();
+  platform.finishLoad();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('load'), ok: true });
+  await settle();
+  assertDeepEqual(sink.log.errors, ['unsupported']);
+  assert(!JSON.stringify(sink.log).includes('RAW_WORKLET_SENTINEL'));
+  assertEqual(platform.contextCloses, 1, 'the audio context is released');
+});
+
+await runCase('captured audio is measured before its buffer is transferred to the worker', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  platform.order.length = 0;
+  platform.emitAudio(new Float32Array([1, -1, 1, -1]));
+  assertDeepEqual(platform.order, ['level', 'post'], 'postMessage detaches the view, so level comes first');
+  assertEqual(sink.log.levels[sink.log.levels.length - 1], 1, 'the level is real, from the recognition stream');
+  const audio = platform.posted[platform.posted.length - 1];
+  assertEqual(audio.type, 'audio');
+  assertEqual(audio.sampleRate, 48_000, 'the context rate travels with the samples');
+  session.dispose();
+});
+
+await runCase('partial text is interim and the finish reply becomes the final text', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  platform.emitPartial('привет');
+  platform.emitPartial('привет как дела');
+  assertDeepEqual(sink.log.transcripts, [
+    { finalText: '', interimText: 'привет' },
+    { finalText: '', interimText: 'привет как дела' },
+  ], 'cumulative partial text never duplicates');
+  session.stop();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('finish'), ok: true, text: 'привет как дела' });
+  await settle();
+  assertDeepEqual(
+    sink.log.transcripts[sink.log.transcripts.length - 1],
+    { finalText: 'привет как дела', interimText: '' },
+  );
+  assertEqual(sink.log.ends, 1);
+});
+
+await runCase('stop releases the microphone before waiting for the tail, and ends once', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  platform.emitPartial('текст');
+  session.stop();
+  session.stop();
+  assertEqual(platform.track.stopCalls, 1, 'the recording indicator goes out immediately');
+  assertEqual(platform.graphDisconnects, 1, 'the capture graph is torn down once');
+  const finishRequests = platform.posted.filter((message) => message.type === 'finish');
+  assertEqual(finishRequests.length, 1, 'a second stop is a no-op');
+  await settle();
+  platform.reply({ id: platform.lastRequestId('finish'), ok: true, text: 'текст' });
+  await settle();
+  assertEqual(sink.log.ends, 1);
+});
+
+await runCase('a ten-minute recording stops itself at the hard cap', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  await startListening(platform, sink);
+  platform.emitPartial('долгая речь');
+  assert(platform.pendingTimerDurations.includes(MAX_RECORDING_MS), 'the cap is armed when listening starts');
+  assertEqual(MAX_RECORDING_MS, 600_000, 'ten minutes exactly');
+  platform.fireTimersOfDuration(MAX_RECORDING_MS);
+  await settle();
+  assertEqual(platform.track.stopCalls, 1, 'the microphone is released automatically');
+  platform.reply({ id: platform.lastRequestId('finish'), ok: true, text: 'долгая речь' });
+  await settle();
+  assertEqual(sink.log.ends, 1);
+  assertDeepEqual(sink.log.errors, []);
+});
+
+await runCase('a finish the worker never answers keeps the partial text instead of losing it', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  platform.emitPartial('почти всё');
+  session.stop();
+  await settle();
+  assert(platform.pendingTimerDurations.includes(WORKER_FINISH_TIMEOUT_MS), 'finish has its own watchdog');
+  platform.fireTimersOfDuration(WORKER_FINISH_TIMEOUT_MS);
+  await settle();
+  assertDeepEqual(
+    sink.log.transcripts[sink.log.transcripts.length - 1],
+    { finalText: 'почти всё', interimText: '' },
+    'the dictation the person already saw is kept',
+  );
+  assertEqual(sink.log.ends, 1);
+  assertDeepEqual(sink.log.errors, []);
+});
+
+await runCase('silence reports no-speech and never advises another browser', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  session.stop();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('finish'), ok: true, text: '' });
+  await settle();
+  assertDeepEqual(sink.log.errors, ['no-speech']);
+  assert(
+    !sink.log.errors.includes('connection-blocked'),
+    'on-device recognition has no cloud service to be blocked from',
+  );
+});
+
+await runCase('a worker that never acknowledges start reports recognition-failed', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+  await settle();
+  platform.finishLoad();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('load'), ok: true });
+  await settle();
+  assert(
+    platform.pendingTimerDurations.includes(WORKER_CONTROL_TIMEOUT_MS),
+    'a control message gets a short watchdog, not the download-sized one',
+  );
+  platform.fireTimersOfDuration(WORKER_CONTROL_TIMEOUT_MS);
+  await settle();
+  assertDeepEqual(sink.log.errors, ['recognition-failed']);
+  assertEqual(sink.log.starts, 0);
+});
+
+await runCase('a worker crash while listening reports recognition-failed without diagnostics', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  await startListening(platform, sink);
+  platform.emitWorkerError();
+  assertDeepEqual(sink.log.errors, ['recognition-failed']);
+  assert(!JSON.stringify(sink.log).includes('RAW_WORKER_SENTINEL'));
+  assertEqual(platform.track.stopCalls, 1, 'the microphone is released on a crash');
+  assertEqual(platform.terminateCalls, 1);
+});
+
+await runCase('dispose while listening releases graph, tracks, context and worker', async () => {
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  session.dispose();
+  assertEqual(platform.graphDisconnects, 1);
+  assertEqual(platform.track.stopCalls, 1);
+  assertEqual(platform.contextCloses, 1);
+  assertEqual(platform.terminateCalls, 1);
+  platform.emitAudio(new Float32Array([1, 1]));
+  platform.emitPartial('поздно');
+  assertEqual(sink.log.ends, 0, 'a disposed session reports nothing');
+  assert(
+    !sink.log.transcripts.some((event) => event.interimText === 'поздно'),
+    'late capture and worker events are ignored',
+  );
+});
+
+await runCase('the adapter only ever emits allowlisted, on-device-appropriate codes', async () => {
+  const seen = new Set<VoiceDictationErrorCode>();
+  for (const build of [
+    () => createFakePlatform({ loadRejects: true }),
+    () => createFakePlatform({ getUserMediaRejects: true }),
+    () => createFakePlatform({ workletRejects: true }),
+  ]) {
+    const platform = build();
+    const sink = recorder();
+    await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+    await settle();
+    platform.finishLoad();
+    await settle();
+    platform.reply({ id: 1, ok: true });
+    await settle();
+    for (const code of sink.log.errors) seen.add(code);
+  }
+  for (const code of seen) {
+    assert(
+      ['prepare-failed', 'permission-denied', 'unsupported', 'no-speech', 'recognition-failed'].includes(code),
+      `unexpected error code from the on-device adapter: ${code}`,
+    );
+  }
+  assert(!seen.has('connection-blocked'), 'there is no recognition service to be blocked from');
 });
 
 console.log('localVoiceDictation.cases.test.ts — all passed');

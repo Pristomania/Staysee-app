@@ -351,14 +351,17 @@ export function createLocalVoiceDictationAdapter(
         }
         stream = nextStream;
 
-        let nextContext: LocalAudioContextLike;
+        let nextContext: LocalAudioContextLike | undefined;
         try {
           nextContext = createAudioContext();
           await nextContext.resume();
           await nextContext.addWorkletModule(platform.captureProcessorUrl);
         } catch {
           // A browser without AudioWorklet is out of scope by design; the
-          // text chat is unaffected.
+          // text chat is unaffected. The context may already have been
+          // created (and even resumed) before the worklet module rejected,
+          // so it must still be released or it leaks.
+          if (nextContext) void nextContext.close().catch(() => undefined);
           throw stageError('unsupported');
         }
         if (!active) {
