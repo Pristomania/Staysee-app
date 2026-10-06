@@ -146,6 +146,24 @@ export function createVoiceDictationController(options: {
         onPrepareProgress(progress: VoiceDictationPrepareProgress | null) {
           if (disposed || token !== sessionToken) return;
           if (snapshot.phase !== 'starting' && snapshot.phase !== 'preparing') return;
+          const prev = snapshot.prepareProgress;
+          if (
+            snapshot.phase === 'preparing'
+            && prev !== null
+            && progress !== null
+            && Math.floor(prev.loadedBytes / 1_000_000) === Math.floor(progress.loadedBytes / 1_000_000)
+          ) {
+            // Same whole-megabyte count as last time: nothing the person would
+            // actually see has changed, so skip the re-render. This caps updates
+            // at roughly one per megabyte (~83 over a full download) instead of
+            // one per network chunk (~1,300-5,200), without ever dropping a
+            // genuine phase transition (preparing->listening still always
+            // publishes, since that's a different `phase`, not a `prepareProgress`
+            // value) or the final 100% state (the last chunk's megabyte count is
+            // guaranteed to differ from the second-to-last, since it's whichever
+            // leftover amount completes the total).
+            return;
+          }
           publish({ phase: 'preparing', prepareProgress: progress });
         },
         onTranscript(event) {

@@ -65,11 +65,34 @@ for (const [name, expectedBytes] of engineFiles) {
   }
 }
 
-// A check for the recognition worker/capture worklet markers in dist/assets
-// belongs here once the local adapter is actually wired into the app
-// (useVoiceDictation.ts still builds the browser adapter only) -- until
-// then nothing imports local​VoiceDictation.ts, so Vite never bundles
-// voiceRecognitionWorker.ts at all, and the markers can never be present.
-// Add this back as part of that wiring change, not before it.
+/**
+ * The recognition worker and the capture worklet are referenced only from
+ * JS chunks, so scripts/smoke-built-site.mjs (which walks index.html) would
+ * not notice either of them vanishing. `zipformer2` is a string literal in
+ * the recognizer config and survives minification as plain text in the
+ * worker chunk. `registerProcessor('voice-capture'` does NOT survive as
+ * plain text when the worklet is small enough for Vite to inline it as a
+ * base64 data: URL (true today -- the file is 1,892 bytes, under Vite's
+ * 4096-byte assetsInlineLimit) -- so this also decodes every inlined
+ * base64 asset and searches the decoded text too, which keeps working
+ * whether the worklet stays inlined or later grows past the threshold and
+ * gets emitted as its own file instead.
+ */
+const assetTexts = jsFiles.map((name) => fs.readFileSync(path.join(distAssets, name), 'utf8'));
+const decodedInlineTexts = assetTexts.flatMap((text) => {
+  const matches = text.match(/data:[\w/+.;=-]*base64,[A-Za-z0-9+/=]+/g) ?? [];
+  return matches.map((uri) => Buffer.from(uri.split('base64,')[1], 'base64').toString('utf8'));
+});
+const haystack = [...assetTexts, ...decodedInlineTexts].join('\n');
+const assetMarkers = [
+  ['zipformer2', 'the recognition worker chunk'],
+  ["registerProcessor('voice-capture'", 'the AudioWorklet capture processor'],
+];
+for (const [marker, description] of assetMarkers) {
+  if (!haystack.includes(marker)) {
+    console.error(`[verify-prod-bundle] ${description} is missing from dist/assets (looked for ${marker})`);
+    process.exit(1);
+  }
+}
 
 console.log('[verify-prod-bundle] OK — no direct supabase.co / openrouter in dist');

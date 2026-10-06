@@ -41,7 +41,28 @@ function includesText(root: ReactNode, expected: string): boolean {
   return matched;
 }
 
+// VoiceDownloadConsent now calls useRef/useEffect to focus its affirmative
+// button on mount. This harness calls the component as a plain function
+// (no ReactDOM render, no commit phase), so there is no active dispatcher —
+// calling those hooks unshimmed throws "Cannot read properties of null
+// (reading 'useRef')" before the component body ever returns. A real DOM
+// render is out of scope here (the tree walk below depends on raw React
+// elements, not rendered DOM nodes), and the ref would never attach to a
+// real button through this harness anyway, so useEffect/ref behavior stays
+// unobservable here by design. This stub just satisfies the dispatcher
+// contract (the same `dispatcher.useRef(initialValue)` shape node's stack
+// trace names) so the element tree can still be built and walked.
+const internals = (React as unknown as {
+  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: { ReactCurrentDispatcher: { current: unknown } };
+}).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+const fakeDispatcher = {
+  useRef: <T,>(initial: T) => ({ current: initial }),
+  useEffect: () => {},
+};
+
 const state: { accepts: number; cancels: number } = { accepts: 0, cancels: 0 };
+const previousDispatcher = internals.ReactCurrentDispatcher.current;
+internals.ReactCurrentDispatcher.current = fakeDispatcher;
 const tree = VoiceDownloadConsent({
   sizeLabel: '83 МБ',
   onAccept: () => { state.accepts += 1; },
@@ -51,6 +72,7 @@ const tree = VoiceDownloadConsent({
   textClass: 'text-test',
   mutedClass: 'muted-test',
 });
+internals.ReactCurrentDispatcher.current = previousDispatcher;
 
 const group = findByProp(tree, 'role', 'group');
 assert(group.props['aria-live'] === 'polite', 'the card announces itself politely');

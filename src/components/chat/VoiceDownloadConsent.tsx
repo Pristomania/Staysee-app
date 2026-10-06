@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Download } from 'lucide-react';
 
 /**
@@ -24,6 +25,11 @@ export function VoiceDownloadConsent(props: {
 }) {
   const { sizeLabel, onAccept, onCancel, borderClass, surfaceClass, textClass, mutedClass } = props;
 
+  const downloadButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    downloadButtonRef.current?.focus();
+  }, []);
+
   return (
     <div
       className={`mb-3 rounded-xl border ${borderClass} ${surfaceClass} px-4 py-3 flex items-start gap-3`}
@@ -41,6 +47,7 @@ export function VoiceDownloadConsent(props: {
         </p>
         <div className="flex gap-2 mt-2.5">
           <button
+            ref={downloadButtonRef}
             type="button"
             onClick={onAccept}
             aria-label="Скачать голосовой пакет"

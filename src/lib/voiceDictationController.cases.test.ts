@@ -200,12 +200,41 @@ await runCase('reports preparing with byte progress and clears it when listening
   await controller.start('Черновик');
   adapter.emitPrepareProgress({ loadedBytes: 0, totalBytes: 83_239_825 });
   equal(controller.getSnapshot().phase, 'preparing', 'phase');
-  adapter.emitPrepareProgress({ loadedBytes: 1_000, totalBytes: 83_239_825 });
-  equal(controller.getSnapshot().prepareProgress?.loadedBytes, 1_000, 'progress updates');
+  // 1_200_000 bytes is a different whole-megabyte than the 0 above, so this
+  // update is expected to publish rather than being throttled away (see the
+  // dedicated throttle test above for same-megabyte updates).
+  adapter.emitPrepareProgress({ loadedBytes: 1_200_000, totalBytes: 83_239_825 });
+  equal(controller.getSnapshot().prepareProgress?.loadedBytes, 1_200_000, 'progress updates');
   adapter.emitStart();
   equal(controller.getSnapshot().phase, 'listening', 'preparing hands over to listening');
   equal(controller.getSnapshot().prepareProgress, null, 'progress is cleared once listening');
   equal(controller.getSnapshot().previewDraft, 'Черновик', 'the draft survives preparation');
+  controller.dispose();
+});
+
+await runCase('same-megabyte prepare progress is throttled, crossing a megabyte republishes', async () => {
+  // Review Focus: onPrepareProgress fires once per network chunk during the
+  // ~83MB download (roughly 1,300-5,200 times), and every call used to
+  // publish unconditionally, forcing a full ChatScreen re-render each time.
+  // The fix only republishes once the displayed whole-megabyte count would
+  // actually change.
+  const adapter = fakeAdapter();
+  const controller = createVoiceDictationController({ adapter: adapter.value, clock: fakeClock().value });
+  await controller.start('Черновик');
+  adapter.emitPrepareProgress({ loadedBytes: 1_000_000, totalBytes: 83_239_825 });
+  equal(controller.getSnapshot().prepareProgress?.loadedBytes, 1_000_000, 'first update publishes');
+  adapter.emitPrepareProgress({ loadedBytes: 1_000_500, totalBytes: 83_239_825 });
+  equal(
+    controller.getSnapshot().prepareProgress?.loadedBytes,
+    1_000_000,
+    'same whole-megabyte update is throttled away',
+  );
+  adapter.emitPrepareProgress({ loadedBytes: 2_000_001, totalBytes: 83_239_825 });
+  equal(
+    controller.getSnapshot().prepareProgress?.loadedBytes,
+    2_000_001,
+    'crossing into the next megabyte republishes',
+  );
   controller.dispose();
 });
 
