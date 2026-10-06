@@ -71,6 +71,59 @@ export function formatDictationDuration(elapsedMs: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+/**
+ * Decimal megabytes, not mebibytes. The design document, the consent copy
+ * and every conversation about this feature say "~83 МБ"; 83,239,825 bytes
+ * is 83 decimal MB but only 79 MiB, and a progress counter that disagreed
+ * with the number the person agreed to would look like a different file.
+ */
+const BYTES_PER_MEGABYTE = 1_000_000;
+
+function megabytes(bytes: number): number {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 0;
+  return Math.round(bytes / BYTES_PER_MEGABYTE);
+}
+
+export function formatVoicePackageSize(totalBytes: number): string {
+  return `${megabytes(totalBytes)} МБ`;
+}
+
+export interface VoicePrepareDisplay {
+  /** What is happening, in plain Russian. */
+  label: string;
+  /** `«41 из 83 МБ»`, or empty when there are no bytes to report. */
+  detail: string;
+  /** 0-100, or `null` for "working, with no progress to show". */
+  percent: number | null;
+}
+
+/**
+ * Turns the snapshot's `prepareProgress` into the three strings the
+ * preparing row renders. A `null` progress is not an error and not zero
+ * percent: it is the engine opening an already-downloaded model, which has
+ * no byte progress of its own -- see the doc comment on
+ * `VoiceDictationSnapshot.prepareProgress`.
+ */
+export function voicePrepareDisplay(
+  progress: VoiceDictationPrepareProgress | null,
+): VoicePrepareDisplay {
+  if (
+    progress === null
+    || !Number.isFinite(progress.totalBytes)
+    || progress.totalBytes <= 0
+  ) {
+    return { label: 'Готовлю голосовой движок', detail: '', percent: null };
+  }
+  const loaded = Number.isFinite(progress.loadedBytes) ? Math.max(0, progress.loadedBytes) : 0;
+  const clamped = Math.min(loaded, progress.totalBytes);
+  return {
+    label: 'Скачиваю голосовой пакет',
+    detail: `${megabytes(clamped)} из ${megabytes(progress.totalBytes)} МБ`,
+    // Floored, so the bar can only read 100% when the last byte is in.
+    percent: Math.floor((clamped / progress.totalBytes) * 100),
+  };
+}
+
 export function normalizeVoiceLevel(level: number): number {
   return Math.min(1, Math.max(0, Number.isFinite(level) ? level : 0));
 }
