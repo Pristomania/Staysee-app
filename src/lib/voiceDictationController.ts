@@ -41,6 +41,7 @@ export function createVoiceDictationController(options: {
     interimText: '',
     elapsedMs: 0,
     level: 0,
+    prepareProgress: null,
     errorCode: null,
   };
   let baseDraft = '';
