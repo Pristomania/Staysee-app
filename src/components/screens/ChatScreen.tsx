@@ -59,10 +59,18 @@ import { generateTitle } from '../../lib/chatPresentation';
 import { resizeChatComposer } from '../../lib/chatComposerLayout';
 import { useVoiceDictation } from '../../hooks/useVoiceDictation';
 import { VoiceDictationBar } from '../chat/VoiceDictationBar';
-import { voiceDictationErrorCopy } from '../../lib/voiceDictationContract';
+import { VoiceDownloadConsent } from '../chat/VoiceDownloadConsent';
+import { VoicePreparingBar } from '../chat/VoicePreparingBar';
+import {
+  formatVoicePackageSize,
+  voiceDictationErrorCopy,
+} from '../../lib/voiceDictationContract';
+import { VOICE_MODEL_TOTAL_BYTES } from '../../lib/voiceModelCache';
+import { voiceDownloadDecision } from '../../lib/voiceDownloadConsent';
 import {
   canStartVoiceDictation,
   shouldStopVoiceDictation,
+  voiceComposerMode,
 } from '../../lib/chatVoiceIntegration';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
@@ -180,6 +188,7 @@ export function ChatScreen() {
     onDraftChange: setInputValue,
     conversationId: currentConversation?.id ?? null,
   });
+  const [voiceConsentOpen, setVoiceConsentOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -904,9 +913,45 @@ export function ChatScreen() {
   const roomTitle = currentConversation?.title || 'Новая беседа';
   const isWaiting = sending && !stream.isStreaming;
   const voiceActive = shouldStopVoiceDictation(voice.snapshot.phase);
+  const voiceComposer = voiceComposerMode(voice.snapshot.phase);
   useLayoutEffect(() => {
     resizeChatComposer(inputRef.current);
   }, [inputValue, voiceActive]);
+
+  // The card is a question about what to do next. Once a session is under
+  // way, or once the chat is busy sending, there is no "next" left to ask
+  // about, so the card closes itself rather than lingering over a composer
+  // that has already moved on.
+  useEffect(() => {
+    if (sending || voiceComposer !== 'compose') setVoiceConsentOpen(false);
+  }, [sending, voiceComposer]);
+
+  function handleVoicePress() {
+    const decision = voiceDownloadDecision({
+      supported: voice.snapshot.supported,
+      packageCached: voice.packageCached,
+      consentRemembered: voice.consentRemembered,
+    });
+    if (decision === 'ask') {
+      voice.clearError();
+      setVoiceConsentOpen(true);
+      return;
+    }
+    setVoiceConsentOpen(false);
+    void voice.start();
+  }
+
+  function handleVoiceConsentAccept() {
+    voice.rememberConsent();
+    setVoiceConsentOpen(false);
+    void voice.start();
+  }
+
+  function handleVoiceConsentCancel() {
+    // Deliberately persists nothing. Declining is "not now", not "never":
+    // the microphone stays pressable and the next press asks again.
+    setVoiceConsentOpen(false);
+  }
   const suppressAiMessageId =
     stream.isStreaming ? persistedTurnRef.current?.aiId ?? null : null;
   const visibleMessages = suppressAiMessageId
@@ -1288,9 +1333,28 @@ export function ChatScreen() {
               </p>
             )}
 
+            {voiceConsentOpen && voiceComposer === 'compose' && (
+              <VoiceDownloadConsent
+                sizeLabel={formatVoicePackageSize(VOICE_MODEL_TOTAL_BYTES)}
+                onAccept={handleVoiceConsentAccept}
+                onCancel={handleVoiceConsentCancel}
+                borderClass={theme.border}
+                surfaceClass={theme.surface}
+                textClass={theme.textSecondary}
+                mutedClass={theme.textMuted}
+              />
+            )}
+
             {/* Input field */}
             <div className={`flex items-end gap-3 rounded-xl px-4 py-3 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
-              {voiceActive ? (
+              {voiceComposer === 'preparing' ? (
+                <VoicePreparingBar
+                  progress={voice.snapshot.prepareProgress}
+                  onCancel={voice.stop}
+                  textClass={theme.inputText}
+                  mutedClass={theme.textMuted}
+                />
+              ) : voiceComposer === 'recording' ? (
                 <VoiceDictationBar
                   elapsedMs={voice.snapshot.elapsedMs}
                   level={voice.snapshot.level}
@@ -1314,12 +1378,13 @@ export function ChatScreen() {
                   {!sending && (
                     <button
                       type="button"
-                      onClick={() => { void voice.start(); }}
-                      disabled={!canStartVoiceDictation({
+                      onClick={handleVoicePress}
+                      disabled={voiceConsentOpen || !canStartVoiceDictation({
                         sending,
                         phase: voice.snapshot.phase,
                       })}
                       aria-label="Начать голосовой ввод"
+                      aria-expanded={voiceConsentOpen}
                       title={voice.snapshot.supported
                         ? 'Голосовой ввод'
                         : 'В этом браузере голосовой ввод пока недоступен'}
