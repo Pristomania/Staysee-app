@@ -109,7 +109,14 @@ export function voiceDictationErrorCopy(code: VoiceDictationErrorCode): string {
     return 'Не удалось подготовить голосовой ввод. Проверь, есть ли свободное место на устройстве и стабильный интернет, и попробуй ещё раз';
   }
   if (code === 'connection-blocked') {
-    return 'Браузер не может подключиться к сервису распознавания речи. Проверь блокировщики рекламы/приватности и VPN, или попробуй Microsoft Edge';
+    // The on-device adapter never emits this code -- there is no recognition
+    // service to be blocked from. It is kept because the copy function is
+    // total over the error union, and the one way something like it could
+    // still happen is a blocker or VPN cutting off the package download.
+    return 'Не получилось скачать голосовой пакет. Проверь блокировщики рекламы и приватности, VPN — и попробуй ещё раз';
   }
-  return 'Не удалось распознать голос в этом браузере. Попробуй Microsoft Edge';
+  // Recognition now happens inside this browser, on this device. The old
+  // advice to try Microsoft Edge pointed at a different cloud provider,
+  // which no longer exists anywhere in this path.
+  return 'Голосовой ввод сорвался на этом устройстве. Попробуй ещё раз или набери текст руками';
 }

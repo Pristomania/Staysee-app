@@ -42,8 +42,20 @@ assert(
   'raw errors never leak',
 );
 assert(
-  voiceDictationErrorCopy('recognition-failed').includes('Microsoft Edge'),
-  'failed browser points to the verified fallback',
+  !voiceDictationErrorCopy('recognition-failed').includes('Microsoft Edge'),
+  'an on-device engine failure never advises another browser',
+);
+assert(
+  voiceDictationErrorCopy('recognition-failed').includes('на этом устройстве'),
+  'an on-device failure names the device, not a remote service',
+);
+assert(
+  !voiceDictationErrorCopy('connection-blocked').includes('Microsoft Edge'),
+  'a blocked package download never advises another browser',
+);
+assert(
+  !voiceDictationErrorCopy('connection-blocked').includes('сервису распознавания'),
+  'there is no recognition service to be blocked from any more',
 );
 assert(
   voiceDictationErrorCopy('connection-blocked').includes('блокировщики'),
