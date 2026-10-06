@@ -16,6 +16,24 @@ export function shouldStopVoiceDictation(phase: VoiceDictationPhase): boolean {
   );
 }
 
+/**
+ * Which of the three things the composer row is right now.
+ *
+ * Deliberately not derived from `shouldStopVoiceDictation`: that predicate
+ * answers "is there a session to stop", which is true during the package
+ * download too. The composer needs a different answer there, because the
+ * recording bar would claim to be listening while nothing is recorded.
+ */
+export type VoiceComposerMode = 'compose' | 'preparing' | 'recording';
+
+export function voiceComposerMode(phase: VoiceDictationPhase): VoiceComposerMode {
+  if (phase === 'preparing') return 'preparing';
+  if (phase === 'starting' || phase === 'listening' || phase === 'stopping') {
+    return 'recording';
+  }
+  return 'compose';
+}
+
 export function shouldApplyVoicePreview(input: {
   phase: VoiceDictationPhase;
   finalText: string;

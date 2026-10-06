@@ -3,6 +3,7 @@ import {
   shouldApplyVoiceSnapshot,
   shouldApplyVoicePreview,
   shouldStopVoiceDictation,
+  voiceComposerMode,
 } from './chatVoiceIntegration';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -64,6 +65,31 @@ assert(shouldStopVoiceDictation('preparing'), 'a downloading session is an activ
 assert(
   !canStartVoiceDictation({ sending: false, phase: 'preparing' }),
   'the mic cannot be pressed again while the package downloads',
+);
+
+assert(
+  voiceComposerMode('preparing') === 'preparing',
+  'an 83 MB download gets its own row, not the recording bar',
+);
+assert(
+  voiceComposerMode('listening') === 'recording',
+  'recording keeps the existing waveform bar',
+);
+assert(
+  voiceComposerMode('starting') === 'recording',
+  'the brief starting moment stays on the recording bar, as before',
+);
+assert(
+  voiceComposerMode('stopping') === 'recording',
+  'the bar stays up until the engine hands back the tail',
+);
+assert(
+  voiceComposerMode('idle') === 'compose',
+  'an idle chat is a text box',
+);
+assert(
+  voiceComposerMode('error') === 'compose',
+  'after a failure the person gets their text box back immediately',
 );
 
 console.log('chatVoiceIntegration.cases.test.ts — all passed');
