@@ -102,6 +102,19 @@ export const WORKER_CONTROL_TIMEOUT_MS = 5_000;
  */
 export const WORKER_FINISH_TIMEOUT_MS = 30_000;
 
+/**
+ * getUserMedia/AudioContext startup is known to produce a brief click or
+ * ramp-up artifact in the first captured audio, before the person has had
+ * a chance to speak -- the streaming recognizer has been observed turning
+ * that into a spurious short word at the very start of every recording.
+ * Each capture block is ~85 ms at a typical 48 kHz device, so skipping two
+ * blocks discards roughly the first 170 ms of audio from the recognizer
+ * (not from the level meter, which still reacts immediately) without
+ * noticeably delaying real speech, which rarely starts inside the first
+ * moment after pressing the mic.
+ */
+export const AUDIO_WARMUP_SKIP_BLOCKS = 2;
+
 type StageName = 'preparing' | 'listening' | 'finishing';
 
 interface PendingRequest {
@@ -411,12 +424,17 @@ export function createLocalVoiceDictationAdapter(
         stage = 'listening';
         const nextGraph = nextContext.createCaptureGraph(nextStream, CAPTURE_PROCESSOR_NAME);
         graph = nextGraph;
+        let warmupBlocksRemaining = AUDIO_WARMUP_SKIP_BLOCKS;
         nextGraph.port.onmessage = (event) => {
           if (!active || graph !== nextGraph || stage !== 'listening') return;
           const samples = event.data as Float32Array;
           // Measure before posting: postMessage transfers the buffer and
           // leaves this view detached, so the level must be read first.
           callbacks.onLevel(voiceLevelFromSamples(samples));
+          if (warmupBlocksRemaining > 0) {
+            warmupBlocksRemaining -= 1;
+            return;
+          }
           worker?.postMessage(
             { type: 'audio', sampleRate: nextContext.sampleRate, samples },
             [samples.buffer],
@@ -574,7 +592,10 @@ export function createLocalVoiceDictationAdapter(
         stopWithError(stage === 'preparing' ? 'prepare-failed' : 'recognition-failed');
       };
 
-      callbacks.onPrepareProgress?.(null);
+      // A reused, already-loaded engine has nothing to prepare -- skip the
+      // signal entirely so the UI never flashes a "preparing" state for an
+      // instant that's gone before a person can read it.
+      if (!engineLoaded) callbacks.onPrepareProgress?.(null);
       void prepare();
 
       return {

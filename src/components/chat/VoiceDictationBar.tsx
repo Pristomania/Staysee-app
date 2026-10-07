@@ -23,7 +23,7 @@ export function VoiceDictationBar(props: {
 
   return (
     <div
-      className="flex min-h-11 flex-1 items-center gap-3"
+      className="flex min-h-11 min-w-0 flex-1 items-center gap-3"
       role="status"
       aria-live="polite"
       aria-label={phase === 'starting' ? 'Голосовой ввод запускается' : 'Идёт голосовой ввод'}

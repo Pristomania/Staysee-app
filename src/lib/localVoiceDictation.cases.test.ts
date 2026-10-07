@@ -7,6 +7,7 @@ import type {
 import { VOICE_MODEL_BASE_URL, VOICE_MODEL_TOTAL_BYTES, type VoiceModelPackage } from './voiceModelCache';
 import {
   createLocalVoiceDictationAdapter,
+  AUDIO_WARMUP_SKIP_BLOCKS,
   CAPTURE_PROCESSOR_NAME,
   MAX_RECORDING_MS,
   WORKER_CONTROL_TIMEOUT_MS,
@@ -431,6 +432,9 @@ await runCase('captured audio is measured before its buffer is transferred to th
   const platform = createFakePlatform();
   const sink = recorder();
   const session = await startListening(platform, sink);
+  for (let index = 0; index < AUDIO_WARMUP_SKIP_BLOCKS; index += 1) {
+    platform.emitAudio(new Float32Array([1, -1, 1, -1]));
+  }
   platform.order.length = 0;
   platform.emitAudio(new Float32Array([1, -1, 1, -1]));
   assertDeepEqual(platform.order, ['level', 'post'], 'postMessage detaches the view, so level comes first');
@@ -438,6 +442,34 @@ await runCase('captured audio is measured before its buffer is transferred to th
   const audio = platform.posted[platform.posted.length - 1];
   assertEqual(audio.type, 'audio');
   assertEqual(audio.sampleRate, 48_000, 'the context rate travels with the samples');
+  session.dispose();
+});
+
+await runCase('the first captured blocks warm up the level meter but never reach the recognizer', async () => {
+  // getUserMedia/AudioContext startup is known to produce a brief artifact
+  // before the person has had a chance to speak; feeding it to the
+  // recognizer was turning into a spurious word at the start of every
+  // recording. The level meter should still react immediately, though --
+  // only the recognizer feed is held back.
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const session = await startListening(platform, sink);
+  const postedBefore = platform.posted.length;
+  for (let index = 0; index < AUDIO_WARMUP_SKIP_BLOCKS; index += 1) {
+    platform.emitAudio(new Float32Array([1, -1, 1, -1]));
+  }
+  assertEqual(
+    platform.posted.length,
+    postedBefore,
+    'none of the warm-up blocks were forwarded to the worker',
+  );
+  assertEqual(
+    sink.log.levels.length,
+    AUDIO_WARMUP_SKIP_BLOCKS,
+    'the level meter still reacted to every warm-up block',
+  );
+  platform.emitAudio(new Float32Array([1, -1, 1, -1]));
+  assertEqual(platform.posted.length, postedBefore + 1, 'the block after warm-up is forwarded as usual');
   session.dispose();
 });
 
@@ -643,15 +675,16 @@ await runCase('a second recording in the same page session reuses the already-lo
   assertEqual(sink.log.ends, 1);
   assertEqual(platform.terminateCalls, 0, 'a clean stop keeps the engine warm instead of tearing it down');
 
+  const prepareCallsBeforeReuse = sink.log.prepare.length;
   const second = await adapter.start(sink.callbacks);
   await settle();
   assertEqual(platform.workerCalls, 1, 'no second worker was created');
   assertEqual(platform.isCachedCalls, 1, 'the cache was never probed again');
   assertEqual(platform.loadCalls, 1, 'the engine was never reloaded');
-  assertDeepEqual(
-    sink.log.prepare.slice(-2),
-    [null, null],
-    'reuse has nothing to report progress on, so preparing stays indeterminate-and-brief rather than claiming a byte bar',
+  assertEqual(
+    sink.log.prepare.length,
+    prepareCallsBeforeReuse,
+    'reuse reports no preparing signal at all, so the UI never flashes a preparing bar for an instant re-open',
   );
   const startRequests = platform.posted.filter((message) => message.type === 'start');
   assertEqual(startRequests.length, 2, 'the worker gets a fresh start message for the new session');
