@@ -280,9 +280,10 @@ async function persistFailure(
   userId: string,
   diagnosticCode: MemoryV3LifecycleShadowDiagnostic,
   transportDetail: string | null = null,
+  reconcilerRawResponse: string | null = null,
 ): Promise<MemoryV3LifecycleShadowResult> {
   try {
-    await failStore({ runId, userId, diagnosticCode, transportDetail } as never);
+    await failStore({ runId, userId, diagnosticCode, transportDetail, reconcilerRawResponse } as never);
     return failed(runId, diagnosticCode);
   } catch {
     return failed(runId, "state_write_failed");
@@ -498,7 +499,7 @@ export async function runMemoryV3LifecycleShadow(
   try {
     rawProposal = JSON.parse(reconciler.rawContent);
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_parse_invalid");
+    return await persistFailure(failStore, runId, userId, "reconciler_parse_invalid", null, reconciler.rawContent);
   }
   let proposal;
   try {
@@ -518,13 +519,13 @@ export async function runMemoryV3LifecycleShadow(
   } catch (error) {
     const own = ownDiagnostic(error);
     if (own === "reconciler_shape_invalid") {
-      return await persistFailure(failStore, runId, userId, own);
+      return await persistFailure(failStore, runId, userId, own, null, reconciler.rawContent);
     }
     const diagnostic = projectSafeMemoryV3LifecycleContractDiagnostic(error);
     const code = diagnostic === "lifecycle_contract_invalid_shape"
       ? "reconciler_shape_invalid"
       : "reconciler_contract_invalid";
-    return await persistFailure(failStore, runId, userId, code);
+    return await persistFailure(failStore, runId, userId, code, null, reconciler.rawContent);
   }
 
   let reduced;
@@ -533,7 +534,7 @@ export async function runMemoryV3LifecycleShadow(
       state, at: last.createdAt, conversationId, extraction, proposal, trustedForgetMemoryKeys: [],
     });
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid");
+    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent);
   }
 
   let resultingState: MemoryV3LifecycleState;
@@ -543,7 +544,7 @@ export async function runMemoryV3LifecycleShadow(
       stateRevision: (reserved.expectedStateRevision as number) + (reduced.changed ? 1 : 0),
     }, userId);
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid");
+    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent);
   }
   let cas: unknown;
   try {

@@ -286,11 +286,14 @@ describe("Memory V3 dialogue store", () => {
     for (const diagnosticCode of DIAGNOSTICS) {
       const fake = fakeClient([{ data: null, error: null }]);
       await createMemoryV3DialogueStore(fake.client).fail({
-        runId: RUN_ID, userId: USER_ID, diagnosticCode, transportDetail: null,
+        runId: RUN_ID, userId: USER_ID, diagnosticCode, transportDetail: null, reconcilerRawResponse: null,
       });
       assert.deepEqual(fake.calls, [{
         name: "fail_memory_v3_dialogue_run",
-        args: { p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: diagnosticCode, p_transport_detail: null },
+        args: {
+          p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: diagnosticCode,
+          p_transport_detail: null, p_reconciler_raw_response: null,
+        },
       }]);
     }
   });
@@ -299,10 +302,29 @@ describe("Memory V3 dialogue store", () => {
     const fake = fakeClient([{ data: null, error: null }]);
     await createMemoryV3DialogueStore(fake.client).fail({
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "extractor_transport_failed", transportDetail: "provider_http_5xx",
+      reconcilerRawResponse: null,
     });
     assert.deepEqual(fake.calls, [{
       name: "fail_memory_v3_dialogue_run",
-      args: { p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: "extractor_transport_failed", p_transport_detail: "provider_http_5xx" },
+      args: {
+        p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: "extractor_transport_failed",
+        p_transport_detail: "provider_http_5xx", p_reconciler_raw_response: null,
+      },
+    }]);
+  });
+
+  it("writes reconcilerRawResponse through to the RPC when the reconciler replied before failing", async () => {
+    const fake = fakeClient([{ data: null, error: null }]);
+    await createMemoryV3DialogueStore(fake.client).fail({
+      runId: RUN_ID, userId: USER_ID, diagnosticCode: "reconciler_contract_invalid", transportDetail: null,
+      reconcilerRawResponse: '{"operations":[]}',
+    });
+    assert.deepEqual(fake.calls, [{
+      name: "fail_memory_v3_dialogue_run",
+      args: {
+        p_run_id: RUN_ID, p_user_id: USER_ID, p_diagnostic_code: "reconciler_contract_invalid",
+        p_transport_detail: null, p_reconciler_raw_response: '{"operations":[]}',
+      },
     }]);
   });
 
@@ -311,6 +333,18 @@ describe("Memory V3 dialogue store", () => {
       const local = fakeClient([]);
       await captureStoreError(() => createMemoryV3DialogueStore(local.client).fail({
         runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure", transportDetail: bad as never,
+        reconcilerRawResponse: null,
+      }));
+      assert.equal(local.calls.length, 0);
+    }
+  });
+
+  it("rejects a reconcilerRawResponse that is not null and not a non-empty string", async () => {
+    for (const bad of ["", "   ", 123, {}]) {
+      const local = fakeClient([]);
+      await captureStoreError(() => createMemoryV3DialogueStore(local.client).fail({
+        runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure", transportDetail: null,
+        reconcilerRawResponse: bad as never,
       }));
       assert.equal(local.calls.length, 0);
     }
@@ -320,6 +354,7 @@ describe("Memory V3 dialogue store", () => {
     const local = fakeClient([]);
     await captureStoreError(() => createMemoryV3DialogueStore(local.client).fail({
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "RAW_NOT_ALLOWLISTED" as never, transportDetail: null,
+      reconcilerRawResponse: null,
     }));
     assert.equal(local.calls.length, 0);
 
@@ -327,6 +362,7 @@ describe("Memory V3 dialogue store", () => {
       const fake = fakeClient([response]);
       await captureStoreError(() => createMemoryV3DialogueStore(fake.client).fail({
         runId: RUN_ID, userId: USER_ID, diagnosticCode: "unknown_failure", transportDetail: null,
+        reconcilerRawResponse: null,
       }));
       assert.equal(fake.calls.length, 1);
     }

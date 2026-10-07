@@ -454,6 +454,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "extractor_transport_failed" });
     assert.deepEqual(test.failInputs, [{
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "extractor_transport_failed", transportDetail: "provider_http_5xx",
+      reconcilerRawResponse: null,
     }]);
     assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
   });
@@ -479,6 +480,7 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.equal(test.calls.at(-1), "fail:reconciler_transport_failed");
     assert.deepEqual(test.failInputs, [{
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "reconciler_transport_failed", transportDetail: "provider_http_400",
+      reconcilerRawResponse: null,
     }]);
   });
 
@@ -521,6 +523,13 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
       });
       assert.equal(test.calls.filter((entry) => entry === "reserve").length, 1);
       assert.equal(test.calls.at(-1), `fail:${diagnosticCode}`);
+      // The exact text the model returned is what makes a future
+      // reconciler_contract_invalid diagnosable instead of a dead end --
+      // see migration 065.
+      assert.equal(
+        (test.failInputs.at(-1) as { reconcilerRawResponse: unknown }).reconcilerRawResponse,
+        rawContent,
+      );
     }
   });
 
@@ -530,6 +539,10 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
       status: "failed", runId: RUN_ID, diagnosticCode: "reconciler_shape_invalid",
     });
     assert.equal(test.calls.at(-1), "fail:reconciler_shape_invalid");
+    assert.equal(
+      (test.failInputs.at(-1) as { reconcilerRawResponse: unknown }).reconcilerRawResponse,
+      "{}",
+    );
   });
 
   it("fails with reconciler_shape_invalid when an operation is missing the topic key", async () => {
@@ -557,6 +570,10 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     });
     assert.equal(test.calls.at(-1), "fail:reconciler_contract_invalid");
     assert.equal(reconcilerCalls, 1);
+    assert.equal(
+      (test.failInputs.at(-1) as { reconcilerRawResponse: unknown }).reconcilerRawResponse,
+      rawContent,
+    );
   });
 
   it("terminalizes an oversized reserved state before either provider", async () => {

@@ -48,6 +48,11 @@ export interface MemoryV3DialogueFailureWrite {
    * transport modules' own code sets evolve independently of this store.
    * null when no specific transport diagnostic applies. */
   transportDetail: string | null;
+  /** The reconciler's raw response text, when the shadow runner has one and
+   * the failure happened after it replied (reconciler_parse_invalid,
+   * reconciler_shape_invalid, reconciler_contract_invalid) -- diagnostic
+   * only, never parsed or branched on here. null otherwise. */
+  reconcilerRawResponse: string | null;
 }
 
 export interface MemoryV3DialogueUsage {
@@ -373,12 +378,13 @@ export function createMemoryV3DialogueStore(clientValue: MemoryV3DialogueRpcClie
     },
 
     async fail(inputValue) {
-      const input = record(inputValue, ["runId", "userId", "diagnosticCode", "transportDetail"]);
+      const input = record(inputValue, ["runId", "userId", "diagnosticCode", "transportDetail", "reconcilerRawResponse"]);
       if (typeof input.runId !== "string" || !UUID.test(input.runId) || typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.diagnosticCode !== "string" || !DIAGNOSTICS.has(input.diagnosticCode as MemoryV3DialogueStoredDiagnostic)) throw fail();
       if (input.transportDetail !== null && !nonEmpty(input.transportDetail)) throw fail();
+      if (input.reconcilerRawResponse !== null && !nonEmpty(input.reconcilerRawResponse)) throw fail();
       const data = await callRpc(client, "fail_memory_v3_dialogue_run", {
         p_run_id: input.runId, p_user_id: input.userId, p_diagnostic_code: input.diagnosticCode,
-        p_transport_detail: input.transportDetail,
+        p_transport_detail: input.transportDetail, p_reconciler_raw_response: input.reconcilerRawResponse,
       });
       if (data !== null) throw fail();
     },
