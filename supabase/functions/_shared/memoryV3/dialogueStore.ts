@@ -93,6 +93,13 @@ export interface MemoryV3DialogueStore {
 }
 
 const OWN_ERRORS = new WeakSet<object>();
+/**
+ * Side channel for failReserve()'s stage tag -- a Symbol key so it can
+ * never collide with or be reached by any enumeration of the error's own
+ * properties. getMemoryV3DialogueReserveStage() is the only sanctioned way
+ * to read it from outside this file.
+ */
+const RESERVE_STAGE = Symbol("memory-v3-dialogue-reserve-stage");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const MEMORY_KEY = SHA256;
@@ -124,6 +131,23 @@ function fail(): Error {
   const error = new Error("[memory-v3:dialogue-store] operation failed");
   error.name = "MemoryV3DialogueStoreError";
   OWN_ERRORS.add(error);
+  return error;
+}
+
+/**
+ * Same error, same generic message, same branding as fail() -- callers
+ * outside this file see no difference, and every test asserting reserve()
+ * always throws the one uninformative message still holds. The reason is
+ * carried on a side-channel, non-enumerable property instead, read only by
+ * dialogueShadowRunner.ts's own console-only diagnostics for the one case
+ * (reservation_failed never reaching the database's own exception log --
+ * migration 067/068) that has no other trace at all. Every string passed
+ * here is a fixed literal, never interpolated from request or response
+ * data, so that side channel can never leak anything either.
+ */
+function failReserve(reason: string): Error {
+  const error = fail();
+  Object.defineProperty(error, RESERVE_STAGE, { value: reason, enumerable: false });
   return error;
 }
 
@@ -351,29 +375,64 @@ function projectUsage(value: unknown): MemoryV3DialogueUsage | null {
   return usage as unknown as MemoryV3DialogueUsage;
 }
 
+/**
+ * Reads failReserve()'s stage tag off an error reserve() threw, for
+ * console-only diagnostics -- a fixed, closed-vocabulary string (never
+ * request/response-derived) or null for any error that isn't one of
+ * reserve()'s own (including a generic fail() from elsewhere in this
+ * file, which carries no stage). Every caller still sees the exact same
+ * generic error and message either way; this reads a side channel that
+ * was never part of that contract.
+ */
+export function getMemoryV3DialogueReserveStage(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const value = (error as Record<symbol, unknown>)[RESERVE_STAGE];
+  return typeof value === "string" ? value : null;
+}
+
 export function createMemoryV3DialogueStore(clientValue: MemoryV3DialogueRpcClient): MemoryV3DialogueStore {
   const client = inspectClient(clientValue);
   return {
     async reserve(inputValue) {
-      const input = record(inputValue, ["userId", "conversationId", "pipelineVersion", "extractorVersion", "reconcilerVersion", "model", "inputHash", "sourceLastMessageId", "sourceLastCreatedAt", "messageCount", "userMessageCount"]);
-      if (typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.conversationId !== "string" || !UUID.test(input.conversationId) || input.pipelineVersion !== MEMORY_V3_DIALOGUE_PIPELINE_VERSION || !nonEmpty(input.extractorVersion) || !nonEmpty(input.reconcilerVersion) || input.model !== "google/gemini-3.7-flash" || typeof input.inputHash !== "string" || !SHA256.test(input.inputHash) || typeof input.sourceLastMessageId !== "string" || !UUID.test(input.sourceLastMessageId) || !isoDateTime(input.sourceLastCreatedAt) || !Number.isSafeInteger(input.messageCount) || (input.messageCount as number) < 1 || (input.messageCount as number) > 60 || !Number.isSafeInteger(input.userMessageCount) || (input.userMessageCount as number) < 1 || (input.userMessageCount as number) > (input.messageCount as number)) throw fail();
-      const data = await callRpc(client, "reserve_memory_v3_dialogue_run", {
-          p_user_id: input.userId, p_conversation_id: input.conversationId, p_pipeline_version: input.pipelineVersion,
-          p_extractor_version: input.extractorVersion, p_reconciler_version: input.reconcilerVersion,
-          p_model: input.model, p_input_hash: input.inputHash, p_source_last_message_id: input.sourceLastMessageId,
-          p_source_last_created_at: input.sourceLastCreatedAt, p_message_count: input.messageCount,
-          p_user_message_count: input.userMessageCount,
-      });
-      const rows = array(data);
-      if (rows.length !== 1) throw fail();
-      const row = record(rows[0], ["result", "run_id", "expected_state_revision", "state"]);
+      let input: Record<string, unknown>;
+      try {
+        input = record(inputValue, ["userId", "conversationId", "pipelineVersion", "extractorVersion", "reconcilerVersion", "model", "inputHash", "sourceLastMessageId", "sourceLastCreatedAt", "messageCount", "userMessageCount"]);
+      } catch {
+        throw failReserve("invalid_input");
+      }
+      if (typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.conversationId !== "string" || !UUID.test(input.conversationId) || input.pipelineVersion !== MEMORY_V3_DIALOGUE_PIPELINE_VERSION || !nonEmpty(input.extractorVersion) || !nonEmpty(input.reconcilerVersion) || input.model !== "google/gemini-3.7-flash" || typeof input.inputHash !== "string" || !SHA256.test(input.inputHash) || typeof input.sourceLastMessageId !== "string" || !UUID.test(input.sourceLastMessageId) || !isoDateTime(input.sourceLastCreatedAt) || !Number.isSafeInteger(input.messageCount) || (input.messageCount as number) < 1 || (input.messageCount as number) > 60 || !Number.isSafeInteger(input.userMessageCount) || (input.userMessageCount as number) < 1 || (input.userMessageCount as number) > (input.messageCount as number)) throw failReserve("invalid_input");
+      let data: unknown;
+      try {
+        data = await callRpc(client, "reserve_memory_v3_dialogue_run", {
+            p_user_id: input.userId, p_conversation_id: input.conversationId, p_pipeline_version: input.pipelineVersion,
+            p_extractor_version: input.extractorVersion, p_reconciler_version: input.reconcilerVersion,
+            p_model: input.model, p_input_hash: input.inputHash, p_source_last_message_id: input.sourceLastMessageId,
+            p_source_last_created_at: input.sourceLastCreatedAt, p_message_count: input.messageCount,
+            p_user_message_count: input.userMessageCount,
+        });
+      } catch {
+        throw failReserve("rpc_call_failed");
+      }
+      let row: Record<string, unknown>;
+      try {
+        const rows = array(data);
+        if (rows.length !== 1) throw fail();
+        row = record(rows[0], ["result", "run_id", "expected_state_revision", "state"]);
+      } catch {
+        throw failReserve("response_shape_invalid");
+      }
       if (row.result === "duplicate" || row.result === "daily_cap") {
-        if (row.run_id !== null || row.expected_state_revision !== null || row.state !== null) throw fail();
+        if (row.run_id !== null || row.expected_state_revision !== null || row.state !== null) throw failReserve("duplicate_payload_invalid");
         return { status: row.result };
       }
-      if (row.result !== "reserved" || typeof row.run_id !== "string" || !UUID.test(row.run_id) || !Number.isSafeInteger(row.expected_state_revision) || (row.expected_state_revision as number) < 0) throw fail();
-      const state = projectState(row.state, input.userId as string, input.conversationId as string);
-      if (state.stateRevision !== row.expected_state_revision) throw fail();
+      if (row.result !== "reserved" || typeof row.run_id !== "string" || !UUID.test(row.run_id) || !Number.isSafeInteger(row.expected_state_revision) || (row.expected_state_revision as number) < 0) throw failReserve("result_invalid");
+      let state: MemoryV3DialogueState;
+      try {
+        state = projectState(row.state, input.userId as string, input.conversationId as string);
+      } catch {
+        throw failReserve("state_invalid");
+      }
+      if (state.stateRevision !== row.expected_state_revision) throw failReserve("state_revision_mismatch");
       return { status: "reserved", runId: row.run_id, expectedStateRevision: row.expected_state_revision as number, state };
     },
 

@@ -37,6 +37,7 @@ import {
   type MemoryV3LifecycleModelAdapter,
   type MemoryV3LifecycleTransportResult,
 } from "./lifecycleTransport.ts";
+import { getMemoryV3LifecycleReserveStage } from "./lifecycleStore.ts";
 import type {
   MemoryV3LifecycleStore,
   MemoryV3LifecycleStoredDiagnostic,
@@ -374,18 +375,17 @@ export async function runMemoryV3LifecycleShadow(
       userMessageCount: dialogue.messages.filter((message) => message.role === "user").length,
     } as never);
   } catch (error) {
-    // Developer-console-only, and deliberately logs the error's *name*
-    // only, never its message: lifecycleStore.ts's own validation
-    // failures are already opaque by design (always the same fixed
-    // message), so the name is all that distinguishes "our own store
-    // rejected this" from a genuinely unexpected error -- and an
-    // unbranded error's message is exactly the thing that might carry
-    // something sensitive (confirmed by this file's own "sanitizes
-    // reservation and state-write failures" test, which caught an
-    // earlier version of this logging statement doing exactly that).
+    // Developer-console-only. getMemoryV3LifecycleReserveStage() reads a
+    // closed-vocabulary, hardcoded-literal side channel lifecycleStore.ts's
+    // reserve() tags its own errors with -- never the error's message,
+    // which this file's own "sanitizes reservation and state-write
+    // failures" test caught an earlier version of this logging statement
+    // leaking (lifecycleStore.ts's validation failures are opaque by
+    // design: always the same fixed message, so logging it would have
+    // taught us nothing anyway).
     console.error(
       "[memory-v3-lifecycle-reserve-raw]",
-      error instanceof Error ? error.name : typeof error,
+      getMemoryV3LifecycleReserveStage(error) ?? (error instanceof Error ? error.name : typeof error),
     );
     return failed(null, "reservation_failed");
   }

@@ -6,6 +6,7 @@ import type { MemoryV3Extraction } from "./contract.ts";
 import { MEMORY_V3_DIALOGUE_SCHEMA_VERSION } from "./dialogueContract.ts";
 import {
   createMemoryV3DialogueStore,
+  getMemoryV3DialogueReserveStage,
   type MemoryV3DialogueStoredDiagnostic,
 } from "./dialogueStore.ts";
 
@@ -269,9 +270,60 @@ describe("Memory V3 dialogue store", () => {
       { userMessageCount: 3 },
     ]) {
       const fake = fakeClient([]);
-      await captureStoreError(() => createMemoryV3DialogueStore(fake.client).reserve({ ...reservationInput(), ...mutation } as never));
+      const caught = await captureStoreError(() => createMemoryV3DialogueStore(fake.client).reserve({ ...reservationInput(), ...mutation } as never));
       assert.equal(fake.calls.length, 0);
+      // The generic message/name is what every external caller still
+      // sees (captureStoreError already asserted that); the stage tag is
+      // a side channel this file's own console-only diagnostics read.
+      assert.equal(getMemoryV3DialogueReserveStage(caught), "invalid_input");
     }
+  });
+
+  it("tags reserve()'s own failure stage without ever changing the generic error callers see", async () => {
+    // response_shape_invalid: the RPC replied, but not with exactly one row.
+    const zeroRows = fakeClient([{ data: [], error: null }]);
+    assert.equal(
+      getMemoryV3DialogueReserveStage(await captureStoreError(() => createMemoryV3DialogueStore(zeroRows.client).reserve(reservationInput()))),
+      "response_shape_invalid",
+    );
+
+    // duplicate_payload_invalid: a 'duplicate' row that isn't all-null otherwise.
+    const dirtyDuplicate = fakeClient([{
+      data: [{ result: "duplicate", run_id: RUN_ID, expected_state_revision: null, state: null }],
+      error: null,
+    }]);
+    assert.equal(
+      getMemoryV3DialogueReserveStage(await captureStoreError(() => createMemoryV3DialogueStore(dirtyDuplicate.client).reserve(reservationInput()))),
+      "duplicate_payload_invalid",
+    );
+
+    // result_invalid: neither duplicate/daily_cap nor a well-formed 'reserved' row.
+    const badResult = fakeClient([{
+      data: [{ result: "reserved", run_id: "not-a-uuid", expected_state_revision: 0, state: {} }],
+      error: null,
+    }]);
+    assert.equal(
+      getMemoryV3DialogueReserveStage(await captureStoreError(() => createMemoryV3DialogueStore(badResult.client).reserve(reservationInput()))),
+      "result_invalid",
+    );
+
+    // state_revision_mismatch: a well-formed reserved row whose state disagrees with its own revision.
+    const mismatch = fakeClient([{
+      data: [{
+        result: "reserved", run_id: RUN_ID, expected_state_revision: 5,
+        state: { ...emptyState(0) },
+      }],
+      error: null,
+    }]);
+    assert.equal(
+      getMemoryV3DialogueReserveStage(await captureStoreError(() => createMemoryV3DialogueStore(mismatch.client).reserve(reservationInput()))),
+      "state_revision_mismatch",
+    );
+
+    // A generic fail() from elsewhere in this file (e.g. the allowlisted
+    // fail() path) carries no stage at all.
+    assert.equal(getMemoryV3DialogueReserveStage(new Error("unrelated")), null);
+    assert.equal(getMemoryV3DialogueReserveStage(null), null);
   });
 
   it("uses a prototype rpc method and a prototype PromiseLike then exactly once", async () => {
