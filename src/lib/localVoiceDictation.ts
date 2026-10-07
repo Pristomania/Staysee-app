@@ -107,13 +107,17 @@ export const WORKER_FINISH_TIMEOUT_MS = 30_000;
  * ramp-up artifact in the first captured audio, before the person has had
  * a chance to speak -- the streaming recognizer has been observed turning
  * that into a spurious short word at the very start of every recording.
- * Each capture block is ~85 ms at a typical 48 kHz device, so skipping two
- * blocks discards roughly the first 170 ms of audio from the recognizer
- * (not from the level meter, which still reacts immediately) without
- * noticeably delaying real speech, which rarely starts inside the first
- * moment after pressing the mic.
+ * Each capture block is ~85 ms at a typical 48 kHz device.
+ *
+ * A first attempt at 2 blocks (~170 ms) was not enough to make the
+ * artifact go away in live testing, so this discards roughly the first
+ * 425 ms of audio from the recognizer instead (not from the level meter,
+ * which still reacts immediately). Still a best-effort mitigation, not a
+ * confirmed root cause: if it recurs even now, the artifact likely is not
+ * a startup-timing issue at all, and trimming more audio would only start
+ * cutting into real speech without fixing anything.
  */
-export const AUDIO_WARMUP_SKIP_BLOCKS = 2;
+export const AUDIO_WARMUP_SKIP_BLOCKS = 5;
 
 type StageName = 'preparing' | 'listening' | 'finishing';
 
