@@ -348,7 +348,20 @@ export async function runMemoryV3DialogueShadow(
       messageCount: dialogue.messages.length,
       userMessageCount: dialogue.messages.filter((message) => message.role === "user").length,
     } as never);
-  } catch {
+  } catch (error) {
+    // Developer-console-only, and deliberately logs the error's *name*
+    // only, never its message: dialogueStore.ts's own validation failures
+    // are already opaque by design (always the same fixed message), so
+    // the name is all that distinguishes "our own store rejected this"
+    // from a genuinely unexpected error -- and an unbranded error's
+    // message is exactly the thing that might carry something sensitive
+    // (confirmed by this file's own "sanitizes reservation and
+    // state-write failures" test, which caught an earlier version of
+    // this logging statement doing exactly that).
+    console.error(
+      "[memory-v3-dialogue-reserve-raw]",
+      error instanceof Error ? error.name : typeof error,
+    );
     return failed(null, "reservation_failed");
   }
 
