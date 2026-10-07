@@ -55,7 +55,6 @@ const tree = VoiceDictationBar({
   elapsedMs: 65_000,
   level: 0.5,
   phase: 'listening',
-  interimText: '',
   onStop: () => { stopCalls += 1; },
   textClass: 'text-test',
   mutedClass: 'muted-test',
@@ -63,7 +62,7 @@ const tree = VoiceDictationBar({
 
 const status = findByProp(tree, 'role', 'status');
 assert(status.props['aria-live'] === 'polite', 'recording state is announced politely');
-assert(includesText(tree, 'Слушаю…'), 'visible listening label while nothing has been recognized yet');
+assert(includesText(tree, 'Слушаю…'), 'visible listening label');
 assert(includesText(tree, '1:05'), 'visible duration');
 assert(countVoiceBars(tree) === 9, 'nine deterministic voice bars');
 
@@ -77,7 +76,6 @@ const fallbackTree = VoiceDictationBar({
   elapsedMs: 0,
   level: 0,
   phase: 'starting',
-  interimText: '',
   onStop: () => undefined,
   textClass: 'text-test',
   mutedClass: 'muted-test',
@@ -87,24 +85,6 @@ assert(
   findByProp(fallbackTree, 'data-voice-wave', 'fallback').props.className
     ?.toString().includes('voice-wave-fallback'),
   'zero level uses calm fallback animation',
-);
-
-const liveTextTree = VoiceDictationBar({
-  elapsedMs: 3_000,
-  level: 0.5,
-  phase: 'listening',
-  interimText: 'привет, как дела',
-  onStop: () => undefined,
-  textClass: 'text-test',
-  mutedClass: 'muted-test',
-});
-assert(
-  includesText(liveTextTree, 'привет, как дела'),
-  'recognized speech is shown live while still recording, not only after Stop',
-);
-assert(
-  !includesText(liveTextTree, 'Слушаю…'),
-  'once real words appear, the placeholder label gets out of the way',
 );
 
 console.log('VoiceDictationBar.cases.test.ts — all passed');

@@ -915,8 +915,8 @@ export function ChatScreen() {
   const voiceActive = shouldStopVoiceDictation(voice.snapshot.phase);
   const voiceComposer = voiceComposerMode(voice.snapshot.phase);
   useLayoutEffect(() => {
-    resizeChatComposer(inputRef.current);
-  }, [inputValue, voiceActive]);
+    resizeChatComposer(inputRef.current, 120, voiceComposer === 'recording');
+  }, [inputValue, voiceActive, voiceComposer]);
 
   // The card is a question about what to do next. Once a session is under
   // way, or once the chat is busy sending, there is no "next" left to ask
@@ -1355,15 +1355,24 @@ export function ChatScreen() {
                   mutedClass={theme.textMuted}
                 />
               ) : voiceComposer === 'recording' ? (
-                <VoiceDictationBar
-                  elapsedMs={voice.snapshot.elapsedMs}
-                  level={voice.snapshot.level}
-                  phase={voice.snapshot.phase}
-                  interimText={voice.snapshot.interimText}
-                  onStop={voice.stop}
-                  textClass={theme.inputText}
-                  mutedClass={theme.textMuted}
-                />
+                <div className="flex w-full flex-col gap-2">
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    readOnly
+                    rows={1}
+                    className={`chat-compose-input w-full bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText}`}
+                    style={{ maxHeight: '120px' }}
+                  />
+                  <VoiceDictationBar
+                    elapsedMs={voice.snapshot.elapsedMs}
+                    level={voice.snapshot.level}
+                    phase={voice.snapshot.phase}
+                    onStop={voice.stop}
+                    textClass={theme.inputText}
+                    mutedClass={theme.textMuted}
+                  />
+                </div>
               ) : (
                 <>
                   <textarea
