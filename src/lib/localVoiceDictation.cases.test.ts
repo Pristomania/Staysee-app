@@ -1,4 +1,5 @@
 import type {
+  VoiceDictationAdapter,
   VoiceDictationErrorCode,
   VoiceDictationPrepareProgress,
   VoiceRecognitionEvent,
@@ -80,6 +81,8 @@ function createFakePlatform(options: {
   workletRejects?: boolean;
 } = {}) {
   let workerCalls = 0;
+  let isCachedCalls = 0;
+  let loadCalls = 0;
   let getUserMediaCalls = 0;
   let abortCalls = 0;
   let graphDisconnects = 0;
@@ -139,8 +142,9 @@ function createFakePlatform(options: {
       return stream;
     },
     model: options.capable === false ? null : {
-      isCached: async () => options.cached === true,
+      isCached: async () => { isCachedCalls += 1; return options.cached === true; },
       load: (loadOptions) => {
+        loadCalls += 1;
         progressSink = loadOptions.onProgress;
         return new Promise<VoiceModelPackage>((resolve, reject) => {
           releaseLoad = resolve;
@@ -182,6 +186,8 @@ function createFakePlatform(options: {
     order,
     track,
     get workerCalls() { return workerCalls; },
+    get isCachedCalls() { return isCachedCalls; },
+    get loadCalls() { return loadCalls; },
     get getUserMediaCalls() { return getUserMediaCalls; },
     get abortCalls() { return abortCalls; },
     get graphDisconnects() { return graphDisconnects; },
@@ -367,8 +373,12 @@ await runCase('one adapter start creates exactly one worker', async () => {
 });
 
 /** Drives a fake session all the way to listening. */
-async function startListening(platform: ReturnType<typeof createFakePlatform>, sink: ReturnType<typeof recorder>) {
-  const session = await createLocalVoiceDictationAdapter(platform.value).start(sink.callbacks);
+async function startListening(
+  platform: ReturnType<typeof createFakePlatform>,
+  sink: ReturnType<typeof recorder>,
+  adapter: VoiceDictationAdapter = createLocalVoiceDictationAdapter(platform.value),
+) {
+  const session = await adapter.start(sink.callbacks);
   await settle();
   platform.finishLoad();
   await settle();
@@ -609,6 +619,86 @@ await runCase('the adapter only ever emits allowlisted, on-device-appropriate co
     );
   }
   assert(!seen.has('connection-blocked'), 'there is no recognition service to be blocked from');
+});
+
+await runCase('a second recording in the same page session reuses the already-loaded engine', async () => {
+  // Terminating and recreating the worker on every single recording meant
+  // re-running the ~5s WASM compile + model load each time, even though the
+  // downloaded bytes were already cached -- this is exactly the delay a
+  // real person reported hitting on every microphone press, not just the
+  // first. Starting a second time after a clean stop must skip both the
+  // cache probe and the worker 'load' message entirely.
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const adapter = createLocalVoiceDictationAdapter(platform.value);
+
+  const first = await startListening(platform, sink, adapter);
+  assertEqual(platform.workerCalls, 1);
+  assertEqual(platform.isCachedCalls, 1);
+  assertEqual(platform.loadCalls, 1);
+  first.stop();
+  await settle();
+  platform.reply({ id: platform.lastRequestId('finish'), ok: true, text: 'первая фраза' });
+  await settle();
+  assertEqual(sink.log.ends, 1);
+  assertEqual(platform.terminateCalls, 0, 'a clean stop keeps the engine warm instead of tearing it down');
+
+  const second = await adapter.start(sink.callbacks);
+  await settle();
+  assertEqual(platform.workerCalls, 1, 'no second worker was created');
+  assertEqual(platform.isCachedCalls, 1, 'the cache was never probed again');
+  assertEqual(platform.loadCalls, 1, 'the engine was never reloaded');
+  assertDeepEqual(
+    sink.log.prepare.slice(-2),
+    [null, null],
+    'reuse has nothing to report progress on, so preparing stays indeterminate-and-brief rather than claiming a byte bar',
+  );
+  const startRequests = platform.posted.filter((message) => message.type === 'start');
+  assertEqual(startRequests.length, 2, 'the worker gets a fresh start message for the new session');
+  platform.reply({ id: platform.lastRequestId('start'), ok: true });
+  await settle();
+  assertEqual(sink.log.starts, 2, 'listening began a second time on the same warm engine');
+  second.dispose();
+});
+
+await runCase('a worker crash means the next recording starts the engine fresh', async () => {
+  // A crashed worker cannot be trusted to still hold a working recognizer --
+  // reuse must never apply to a session that ended abnormally.
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const adapter = createLocalVoiceDictationAdapter(platform.value);
+
+  await startListening(platform, sink);
+  assertEqual(platform.workerCalls, 1);
+  platform.emitWorkerError();
+  assertDeepEqual(sink.log.errors, ['recognition-failed']);
+  assertEqual(platform.terminateCalls, 1, 'the crashed worker is torn down, not kept for reuse');
+
+  const second = await adapter.start(sink.callbacks);
+  await settle();
+  assertEqual(platform.workerCalls, 2, 'a fresh worker replaces the crashed one');
+  assertEqual(platform.isCachedCalls, 2, 'the cache is probed again rather than trusting stale state');
+  second.dispose();
+});
+
+await runCase('dispose while listening tears the engine down instead of keeping it warm', async () => {
+  // Disposal means the component is genuinely going away (leaving the chat
+  // screen entirely) -- unlike a plain stop between recordings, this is the
+  // one signal that really does mean "done with voice dictation for now",
+  // so it still fully releases the worker.
+  const platform = createFakePlatform();
+  const sink = recorder();
+  const adapter = createLocalVoiceDictationAdapter(platform.value);
+
+  const session = await startListening(platform, sink);
+  session.dispose();
+  assertEqual(platform.terminateCalls, 1, 'dispose always tears the engine down, unlike a clean stop');
+
+  const second = await adapter.start(sink.callbacks);
+  await settle();
+  assertEqual(platform.workerCalls, 2, 'a fresh worker is created after disposal');
+  assertEqual(platform.isCachedCalls, 2);
+  second.dispose();
 });
 
 console.log('localVoiceDictation.cases.test.ts — all passed');

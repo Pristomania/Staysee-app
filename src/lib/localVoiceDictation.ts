@@ -243,6 +243,30 @@ export function createLocalVoiceDictationAdapter(
 ): VoiceDictationAdapter {
   const { createWorker, createAudioContext, getUserMedia, model } = platform;
 
+  // Shared across every start() call this adapter instance ever makes, not
+  // per-session like everything below. Opening the engine -- compiling the
+  // WASM module and loading the model into the ONNX runtime -- costs
+  // several seconds even though the model's own bytes are already cached by
+  // voiceModelCache.ts; terminating and recreating the worker after every
+  // single recording meant paying that cost again on every microphone
+  // press, not just the first. A worker kept warm here can be handed a
+  // fresh `'start'` message for a new recording -- the worker's own
+  // onmessage handler already resets cleanly for that (clears its queue,
+  // finishes any stale session, opens a new one on the same recognizer) --
+  // skipping the cache probe and the `'load'` message entirely.
+  let sharedWorker: VoiceWorkerLike | null = null;
+  let engineLoaded = false;
+
+  const discardSharedWorker = () => {
+    if (sharedWorker) {
+      sharedWorker.onmessage = null;
+      sharedWorker.onerror = null;
+      sharedWorker.terminate();
+    }
+    sharedWorker = null;
+    engineLoaded = false;
+  };
+
   return {
     supported: createWorker !== null
       && createAudioContext !== null
@@ -257,7 +281,7 @@ export function createLocalVoiceDictationAdapter(
       let active = true;
       let stopRequested = false;
       let stage: StageName = 'preparing';
-      let worker: VoiceWorkerLike | null = null;
+      let worker: VoiceWorkerLike | null = sharedWorker;
       let audioContext: LocalAudioContextLike | null = null;
       let stream: MediaStreamLike | null = null;
       let graph: VoiceCaptureGraph | null = null;
@@ -286,7 +310,13 @@ export function createLocalVoiceDictationAdapter(
         stream = null;
       };
 
-      const cleanup = () => {
+      // `keepWorkerWarm`: true only for the one path that both finished
+      // cleanly AND is known to have a genuinely working engine behind it
+      // (a successful recording, or ending a reused session's preparing
+      // stage instantly). Every error path, a crashed worker, and disposal
+      // all pass false -- reuse must never apply to a session that didn't
+      // clearly end in a good state.
+      const cleanup = (keepWorkerWarm: boolean) => {
         if (!active) return;
         active = false;
         // An 83 MB fetch for a session nobody is waiting for is pure waste
@@ -298,10 +328,11 @@ export function createLocalVoiceDictationAdapter(
         releaseCapture();
         if (audioContext) void audioContext.close().catch(() => undefined);
         audioContext = null;
-        if (worker) {
-          worker.onmessage = null;
-          worker.onerror = null;
-          worker.terminate();
+        if (keepWorkerWarm && worker && worker === sharedWorker && engineLoaded) {
+          // Leave sharedWorker/engineLoaded as they are: the next start()
+          // on this adapter will reuse this exact worker.
+        } else {
+          discardSharedWorker();
         }
         worker = null;
       };
@@ -312,12 +343,12 @@ export function createLocalVoiceDictationAdapter(
       // it, so a trailing onEnd would be ignored anyway.
       const stopWithError = (code: VoiceDictationErrorCode) => {
         if (!active) return;
-        cleanup();
+        cleanup(false);
         callbacks.onError(code);
       };
-      const endSession = () => {
+      const endSession = (keepWorkerWarm: boolean) => {
         if (!active) return;
-        cleanup();
+        cleanup(keepWorkerWarm);
         callbacks.onEnd();
       };
 
@@ -402,6 +433,13 @@ export function createLocalVoiceDictationAdapter(
 
       const prepare = async () => {
         try {
+          if (engineLoaded) {
+            // sharedWorker is already holding a loaded engine from an
+            // earlier session on this same adapter -- skip the cache
+            // probe and the download/load round trip entirely.
+            await startCapture();
+            return;
+          }
           let pkg: VoiceModelPackage;
           try {
             const cached = await model.isCached();
@@ -441,6 +479,7 @@ export function createLocalVoiceDictationAdapter(
             throw stageError('prepare-failed');
           }
           if (!active) return;
+          engineLoaded = true;
 
           await startCapture();
         } catch (error) {
@@ -456,7 +495,11 @@ export function createLocalVoiceDictationAdapter(
         if (stage === 'preparing') {
           // Nothing was recorded; abandon the download instead of letting it
           // run to completion for a session the person already cancelled.
-          endSession();
+          // cleanup()'s own guard only actually keeps the worker warm when
+          // it was already a loaded, reused engine -- a first-time
+          // preparing stage (download/load still in flight) never
+          // qualifies, since engineLoaded is still false at that point.
+          endSession(true);
           return;
         }
 
@@ -484,11 +527,12 @@ export function createLocalVoiceDictationAdapter(
           return;
         }
         callbacks.onTranscript({ finalText: text, interimText: '' });
-        endSession();
+        endSession(true);
       }
 
-      const next = createWorker();
+      const next = sharedWorker ?? createWorker();
       worker = next;
+      sharedWorker = next;
       next.onmessage = (event) => {
         if (!active || worker !== next) return;
         const data = event.data as VoiceWorkerMessage;
@@ -510,6 +554,11 @@ export function createLocalVoiceDictationAdapter(
       };
       next.onerror = () => {
         if (!active || worker !== next) return;
+        // A crashed engine is never safe to hand to the next session,
+        // regardless of which stage this one was in when it crashed --
+        // discard it now so a later endSession(true) (e.g. the
+        // finishing-tail fallback below) can't mistake it for reusable.
+        if (sharedWorker === next) discardSharedWorker();
         // While finishing, a `finish` request is already in flight. Settling
         // it here lets stopSession()'s own catch block run to completion and
         // fall back to `latestText` -- the same path the finish-timeout case
@@ -530,7 +579,7 @@ export function createLocalVoiceDictationAdapter(
 
       return {
         stop() { void stopSession(); },
-        dispose() { cleanup(); },
+        dispose() { cleanup(false); },
       };
     },
   };
