@@ -1359,6 +1359,7 @@ export function ChatScreen() {
                   elapsedMs={voice.snapshot.elapsedMs}
                   level={voice.snapshot.level}
                   phase={voice.snapshot.phase}
+                  interimText={voice.snapshot.interimText}
                   onStop={voice.stop}
                   textClass={theme.inputText}
                   mutedClass={theme.textMuted}

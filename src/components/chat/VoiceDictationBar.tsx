@@ -11,13 +11,15 @@ export function VoiceDictationBar(props: {
   elapsedMs: number;
   level: number;
   phase: VoiceDictationPhase;
+  interimText: string;
   onStop(): void;
   textClass: string;
   mutedClass: string;
 }) {
-  const { elapsedMs, level, phase, onStop, textClass, mutedClass } = props;
+  const { elapsedMs, level, phase, interimText, onStop, textClass, mutedClass } = props;
   const normalizedLevel = normalizeVoiceLevel(level);
   const fallback = normalizedLevel === 0;
+  const label = interimText || (phase === 'starting' ? 'Подготавливаю…' : 'Слушаю…');
 
   return (
     <div
@@ -27,25 +29,25 @@ export function VoiceDictationBar(props: {
       aria-label={phase === 'starting' ? 'Голосовой ввод запускается' : 'Идёт голосовой ввод'}
     >
       <Mic className="h-4 w-4 shrink-0 text-[#c9a96e]" strokeWidth={1.6} />
-      <span className={`shrink-0 text-sm font-light ${textClass}`}>
-        {phase === 'starting' ? 'Подготавливаю…' : 'Слушаю…'}
-      </span>
-      <div
-        className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1 ${fallback ? 'voice-wave-fallback' : ''}`}
-        data-voice-wave={fallback ? 'fallback' : 'live'}
-        aria-hidden="true"
-      >
-        {BAR_MULTIPLIERS.map((multiplier, index) => {
-          const scale = fallback ? multiplier * 0.5 : Math.max(0.22, normalizedLevel * multiplier);
-          return (
-            <span
-              key={index}
-              data-voice-bar={`bar-${index}`}
-              className="h-5 w-0.5 rounded-full bg-[#c9a96e]/70 transition-transform duration-100"
-              style={{ transform: `scaleY(${scale})` }}
-            />
-          );
-        })}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className={`truncate text-sm font-light ${textClass}`}>{label}</span>
+        <div
+          className={`flex h-3 min-w-0 items-center gap-1 ${fallback ? 'voice-wave-fallback' : ''}`}
+          data-voice-wave={fallback ? 'fallback' : 'live'}
+          aria-hidden="true"
+        >
+          {BAR_MULTIPLIERS.map((multiplier, index) => {
+            const scale = fallback ? multiplier * 0.5 : Math.max(0.22, normalizedLevel * multiplier);
+            return (
+              <span
+                key={index}
+                data-voice-bar={`bar-${index}`}
+                className="h-3 w-0.5 rounded-full bg-[#c9a96e]/70 transition-transform duration-100"
+                style={{ transform: `scaleY(${scale})` }}
+              />
+            );
+          })}
+        </div>
       </div>
       <span className={`w-9 shrink-0 text-right text-xs tabular-nums ${mutedClass}`}>
         {formatDictationDuration(elapsedMs)}
