@@ -281,9 +281,10 @@ async function persistFailure(
   diagnosticCode: MemoryV3DialogueShadowDiagnostic,
   transportDetail: string | null = null,
   reconcilerRawResponse: string | null = null,
+  reconcilerContext: string | null = null,
 ): Promise<MemoryV3DialogueShadowResult> {
   try {
-    await failStore({ runId, userId, diagnosticCode, transportDetail, reconcilerRawResponse } as never);
+    await failStore({ runId, userId, diagnosticCode, transportDetail, reconcilerRawResponse, reconcilerContext } as never);
     return failed(runId, diagnosticCode);
   } catch {
     return failed(runId, "state_write_failed");
@@ -483,11 +484,25 @@ export async function runMemoryV3DialogueShadow(
     });
   }
 
+  // The exact inputs validateMemoryV3DialogueProposal() is about to
+  // receive -- captured once, before anything can go wrong, so every
+  // failure branch below can hand it to persistFailure() for a replayable
+  // diagnostic (migration 071). Built defensively: a circular or
+  // otherwise unserializable state/extraction must never block reporting
+  // the failure it would have explained.
+  const reconcilerContext = (() => {
+    try {
+      return JSON.stringify({ state, extraction, bindings: bundle.bindings }).slice(0, 20_000);
+    } catch {
+      return null;
+    }
+  })();
+
   let rawProposal: unknown;
   try {
     rawProposal = JSON.parse(reconciler.rawContent);
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_parse_invalid", null, reconciler.rawContent);
+    return await persistFailure(failStore, runId, userId, "reconciler_parse_invalid", null, reconciler.rawContent, reconcilerContext);
   }
   let proposal;
   try {
@@ -507,13 +522,13 @@ export async function runMemoryV3DialogueShadow(
   } catch (error) {
     const own = ownDiagnostic(error);
     if (own === "reconciler_shape_invalid") {
-      return await persistFailure(failStore, runId, userId, own, null, reconciler.rawContent);
+      return await persistFailure(failStore, runId, userId, own, null, reconciler.rawContent, reconcilerContext);
     }
     const diagnostic = projectSafeMemoryV3DialogueContractDiagnostic(error);
     const code = diagnostic === "dialogue_contract_invalid_shape"
       ? "reconciler_shape_invalid"
       : "reconciler_contract_invalid";
-    return await persistFailure(failStore, runId, userId, code, null, reconciler.rawContent);
+    return await persistFailure(failStore, runId, userId, code, null, reconciler.rawContent, reconcilerContext);
   }
 
   let reduced;
@@ -522,7 +537,7 @@ export async function runMemoryV3DialogueShadow(
       state, at: last.createdAt, conversationId, extraction, proposal, trustedForgetMemoryKeys: [],
     });
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent);
+    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent, reconcilerContext);
   }
 
   let resultingState: MemoryV3DialogueState;
@@ -532,7 +547,7 @@ export async function runMemoryV3DialogueShadow(
       stateRevision: (reserved.expectedStateRevision as number) + (reduced.changed ? 1 : 0),
     }, userId, conversationId);
   } catch {
-    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent);
+    return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent, reconcilerContext);
   }
   let cas: unknown;
   try {

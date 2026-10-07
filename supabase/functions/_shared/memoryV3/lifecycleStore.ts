@@ -54,6 +54,13 @@ export interface MemoryV3LifecycleFailureWrite {
    * reconciler_shape_invalid, reconciler_contract_invalid) -- diagnostic
    * only, never parsed or branched on here. null otherwise. */
   reconcilerRawResponse: string | null;
+  /** JSON.stringify({ state, extraction, bindings }) -- the exact inputs
+   * validateMemoryV3LifecycleProposal() received, present for the same
+   * failures as reconcilerRawResponse. Lets a future failure be replayed
+   * through the real validator instead of guessed at. Ordinary
+   * application data already sent to the provider and already persisted
+   * on the success path; diagnostic only, never parsed here. */
+  reconcilerContext: string | null;
 }
 
 export interface MemoryV3LifecycleUsage {
@@ -437,13 +444,15 @@ export function createMemoryV3LifecycleStore(clientValue: MemoryV3LifecycleRpcCl
     },
 
     async fail(inputValue) {
-      const input = record(inputValue, ["runId", "userId", "diagnosticCode", "transportDetail", "reconcilerRawResponse"]);
+      const input = record(inputValue, ["runId", "userId", "diagnosticCode", "transportDetail", "reconcilerRawResponse", "reconcilerContext"]);
       if (typeof input.runId !== "string" || !UUID.test(input.runId) || typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.diagnosticCode !== "string" || !DIAGNOSTICS.has(input.diagnosticCode as MemoryV3LifecycleStoredDiagnostic)) throw fail();
       if (input.transportDetail !== null && !nonEmpty(input.transportDetail)) throw fail();
       if (input.reconcilerRawResponse !== null && !nonEmpty(input.reconcilerRawResponse)) throw fail();
+      if (input.reconcilerContext !== null && !nonEmpty(input.reconcilerContext)) throw fail();
       const data = await callRpc(client, "fail_memory_v3_lifecycle_shadow_run", {
         p_run_id: input.runId, p_user_id: input.userId, p_diagnostic_code: input.diagnosticCode,
         p_transport_detail: input.transportDetail, p_reconciler_raw_response: input.reconcilerRawResponse,
+        p_reconciler_context: input.reconcilerContext,
       });
       if (data !== null) throw fail();
     },

@@ -400,7 +400,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "extractor_transport_failed" });
     assert.deepEqual(test.failInputs, [{
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "extractor_transport_failed", transportDetail: "provider_http_5xx",
-      reconcilerRawResponse: null,
+      reconcilerRawResponse: null, reconcilerContext: null,
     }]);
     assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
   });
@@ -426,7 +426,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.equal(test.calls.at(-1), "fail:reconciler_transport_failed");
     assert.deepEqual(test.failInputs, [{
       runId: RUN_ID, userId: USER_ID, diagnosticCode: "reconciler_transport_failed", transportDetail: "provider_http_400",
-      reconcilerRawResponse: null,
+      reconcilerRawResponse: null, reconcilerContext: null,
     }]);
   });
 
@@ -476,6 +476,14 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
         (test.failInputs.at(-1) as { reconcilerRawResponse: unknown }).reconcilerRawResponse,
         rawContent,
       );
+      // migration 071: the exact state/extraction/bindings the reconciler
+      // was reasoning about, so a future failure can be replayed through
+      // the real validator instead of reconstructed from memory.
+      const context = JSON.parse(
+        (test.failInputs.at(-1) as { reconcilerContext: string }).reconcilerContext,
+      );
+      assert.deepEqual(Object.keys(context).sort(), ["bindings", "extraction", "state"]);
+      assert.equal(context.bindings.candidates[0].candidateRef, "candidate:0001");
     }
   });
 
