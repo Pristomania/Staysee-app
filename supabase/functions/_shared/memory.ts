@@ -1026,6 +1026,7 @@ export async function updateConversationSummary(
   const withTimestamp = {
     conversation_summary: serialized,
     summary_updated_at: new Date().toISOString(),
+    emotional_tone: tone ?? null,
   };
 
   if (input.diag?.enabled) {
