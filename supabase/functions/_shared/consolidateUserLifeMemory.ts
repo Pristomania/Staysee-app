@@ -234,6 +234,7 @@ export async function consolidateUserLifeMemoryRows(
       user_id: userId,
       memory_type: c.memory_type,
       content,
+      importance: c.importance,
     });
     if (error) {
       console.error(`[consolidate] insert failed user=${userId}:`, error.message);

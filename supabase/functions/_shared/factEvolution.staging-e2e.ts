@@ -51,6 +51,7 @@ async function applyCandidates(
         user_id: TEST_USER,
         memory_type: evolution.memory_type,
         content: evolution.content.endsWith(".") ? evolution.content : `${evolution.content}.`,
+        importance: c.importance,
       })
       .select("id, content, memory_type")
       .single();

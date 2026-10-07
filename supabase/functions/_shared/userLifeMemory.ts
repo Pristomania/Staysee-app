@@ -384,6 +384,7 @@ export async function refreshUserLifeMemory(
           user_id: userId,
           memory_type: evolution.memory_type,
           content,
+          importance: c.importance,
         })
         .select("id")
         .single();
@@ -437,6 +438,7 @@ export async function refreshUserLifeMemory(
       user_id: userId,
       memory_type: c.memory_type,
       content,
+      importance: c.importance,
     });
 
     if (!error) {
