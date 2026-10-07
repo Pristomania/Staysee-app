@@ -130,3 +130,18 @@ describe("conversation-scoped cross-memory", () => {
     );
   });
 });
+
+describe("fetchMemoryItems ordering", () => {
+  it("breaks importance ties by recency, so a reconfirmed fact outranks one nobody has touched in months", () => {
+    // Without a secondary key, two rows tied on importance (most rows, in
+    // practice, since most types share a score) fall back to whatever
+    // order Postgres happens to return matching rows in -- close to
+    // insertion order, and exactly the "stuck on old facts forever" risk
+    // userLifeMemory.ts's reinforceExistingRow was built to avoid on the
+    // write side. This is the read-side half of the same fix.
+    assert.match(
+      contextSource,
+      /\.order\("importance",\s*\{\s*ascending:\s*false\s*\}\)[\s\S]*?\.order\("updated_at",\s*\{\s*ascending:\s*false,\s*nullsFirst:\s*false\s*\}\)/,
+    );
+  });
+});

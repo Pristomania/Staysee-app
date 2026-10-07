@@ -270,7 +270,7 @@ export async function refreshUserLifeMemory(
 
   const { data: existingRows } = await supabase
     .from("user_memory")
-    .select("id, content, memory_type")
+    .select("id, content, memory_type, importance")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(MAX_CROSS_MEMORY_ROWS);
@@ -282,6 +282,26 @@ export async function refreshUserLifeMemory(
   }));
   const existing = existingRowRecords.map((r) => r.content);
   const known = new Set(existing.map((c) => c.toLowerCase()));
+  // A fact being mentioned again, in a later conversation, is the only
+  // "still relevant" signal this table has -- without it, importance is
+  // write-once (set at insert, then frozen forever). Tracks the current
+  // importance per row id so a reconfirmation can raise it instead of
+  // only being silently deduplicated away.
+  const importanceById = new Map<string, number>(
+    (existingRows ?? []).map((r) => [r.id as string, (r.importance as number | null) ?? 3])
+  );
+  async function reinforceExistingRow(rowId: string): Promise<void> {
+    const current = importanceById.get(rowId) ?? 3;
+    const boosted = Math.min(5, current + 1);
+    importanceById.set(rowId, boosted);
+    const { error } = await supabase
+      .from("user_memory")
+      .update({ importance: boosted, updated_at: new Date().toISOString() })
+      .eq("id", rowId);
+    if (error) {
+      console.warn("[userLifeMemory] reinforce failed:", error.message);
+    }
+  }
 
   const ruleBased = filterCrossMemoryCandidates(buildCrossMemoryCandidates(memory));
   const candidates: CrossMemoryCandidate[] = [...ruleBased];
@@ -375,8 +395,16 @@ export async function refreshUserLifeMemory(
       }
 
       const key = content.toLowerCase();
-      if (known.has(key)) continue;
-      if (trackedRows.some((r) => similarMemory(r.content, content))) continue;
+      if (known.has(key)) {
+        const match = trackedRows.find((r) => r.content.toLowerCase() === key);
+        if (match?.id) await reinforceExistingRow(match.id);
+        continue;
+      }
+      const reconfirmed = trackedRows.find((r) => similarMemory(r.content, content));
+      if (reconfirmed) {
+        if (reconfirmed.id) await reinforceExistingRow(reconfirmed.id);
+        continue;
+      }
 
       const { data: inserted, error } = await supabase
         .from("user_memory")
@@ -392,6 +420,7 @@ export async function refreshUserLifeMemory(
       if (!error && inserted?.id) {
         known.add(key);
         rowCount++;
+        importanceById.set(inserted.id as string, c.importance);
         trackedRows.push({
           id: inserted.id as string,
           content,
@@ -421,8 +450,16 @@ export async function refreshUserLifeMemory(
     if (!content) continue;
     if (crossMemoryContradictsCorrection(content, durableCorrections)) continue;
     const key = content.toLowerCase();
-    if (known.has(key)) continue;
-    if (trackedRows.some((r) => similarMemory(r.content, content))) continue;
+    if (known.has(key)) {
+      const match = trackedRows.find((r) => r.content.toLowerCase() === key);
+      if (match?.id) await reinforceExistingRow(match.id);
+      continue;
+    }
+    const reconfirmed = trackedRows.find((r) => similarMemory(r.content, content));
+    if (reconfirmed) {
+      if (reconfirmed.id) await reinforceExistingRow(reconfirmed.id);
+      continue;
+    }
     if (
       candidates.some(
         (other) =>

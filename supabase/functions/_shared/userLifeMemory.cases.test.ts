@@ -28,3 +28,31 @@ it("writes the candidate's computed importance on both user_memory insert paths,
     assert.match(call, /importance:\s*c\.importance/);
   }
 });
+
+it("reinforces (not silently skips) a fact that matches an already-stored row, instead of leaving importance write-once forever", () => {
+  // Without this, importance is set once at insert and never revisited --
+  // a fact mentioned again in a later conversation (the only real "still
+  // relevant" signal this table has) was previously just deduplicated
+  // away with zero effect, same as a fact nobody has mentioned since.
+  assert.match(
+    source,
+    /async function reinforceExistingRow\(rowId: string\): Promise<void> \{/,
+  );
+  assert.match(source, /const boosted = Math\.min\(5, current \+ 1\);/);
+  assert.match(
+    source,
+    /\.update\(\{\s*importance:\s*boosted,\s*updated_at:\s*new Date\(\)\.toISOString\(\),?\s*\}\)/,
+  );
+  // Called from both the exact-duplicate and the similar-fact branch, in
+  // both the fact-evolution insert path and the generic insert path --
+  // four call sites, not just a defined-but-unused helper.
+  const calls = source.match(/reinforceExistingRow\([a-zA-Z.]+\)/g) ?? [];
+  assert.equal(calls.length, 4);
+});
+
+it("keeps importance within the column's 1-5 range even after repeated reinforcement", () => {
+  // The backing column has CHECK (importance BETWEEN 1 AND 5) (migration
+  // 005) -- Math.min(5, ...) is not just a product choice, an unbounded
+  // increment would make every repeat insert fail the constraint outright.
+  assert.match(source, /Math\.min\(5, current \+ 1\)/);
+});

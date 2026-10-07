@@ -288,6 +288,14 @@ async function fetchMemoryItems(
     .select("id, memory_type, content, importance, created_at, updated_at, last_used_at")
     .eq("user_id", userId)
     .order("importance", { ascending: false })
+    // Secondary key, not a replacement for importance: within the same
+    // importance tier (most rows, in practice -- see userLifeMemory.ts's
+    // reinforceExistingRow), a fact reconfirmed or inserted recently beats
+    // one nobody has mentioned in months. Without this, a tie on
+    // importance silently falls back to whatever order Postgres happens
+    // to return matching rows in, which is close to insertion order and
+    // exactly the "stuck on old facts" risk this was built to avoid.
+    .order("updated_at", { ascending: false, nullsFirst: false })
     .limit(MAX_MEMORY_ITEMS);
 
   if (!rich.error && rich.data?.length) {
