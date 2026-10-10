@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { dedupeMemoryItems, normalizeDedupKey } from './memoryDisplay';
 import { filterTensionNotes, type ProgressEntry } from './progressDiary';
 import { parseConversationMemory, type StructuredMemory } from './memoryUi';
-import type { UserMemory } from '../types';
+import { exportMemoryV3Data } from './memoryV3Viewer';
 
 export interface MessageActivityWindow {
   recentCount: number;
@@ -54,11 +54,17 @@ export interface DynamicsAliveItem {
   source: 'open_loops' | 'tension' | 'weekly';
 }
 
+export interface LinkedMemoryPair {
+  newClaim: string;
+  oldClaim: string;
+  newUpdatedAt: string;
+}
+
 export interface ConversationDynamicsData {
   memory: StructuredMemory;
   weeklies: ProgressEntry[];
   tensions: ProgressEntry[];
-  crossMemory: UserMemory[];
+  linkedPairs: LinkedMemoryPair[];
   messageActivity: MessageActivityWindow;
 }
 
@@ -80,37 +86,6 @@ function dedupeTexts(texts: string[]): string[] {
     out.push(t);
   }
   return out;
-}
-
-function splitWeeklyPhrases(text: string): string[] {
-  return text
-    .split(/[\n.;]+/)
-    .map((p) => p.replace(/^[\s\-–—]+/, '').trim())
-    .filter((p) => p.length >= 8);
-}
-
-function compareWeeklies(newer: string, older: string) {
-  const newerPhrases = splitWeeklyPhrases(newer);
-  const olderPhrases = splitWeeklyPhrases(older);
-  const newItems: string[] = [];
-  const fadedItems: string[] = [];
-  const repeatedItems: string[] = [];
-
-  for (const phrase of newerPhrases) {
-    const inOlder = olderPhrases.some((o) => isSimilarText(phrase, o));
-    if (inOlder) repeatedItems.push(phrase);
-    else newItems.push(phrase);
-  }
-  for (const phrase of olderPhrases) {
-    const inNewer = newerPhrases.some((n) => isSimilarText(phrase, n));
-    if (!inNewer) fadedItems.push(phrase);
-  }
-
-  return {
-    newItems: dedupeTexts(newItems).slice(0, 4),
-    fadedItems: dedupeTexts(fadedItems).slice(0, 4),
-    repeatedItems: dedupeTexts(repeatedItems).slice(0, 3),
-  };
 }
 
 function messageWord(n: number): string {
@@ -162,27 +137,22 @@ function extractUnfinishedFromWeekly(text: string): string[] {
 }
 
 export function buildChangingView(data: ConversationDynamicsData): DynamicsChangingView {
-  const latest = data.weeklies[0];
-  const previous = data.weeklies[1];
-  let newItems: string[] = [];
-  let fadedItems: string[] = [];
-  let repeatedItems: string[] = [];
-
-  if (latest && previous) {
-    const diff = compareWeeklies(latest.content, previous.content);
-    newItems = diff.newItems;
-    fadedItems = diff.fadedItems;
-    repeatedItems = diff.repeatedItems;
-  }
+  const latestWeeklyAt = data.weeklies[0]?.created_at;
+  const previousWeeklyAt = data.weeklies[1]?.created_at;
+  const sincePrevious = previousWeeklyAt
+    ? data.linkedPairs.filter((p) =>
+        p.newUpdatedAt > previousWeeklyAt && (!latestWeeklyAt || p.newUpdatedAt <= latestWeeklyAt))
+    : [];
+  const newItems = sincePrevious.map((p) => p.newClaim).slice(0, 4);
+  const fadedItems = sincePrevious.map((p) => p.oldClaim).slice(0, 4);
 
   const activityText = buildActivityText(data.messageActivity);
   const empty =
     newItems.length === 0 &&
     fadedItems.length === 0 &&
-    repeatedItems.length === 0 &&
     !activityText;
 
-  return { newItems, fadedItems, repeatedItems, activityText, empty };
+  return { newItems, fadedItems, repeatedItems: [], activityText, empty };
 }
 
 export function buildRepeatingView(data: ConversationDynamicsData): DynamicsRepeatingItem[] {
@@ -279,14 +249,19 @@ export async function fetchMessageActivityForConversation(
   return { recentCount, previousCount };
 }
 
-export async function fetchCrossMemoryForUser(userId: string): Promise<UserMemory[]> {
-  const { data, error } = await supabase
-    .from('user_memory')
-    .select('id, user_id, memory_type, content, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as UserMemory[];
+export async function fetchLinkedMemoryPairs(): Promise<LinkedMemoryPair[]> {
+  const result = await exportMemoryV3Data();
+  if (result.error) return [];
+  const all = [...result.accountWide, ...result.dialogue];
+  const byKey = new Map(all.map((item) => [item.memoryKey, item]));
+  const pairs: LinkedMemoryPair[] = [];
+  for (const item of all) {
+    if (!item.replacesMemoryKey) continue;
+    const old = byKey.get(item.replacesMemoryKey);
+    if (!old) continue;
+    pairs.push({ newClaim: item.claim, oldClaim: old.claim, newUpdatedAt: item.updatedAt });
+  }
+  return pairs.sort((a, b) => (a.newUpdatedAt < b.newUpdatedAt ? 1 : -1));
 }
 
 export async function fetchTensionsForConversation(

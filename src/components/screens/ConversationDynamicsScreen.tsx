@@ -12,7 +12,7 @@ import {
   buildChangingView,
   buildRepeatingView,
   fetchConversationMemory,
-  fetchCrossMemoryForUser,
+  fetchLinkedMemoryPairs,
   fetchMessageActivityForConversation,
   fetchTensionsForConversation,
   type ConversationDynamicsData,
@@ -375,11 +375,11 @@ export function ConversationDynamicsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [weeklyRows, memory, tensions, crossMemory, activity, cd] = await Promise.all([
+      const [weeklyRows, memory, tensions, linkedPairs, activity, cd] = await Promise.all([
         fetchWeeklyDynamics(user.id, convId),
         fetchConversationMemory(user.id, convId),
         fetchTensionsForConversation(user.id, convId),
-        fetchCrossMemoryForUser(user.id),
+        fetchLinkedMemoryPairs(),
         fetchMessageActivityForConversation(convId),
         getWeeklyCooldownStatus(convId),
       ]);
@@ -389,7 +389,7 @@ export function ConversationDynamicsScreen() {
         memory: memory ?? emptyMemory(),
         weeklies: weeklyRows,
         tensions,
-        crossMemory,
+        linkedPairs,
         messageActivity: activity,
       });
     } catch {
