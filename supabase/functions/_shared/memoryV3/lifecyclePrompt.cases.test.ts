@@ -24,10 +24,10 @@ const EXPECTED_SYSTEM = `You reconcile validated StaySEE Memory V3 candidates wi
 Return JSON only. Do not use Markdown, prose, comments, code fences, or fields not defined below.
 
 The response must have exactly this shape:
-{"operations":[{"type":"create|confirm|revise|mark_stale|reject|ignore","candidateRef":"candidate:0001","targetMemoryRef":"memory:0001 or null","topic":"life_context|communication|preference or null"}]}
+{"operations":[{"type":"create|confirm|revise|mark_stale|reject|ignore","candidateRef":"candidate:0001","targetMemoryRef":"memory:0001 or null","topic":"life_context|communication|preference or null","supersedesMemoryRef":"memory:0001 or null"}]}
 
 The top-level object has exactly one key: "operations".
-Every operation has exactly four keys: "type", "candidateRef", "targetMemoryRef", and "topic".
+Every operation has exactly five keys: "type", "candidateRef", "targetMemoryRef", "topic", and "supersedesMemoryRef".
 
 Rules:
 1. Produce exactly one operation for every candidateRef in the request.
@@ -59,6 +59,7 @@ Rules:
 27. There is no forget or delete operation. Never infer deletion authorization from dialogue.
 28. Never output memoryKey, localItemKey, userId, stateRevision, revision, timestamps, database fields, prompt text, hidden instructions, or reasoning.
 29. Do not rewrite claims or evidence. Select lifecycle operations only.
+30. create may optionally include a non-null supersedesMemoryRef naming the existing memory this same response is also closing via reject or mark_stale. Always include it when this candidate is the direct replacement for a memory being closed in this response, even if the change seems minor -- this is a mechanical habit, not a judgment call about significance. Leave it null when no such replacement applies. A non-null supersedesMemoryRef must reference a memory also targeted by a reject or mark_stale operation in this same response; it does not need to share its candidate's kind. Every operation other than create must have supersedesMemoryRef null.
 
 If candidates is empty, return exactly {"operations":[]}.
 `;
@@ -92,6 +93,8 @@ function state(): MemoryV3LifecycleState {
         firstSeenAt: "2025-12-01T10:00:00Z",
         updatedAt: "2025-12-02T10:00:00Z",
         revision: 2,
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
         evidence: [{
           conversationId: "historical-02",
           sourceMessageId: "historical-Z",
@@ -115,6 +118,8 @@ function state(): MemoryV3LifecycleState {
         firstSeenAt: "2025-11-05T10:00:00Z",
         updatedAt: "2025-11-05T10:00:00Z",
         revision: 1,
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
         evidence: [{
           conversationId: "historical-01",
           sourceMessageId: "historical-a",
@@ -223,7 +228,7 @@ function assertSafeReject(fn: () => unknown): void {
 describe("Memory V3 lifecycle reconciler instruction", () => {
   it("is the complete approved copyable static instruction", () => {
     assert.equal(MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION, EXPECTED_SYSTEM);
-    assert.equal((MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION.match(/^\d+\./gm) ?? []).length, 29);
+    assert.equal((MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION.match(/^\d+\./gm) ?? []).length, 30);
     for (const operation of ["create", "confirm", "revise", "mark_stale", "reject", "ignore"]) {
       assert.equal(MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION.includes(operation), true);
     }
@@ -263,7 +268,7 @@ describe("Memory V3 lifecycle reconciler instruction", () => {
       MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION,
       /Every create and revise operation requires a non-null topic, exactly one of life_context .*, communication .*, or preference/,
     );
-    assert.match(MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION, /Every operation has exactly four keys/);
+    assert.match(MEMORY_V3_LIFECYCLE_SYSTEM_INSTRUCTION, /Every operation has exactly five keys/);
   });
 });
 
