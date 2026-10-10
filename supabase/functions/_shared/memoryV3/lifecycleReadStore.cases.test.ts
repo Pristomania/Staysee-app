@@ -31,6 +31,8 @@ function validContext() {
         eventTimeEnd: null,
         alternative: null,
         updatedAt: "2026-09-20T08:00:00Z",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
       {
         kind: "recurrence",
@@ -41,6 +43,8 @@ function validContext() {
         eventTimeEnd: null,
         alternative: null,
         updatedAt: "2026-09-19T08:00:00+03:00",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
       {
         kind: "hypothesis",
@@ -51,6 +55,8 @@ function validContext() {
         eventTimeEnd: null,
         alternative: "Юмор помогает поддержать окружающих.",
         updatedAt: "2026-09-18T08:00:00.123Z",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
     ],
   };
@@ -119,6 +125,8 @@ describe("Memory V3 lifecycle read projection", () => {
         "eventTimeEnd",
         "alternative",
         "updatedAt",
+        "replacesMemoryKey",
+        "replacedByMemoryKey",
       ]);
     }
     assert.deepEqual(input, snapshot);
@@ -236,6 +244,52 @@ describe("Memory V3 lifecycle read projection", () => {
     for (const value of [cyclic, revoked, throwing, stateful]) {
       assertSafeStoreError(() => projectMemoryV3LifecycleReadContext(value));
     }
+  });
+});
+
+describe("Memory V3 lifecycle read linked pairs", () => {
+  test("accepts an event/recurrence item in a CLOSED status when it carries replacedByMemoryKey (the old end of a linked pair)", () => {
+    const closedLinkedItem = {
+      kind: "event", claim: "boa", status: "corrected", sensitivity: "normal",
+      eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      updatedAt: "2026-01-01T00:00:00Z",
+      replacesMemoryKey: null, replacedByMemoryKey: "a".repeat(64),
+    };
+    const value = {
+      schemaVersion: SCHEMA_VERSION, stateRevision: 0,
+      items: [closedLinkedItem],
+    };
+    assert.doesNotThrow(() => projectMemoryV3LifecycleReadContext(value));
+  });
+
+  test("still rejects a bare CLOSED item with no link pointer, exactly as before", () => {
+    const bareClosedItem = {
+      kind: "event", claim: "boa", status: "corrected", sensitivity: "normal",
+      eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      updatedAt: "2026-01-01T00:00:00Z",
+      replacesMemoryKey: null, replacedByMemoryKey: null,
+    };
+    const value = {
+      schemaVersion: SCHEMA_VERSION, stateRevision: 0,
+      items: [bareClosedItem],
+    };
+    assertSafeStoreError(() => projectMemoryV3LifecycleReadContext(value));
+  });
+
+  test("keeps today's output for an ordinary active item with both link fields null", () => {
+    const ordinary = {
+      kind: "event", claim: "boa", status: "active", sensitivity: "normal",
+      eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      updatedAt: "2026-01-01T00:00:00Z",
+      replacesMemoryKey: null, replacedByMemoryKey: null,
+    };
+    const value = {
+      schemaVersion: SCHEMA_VERSION, stateRevision: 0,
+      items: [ordinary],
+    };
+    const result = projectMemoryV3LifecycleReadContext(value);
+    assert.equal(result.items[0].replacesMemoryKey, null);
+    assert.equal(result.items[0].replacedByMemoryKey, null);
   });
 });
 
