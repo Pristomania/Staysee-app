@@ -103,7 +103,7 @@ class QueryLike<T> implements PromiseLike<T> {
 describe("Memory V3 lifecycle read projection", () => {
   test("exports the exact schema version and item cap", () => {
     assert.equal(MEMORY_V3_LIFECYCLE_READ_SCHEMA_VERSION, SCHEMA_VERSION);
-    assert.equal(MEMORY_V3_LIFECYCLE_READ_MAX_ITEMS, 12);
+    assert.equal(MEMORY_V3_LIFECYCLE_READ_MAX_ITEMS, 22);
   });
 
   test("projects a valid mixed context into fresh closed objects", () => {
@@ -181,7 +181,7 @@ describe("Memory V3 lifecycle read projection", () => {
       { ...validContext(), stateRevision: -1 },
       { ...validContext(), stateRevision: Number.MAX_SAFE_INTEGER + 1 },
       { ...validContext(), stateRevision: 1.5 },
-      { ...validContext(), items: Array.from({ length: 13 }, () => validContext().items[0]) },
+      { ...validContext(), items: Array.from({ length: 23 }, () => validContext().items[0]) },
       { ...validContext(), items: [{ ...validContext().items[0], sensitivity: "private" }] },
       { ...validContext(), items: [{ ...validContext().items[0], alternative: "not allowed" }] },
       { ...validContext(), items: [{ ...validContext().items[2], alternative: null }] },

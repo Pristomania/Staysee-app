@@ -1,6 +1,9 @@
 export const MEMORY_V3_LIFECYCLE_READ_SCHEMA_VERSION =
   "memory-v3-lifecycle-read-context-v1" as const;
-export const MEMORY_V3_LIFECYCLE_READ_MAX_ITEMS = 12;
+// 12 current items (plain recency window) plus up to 10 more from the 5
+// protected sensitive pairs the read-context RPC additionally UNIONs in
+// (migration 073) -- 22 is the true upper bound the RPC can return.
+export const MEMORY_V3_LIFECYCLE_READ_MAX_ITEMS = 22;
 
 export interface MemoryV3LifecycleReadContext {
   schemaVersion: typeof MEMORY_V3_LIFECYCLE_READ_SCHEMA_VERSION;
