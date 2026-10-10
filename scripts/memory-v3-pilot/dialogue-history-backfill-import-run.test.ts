@@ -101,7 +101,7 @@ async function files() {
     }),
     reconcilerAdapter: async (request: MemoryV3DialogueReconcileRequest) => ({
       rawContent: JSON.stringify({ operations: request.input.candidates.map((candidate) => ({
-        type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact',
+        type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact', supersedesMemoryRef: null,
       })) }), usage: null, resolvedModel: LIFECYCLE_HISTORY_PRIMARY_MODEL,
     }),
   });

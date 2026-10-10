@@ -197,7 +197,7 @@ function providerFetch(log: string[]) {
         })
       : JSON.stringify({
           operations: [{
-            type: 'create', candidateRef: 'candidate:0001', targetMemoryRef: null, topic: 'preference',
+            type: 'create', candidateRef: 'candidate:0001', targetMemoryRef: null, topic: 'preference', supersedesMemoryRef: null,
           }],
         });
     return openRouterResponse(content);

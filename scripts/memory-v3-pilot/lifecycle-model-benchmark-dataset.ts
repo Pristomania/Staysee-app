@@ -369,20 +369,28 @@ function translateProposal(
       candidateLocalItemKey: row.candidateLocalItemKey,
       targetMemoryKey: targetMemoryKey ?? null,
       topic: requiresTopic ? SYNTHETIC_PROPOSAL_TOPIC : null,
+      // This dataset format has no concept of was->became linking (a later
+      // addition to the live reducer); every replayed operation is a plain,
+      // unlinked one.
+      supersedesMemoryKey: null,
     };
   });
 }
 
 // The frozen evaluator (lifecycle-evaluator.mjs, via lifecycle-contract.mjs) is a legacy,
-// byte-pinned reference implementation that predates topic support and strictly rejects any item
-// field it does not recognize. Production lifecycle items now always carry a `topic` field, so it
-// must be projected away before an item reaches the evaluator -- the evaluator never scored topic
-// to begin with, so dropping it here changes no assertion, only the shape crossing this boundary.
+// byte-pinned reference implementation that predates topic support (and, more recently, the
+// was->became linking fields) and strictly rejects any item field it does not recognize.
+// Production lifecycle items now always carry a `topic` field plus `replacesMemoryKey`/
+// `replacedByMemoryKey`, so all three must be projected away before an item reaches the
+// evaluator -- it never scored any of them, so dropping them here changes no assertion, only
+// the shape crossing this boundary.
 export function stripTopicForEvaluator(
   items: MemoryV3LifecycleState['items'],
-): Array<Omit<MemoryV3LifecycleState['items'][number], 'topic'>> {
-  return items.map(({ topic, ...rest }) => {
+): Array<Omit<MemoryV3LifecycleState['items'][number], 'topic' | 'replacesMemoryKey' | 'replacedByMemoryKey'>> {
+  return items.map(({ topic, replacesMemoryKey, replacedByMemoryKey, ...rest }) => {
     void topic;
+    void replacesMemoryKey;
+    void replacedByMemoryKey;
     return rest;
   });
 }

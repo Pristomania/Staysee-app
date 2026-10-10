@@ -5,10 +5,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
+// This migration file is checked out with CRLF line endings (confirmed: 246
+// CRLF, 0 bare LF). Several assertions below search for a hardcoded
+// multi-line marker using plain "\n", which never matches inside a CRLF
+// file -- normalizing once here keeps every assertion in this file immune
+// to the checkout's line-ending setting, on any OS.
 const sql = readFileSync(
   join(here, "..", "..", "..", "migrations", "20261007060000_067_memory_v3_reservation_failure_log.sql"),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 describe("Memory V3 reservation-failure-log migration", () => {
   it("creates the log table scoped to a kind, user, and conversation, with RLS and no policies", () => {

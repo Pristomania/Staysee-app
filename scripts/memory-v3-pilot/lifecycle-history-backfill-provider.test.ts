@@ -327,7 +327,7 @@ describe('history provider isolation', () => {
 
     for (const [relative, expected] of [
       ['../../supabase/functions/_shared/memoryV3/transport.ts', '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D'],
-      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', '6E4E5B37A09E50649F01665353B8363CD519B797150D32159E887E668B7598F9'],
+      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', 'D555A57FE81EBB6BA72DE3E6A801CFEFE4F782080BD9A23E4C3BEA0533270DEB'],
     ] as const) {
       const bytes = await readFile(fileURLToPath(new URL(relative, import.meta.url)));
       assert.equal(createHash('sha256').update(bytes).digest('hex').toUpperCase(), expected);

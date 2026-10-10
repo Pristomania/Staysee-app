@@ -76,6 +76,9 @@ function wireOperations(testCase: PreparedLifecycleModelCase) {
         (binding) => binding.memoryKey === operation.targetMemoryKey,
       )?.memoryRef,
     topic: operation.topic,
+    // This dataset has no concept of was->became linking; every simulated
+    // model response is a plain, unlinked operation.
+    supersedesMemoryRef: null,
   }));
 }
 

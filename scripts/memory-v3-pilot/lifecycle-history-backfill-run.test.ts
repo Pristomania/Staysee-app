@@ -144,7 +144,7 @@ function providerFetch(log: string[]) {
       : JSON.stringify({
           operations: [{
             type: 'create', candidateRef: 'candidate:0001', targetMemoryRef: null,
-            topic: 'life_context',
+            topic: 'life_context', supersedesMemoryRef: null,
           }],
         });
     return openRouterResponse(content);
