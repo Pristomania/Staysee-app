@@ -249,10 +249,18 @@ export async function fetchMessageActivityForConversation(
   return { recentCount, previousCount };
 }
 
-export async function fetchLinkedMemoryPairs(): Promise<LinkedMemoryPair[]> {
+export async function fetchLinkedMemoryPairs(conversationId: string): Promise<LinkedMemoryPair[]> {
   const result = await exportMemoryV3Data();
   if (result.error) return [];
-  const all = [...result.accountWide, ...result.dialogue];
+  // Dialogue memory keys are sha256(namespace, userId, ordinal) with no
+  // conversationId baked in, and the per-conversation ordinal resets for
+  // every new conversation -- so two unrelated conversations' dialogue items
+  // can collide on the same memory_key. Scoping to this conversation before
+  // building the key map keeps a pair here from ever resolving its "old" end
+  // against an unrelated item from a different conversation. Account-wide
+  // (lifecycle) items have no such reset and stay global by design.
+  const dialogueInConversation = result.dialogue.filter((item) => item.conversationId === conversationId);
+  const all = [...result.accountWide, ...dialogueInConversation];
   const byKey = new Map(all.map((item) => [item.memoryKey, item]));
   const pairs: LinkedMemoryPair[] = [];
   for (const item of all) {

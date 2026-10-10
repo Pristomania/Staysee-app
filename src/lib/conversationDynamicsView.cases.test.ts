@@ -45,4 +45,22 @@ assertDoesNotMatch(
   "the now-unused UserMemory import should be dropped",
 );
 
+// Dialogue memory keys are sha256(namespace, userId, ordinal) with no
+// conversationId baked in -- the per-conversation ordinal counter resets for
+// every new conversation, so two unrelated conversations' dialogue items can
+// land on the identical memory_key. fetchLinkedMemoryPairs must scope its
+// dialogue-side lookup to one conversation (account-wide/lifecycle pairs
+// stay global, by design) so a pair in conversation A can never resolve its
+// "old" end against an unrelated item in conversation B.
+assertMatch(
+  source,
+  /export async function fetchLinkedMemoryPairs\(\s*conversationId: string,?\s*\)/,
+  "fetchLinkedMemoryPairs should take a conversationId parameter",
+);
+assertMatch(
+  source,
+  /result\.dialogue\.filter\(\s*\(item\)\s*=>\s*item\.conversationId === conversationId\s*\)/,
+  "should filter dialogue items to the current conversation before building the key map",
+);
+
 console.log("PASS: conversationDynamicsView.cases.test.ts");

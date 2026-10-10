@@ -379,7 +379,7 @@ export function ConversationDynamicsScreen() {
         fetchWeeklyDynamics(user.id, convId),
         fetchConversationMemory(user.id, convId),
         fetchTensionsForConversation(user.id, convId),
-        fetchLinkedMemoryPairs(),
+        fetchLinkedMemoryPairs(convId),
         fetchMessageActivityForConversation(convId),
         getWeeklyCooldownStatus(convId),
       ]);
