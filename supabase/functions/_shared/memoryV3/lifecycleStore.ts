@@ -342,7 +342,7 @@ function projectExtraction(value: unknown, userId: string): MemoryV3Extraction {
 
 function projectOperations(value: unknown): MemoryV3LifecycleProposal {
   return array(value, MEMORY_V3_LIFECYCLE_MAX_CANDIDATES).map((raw) => {
-    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey", "topic"]);
+    const operation = record(raw, ["type", "candidateLocalItemKey", "targetMemoryKey", "topic", "supersedesMemoryKey"]);
     if (!OPERATION_TYPES.has(operation.type as string) || !nonEmpty(operation.candidateLocalItemKey)) throw fail();
     const hasTarget = typeof operation.targetMemoryKey === "string" && MEMORY_KEY.test(operation.targetMemoryKey);
     if (operation.type === "create" || operation.type === "ignore" ? operation.targetMemoryKey !== null : !hasTarget) throw fail();
@@ -350,6 +350,8 @@ function projectOperations(value: unknown): MemoryV3LifecycleProposal {
     if (requiresTopic
       ? (operation.topic === null || !MEMORY_V3_LIFECYCLE_TOPICS.includes(operation.topic as MemoryV3LifecycleTopic))
       : operation.topic !== null) throw fail();
+    if (operation.supersedesMemoryKey !== null &&
+      (typeof operation.supersedesMemoryKey !== "string" || !MEMORY_KEY.test(operation.supersedesMemoryKey))) throw fail();
     return { ...operation } as MemoryV3LifecycleProposal[number];
   });
 }
