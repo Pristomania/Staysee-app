@@ -172,11 +172,17 @@ specific sensitive moments, not entire histories).
   currently reads `public.user_memory`. It's replaced with a call to the
   existing `exportMemoryV3Data()` helper (`src/lib/memoryV3Viewer.ts`,
   already shipped for the data-export feature) rather than the narrower
-  `fetchMemoryV3Items()`/`"read"` action: the export path already returns
-  every kind including `hypothesis` and doesn't apply the regular
-  viewer's status filtering, which matters here since a hypothesis
-  resolving into a confirmed fact is exactly the kind of change this
-  feature exists to show. This screen's job is the full history on
+  `fetchMemoryV3Items()`/`"read"` action: the export path includes
+  `event`/`recurrence` items regardless of status (same as the regular
+  viewer) but, unlike the regular viewer, also includes a `hypothesis`
+  once it reaches `supported` — which matters here, since a recurring
+  worry resolving into a confirmed understanding is exactly the kind of
+  change this feature exists to show. A *rejected or stale* hypothesis
+  stays excluded from export either way (existing, deliberate behavior —
+  see `projectMemoryV3ExportItems`'s own comment: a discarded guess isn't
+  something the app "remembers," so this feature doesn't surface it as a
+  milestone's old end, and doesn't change that filter). This screen's
+  job is the full history on
   demand, not what the live chat currently holds, so it deliberately does
   not go through the 12+5-item live-context RPCs at all.
 - `projectMemoryV3ExportItems` (`supabase/functions/_shared/memoryV3/viewerProjection.ts`)
