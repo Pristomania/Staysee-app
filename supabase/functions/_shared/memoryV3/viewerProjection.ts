@@ -13,6 +13,8 @@ export interface MemoryV3ViewerSourceItem {
   /** Only present on rows from load_memory_v3_dialogue_viewer_items_all --
    * absent (never present) on lifecycle rows, which have no conversation. */
   conversationId?: string;
+  replacesMemoryKey?: string | null;
+  replacedByMemoryKey?: string | null;
 }
 
 export interface MemoryV3ViewerItem {
@@ -43,6 +45,8 @@ export interface MemoryV3ExportItem {
    * identical-looking facts that were independently noticed in different
    * conversations, instead of them reading as an unexplained duplicate. */
   conversationId: string | null;
+  replacesMemoryKey: string | null;
+  replacedByMemoryKey: string | null;
 }
 
 // The extractor prompt now tells the model never to write "пользователь"/
@@ -107,5 +111,7 @@ export function projectMemoryV3ExportItems(
       updatedAt: item.updatedAt,
       alternative: item.alternative,
       conversationId: item.conversationId ?? null,
+      replacesMemoryKey: item.replacesMemoryKey ?? null,
+      replacedByMemoryKey: item.replacedByMemoryKey ?? null,
     }));
 }

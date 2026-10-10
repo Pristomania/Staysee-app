@@ -82,7 +82,7 @@ const LIFECYCLE_RESPONSE_SCHEMA = deepFreeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "candidateRef", "targetMemoryRef", "topic"],
+        required: ["type", "candidateRef", "targetMemoryRef", "topic", "supersedesMemoryRef"],
         properties: {
           type: {
             type: "string",
@@ -91,6 +91,7 @@ const LIFECYCLE_RESPONSE_SCHEMA = deepFreeze({
           candidateRef: { type: "string" },
           targetMemoryRef: { type: ["string", "null"] },
           topic: { type: ["string", "null"], enum: ["life_context", "communication", "preference", null] },
+          supersedesMemoryRef: { type: ["string", "null"] },
         },
       },
     },

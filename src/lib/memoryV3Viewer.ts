@@ -80,6 +80,8 @@ export interface MemoryV3ExportItem {
   updatedAt: string;
   alternative: string | null;
   conversationId: string | null;
+  replacesMemoryKey: string | null;
+  replacedByMemoryKey: string | null;
 }
 
 export interface MemoryV3ExportData {

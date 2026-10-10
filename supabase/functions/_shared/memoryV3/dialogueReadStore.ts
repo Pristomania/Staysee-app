@@ -1,6 +1,9 @@
 export const MEMORY_V3_DIALOGUE_READ_SCHEMA_VERSION =
   "memory-v3-dialogue-read-context-v1" as const;
-export const MEMORY_V3_DIALOGUE_READ_MAX_ITEMS = 12;
+// 12 current items (plain recency window) plus up to 10 more from the 5
+// protected sensitive pairs the read-context RPC additionally UNIONs in
+// (migration 073) -- 22 is the true upper bound the RPC can return.
+export const MEMORY_V3_DIALOGUE_READ_MAX_ITEMS = 22;
 
 export interface MemoryV3DialogueReadContext {
   schemaVersion: typeof MEMORY_V3_DIALOGUE_READ_SCHEMA_VERSION;
@@ -14,6 +17,8 @@ export interface MemoryV3DialogueReadContext {
     eventTimeEnd: string | null;
     alternative: string | null;
     updatedAt: string;
+    replacesMemoryKey: string | null;
+    replacedByMemoryKey: string | null;
   }>;
 }
 
@@ -46,6 +51,8 @@ const ITEM_FIELDS = [
   "eventTimeEnd",
   "alternative",
   "updatedAt",
+  "replacesMemoryKey",
+  "replacedByMemoryKey",
 ] as const;
 
 function fail(): Error {
@@ -240,10 +247,23 @@ export function projectMemoryV3DialogueReadContext(
       }
       if (!isIsoDateTime(item.updatedAt)) throw fail();
 
+      const isLinked = item.replacesMemoryKey !== null || item.replacedByMemoryKey !== null;
+      if (
+        item.replacesMemoryKey !== null &&
+        (typeof item.replacesMemoryKey !== "string" || item.replacesMemoryKey.length !== 64)
+      ) throw fail();
+      if (
+        item.replacedByMemoryKey !== null &&
+        (typeof item.replacedByMemoryKey !== "string" || item.replacedByMemoryKey.length !== 64)
+      ) throw fail();
       if (item.kind === "event" || item.kind === "recurrence") {
-        if (item.status !== "active" || item.alternative !== null) throw fail();
+        const currentOk = item.status === "active";
+        const closedLinkedOk = isLinked && (item.status === "corrected" || item.status === "stale" || item.status === "rejected");
+        if ((!currentOk && !closedLinkedOk) || item.alternative !== null) throw fail();
       } else if (item.kind === "hypothesis") {
-        if (item.status !== "supported" || !isNonEmptyString(item.alternative)) {
+        const currentOk = item.status === "supported";
+        const closedLinkedOk = isLinked && (item.status === "stale" || item.status === "rejected");
+        if ((!currentOk && !closedLinkedOk) || !isNonEmptyString(item.alternative)) {
           throw fail();
         }
       } else {
@@ -259,6 +279,8 @@ export function projectMemoryV3DialogueReadContext(
         eventTimeEnd: item.eventTimeEnd as string | null,
         alternative: item.alternative as string | null,
         updatedAt: item.updatedAt,
+        replacesMemoryKey: item.replacesMemoryKey as string | null,
+        replacedByMemoryKey: item.replacedByMemoryKey as string | null,
       } as MemoryV3DialogueReadContext["items"][number];
     },
   );

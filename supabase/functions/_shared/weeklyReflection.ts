@@ -8,6 +8,7 @@ import {
   parseStoredMemory,
   type StructuredMemory,
 } from "./memory.ts";
+import { makeServiceClient } from "./cost.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import { WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE } from "./weeklyReflectionPrivacy.ts";
 
@@ -24,6 +25,11 @@ export interface WeeklyReflectionInput {
   conversationId: string;
   conversationTitle: string | null;
   conversationSummary: string | null;
+}
+
+export interface WeeklyReflectionLinkedPair {
+  newClaim: string;
+  oldClaim: string;
 }
 
 export interface WeekTranscriptLine {
@@ -119,6 +125,7 @@ export function buildWeeklyReflectionPrompt(input: {
   transcript: WeekTranscriptLine[];
   userMarks: string[];
   activeDays: number;
+  linkedPairs: WeeklyReflectionLinkedPair[];
 }): string {
   const title = input.title.trim() || "эта беседа";
   const days = dayWordRu(input.activeDays);
@@ -142,6 +149,12 @@ export function buildWeeklyReflectionPrompt(input: {
     ? input.userMarks.map((m) => `• ${m}`).join("\n")
     : "Пользователь не оставлял своих следов вручную.";
 
+  const pairsBlock = input.linkedPairs.length
+    ? `\n\nПЕРЕМЕНЫ, КОТОРЫЕ УЖЕ ПРОИЗОШЛИ (раньше было иначе, сейчас стало так):\n${input.linkedPairs
+        .map((p) => `• было: ${p.oldClaim} → стало: ${p.newClaim}`)
+        .join("\n")}\nМожете упомянуть это, если оно естественно откликается на неделю ниже -- включая то, связывать ли это с работой здесь, оставляю на ваше усмотрение.`
+    : "";
+
   return `Ты StaySee AI — тёплый, спокойный собеседник для осознанного самонаблюдения.
 
 Задача: написать «Оглянуться за неделю» ТОЛЬКО для одной беседы «${title}».
@@ -161,7 +174,7 @@ export function buildWeeklyReflectionPrompt(input: {
 ${memoryBlock}
 
 СЛЕДЫ, КОТОРЫЕ ПОЛЬЗОВАТЕЛЬ САМ СОХРАНИЛ:
-${marksBlock}
+${marksBlock}${pairsBlock}
 
 ФРАГМЕНТЫ ПЕРЕПИСКИ ЗА НЕДЕЛЮ (только эта комната):
 ${transcriptBlock}
@@ -209,6 +222,40 @@ export function countActiveDays(transcript: WeekTranscriptLine[]): number {
   return days.size;
 }
 
+export async function fetchLinkedPairsForConversation(
+  conversationId: string
+): Promise<WeeklyReflectionLinkedPair[]> {
+  // memory_v3_dialogue_items is REVOKE ALL ... FROM authenticated (migration
+  // 039) -- only service_role may read it. generateWeeklyReflectionText is
+  // called with a user-JWT-scoped client, which can never read this table,
+  // so this needs its own service-role client rather than the caller's.
+  const supabase = makeServiceClient();
+  const { data, error } = await supabase
+    .from("memory_v3_dialogue_items")
+    .select("memory_key, claim, replaces_memory_key")
+    .eq("conversation_id", conversationId);
+
+  if (error) {
+    console.error("[weeklyReflection] linkedPairs:", error.message);
+    return [];
+  }
+
+  const rows = (data ?? []) as Array<{
+    memory_key: string;
+    claim: string;
+    replaces_memory_key: string | null;
+  }>;
+  const byKey = new Map(rows.map((row) => [row.memory_key, row]));
+  const pairs: WeeklyReflectionLinkedPair[] = [];
+  for (const row of rows) {
+    if (!row.replaces_memory_key) continue;
+    const old = byKey.get(row.replaces_memory_key);
+    if (!old) continue;
+    pairs.push({ newClaim: row.claim, oldClaim: old.claim });
+  }
+  return pairs;
+}
+
 export async function generateWeeklyReflectionText(
   supabase: SupabaseClient,
   meta: WeeklyReflectionInput,
@@ -221,6 +268,7 @@ export async function generateWeeklyReflectionText(
 ): Promise<{ text: string; generated: boolean }> {
   const transcript = await fetchWeekTranscript(supabase, meta.conversationId);
   const userMarks = await fetchWeekUserMarks(supabase, meta.conversationId);
+  const linkedPairs = await fetchLinkedPairsForConversation(meta.conversationId);
   const memory = parseStoredMemory(meta.conversationSummary);
   const activeDays = countActiveDays(transcript);
   const title = meta.conversationTitle ?? "эта беседа";
@@ -243,6 +291,7 @@ export async function generateWeeklyReflectionText(
     transcript,
     userMarks,
     activeDays,
+    linkedPairs,
   });
 
   try {

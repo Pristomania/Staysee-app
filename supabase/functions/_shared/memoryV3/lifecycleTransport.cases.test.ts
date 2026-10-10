@@ -24,7 +24,7 @@ const EXPECTED_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "candidateRef", "targetMemoryRef", "topic"],
+        required: ["type", "candidateRef", "targetMemoryRef", "topic", "supersedesMemoryRef"],
         properties: {
           type: {
             type: "string",
@@ -33,6 +33,7 @@ const EXPECTED_SCHEMA = {
           candidateRef: { type: "string" },
           targetMemoryRef: { type: ["string", "null"] },
           topic: { type: ["string", "null"], enum: ["life_context", "communication", "preference", null] },
+          supersedesMemoryRef: { type: ["string", "null"] },
         },
       },
     },
@@ -169,11 +170,24 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
     assert.equal(fetchImpl.calls.length, 1);
     const body = JSON.parse(String(fetchImpl.calls[0].init.body));
     const operationSchema = body.response_format.json_schema.schema.properties.operations.items;
-    assert.deepEqual(operationSchema.required, ["type", "candidateRef", "targetMemoryRef", "topic"]);
+    assert.deepEqual(
+      operationSchema.required,
+      ["type", "candidateRef", "targetMemoryRef", "topic", "supersedesMemoryRef"],
+    );
     assert.deepEqual(operationSchema.properties.topic, {
       type: ["string", "null"],
       enum: ["life_context", "communication", "preference", null],
     });
+  });
+
+  it("allows the model to emit supersedesMemoryRef as a fifth key, nullable like targetMemoryRef", async () => {
+    const fetchImpl = recordingFetch();
+    await createMemoryV3LifecycleOpenRouterAdapter({ fetchImpl, apiKey: API_KEY })(request());
+    assert.equal(fetchImpl.calls.length, 1);
+    const body = JSON.parse(String(fetchImpl.calls[0].init.body));
+    const operationSchema = body.response_format.json_schema.schema.properties.operations.items;
+    assert.deepEqual(operationSchema.properties.supersedesMemoryRef, { type: ["string", "null"] });
+    assert.equal(operationSchema.additionalProperties, false);
   });
 
   it("accepts Task 3 evidence with mentionTime and preserves it in the serialized request", async () => {

@@ -496,6 +496,7 @@ describe("Memory V3 dialogue store", () => {
           memoryKey, kind: "event", claim: "Любит утренние прогулки", status: "active",
           sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, alternative: null,
           topic: "person", firstSeenAt: mentionTime, updatedAt: mentionTime, revision: 1,
+          replacesMemoryKey: null, replacedByMemoryKey: null,
           evidence: [{
             conversationId: CONVERSATION_ID, sourceMessageId: MESSAGE_ID, relation: "supports",
             supportType: null, episodeKey: "episode:1", provenanceRole: "user", mentionTime,

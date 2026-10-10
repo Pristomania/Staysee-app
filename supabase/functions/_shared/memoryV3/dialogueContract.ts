@@ -56,6 +56,8 @@ export interface MemoryV3DialogueItem {
   firstSeenAt: string;
   updatedAt: string;
   revision: number;
+  replacesMemoryKey: string | null;
+  replacedByMemoryKey: string | null;
   evidence: MemoryV3DialogueEvidence[];
 }
 
@@ -78,6 +80,7 @@ export type MemoryV3DialogueProposal = Array<{
   candidateLocalItemKey: string;
   targetMemoryKey: string | null;
   topic: MemoryV3DialogueTopic | null;
+  supersedesMemoryKey: string | null;
 }>;
 
 type Diagnostic =
@@ -122,7 +125,8 @@ const STATUS_RELATION: Record<string, EvidenceRelation> = {
 const STATE_FIELDS = ["schemaVersion", "userId", "conversationId", "stateRevision", "nextMemoryOrdinal", "items"] as const;
 const ITEM_FIELDS = [
   "memoryKey", "kind", "claim", "status", "sensitivity", "eventTimeStart",
-  "eventTimeEnd", "alternative", "topic", "firstSeenAt", "updatedAt", "revision", "evidence",
+  "eventTimeEnd", "alternative", "topic", "firstSeenAt", "updatedAt", "revision",
+  "replacesMemoryKey", "replacedByMemoryKey", "evidence",
 ] as const;
 const EVIDENCE_FIELDS = [
   "conversationId", "sourceMessageId", "relation", "supportType", "episodeKey",
@@ -143,7 +147,7 @@ const MEMORY_BINDING_FIELDS = ["memoryRef", "memoryKey"] as const;
 const CANDIDATE_BINDING_FIELDS = ["candidateRef", "localItemKey"] as const;
 const CONTEXT_FIELDS = ["state", "extraction", "bindings"] as const;
 const PROPOSAL_ROOT_FIELDS = ["operations"] as const;
-const MODEL_OPERATION_FIELDS = ["type", "candidateRef", "targetMemoryRef", "topic"] as const;
+const MODEL_OPERATION_FIELDS = ["type", "candidateRef", "targetMemoryRef", "topic", "supersedesMemoryRef"] as const;
 
 function makeError(token: object, diagnosticCode: Diagnostic): Error {
   const error = new Error("[memory-v3:dialogue-contract] value is invalid");
@@ -363,6 +367,14 @@ function validateStateInternal(
     if (!validDateTime(item.firstSeenAt) || !validDateTime(item.updatedAt) ||
         Date.parse(item.updatedAt) < Date.parse(item.firstSeenAt) ||
         !Number.isSafeInteger(item.revision) || (item.revision as number) < 1) fail(token, code);
+    if (
+      (item.replacesMemoryKey !== null &&
+        (typeof item.replacesMemoryKey !== "string" || !MEMORY_KEY.test(item.replacesMemoryKey) ||
+          item.replacesMemoryKey === item.memoryKey)) ||
+      (item.replacedByMemoryKey !== null &&
+        (typeof item.replacedByMemoryKey !== "string" || !MEMORY_KEY.test(item.replacedByMemoryKey) ||
+          item.replacedByMemoryKey === item.memoryKey))
+    ) fail(token, code);
     const evidence = denseArray(token, item.evidence, MEMORY_V3_DIALOGUE_MAX_STATE_EVIDENCE, shape, code)
       .map((row) => validateEvidence(token, row, item.kind as MemoryKind, code, root.conversationId as string));
     totalEvidence += evidence.length;
@@ -382,6 +394,20 @@ function validateStateInternal(
     }
     return { ...item, evidence } as MemoryV3DialogueItem;
   });
+  const itemsByKey = new Map(items.map((item) => [item.memoryKey, item]));
+  for (const item of items) {
+    if (item.replacesMemoryKey !== null) {
+      const partner = itemsByKey.get(item.replacesMemoryKey);
+      if (
+        !partner || partner.replacedByMemoryKey !== item.memoryKey ||
+        !CLOSED[partner.kind].includes(partner.status)
+      ) fail(token, code);
+    }
+    if (item.replacedByMemoryKey !== null) {
+      const partner = itemsByKey.get(item.replacedByMemoryKey);
+      if (!partner || partner.replacesMemoryKey !== item.memoryKey) fail(token, code);
+    }
+  }
   return {
     schemaVersion: MEMORY_V3_DIALOGUE_SCHEMA_VERSION,
     userId: root.userId as string,
@@ -516,6 +542,8 @@ export function validateMemoryV3DialogueProposal(
     const consumed = new Set<string>();
     const targeted = new Map<string, MemoryV3DialogueOperationType>();
     const translated: MemoryV3DialogueProposal = [];
+    const supersededTargets = new Set<string>();
+    const pendingSupersessions: string[] = [];
     for (const operation of operations) {
       if (!OPERATION_TYPES.includes(operation.type as MemoryV3DialogueOperationType) || !nonEmpty(operation.candidateRef)) {
         fail(token, code);
@@ -531,15 +559,28 @@ export function validateMemoryV3DialogueProposal(
         : operation.topic !== null) fail(token, code);
       const topic = operation.topic as MemoryV3DialogueTopic | null;
       let targetMemoryKey: string | null = null;
+      let supersedesMemoryKey: string | null = null;
       if (type === "create" || type === "ignore") {
         if (operation.targetMemoryRef !== null) fail(token, code);
-        if (type === "create" && candidate.kind === "recurrence" && CURRENT.recurrence.includes(candidate.status)) {
-          const observations = new Set(extraction.evidence
-            .filter((row) => row.itemKey === localItemKey && row.relation === "supports" && row.supportType === "episode_observation")
-            .map((row) => row.episodeKey));
-          if (observations.size < (candidate.status === "active" ? 2 : 1)) fail(token, code);
+        if (type === "ignore" && operation.supersedesMemoryRef !== null) fail(token, code);
+        if (type === "create") {
+          if (operation.supersedesMemoryRef !== null) {
+            if (!nonEmpty(operation.supersedesMemoryRef)) fail(token, code);
+            const resolved = memoryByRef.get(operation.supersedesMemoryRef as string);
+            if (!resolved || supersededTargets.has(resolved)) fail(token, code);
+            supersededTargets.add(resolved);
+            supersedesMemoryKey = resolved;
+            pendingSupersessions.push(resolved);
+          }
+          if (candidate.kind === "recurrence" && CURRENT.recurrence.includes(candidate.status)) {
+            const observations = new Set(extraction.evidence
+              .filter((row) => row.itemKey === localItemKey && row.relation === "supports" && row.supportType === "episode_observation")
+              .map((row) => row.episodeKey));
+            if (observations.size < (candidate.status === "active" ? 2 : 1)) fail(token, code);
+          }
         }
       } else {
+        if (operation.supersedesMemoryRef !== null) fail(token, code);
         if (!nonEmpty(operation.targetMemoryRef)) fail(token, code);
         targetMemoryKey = memoryByRef.get(operation.targetMemoryRef) ?? null;
         if (targetMemoryKey === null) fail(token, code);
@@ -556,9 +597,13 @@ export function validateMemoryV3DialogueProposal(
         if (type === "reject" && (candidate.status !== "rejected" || !extraction.evidence.some((row) =>
           row.itemKey === localItemKey && row.relation === "rejects"))) fail(token, code);
       }
-      translated.push({ type, candidateLocalItemKey: localItemKey, targetMemoryKey, topic });
+      translated.push({ type, candidateLocalItemKey: localItemKey, targetMemoryKey, topic, supersedesMemoryKey });
     }
     if (consumed.size !== candidateByKey.size) fail(token, code);
+    for (const key of pendingSupersessions) {
+      const closingType = targeted.get(key);
+      if (closingType !== "reject" && closingType !== "mark_stale") fail(token, code);
+    }
     return translated.map((operation) => ({ ...operation }));
   });
 }

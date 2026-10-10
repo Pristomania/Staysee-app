@@ -35,7 +35,7 @@ const STEP_FIELDS = [
   "proposal",
   "trustedForgetMemoryKeys",
 ] as const;
-const INTERNAL_OPERATION_FIELDS = ["type", "candidateLocalItemKey", "targetMemoryKey", "topic"] as const;
+const INTERNAL_OPERATION_FIELDS = ["type", "candidateLocalItemKey", "targetMemoryKey", "topic", "supersedesMemoryKey"] as const;
 const MATERIAL_FIELDS = [
   "kind",
   "claim",
@@ -334,16 +334,21 @@ function validateInternalProposal(
         (row.targetMemoryKey !== null &&
           (typeof row.targetMemoryKey !== "string" || !MEMORY_KEY.test(row.targetMemoryKey) ||
             !memoryRefByKey.has(row.targetMemoryKey))) ||
+        (row.supersedesMemoryKey !== null &&
+          (typeof row.supersedesMemoryKey !== "string" || !MEMORY_KEY.test(row.supersedesMemoryKey) ||
+            !memoryRefByKey.has(row.supersedesMemoryKey))) ||
         (row.topic !== null && typeof row.topic !== "string")) {
       fail(token, "lifecycle_reducer_invalid_input");
     }
     const candidateLocalItemKey = row.candidateLocalItemKey as string;
     const targetMemoryKey = row.targetMemoryKey as string | null;
+    const supersedesMemoryKey = row.supersedesMemoryKey as string | null;
     return {
       type: row.type,
       candidateRef: candidateRefByKey.get(candidateLocalItemKey),
       targetMemoryRef: targetMemoryKey === null ? null : memoryRefByKey.get(targetMemoryKey),
       topic: row.topic as string | null,
+      supersedesMemoryRef: supersedesMemoryKey === null ? null : memoryRefByKey.get(supersedesMemoryKey),
     };
   });
   return validateMemoryV3LifecycleProposal(
@@ -441,6 +446,7 @@ export async function applyMemoryV3LifecycleStep(input: {
       resultingMemoryKey: null,
     }));
 
+    const replacementMap = new Map<string, string>();
     for (const operation of proposal) {
       const candidate = candidateByKey.get(operation.candidateLocalItemKey);
       if (!candidate) fail(token, "lifecycle_reducer_transition_invalid");
@@ -451,6 +457,9 @@ export async function applyMemoryV3LifecycleStep(input: {
         if (working.items.some((item) => item.memoryKey === resultingMemoryKey)) {
           fail(token, "lifecycle_reducer_transition_invalid");
         }
+        if (operation.supersedesMemoryKey !== null) {
+          replacementMap.set(operation.supersedesMemoryKey, resultingMemoryKey);
+        }
         working.items.push({
           memoryKey: resultingMemoryKey,
           ...materialFromCandidate(candidate),
@@ -458,6 +467,8 @@ export async function applyMemoryV3LifecycleStep(input: {
           firstSeenAt: projected.at,
           updatedAt: projected.at,
           revision: 1,
+          replacesMemoryKey: operation.supersedesMemoryKey,
+          replacedByMemoryKey: null,
           evidence: incomingEvidence,
         } as MemoryV3LifecycleItem);
         working.nextMemoryOrdinal += 1;
@@ -492,6 +503,7 @@ export async function applyMemoryV3LifecycleStep(input: {
             status: candidate.status,
             updatedAt: projected.at,
             revision: target.revision + 1,
+            replacedByMemoryKey: replacementMap.get(target.memoryKey) ?? null,
             evidence,
           };
         }

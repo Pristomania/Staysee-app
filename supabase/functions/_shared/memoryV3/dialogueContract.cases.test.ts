@@ -81,6 +81,8 @@ function runtimeState(scenarioId: string, expectedState: JsonRecord, revision = 
         memoryKey: memoryKey(index),
         ...structuredClone(item),
         topic: null,
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
         evidence: (item.evidence as JsonRecord[]).map(retagForDialogue),
       };
     }),
@@ -136,6 +138,7 @@ function proposalFixture(step: JsonRecord, previousExpectedState: JsonRecord) {
           ? null
           : memoryByGoldId.get(operation.targetGoldMemoryId)?.memoryRef,
         topic: topicForOperationType(operation.type as string),
+        supersedesMemoryRef: null,
       })),
     },
     expected: step.scriptedProposal.map((operation: JsonRecord) => ({
@@ -145,6 +148,7 @@ function proposalFixture(step: JsonRecord, previousExpectedState: JsonRecord) {
         ? null
         : memoryByGoldId.get(operation.targetGoldMemoryId)?.memoryKey,
       topic: topicForOperationType(operation.type as string),
+      supersedesMemoryKey: null,
     })),
   };
 }
@@ -424,12 +428,12 @@ describe("proposal rules", () => {
     fixture.bindings.candidates.push({ candidateRef: "candidate:2", localItemKey: `${candidate.localItemKey}-2` });
     const target = fixture.bindings.memories[0].memoryRef;
     assert.doesNotThrow(() => validateMemoryV3DialogueProposal({ operations: [
-      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null },
-      { type: "confirm", candidateRef: "candidate:2", targetMemoryRef: target, topic: null },
+      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null, supersedesMemoryRef: null },
+      { type: "confirm", candidateRef: "candidate:2", targetMemoryRef: target, topic: null, supersedesMemoryRef: null },
     ] }, contextOf(fixture)));
     assertContractError(() => validateMemoryV3DialogueProposal({ operations: [
-      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null },
-      { type: "revise", candidateRef: "candidate:2", targetMemoryRef: target, topic: MEMORY_V3_DIALOGUE_TOPICS[0] },
+      { type: "confirm", candidateRef: "candidate:1", targetMemoryRef: target, topic: null, supersedesMemoryRef: null },
+      { type: "revise", candidateRef: "candidate:2", targetMemoryRef: target, topic: MEMORY_V3_DIALOGUE_TOPICS[0], supersedesMemoryRef: null },
     ] }, contextOf(fixture)), "dialogue_contract_invalid_proposal");
   });
 
@@ -505,6 +509,7 @@ describe("proposal rules", () => {
     }));
     fixture.raw.operations = fixture.bindings.candidates.map((entry: JsonRecord) => ({
       type: "ignore", candidateRef: entry.candidateRef, targetMemoryRef: null, topic: null,
+      supersedesMemoryRef: null,
     }));
     assertContractError(
       () => validateMemoryV3DialogueProposal(fixture.raw, contextOf(fixture)),
@@ -756,6 +761,7 @@ describe("strict JSON-data-only boundaries", () => {
       candidateRef: "candidate:1",
       targetMemoryRef: null,
       topic: MEMORY_V3_DIALOGUE_TOPICS[0],
+      supersedesMemoryRef: null,
     };
     operation.candidateRef = operation;
     const proposalError = assertContractError(
@@ -828,7 +834,7 @@ describe("Memory V3 dialogue contract topic", () => {
     const context = { state: baseState(userId, CONVERSATION_ID), extraction, bindings: candidateBindings("item-1") };
     for (const topic of MEMORY_V3_DIALOGUE_TOPICS) {
       const result = validateMemoryV3DialogueProposal(
-        { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic }] },
+        { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic, supersedesMemoryRef: null }] },
         context,
       );
       assert.equal(result[0].topic, topic);
@@ -840,7 +846,7 @@ describe("Memory V3 dialogue contract topic", () => {
     const extraction = baseExtraction("item-1", CONVERSATION_ID);
     const context = { state: baseState(userId, CONVERSATION_ID), extraction, bindings: candidateBindings("item-1") };
     assert.throws(() => validateMemoryV3DialogueProposal(
-      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: null }] },
+      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: null, supersedesMemoryRef: null }] },
       context,
     ));
   });
@@ -850,7 +856,7 @@ describe("Memory V3 dialogue contract topic", () => {
     const extraction = baseExtraction("item-1", CONVERSATION_ID);
     const context = { state: baseState(userId, CONVERSATION_ID), extraction, bindings: candidateBindings("item-1") };
     assert.throws(() => validateMemoryV3DialogueProposal(
-      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "life_context" }] },
+      { operations: [{ type: "create", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "life_context", supersedesMemoryRef: null }] },
       context,
     ));
   });
@@ -860,8 +866,203 @@ describe("Memory V3 dialogue contract topic", () => {
     const extraction = baseExtraction("item-1", CONVERSATION_ID);
     const context = { state: baseState(userId, CONVERSATION_ID), extraction, bindings: candidateBindings("item-1") };
     assert.throws(() => validateMemoryV3DialogueProposal(
-      { operations: [{ type: "ignore", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "person" }] },
+      { operations: [{ type: "ignore", candidateRef: "candidate:0001", targetMemoryRef: null, topic: "person", supersedesMemoryRef: null }] },
       context,
     ));
+  });
+});
+
+function oldEventItem(memoryKeyValue: string): JsonRecord {
+  return {
+    memoryKey: memoryKeyValue, kind: "event", claim: "боялась сменить работу", status: "active",
+    sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, alternative: null, topic: "fact",
+    firstSeenAt: "2025-01-01T10:00:00Z", updatedAt: "2025-01-01T10:00:00Z", revision: 1,
+    replacesMemoryKey: null, replacedByMemoryKey: null,
+    evidence: [{
+      conversationId: CONVERSATION_ID, sourceMessageId: "historical-old", relation: "supports",
+      supportType: null, episodeKey: "episode:historical-old", provenanceRole: "user",
+      mentionTime: "2025-01-01T10:00:00Z",
+    }],
+  };
+}
+
+function oldRecurrenceItem(memoryKeyValue: string): JsonRecord {
+  return {
+    memoryKey: memoryKeyValue, kind: "recurrence", claim: "часто говорит о страхе увольнения",
+    status: "active", sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, alternative: null,
+    topic: "fact", firstSeenAt: "2025-01-01T10:00:00Z", updatedAt: "2025-01-01T10:00:00Z", revision: 2,
+    replacesMemoryKey: null, replacedByMemoryKey: null,
+    evidence: [
+      {
+        conversationId: CONVERSATION_ID, sourceMessageId: "historical-r1", relation: "supports",
+        supportType: "episode_observation", episodeKey: "episode:r1", provenanceRole: "user",
+        mentionTime: "2025-01-01T10:00:00Z",
+      },
+      {
+        conversationId: CONVERSATION_ID, sourceMessageId: "historical-r2", relation: "supports",
+        supportType: "episode_observation", episodeKey: "episode:r2", provenanceRole: "user",
+        mentionTime: "2025-01-02T10:00:00Z",
+      },
+    ],
+  };
+}
+
+function twoItemFixture(oldItem: JsonRecord, oldItemKind: "event" | "recurrence" = "event") {
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const oldKey = "a".repeat(64);
+  const resolvedOld = { ...oldItem, memoryKey: oldKey };
+  const state = { ...baseState(userId, CONVERSATION_ID), items: [resolvedOld], nextMemoryOrdinal: 2 };
+  const extraction = {
+    run: { caseId: "case-1", extractorVersion: "v1" },
+    items: [
+      {
+        localItemKey: "close-candidate", kind: oldItemKind, claim: "уже не актуально",
+        scope: "conversation" as const, conversationId: CONVERSATION_ID, eventTimeStart: null,
+        eventTimeEnd: null, status: oldItemKind === "event" ? "rejected" : "stale", sensitivity: "normal",
+        alternative: null,
+      },
+      {
+        localItemKey: "new-candidate", kind: "event", claim: "сменила работу",
+        scope: "conversation" as const, conversationId: CONVERSATION_ID, eventTimeStart: null,
+        eventTimeEnd: null, status: "active", sensitivity: "normal", alternative: null,
+      },
+    ],
+    evidence: [
+      {
+        itemKey: "close-candidate", sourceMessageId: "m1",
+        relation: oldItemKind === "event" ? "rejects" : "contradicts",
+        supportType: null, episodeKey: "episode:m1", provenanceRole: "user",
+        mentionTime: "2026-01-01T10:00:00.000Z",
+      },
+      {
+        itemKey: "new-candidate", sourceMessageId: "m2", relation: "supports", supportType: null,
+        episodeKey: "episode:m2", provenanceRole: "user", mentionTime: "2026-01-02T10:00:00.000Z",
+      },
+    ],
+  };
+  const bindings = {
+    memories: [{ memoryRef: "memory:0001", memoryKey: oldKey }],
+    candidates: [
+      { candidateRef: "candidate:0001", localItemKey: "close-candidate" },
+      { candidateRef: "candidate:0002", localItemKey: "new-candidate" },
+    ],
+  };
+  const closeOp = {
+    type: oldItemKind === "event" ? "reject" : "mark_stale",
+    candidateRef: "candidate:0001", targetMemoryRef: "memory:0001", topic: null,
+    supersedesMemoryRef: null,
+  };
+  const createOp = {
+    type: "create", candidateRef: "candidate:0002", targetMemoryRef: null, topic: "fact",
+    supersedesMemoryRef: "memory:0001",
+  };
+  return { userId, oldKey, state, extraction, bindings, closeOp, createOp };
+}
+
+describe("Memory V3 dialogue supersedesMemoryRef linking", () => {
+  it("resolves supersedesMemoryRef to supersedesMemoryKey only when the target is also closed by reject/mark_stale in the same response", () => {
+    const fixture = twoItemFixture(oldEventItem("placeholder"));
+    const result = validateMemoryV3DialogueProposal(
+      { operations: [fixture.closeOp, fixture.createOp] },
+      { state: fixture.state, extraction: fixture.extraction, bindings: fixture.bindings },
+    );
+    const created = result.find((op) => op.type === "create")!;
+    assert.equal((created as unknown as { supersedesMemoryKey: string }).supersedesMemoryKey, fixture.oldKey);
+  });
+
+  it("rejects a create whose supersedesMemoryRef points at a memory not closed in this response", () => {
+    const fixture = twoItemFixture(oldEventItem("placeholder"));
+    assertContractError(
+      () => validateMemoryV3DialogueProposal(
+        { operations: [fixture.createOp] },
+        { state: fixture.state, extraction: fixture.extraction, bindings: fixture.bindings },
+      ),
+      "dialogue_contract_invalid_proposal",
+    );
+  });
+
+  it("rejects two creates both claiming to supersede the same target", () => {
+    const fixture = twoItemFixture(oldEventItem("placeholder"));
+    const extraction = structuredClone(fixture.extraction);
+    extraction.items.push({
+      localItemKey: "new-candidate-2", kind: "event", claim: "нашла другую работу",
+      scope: "conversation" as const, conversationId: CONVERSATION_ID, eventTimeStart: null,
+      eventTimeEnd: null, status: "active", sensitivity: "normal", alternative: null,
+    });
+    extraction.evidence.push({
+      itemKey: "new-candidate-2", sourceMessageId: "m3", relation: "supports", supportType: null,
+      episodeKey: "episode:m3", provenanceRole: "user", mentionTime: "2026-01-03T10:00:00.000Z",
+    });
+    const bindings = structuredClone(fixture.bindings);
+    bindings.candidates.push({ candidateRef: "candidate:0003", localItemKey: "new-candidate-2" });
+    const secondCreate = { ...fixture.createOp, candidateRef: "candidate:0003" };
+    assertContractError(
+      () => validateMemoryV3DialogueProposal(
+        { operations: [fixture.closeOp, fixture.createOp, secondCreate] },
+        { state: fixture.state, extraction, bindings },
+      ),
+      "dialogue_contract_invalid_proposal",
+    );
+  });
+
+  it("accepts supersedesMemoryRef even when the create's own candidate kind differs from the target's kind", () => {
+    const fixture = twoItemFixture(oldRecurrenceItem("placeholder"), "recurrence");
+    const result = validateMemoryV3DialogueProposal(
+      { operations: [fixture.closeOp, fixture.createOp] },
+      { state: fixture.state, extraction: fixture.extraction, bindings: fixture.bindings },
+    );
+    const created = result.find((op) => op.type === "create")!;
+    assert.equal((created as unknown as { supersedesMemoryKey: string }).supersedesMemoryKey, fixture.oldKey);
+  });
+
+  it("rejects a non-create operation that sets supersedesMemoryRef", () => {
+    const fixture = twoItemFixture(oldEventItem("placeholder"));
+    const confirmWithSupersedes = {
+      type: "confirm", candidateRef: "candidate:0001", targetMemoryRef: "memory:0001", topic: null,
+      supersedesMemoryRef: "memory:0001",
+    };
+    assertContractError(
+      () => validateMemoryV3DialogueProposal(
+        { operations: [confirmWithSupersedes] },
+        { state: fixture.state, extraction: fixture.extraction, bindings: fixture.bindings },
+      ),
+      "dialogue_contract_invalid_proposal",
+    );
+  });
+});
+
+describe("Memory V3 dialogue state replacesMemoryKey/replacedByMemoryKey", () => {
+  it("stores the fields on items and enforces the pair is symmetric and the old end is CLOSED", () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const closedEvent = {
+      ...oldEventItem("a".repeat(64)), status: "corrected",
+      replacesMemoryKey: null, replacedByMemoryKey: "b".repeat(64),
+      evidence: [{
+        conversationId: CONVERSATION_ID, sourceMessageId: "historical-old", relation: "corrects",
+        supportType: null, episodeKey: "episode:historical-old", provenanceRole: "user",
+        mentionTime: "2025-01-01T10:00:00Z",
+      }],
+    };
+    const newEvent = {
+      ...oldEventItem("b".repeat(64)), status: "active",
+      replacesMemoryKey: "a".repeat(64), replacedByMemoryKey: null,
+    };
+    const okState = {
+      schemaVersion: "memory-v3-dialogue-state-v1", userId, conversationId: CONVERSATION_ID,
+      stateRevision: 0, nextMemoryOrdinal: 3, items: [closedEvent, newEvent],
+    };
+    assert.doesNotThrow(() => validateMemoryV3DialogueState(okState, userId, CONVERSATION_ID));
+
+    const brokenState = { ...okState, items: [{ ...closedEvent, replacedByMemoryKey: "c".repeat(64) }, newEvent] };
+    assertContractError(
+      () => validateMemoryV3DialogueState(brokenState, userId, CONVERSATION_ID),
+      "dialogue_contract_invalid_state",
+    );
+
+    const notClosedState = { ...okState, items: [{ ...closedEvent, status: "active" }, newEvent] };
+    assertContractError(
+      () => validateMemoryV3DialogueState(notClosedState, userId, CONVERSATION_ID),
+      "dialogue_contract_invalid_state",
+    );
   });
 });
