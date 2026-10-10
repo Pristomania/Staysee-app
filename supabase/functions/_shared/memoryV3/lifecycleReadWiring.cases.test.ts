@@ -122,6 +122,8 @@ function lifecycleContext(): MemoryV3LifecycleReadContext {
       eventTimeEnd: null,
       alternative: null,
       updatedAt: "2026-09-20T08:00:00Z",
+      replacesMemoryKey: null,
+      replacedByMemoryKey: null,
     }],
   };
 }

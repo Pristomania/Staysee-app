@@ -22,6 +22,8 @@ function context() {
         eventTimeEnd: null,
         alternative: null,
         updatedAt: "2026-09-20T08:00:00Z",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
       {
         kind: "recurrence" as const,
@@ -32,6 +34,8 @@ function context() {
         eventTimeEnd: null,
         alternative: null,
         updatedAt: "2026-09-19T08:00:00Z",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
       {
         kind: "hypothesis" as const,
@@ -42,6 +46,8 @@ function context() {
         eventTimeEnd: null,
         alternative: "Юмор помогает поддержать окружающих.",
         updatedAt: "2026-09-18T08:00:00Z",
+        replacesMemoryKey: null,
+        replacedByMemoryKey: null,
       },
     ],
   };
