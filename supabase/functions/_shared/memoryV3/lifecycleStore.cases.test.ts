@@ -465,7 +465,7 @@ describe("Memory V3 lifecycle store", () => {
     const input = {
       ...successWrite(true),
       extraction,
-      operations: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context" }],
+      operations: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context", supersedesMemoryKey: null }],
       transitions: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, resultingMemoryKey: memoryKey }],
       state: {
         ...emptyState(1),
@@ -487,7 +487,7 @@ describe("Memory V3 lifecycle store", () => {
     assert.equal(fake.calls.length, 1);
     const sentOperations = fake.calls[0].args.p_operations as Array<Record<string, unknown>>;
     assert.deepEqual(sentOperations, [
-      { type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context" },
+      { type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "life_context", supersedesMemoryKey: null },
     ]);
   });
 

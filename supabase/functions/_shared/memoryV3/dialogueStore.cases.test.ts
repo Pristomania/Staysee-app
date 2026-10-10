@@ -470,6 +470,12 @@ describe("Memory V3 dialogue store", () => {
     // field for the topic-classification feature, but this store's own
     // independent field-shape check was never updated to expect it) shipped
     // without any test catching it. Every real write always failed here.
+    // The same thing happened again for supersedesMemoryRef/Key (the
+    // was->became linking feature): this fixture originally still had only
+    // 4 keys, so this exact test stayed green while production's real
+    // operations (5 keys, stamped by the reducer on every operation) failed
+    // projectOperations' field-count check on every single write -- caught
+    // only by a manual end-to-end test against the live canary account.
     const memoryKey = "a".repeat(64);
     const mentionTime = "2026-09-14T10:00:00.000Z";
     const extraction: MemoryV3Extraction = {
@@ -488,7 +494,7 @@ describe("Memory V3 dialogue store", () => {
     const input = {
       ...successWrite(true),
       extraction,
-      operations: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "person" }],
+      operations: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "person", supersedesMemoryKey: null }],
       transitions: [{ type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, resultingMemoryKey: memoryKey }],
       state: {
         ...emptyState(1),
@@ -510,7 +516,7 @@ describe("Memory V3 dialogue store", () => {
     assert.equal(fake.calls.length, 1);
     const sentOperations = fake.calls[0].args.p_operations as Array<Record<string, unknown>>;
     assert.deepEqual(sentOperations, [
-      { type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "person" },
+      { type: "create", candidateLocalItemKey: memoryKey, targetMemoryKey: null, topic: "person", supersedesMemoryKey: null },
     ]);
   });
 
