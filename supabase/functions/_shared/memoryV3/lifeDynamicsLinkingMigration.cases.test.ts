@@ -49,8 +49,12 @@ describe("Memory V3 life-dynamics linking migration", () => {
     assert.match(body, /LIMIT 5/);
   });
 
-  it("never touches the viewer or export RPCs", () => {
-    assert.equal(/CREATE OR REPLACE FUNCTION public\.load_memory_v3_lifecycle_viewer_items/.test(sql), false);
-    assert.equal(/CREATE OR REPLACE FUNCTION public\.load_memory_v3_dialogue_viewer_items_all/.test(sql), false);
+  it("never touches the per-conversation dialogue viewer RPC the regular Память screen uses", () => {
+    assert.equal(/CREATE OR REPLACE FUNCTION public\.load_memory_v3_dialogue_viewer_items\(/.test(sql), false);
+  });
+
+  it("also threads the link fields through both export-relevant viewer RPCs so the export path can show them", () => {
+    assert.match(sql, /CREATE OR REPLACE FUNCTION public\.load_memory_v3_lifecycle_viewer_items[\s\S]*?'replacesMemoryKey', i\.replaces_memory_key,\s*\n\s*'replacedByMemoryKey', i\.replaced_by_memory_key/);
+    assert.match(sql, /CREATE OR REPLACE FUNCTION public\.load_memory_v3_dialogue_viewer_items_all[\s\S]*?'replacesMemoryKey', i\.replaces_memory_key,\s*\n\s*'replacedByMemoryKey', i\.replaced_by_memory_key/);
   });
 });

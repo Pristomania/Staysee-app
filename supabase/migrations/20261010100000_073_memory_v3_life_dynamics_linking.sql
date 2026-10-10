@@ -459,3 +459,62 @@ AS $function$
   ) AS projected ON true
   WHERE h.user_id = p_user_id AND h.conversation_id = p_conversation_id;
 $function$;
+
+-- Also threads the link fields through the two viewer-read RPCs the
+-- export action actually calls (load_memory_v3_lifecycle_viewer_items,
+-- load_memory_v3_dialogue_viewer_items_all), so projectMemoryV3ExportItems
+-- can pass them through for real -- unlike the read-context RPCs above,
+-- these were untouched by this migration's first pass, which only
+-- extended the hot-path read RPCs. load_memory_v3_dialogue_viewer_items
+-- (the per-conversation one the regular Память screen uses) is
+-- deliberately left unchanged -- this feature's linkage data is only
+-- ever surfaced through the export path.
+
+CREATE OR REPLACE FUNCTION public.load_memory_v3_lifecycle_viewer_items(p_user_id uuid)
+RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $function$
+  SELECT COALESCE(pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object(
+      'memoryKey', i.memory_key,
+      'kind', i.kind,
+      'claim', i.claim,
+      'status', i.status,
+      'sensitivity', i.sensitivity,
+      'eventTimeStart', i.event_time_start,
+      'eventTimeEnd', i.event_time_end,
+      'topic', i.topic,
+      'firstSeenAt', i.first_seen_at,
+      'updatedAt', i.updated_at,
+      'alternative', i.alternative,
+      'replacesMemoryKey', i.replaces_memory_key,
+      'replacedByMemoryKey', i.replaced_by_memory_key
+    ) ORDER BY i.updated_at DESC, i.memory_key COLLATE "C"
+  ), '[]'::jsonb)
+  FROM public.memory_v3_lifecycle_shadow_items i
+  WHERE i.user_id = p_user_id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.load_memory_v3_dialogue_viewer_items_all(p_user_id uuid)
+RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $function$
+  SELECT COALESCE(pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object(
+      'memoryKey', i.memory_key,
+      'conversationId', i.conversation_id,
+      'kind', i.kind,
+      'claim', i.claim,
+      'status', i.status,
+      'sensitivity', i.sensitivity,
+      'eventTimeStart', i.event_time_start,
+      'eventTimeEnd', i.event_time_end,
+      'topic', i.topic,
+      'firstSeenAt', i.first_seen_at,
+      'updatedAt', i.updated_at,
+      'alternative', i.alternative,
+      'replacesMemoryKey', i.replaces_memory_key,
+      'replacedByMemoryKey', i.replaced_by_memory_key
+    ) ORDER BY i.updated_at DESC, i.memory_key COLLATE "C"
+  ), '[]'::jsonb)
+  FROM public.memory_v3_dialogue_items i
+  WHERE i.user_id = p_user_id;
+$function$;

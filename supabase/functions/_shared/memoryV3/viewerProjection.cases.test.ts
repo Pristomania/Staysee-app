@@ -149,11 +149,47 @@ describe("Memory V3 export projection", () => {
       { memoryKey: "a", kind: "event", claim: "X", status: "active", sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, topic: null, firstSeenAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z", alternative: null },
     ]);
     assert.deepEqual(Object.keys(result[0]).sort(), [
-      "alternative", "claim", "conversationId", "eventTimeEnd", "eventTimeStart", "firstSeenAt", "kind", "memoryKey", "sensitivity", "topic", "updatedAt",
+      "alternative", "claim", "conversationId", "eventTimeEnd", "eventTimeStart", "firstSeenAt", "kind", "memoryKey",
+      "replacedByMemoryKey", "replacesMemoryKey", "sensitivity", "topic", "updatedAt",
     ]);
   });
 
   it("returns an empty array for empty input", () => {
     assert.deepEqual(projectMemoryV3ExportItems([]), []);
+  });
+
+  it("passes through replacesMemoryKey/replacedByMemoryKey unchanged when present, and defaults both to null when absent", () => {
+    const [withLinks, withoutLinks] = projectMemoryV3ExportItems([
+      {
+        memoryKey: "a".repeat(64), kind: "event", claim: "boa", status: "corrected",
+        eventTimeStart: null, eventTimeEnd: null, sensitivity: "normal", topic: null,
+        firstSeenAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", alternative: null,
+        replacesMemoryKey: null, replacedByMemoryKey: "b".repeat(64),
+      },
+      {
+        memoryKey: "c".repeat(64), kind: "event", claim: "fact", status: "active",
+        eventTimeStart: null, eventTimeEnd: null, sensitivity: "normal", topic: null,
+        firstSeenAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", alternative: null,
+      },
+    ]);
+    assert.equal(withLinks.replacedByMemoryKey, "b".repeat(64));
+    assert.equal(withLinks.replacesMemoryKey, null);
+    assert.equal(withoutLinks.replacesMemoryKey, null);
+    assert.equal(withoutLinks.replacedByMemoryKey, null);
+  });
+
+  it("projectMemoryV3ViewerItems's own output is unchanged -- it never gains these fields", () => {
+    const [result] = projectMemoryV3ViewerItems([
+      {
+        memoryKey: "a".repeat(64), kind: "event", claim: "boa", status: "active",
+        eventTimeStart: null, eventTimeEnd: null, sensitivity: "normal", topic: null,
+        firstSeenAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", alternative: null,
+        replacesMemoryKey: null, replacedByMemoryKey: "b".repeat(64),
+      },
+    ]);
+    assert.deepEqual(Object.keys(result).sort(), [
+      "claim", "eventTimeEnd", "eventTimeStart", "firstSeenAt", "kind",
+      "memoryKey", "sensitivity", "topic", "updatedAt",
+    ]);
   });
 });
