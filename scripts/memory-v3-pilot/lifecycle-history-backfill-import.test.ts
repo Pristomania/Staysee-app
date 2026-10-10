@@ -109,7 +109,7 @@ async function fixture(itemCount = 1) {
       rawContent: JSON.stringify({
         operations: request.input.candidates.map((candidate) => ({
           type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
-          topic: 'life_context',
+          topic: 'life_context', supersedesMemoryRef: null,
         })),
       }),
       usage: null,

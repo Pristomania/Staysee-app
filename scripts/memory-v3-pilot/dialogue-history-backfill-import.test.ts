@@ -119,7 +119,7 @@ async function fixture(count = 1, revisionOverrides: Record<string, number> = {}
     reconcilerAdapter: async (request: MemoryV3DialogueReconcileRequest) => ({
       rawContent: JSON.stringify({
         operations: request.input.candidates.map((candidate) => ({
-          type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact',
+          type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact', supersedesMemoryRef: null,
         })),
       }),
       usage: null,
@@ -585,7 +585,7 @@ describe('reviewed dialogue history import', () => {
       reconcilerAdapter: async (request: MemoryV3DialogueReconcileRequest) => ({
         rawContent: JSON.stringify({
           operations: request.input.candidates.map((candidate) => ({
-            type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact',
+            type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null, topic: 'fact', supersedesMemoryRef: null,
           })),
         }),
         usage: null,

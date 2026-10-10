@@ -357,6 +357,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
             candidateRef: candidate.candidateRef,
             targetMemoryRef: null,
             topic: 'life_context',
+            supersedesMemoryRef: null,
           })),
         }),
         usage: { promptTokens: 20, completionTokens: 3, costUsd: 0.002 },
@@ -549,6 +550,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
                   ? null
                   : request.input.currentItems[0].memoryRef,
                 topic: type === 'create' || type === 'revise' ? 'life_context' : null,
+                supersedesMemoryRef: null,
               }],
             }),
             usage: null,
@@ -829,7 +831,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         rawContent: JSON.stringify({
           operations: request.input.candidates.map((candidate) => ({
             type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
-            topic: 'life_context',
+            topic: 'life_context', supersedesMemoryRef: null,
           })),
         }),
         usage: null,
@@ -1179,6 +1181,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
             candidateRef: candidate.candidateRef,
             targetMemoryRef: null,
             topic: 'life_context',
+            supersedesMemoryRef: null,
           })),
         }),
         usage: { promptTokens: 20, completionTokens: 3, costUsd: 0.002 },
@@ -1227,7 +1230,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         rawContent: JSON.stringify({
           operations: request.input.candidates.map((candidate) => ({
             type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
-            topic: 'life_context',
+            topic: 'life_context', supersedesMemoryRef: null,
           })),
         }),
         usage: null,
@@ -1261,7 +1264,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
         rawContent: JSON.stringify({
           operations: request.input.candidates.map((candidate) => ({
             type: 'create', candidateRef: candidate.candidateRef, targetMemoryRef: null,
-            topic: 'life_context',
+            topic: 'life_context', supersedesMemoryRef: null,
           })),
         }),
         usage: null,
