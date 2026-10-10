@@ -154,7 +154,7 @@ async function applyCreate(overrides: JsonRecord = {}) {
     at: "2026-01-10T10:00:00Z",
     conversationId: CONVERSATION_ID,
     extraction: eventExtraction(),
-    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: TOPIC }],
+    proposal: [{ type: "create", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null }],
     trustedForgetMemoryKeys: [],
     ...overrides,
   });
@@ -201,8 +201,8 @@ describe("production dialogue reducer behavior", () => {
       evidence: [secondEvidence, { ...first.evidence[0], itemKey: "a-candidate", sourceMessageId: "a-message" }],
     } as MemoryV3Extraction;
     const proposal: MemoryV3DialogueProposal = [
-      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null, topic: TOPIC },
-      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null, topic: TOPIC },
+      { type: "create", candidateLocalItemKey: "a-candidate", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null },
+      { type: "create", candidateLocalItemKey: "Z-candidate", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null },
     ];
     const input = {
       state: createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID }),
@@ -248,6 +248,7 @@ describe("production dialogue reducer behavior", () => {
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
         topic: null,
+        supersedesMemoryKey: null,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -265,7 +266,7 @@ describe("production dialogue reducer behavior", () => {
     const empty = createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID });
     const ignored = await applyCreate({
       state: empty,
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null, supersedesMemoryKey: null }],
     });
     assert.equal(ignored.changed, false);
     assert.deepEqual(ignored.state, empty);
@@ -276,7 +277,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(confirmed.changed, false);
@@ -295,6 +296,7 @@ describe("production dialogue reducer behavior", () => {
         candidateLocalItemKey: "candidate-01",
         targetMemoryKey: created.state.items[0].memoryKey,
         topic: TOPIC,
+        supersedesMemoryKey: null,
       }],
       trustedForgetMemoryKeys: [],
     });
@@ -327,6 +329,7 @@ describe("production dialogue reducer behavior", () => {
         candidateLocalItemKey: item.localItemKey,
         targetMemoryKey: null,
         topic: TOPIC,
+        supersedesMemoryKey: null,
       })),
       trustedForgetMemoryKeys: [],
     });
@@ -337,7 +340,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-11T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null }],
+      proposal: [{ type: "ignore", candidateLocalItemKey: "candidate-01", targetMemoryKey: null, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(ignored.changed, false);
@@ -354,7 +357,7 @@ describe("production dialogue reducer behavior", () => {
         item: { claim: "Moved permanently to Kazan" },
         evidence: { sourceMessageId: "m2", episodeKey: "episode:m2", mentionTime: "2026-01-11T10:00:00Z" },
       }),
-      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey, topic: TOPIC }],
+      proposal: [{ type: "revise", candidateLocalItemKey: "candidate-01", targetMemoryKey: event.state.items[0].memoryKey, topic: TOPIC, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(revised.state.items[0].claim, "Moved permanently to Kazan");
@@ -367,7 +370,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: recurrenceInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null, topic: TOPIC }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     const stale = await applyMemoryV3DialogueStep({
@@ -384,7 +387,7 @@ describe("production dialogue reducer behavior", () => {
           mentionTime: "2026-01-12T10:00:00Z",
         }],
       }),
-      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey, topic: null }],
+      proposal: [{ type: "mark_stale", candidateLocalItemKey: "candidate-recurrence", targetMemoryKey: recurrence.state.items[0].memoryKey, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(stale.state.items[0].status, "stale");
@@ -397,7 +400,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: hypothesisInput,
-      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null, topic: TOPIC }],
+      proposal: [{ type: "create", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     const rejected = await applyMemoryV3DialogueStep({
@@ -405,7 +408,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-12T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: hypothesisExtraction({ item: { status: "rejected" }, relation: "rejects" }),
-      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey, topic: null }],
+      proposal: [{ type: "reject", candidateLocalItemKey: "candidate-hypothesis", targetMemoryKey: hypothesis.state.items[0].memoryKey, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(rejected.state.items[0].status, "rejected");
@@ -431,7 +434,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction,
-      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null, topic: TOPIC })),
+      proposal: extraction.items.map((item) => ({ type: "create" as const, candidateLocalItemKey: item.localItemKey, targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: null })),
       trustedForgetMemoryKeys: [],
     });
     const before = structuredClone(created.state);
@@ -457,6 +460,7 @@ describe("production dialogue reducer behavior", () => {
         candidateLocalItemKey: confirmExtraction.items[index].localItemKey,
         targetMemoryKey: item.memoryKey,
         topic: null,
+        supersedesMemoryKey: null,
       })),
       trustedForgetMemoryKeys: [],
     }), "dialogue_reducer_transition_invalid");
@@ -472,7 +476,7 @@ describe("production dialogue reducer behavior", () => {
       at: "2025-01-01T00:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction(),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "candidate-01", targetMemoryKey: created.state.items[0].memoryKey, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     }), "dialogue_reducer_transition_invalid");
     assert.deepEqual(created.state, before);
@@ -571,7 +575,7 @@ describe("Memory V3 dialogue reducer topic", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
-      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "person" }],
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "person", supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(result.state.items.length, 1);
@@ -585,7 +589,7 @@ describe("Memory V3 dialogue reducer topic", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
-      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact" }],
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact", supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     const memoryKey = created.state.items[0].memoryKey;
@@ -594,7 +598,7 @@ describe("Memory V3 dialogue reducer topic", () => {
       at: "2026-01-11T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
-      proposal: [{ type: "revise", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: "preference" }],
+      proposal: [{ type: "revise", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: "preference", supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(revised.state.items[0].topic, "preference");
@@ -608,7 +612,7 @@ describe("Memory V3 dialogue reducer topic", () => {
       at: "2026-01-10T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction({ item: { localItemKey: "item-1", claim: "Переехала в Казань" } }),
-      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact" }],
+      proposal: [{ type: "create", candidateLocalItemKey: "item-1", targetMemoryKey: null, topic: "fact", supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     const memoryKey = created.state.items[0].memoryKey;
@@ -617,9 +621,59 @@ describe("Memory V3 dialogue reducer topic", () => {
       at: "2026-01-11T10:00:00Z",
       conversationId: CONVERSATION_ID,
       extraction: eventExtraction({ item: { localItemKey: "item-2", claim: "Переехала в Казань" } }),
-      proposal: [{ type: "confirm", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: null }],
+      proposal: [{ type: "confirm", candidateLocalItemKey: "item-2", targetMemoryKey: memoryKey, topic: null, supersedesMemoryKey: null }],
       trustedForgetMemoryKeys: [],
     });
     assert.equal(confirmed.state.items[0].topic, "fact");
+  });
+});
+
+describe("Memory V3 dialogue reducer was->became linking", () => {
+  it("stamps replacesMemoryKey on the new item and replacedByMemoryKey on the old one when a create supersedes a reject target in the same step", async () => {
+    const event = await applyCreate();
+    const oldKey = event.state.items[0].memoryKey;
+    const extraction: MemoryV3Extraction = {
+      run: { caseId: "case-close", extractorVersion: "fixture-v1" },
+      items: [{
+        localItemKey: "close-candidate", kind: "event", claim: "уже неактуально",
+        scope: "conversation", conversationId: CONVERSATION_ID, eventTimeStart: null,
+        eventTimeEnd: null, status: "rejected", sensitivity: "normal", alternative: null,
+      }, {
+        localItemKey: "new-candidate", kind: "event", claim: "сменила работу",
+        scope: "conversation", conversationId: CONVERSATION_ID, eventTimeStart: null,
+        eventTimeEnd: null, status: "active", sensitivity: "normal", alternative: null,
+      }],
+      evidence: [{
+        itemKey: "close-candidate", sourceMessageId: "m-close", relation: "rejects",
+        supportType: null, episodeKey: "episode:m-close", provenanceRole: "user",
+        mentionTime: "2026-01-11T10:00:00Z",
+      }, {
+        itemKey: "new-candidate", sourceMessageId: "m-new", relation: "supports",
+        supportType: null, episodeKey: "episode:m-new", provenanceRole: "user",
+        mentionTime: "2026-01-11T10:00:00Z",
+      }],
+    } as MemoryV3Extraction;
+    const result = await applyMemoryV3DialogueStep({
+      state: event.state,
+      at: "2026-01-11T10:00:00Z",
+      conversationId: CONVERSATION_ID,
+      extraction,
+      proposal: [
+        { type: "reject", candidateLocalItemKey: "close-candidate", targetMemoryKey: oldKey, topic: null, supersedesMemoryKey: null },
+        { type: "create", candidateLocalItemKey: "new-candidate", targetMemoryKey: null, topic: TOPIC, supersedesMemoryKey: oldKey },
+      ],
+      trustedForgetMemoryKeys: [],
+    });
+    const closed = result.state.items.find((item) => item.memoryKey === oldKey)!;
+    const created = result.state.items.find((item) => item.status === "active" && item.replacesMemoryKey === oldKey)!;
+    assert.equal(closed.replacedByMemoryKey, created.memoryKey);
+    assert.equal(created.replacesMemoryKey, oldKey);
+    assert.equal(closed.status, "rejected");
+  });
+
+  it("leaves replacesMemoryKey/replacedByMemoryKey null on an ordinary create with no supersedesMemoryKey, matching today's output exactly", async () => {
+    const result = await applyCreate();
+    assert.equal(result.state.items[0].replacesMemoryKey, null);
+    assert.equal(result.state.items[0].replacedByMemoryKey, null);
   });
 });
