@@ -109,7 +109,22 @@ Validation (contract layer): if `supersedesMemoryKey` is present, it must
 match a `targetMemoryKey` that this same operation batch is also closing
 via `reject` or `mark_stale` in that same response — reusing the existing
 "no other operation may target that memory" bookkeeping, extended to
-recognize this cross-reference rather than reject it as a conflict.
+recognize this cross-reference rather than reject it as a conflict. At
+most one `create` in a batch may reference a given `targetMemoryKey` this
+way — two different creates both claiming to supersede the same closed
+item is rejected, the same way the existing rule already rejects two
+operations both targeting the same memory for closing. Unlike `revise`,
+which requires `candidate.kind === target.kind`, `supersedesMemoryKey`
+carries no such constraint — a recurrence (e.g. a recurring worry)
+resolving into an `event` (e.g. the thing it was about actually
+happening) is exactly the kind of change this feature exists to capture,
+and kind-matching would rule it out.
+
+A linked item's new end can itself later become the old end of a further
+link — chains are supported with no special-casing: a middle-of-chain
+item simply carries both `replacesMemoryKey` (pointing to what it
+replaced) and `replacedByMemoryKey` (pointing to what replaced it) at
+once.
 
 Reducer: when applying such a `create`, it stamps both ends —
 `replacesMemoryKey` on the new item (pointing at the old one) and
@@ -142,6 +157,14 @@ keeps this change's worst-case cost/token growth roughly the same order
 of magnitude as the existing 12, while giving a handful of real life
 changes room not to crowd each other out. It's a `LIMIT` in a migration,
 not a schema shape, so it's cheap to retune later.
+
+Protection is evaluated per pair (an item and its direct
+`replacesMemoryKey`/`replacedByMemoryKey` partner), not transitively
+across a whole chain — a 3-link chain where only the oldest item is
+sensitive protects that oldest item and its immediate partner, not every
+item in the chain. This keeps the selection query a simple join, not a
+recursive walk, and matches the 5-slot budget's intent (a handful of
+specific sensitive moments, not entire histories).
 
 ### 3. Weekly dynamics screen + weekly-reflection prompt
 
@@ -206,8 +229,10 @@ not a schema shape, so it's cheap to retune later.
 - `dialogueContract.cases.test.ts` / `lifecycleContract.cases.test.ts`:
   `supersedesMemoryKey` accepted only when it matches a same-batch
   `reject`/`mark_stale` target; rejected when it references anything
-  else (wrong batch, not being closed, malformed memory-key format) —
-  same assertion style already used for `targetMemoryKey` in this file.
+  else (wrong batch, not being closed, malformed memory-key format), when
+  two creates reference the same target, and accepted even when the
+  create's own `kind` differs from the target's `kind` (unlike `revise`)
+  — same assertion style already used for `targetMemoryKey` in this file.
 - `dialogueReducer.cases.test.ts` / `lifecycleReducer.cases.test.ts`:
   a `create` with `supersedesMemoryKey` stamps `replacesMemoryKey` on the
   new item and `replacedByMemoryKey` on the old one; a `create` without
