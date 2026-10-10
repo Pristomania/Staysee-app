@@ -8,6 +8,7 @@ import {
   parseStoredMemory,
   type StructuredMemory,
 } from "./memory.ts";
+import { makeServiceClient } from "./cost.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import { WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE } from "./weeklyReflectionPrivacy.ts";
 
@@ -222,9 +223,13 @@ export function countActiveDays(transcript: WeekTranscriptLine[]): number {
 }
 
 export async function fetchLinkedPairsForConversation(
-  supabase: SupabaseClient,
   conversationId: string
 ): Promise<WeeklyReflectionLinkedPair[]> {
+  // memory_v3_dialogue_items is REVOKE ALL ... FROM authenticated (migration
+  // 039) -- only service_role may read it. generateWeeklyReflectionText is
+  // called with a user-JWT-scoped client, which can never read this table,
+  // so this needs its own service-role client rather than the caller's.
+  const supabase = makeServiceClient();
   const { data, error } = await supabase
     .from("memory_v3_dialogue_items")
     .select("memory_key, claim, replaces_memory_key")
@@ -263,7 +268,7 @@ export async function generateWeeklyReflectionText(
 ): Promise<{ text: string; generated: boolean }> {
   const transcript = await fetchWeekTranscript(supabase, meta.conversationId);
   const userMarks = await fetchWeekUserMarks(supabase, meta.conversationId);
-  const linkedPairs = await fetchLinkedPairsForConversation(supabase, meta.conversationId);
+  const linkedPairs = await fetchLinkedPairsForConversation(meta.conversationId);
   const memory = parseStoredMemory(meta.conversationSummary);
   const activeDays = countActiveDays(transcript);
   const title = meta.conversationTitle ?? "эта беседа";
