@@ -79,6 +79,31 @@ describe("Memory V3 lifecycle read prompt", () => {
     assert.equal(utf8Bytes(result) <= MEMORY_V3_LIFECYCLE_READ_MAX_PROMPT_BYTES, true);
   });
 
+  test("renders a closed/superseded item under its own heading, never inside a live-status group", () => {
+    const input = context();
+    input.items = [...input.items, {
+      kind: "event" as const,
+      claim: "Пользователь боялся увольнения.",
+      status: "corrected" as const,
+      sensitivity: "normal" as const,
+      eventTimeStart: null,
+      eventTimeEnd: null,
+      alternative: null,
+      updatedAt: "2026-04-20T08:00:00Z",
+      replacesMemoryKey: null,
+      replacedByMemoryKey: "a".repeat(64),
+    }];
+    const result = formatMemoryV3LifecycleReadPrompt(input, "2026-09-20T08:00:00Z");
+
+    assert.match(result, /Previously true, since changed[^\n]*:\n- Пользователь боялся увольнения\./);
+    const confirmedSection = result.slice(
+      result.indexOf("Confirmed events:"),
+      result.indexOf("Recurring patterns:"),
+    );
+    assert.equal(confirmedSection.includes("боялся увольнения"), false);
+    assert.equal(result.includes("a".repeat(64)), false);
+  });
+
   test("includes all epistemic, privacy, sensitivity, precedence, quotation, and age-weighting rules", () => {
     const result = formatMemoryV3LifecycleReadPrompt(context());
 
