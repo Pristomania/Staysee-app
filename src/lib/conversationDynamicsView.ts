@@ -12,7 +12,6 @@ export interface MessageActivityWindow {
 export interface DynamicsChangingView {
   newItems: string[];
   fadedItems: string[];
-  repeatedItems: string[];
   activityText: string | null;
   empty: boolean;
 }
@@ -152,7 +151,7 @@ export function buildChangingView(data: ConversationDynamicsData): DynamicsChang
     fadedItems.length === 0 &&
     !activityText;
 
-  return { newItems, fadedItems, repeatedItems: [], activityText, empty };
+  return { newItems, fadedItems, activityText, empty };
 }
 
 export function buildRepeatingView(data: ConversationDynamicsData): DynamicsRepeatingItem[] {

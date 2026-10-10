@@ -427,9 +427,7 @@ export function ConversationDynamicsScreen() {
     weeklies.length >= DYNAMICS_WEEKLY_TREND_MIN_WEEKLIES &&
     changing &&
     !changing.empty &&
-    (changing.newItems.length > 0 ||
-      changing.fadedItems.length > 0 ||
-      changing.repeatedItems.length > 0);
+    (changing.newItems.length > 0 || changing.fadedItems.length > 0);
 
   function aliveSublabel(source: string): string | undefined {
     if (source === 'open_loops') return DYNAMICS_COPY.fromMemory;
@@ -628,12 +626,6 @@ export function ConversationDynamicsScreen() {
                   items={changing?.fadedItems ?? []}
                   theme={theme}
                 />
-                <TrendGroup
-                  direction="repeat"
-                  label={DYNAMICS_COPY.trendRepeated}
-                  items={changing?.repeatedItems ?? []}
-                  theme={theme}
-                />
                 {changing?.activityText ? (
                   <TextCard text={changing.activityText} sublabel={DYNAMICS_COPY.rhythm} theme={theme} />
                 ) : null}
@@ -645,9 +637,6 @@ export function ConversationDynamicsScreen() {
                 ))}
                 {changing?.fadedItems.map((text) => (
                   <TextCard key={`fade-${text}`} text={text} sublabel={DYNAMICS_COPY.faded} theme={theme} />
-                ))}
-                {changing?.repeatedItems.map((text) => (
-                  <TextCard key={`rep-${text}`} text={text} sublabel={DYNAMICS_COPY.repeated} theme={theme} />
                 ))}
                 {changing?.activityText ? (
                   <TextCard text={changing.activityText} sublabel={DYNAMICS_COPY.rhythm} theme={theme} />

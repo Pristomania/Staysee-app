@@ -63,4 +63,11 @@ assertMatch(
   "should filter dialogue items to the current conversation before building the key map",
 );
 
+// repeatedItems was dead code: buildChangingView always returned [] for it
+// (Task 6 rewrote the "repeated" concept away entirely, replacing it with
+// linkedPairs), and TrendGroup/the screen's own render path already
+// no-op on an empty array -- but the field, its type, and its two render
+// sites lingered. Removed entirely rather than left as a permanent no-op.
+assertDoesNotMatch(source, /repeatedItems/, "repeatedItems should be fully removed -- it was always []");
+
 console.log("PASS: conversationDynamicsView.cases.test.ts");
