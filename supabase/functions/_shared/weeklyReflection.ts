@@ -10,12 +10,6 @@ import {
 } from "./memory.ts";
 import { makeServiceClient } from "./cost.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
-import { WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE } from "./weeklyReflectionPrivacy.ts";
-
-export {
-  isWeeklyReflectionVisibleEntryType,
-  WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE,
-} from "./weeklyReflectionPrivacy.ts";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_TRANSCRIPT_LINES = 36;
@@ -30,6 +24,12 @@ export interface WeeklyReflectionInput {
 export interface WeeklyReflectionLinkedPair {
   newClaim: string;
   oldClaim: string;
+}
+
+export interface WeeklyReflectionConfirmedItem {
+  kind: "event" | "recurrence" | "hypothesis";
+  claim: string;
+  alternative: string | null;
 }
 
 export interface WeekTranscriptLine {
@@ -101,30 +101,12 @@ export async function fetchWeekTranscript(
   return sampleTranscriptLines(lines, MAX_TRANSCRIPT_LINES);
 }
 
-export async function fetchWeekUserMarks(
-  supabase: SupabaseClient,
-  conversationId: string
-): Promise<string[]> {
-  const { data } = await supabase
-    .from("progress_entries")
-    .select("content, created_at")
-    .eq("conversation_id", conversationId)
-    .eq("entry_type", WEEKLY_REFLECTION_USER_MARK_ENTRY_TYPE)
-    .gte("created_at", sinceIsoWeek())
-    .order("created_at", { ascending: true })
-    .limit(12);
-
-  return (data ?? [])
-    .map((r) => (r.content ?? "").trim())
-    .filter((t) => t.length > 0);
-}
-
 export function buildWeeklyReflectionPrompt(input: {
   title: string;
   memory: StructuredMemory | null;
   transcript: WeekTranscriptLine[];
-  userMarks: string[];
   activeDays: number;
+  confirmedMemory: WeeklyReflectionConfirmedItem[];
   linkedPairs: WeeklyReflectionLinkedPair[];
 }): string {
   const title = input.title.trim() || "эта беседа";
@@ -145,9 +127,13 @@ export function buildWeeklyReflectionPrompt(input: {
         .join("\n")
     : "За неделю в переписке почти не было содержательных реплик.";
 
-  const marksBlock = input.userMarks.length
-    ? input.userMarks.map((m) => `• ${m}`).join("\n")
-    : "Пользователь не оставлял своих следов вручную.";
+  const confirmedBlock = input.confirmedMemory.length
+    ? input.confirmedMemory
+        .map((item) => item.kind === "hypothesis"
+          ? `• Гипотеза: ${item.claim} Альтернатива: ${item.alternative}`
+          : `• ${item.claim}`)
+        .join("\n")
+    : "Подтверждённых фактов пока нет.";
 
   const pairsBlock = input.linkedPairs.length
     ? `\n\nПЕРЕМЕНЫ, КОТОРЫЕ УЖЕ ПРОИЗОШЛИ (раньше было иначе, сейчас стало так):\n${input.linkedPairs
@@ -173,8 +159,8 @@ export function buildWeeklyReflectionPrompt(input: {
 ПАМЯТЬ ЭТОЙ БЕСЕДЫ:
 ${memoryBlock}
 
-СЛЕДЫ, КОТОРЫЕ ПОЛЬЗОВАТЕЛЬ САМ СОХРАНИЛ:
-${marksBlock}${pairsBlock}
+ПОДТВЕРЖДЁННЫЕ ФАКТЫ И ПАТТЕРНЫ ЭТОЙ БЕСЕДЫ:
+${confirmedBlock}${pairsBlock}
 
 ФРАГМЕНТЫ ПЕРЕПИСКИ ЗА НЕДЕЛЮ (только эта комната):
 ${transcriptBlock}
@@ -256,6 +242,46 @@ export async function fetchLinkedPairsForConversation(
   return pairs;
 }
 
+export async function fetchConfirmedMemoryForConversation(
+  conversationId: string
+): Promise<WeeklyReflectionConfirmedItem[]> {
+  // Same reasoning as fetchLinkedPairsForConversation: memory_v3_dialogue_items
+  // is REVOKE ALL ... FROM authenticated, so this needs its own service-role
+  // client. This file deliberately never touches the user's own private
+  // notes table at all -- only confirmed, non-sensitive Memory V3
+  // facts/patterns reach this prompt.
+  const supabase = makeServiceClient();
+  const { data, error } = await supabase
+    .from("memory_v3_dialogue_items")
+    .select("kind, claim, status, sensitivity, alternative")
+    .eq("conversation_id", conversationId);
+
+  if (error) {
+    console.error("[weeklyReflection] confirmedMemory:", error.message);
+    return [];
+  }
+
+  const rows = (data ?? []) as Array<{
+    kind: string;
+    claim: string;
+    status: string;
+    sensitivity: string;
+    alternative: string | null;
+  }>;
+
+  return rows
+    .filter((row) => row.sensitivity !== "sensitive")
+    .filter((row) =>
+      ((row.kind === "event" || row.kind === "recurrence") && row.status === "active") ||
+      (row.kind === "hypothesis" && row.status === "supported")
+    )
+    .map((row) => ({
+      kind: row.kind as "event" | "recurrence" | "hypothesis",
+      claim: row.claim,
+      alternative: row.kind === "hypothesis" ? row.alternative : null,
+    }));
+}
+
 export async function generateWeeklyReflectionText(
   supabase: SupabaseClient,
   meta: WeeklyReflectionInput,
@@ -267,7 +293,7 @@ export async function generateWeeklyReflectionText(
   }
 ): Promise<{ text: string; generated: boolean }> {
   const transcript = await fetchWeekTranscript(supabase, meta.conversationId);
-  const userMarks = await fetchWeekUserMarks(supabase, meta.conversationId);
+  const confirmedMemory = await fetchConfirmedMemoryForConversation(meta.conversationId);
   const linkedPairs = await fetchLinkedPairsForConversation(meta.conversationId);
   const memory = parseStoredMemory(meta.conversationSummary);
   const activeDays = countActiveDays(transcript);
@@ -289,8 +315,8 @@ export async function generateWeeklyReflectionText(
     title,
     memory,
     transcript,
-    userMarks,
     activeDays,
+    confirmedMemory,
     linkedPairs,
   });
 
