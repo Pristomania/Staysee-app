@@ -309,10 +309,12 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
       {
         userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "extractor",
         model: "google/gemini-3.7-flash", promptTokens: 500, completionTokens: 80, costUsd: 0.00021,
+        pipeline: "dialogue",
       },
       {
         userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "reconciler",
         model: "google/gemini-3.7-flash", promptTokens: 900, completionTokens: 150, costUsd: 0.00045,
+        pipeline: "dialogue",
       },
     ]);
   });

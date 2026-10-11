@@ -301,6 +301,10 @@ export type MemoryV3LifecycleUsageLogger = (input: {
   promptTokens: number;
   completionTokens: number;
   costUsd: number;
+  /** Which Memory V3 pipeline this call belongs to -- dialogue (per-conversation)
+   * and lifecycle (cross-conversation) share this logger's shape, and without
+   * this tag their costs are indistinguishable in ai_usage_logs. */
+  pipeline: "dialogue" | "lifecycle";
 }) => Promise<void>;
 
 export async function runMemoryV3LifecycleShadow(
@@ -441,6 +445,7 @@ export async function runMemoryV3LifecycleShadow(
       promptTokens: extractor.usage.promptTokens,
       completionTokens: extractor.usage.completionTokens,
       costUsd: extractor.usage.costUsd,
+      pipeline: "lifecycle",
     });
   }
 
@@ -506,6 +511,7 @@ export async function runMemoryV3LifecycleShadow(
       promptTokens: reconciler.usage.promptTokens,
       completionTokens: reconciler.usage.completionTokens,
       costUsd: reconciler.usage.costUsd,
+      pipeline: "lifecycle",
     });
   }
 
