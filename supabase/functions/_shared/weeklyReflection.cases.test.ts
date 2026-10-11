@@ -49,6 +49,7 @@ const {
   buildWeeklyReflectionPrompt,
   fetchLinkedPairsForConversation,
   fetchConfirmedMemoryForConversation,
+  generateWeeklyReflectionText,
 } = await import("./weeklyReflection.ts");
 
 function assert(condition: boolean, message: string): void {
@@ -220,3 +221,49 @@ console.log("\n=== fetchLinkedPairsForConversation uses the service-role client 
 }
 
 console.log("fetchLinkedPairsForConversation service-role case passed.");
+
+console.log("\n=== generateWeeklyReflectionText caps reasoning effort ===\n");
+
+// Found via a live production test on a rich real conversation: with no
+// reasoning cap, google/gemini-3.7-flash spent 498 of its 520-token budget
+// on invisible reasoning tokens, leaving only a few tokens for the actual
+// visible answer -- the real response came back cut off mid-sentence
+// (finish_reason "length") while still passing the ">= 40 chars" check and
+// being reported as generated:true. dialogueTransport.ts/lifecycleTransport.ts
+// already guard against exactly this with reasoning:{effort:"low"}; this
+// call never had that guard.
+{
+  const { createClient } = await import("@supabase/supabase-js");
+  const originalFetch = globalThis.fetch;
+  let reflectionRequestBody: Record<string, unknown> | null = null;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = String(url);
+    if (urlStr.includes("openrouter.ai")) {
+      reflectionRequestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "Достаточно длинный текст снимка недели для проверки." } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const userClient = createClient("https://sentinel.supabase.co", "ANON_SENTINEL_KEY");
+    const result = await generateWeeklyReflectionText(
+      userClient,
+      { conversationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", conversationTitle: "Тест", conversationSummary: null },
+      { baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-3.7-flash", apiKey: "test-key" },
+    );
+    assert(result.generated, "should have generated via the model, not the fallback");
+    assert(reflectionRequestBody !== null, "should have called OpenRouter");
+    assert(
+      JSON.stringify(reflectionRequestBody!.reasoning) === JSON.stringify({ effort: "low" }),
+      `should cap reasoning effort so the completion budget isn't spent on invisible thinking, got: ${JSON.stringify(reflectionRequestBody!.reasoning)}`,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+console.log("generateWeeklyReflectionText reasoning-effort case passed.");
