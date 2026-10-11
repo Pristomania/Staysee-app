@@ -333,6 +333,12 @@ export async function generateWeeklyReflectionText(
         messages: [{ role: "user", content: prompt }],
         max_tokens: 520,
         temperature: 0.45,
+        // Without this, a reasoning-capable model can spend nearly the
+        // whole completion budget on invisible "thinking" tokens, leaving
+        // only a few tokens for the actual visible answer -- confirmed live:
+        // 498 of 520 tokens went to reasoning, and the real text came back
+        // cut off mid-sentence while still passing the length check below.
+        reasoning: { effort: "low" },
       }),
     });
 
