@@ -416,6 +416,7 @@ export async function runMemoryV3DialogueShadow(
       promptTokens: extractor.usage.promptTokens,
       completionTokens: extractor.usage.completionTokens,
       costUsd: extractor.usage.costUsd,
+      pipeline: "dialogue",
     });
   }
 
@@ -481,6 +482,7 @@ export async function runMemoryV3DialogueShadow(
       promptTokens: reconciler.usage.promptTokens,
       completionTokens: reconciler.usage.completionTokens,
       costUsd: reconciler.usage.costUsd,
+      pipeline: "dialogue",
     });
   }
 

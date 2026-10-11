@@ -21,14 +21,15 @@ function mirrorMemoryV3LifecycleUsageRow(input: {
   costUsd: number;
   promptTokens: number;
   completionTokens: number;
+  pipeline: "dialogue" | "lifecycle";
 }): Record<string, unknown> {
   return {
     cost: input.costUsd,
     prompt_tokens: input.promptTokens,
     completion_tokens: input.completionTokens,
-    call_kind: input.stage === "extractor"
-      ? "memory_lifecycle_extractor"
-      : "memory_lifecycle_reconciler",
+    call_kind: input.pipeline === "dialogue"
+      ? (input.stage === "extractor" ? "memory_dialogue_extractor" : "memory_dialogue_reconciler")
+      : (input.stage === "extractor" ? "memory_lifecycle_extractor" : "memory_lifecycle_reconciler"),
     request_id: input.runId,
   };
 }
@@ -109,19 +110,41 @@ const RUN_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 const extractorRow = mirrorMemoryV3LifecycleUsageRow({
   runId: RUN_ID, stage: "extractor", costUsd: 0.00034, promptTokens: 500, completionTokens: 120,
+  pipeline: "lifecycle",
 });
-assert(extractorRow.call_kind === "memory_lifecycle_extractor", "extractor call_kind");
+assert(extractorRow.call_kind === "memory_lifecycle_extractor", "lifecycle extractor call_kind");
 assert(extractorRow.request_id === RUN_ID, "extractor request_id reuses runId");
 assert(extractorRow.cost === 0.00034, "extractor keeps the real reported cost");
 
 const reconcilerRow = mirrorMemoryV3LifecycleUsageRow({
   runId: RUN_ID, stage: "reconciler", costUsd: 0.00061, promptTokens: 900, completionTokens: 200,
+  pipeline: "lifecycle",
 });
-assert(reconcilerRow.call_kind === "memory_lifecycle_reconciler", "reconciler call_kind");
+assert(reconcilerRow.call_kind === "memory_lifecycle_reconciler", "lifecycle reconciler call_kind");
 assert(reconcilerRow.request_id === RUN_ID, "reconciler request_id reuses runId");
 assert(
   extractorRow.request_id === reconcilerRow.request_id,
   "both stages of one check share request_id, so count(DISTINCT request_id) counts checks"
+);
+
+// Dialogue (per-conversation) and lifecycle (cross-conversation) calls used
+// to share the same call_kind regardless of which pipeline actually ran --
+// making it impossible to tell their costs apart in ai_usage_logs. The
+// pipeline tag must route to its own distinct call_kind pair.
+const dialogueExtractorRow = mirrorMemoryV3LifecycleUsageRow({
+  runId: RUN_ID, stage: "extractor", costUsd: 0.00021, promptTokens: 500, completionTokens: 80,
+  pipeline: "dialogue",
+});
+assert(dialogueExtractorRow.call_kind === "memory_dialogue_extractor", "dialogue extractor call_kind");
+
+const dialogueReconcilerRow = mirrorMemoryV3LifecycleUsageRow({
+  runId: RUN_ID, stage: "reconciler", costUsd: 0.00045, promptTokens: 900, completionTokens: 150,
+  pipeline: "dialogue",
+});
+assert(dialogueReconcilerRow.call_kind === "memory_dialogue_reconciler", "dialogue reconciler call_kind");
+assert(
+  dialogueExtractorRow.call_kind !== extractorRow.call_kind,
+  "dialogue and lifecycle extractor calls must not collapse onto the same call_kind"
 );
 
 console.log("usageAnalytics.cases.test.ts — all passed");

@@ -282,13 +282,18 @@ export async function logLifeMemorySynthesisUsage(
 }
 
 /**
- * Log one OpenRouter call from the Memory V3 lifecycle pipeline (extractor
- * or reconciler stage). Logged as soon as the call's response is received,
- * independent of whether the lifecycle run itself later succeeds or fails
+ * Log one OpenRouter call from a Memory V3 pipeline (extractor or reconciler
+ * stage, dialogue or lifecycle). Logged as soon as the call's response is
+ * received, independent of whether the run itself later succeeds or fails
  * downstream -- the money is spent either way. `runId` is stored as
- * `requestId` so the two calls (extractor + reconciler) of one lifecycle
- * check share an id and can be counted as one check via
- * count(DISTINCT request_id).
+ * `requestId` so the two calls (extractor + reconciler) of one check share
+ * an id and can be counted as one check via count(DISTINCT request_id).
+ *
+ * `pipeline` keeps dialogue (per-conversation) and lifecycle (cross-
+ * conversation) costs distinguishable in ai_usage_logs -- both shapes used
+ * to share the same "memory_lifecycle_*" call_kind regardless of which
+ * pipeline actually ran, which made per-pipeline cost impossible to read
+ * back out of production data.
  */
 export async function logMemoryV3LifecycleUsage(
   supabase: SupabaseClient,
@@ -301,6 +306,7 @@ export async function logMemoryV3LifecycleUsage(
     promptTokens: number;
     completionTokens: number;
     costUsd: number;
+    pipeline: "dialogue" | "lifecycle";
   }
 ): Promise<void> {
   const row = buildUsageLogRow({
@@ -312,9 +318,9 @@ export async function logMemoryV3LifecycleUsage(
     usage: { cost: input.costUsd },
     memoryTokens: 0,
     summaryTokens: 0,
-    callKind: input.stage === "extractor"
-      ? "memory_lifecycle_extractor"
-      : "memory_lifecycle_reconciler",
+    callKind: input.pipeline === "dialogue"
+      ? (input.stage === "extractor" ? "memory_dialogue_extractor" : "memory_dialogue_reconciler")
+      : (input.stage === "extractor" ? "memory_lifecycle_extractor" : "memory_lifecycle_reconciler"),
     audit: { requestId: input.runId },
   });
 
