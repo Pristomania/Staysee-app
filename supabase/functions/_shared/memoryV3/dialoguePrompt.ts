@@ -320,6 +320,18 @@ export function buildMemoryV3DialogueReconcileRequest(input: {
       const source = messageById.get(row.sourceMessageId);
       if (!source || source.role !== "user" || source.createdAt !== row.mentionTime) fail(token);
     }
+    // Spec 2026-10-13 §2: the reconciler sees only the messages the NEW
+    // candidates cite (each just proven present above) -- not the whole
+    // window again, and never the source text behind existing items, which
+    // are compared by their stored claim/status/fields. With nothing cited,
+    // the window's last message alone keeps the transport's one-message
+    // minimum (live runners never get here -- they skip the reconciler for
+    // empty extractions -- but the history backfill engines still call it).
+    const last = messages[messages.length - 1];
+    const citedMessageIds = new Set(extraction.evidence.map((row) => row.sourceMessageId));
+    const requestMessages = citedMessageIds.size > 0
+      ? messages.filter((message) => citedMessageIds.has(message.id))
+      : [last];
     const memoryRefByKey = new Map(bindings.memories.map((row) => [row.memoryKey, row.memoryRef]));
     const candidateRefByKey = new Map(bindings.candidates.map((row) => [row.localItemKey, row.candidateRef]));
     const currentItems: MemoryV3DialogueProjectedItem[] = sortedItems.map((item) => ({
@@ -345,7 +357,6 @@ export function buildMemoryV3DialogueReconcileRequest(input: {
       alternative: item.alternative,
       evidence: projectedEvidence(extraction.evidence.filter((row) => row.itemKey === item.localItemKey)),
     }));
-    const last = messages[messages.length - 1];
     const request: MemoryV3DialogueReconcileRequest = {
       system: MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION,
       input: {
@@ -356,7 +367,7 @@ export function buildMemoryV3DialogueReconcileRequest(input: {
           sourceLastMessageId: last.id,
           sourceLastCreatedAt: last.createdAt,
         },
-        messages,
+        messages: requestMessages,
         currentItems,
         candidates,
       },
