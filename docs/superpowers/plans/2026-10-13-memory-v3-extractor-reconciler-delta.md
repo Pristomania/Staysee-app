@@ -3897,7 +3897,85 @@ EOF
 
 ---
 
-### Task 11: Whole-branch verification
+### Task 11: Lifecycle trigger gate matches the loader's compound cursor (migration 078)
+
+**Found during review (13.10.2026), not in the original plan.** Migration
+077's gate counts new messages with `m.created_at > v_last_cursor` — a
+plain timestamp, the same bug class Task 2's loader exists to fix with a
+compound `(created_at, id)` comparison. If the cursor message shares its
+timestamp with the very next message, that message is never counted as
+new by this gate; if nothing else with a later, distinct timestamp ever
+arrives in that conversation, the gate never reaches its 10-message
+threshold and lifecycle memory never triggers for it.
+
+**Files:**
+- Create: `supabase/migrations/20261013100000_078_memory_v3_lifecycle_gate_compound_cursor.sql`
+- Create: `supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks — this is a standalone SQL fix to
+  `reserve_memory_v3_lifecycle_shadow_run`, independent of the TS-level
+  loader/runner work in Tasks 1-10.
+- Produces: the same function signature and wire results (`reserved` /
+  `duplicate` / `daily_cap` / `reservation_failed`) as migration 077 —
+  only the gate's internal cursor comparison changes.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts` asserting (against the migration's raw SQL text, same convention as `lifecycleWatermarkRestoreMigration.cases.test.ts`):
+- only the lifecycle function is replaced;
+- the cursor lookup selects both `source_last_created_at` and `source_last_message_id` via `ORDER BY ... DESC, ... DESC LIMIT 1`, not `MAX(source_last_created_at)` alone;
+- the count's `WHERE` clause uses the compound `(m.created_at > v_last_cursor_at OR (m.created_at = v_last_cursor_at AND m.id > v_last_cursor_id))` comparison, not `created_at > v_last_cursor` alone;
+- the `< 10` threshold and `daily_cap` wire result are unchanged;
+- everything migration 077 added (topic field, link-pointer fields, exception handler, no separate daily-success cap) is still present;
+- the function signature is byte-identical to migration 077's.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `node node_modules/tsx/dist/cli.mjs --test supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts`
+
+Expected: FAIL — the migration file referenced by the test does not exist yet.
+
+- [ ] **Step 3: Write the migration**
+
+Create `supabase/migrations/20261013100000_078_memory_v3_lifecycle_gate_compound_cursor.sql`: `CREATE OR REPLACE FUNCTION public.reserve_memory_v3_lifecycle_shadow_run(...)`, identical to migration 077 except:
+- `DECLARE` gains `v_last_cursor_at timestamptz` and `v_last_cursor_id uuid` in place of `v_last_cursor timestamptz`;
+- the cursor lookup becomes `SELECT r.source_last_created_at, r.source_last_message_id INTO v_last_cursor_at, v_last_cursor_id FROM memory_v3_lifecycle_shadow_runs r WHERE ... AND r.status = 'succeeded' ORDER BY r.source_last_created_at DESC, r.source_last_message_id DESC LIMIT 1;`;
+- the count's `WHERE` clause becomes `AND (m.created_at > v_last_cursor_at OR (m.created_at = v_last_cursor_at AND m.id > v_last_cursor_id))`.
+
+Every other clause (topic field, link-pointer fields, exception handler, best-effort failure log) copied unchanged from migration 077.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `node node_modules/tsx/dist/cli.mjs --test supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts`
+
+Expected: PASS, 6 tests, 0 failures.
+
+- [ ] **Step 5: Staging verification (not provable offline)**
+
+Before relying on this in production: run one reservation attempt against staging (or a local `supabase start`) for a conversation where two messages share a `created_at` value, and confirm the later-id message counts toward the 10-message threshold. PostgREST/Postgres compound-comparison behavior cannot be proven by the offline suite alone.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/migrations/20261013100000_078_memory_v3_lifecycle_gate_compound_cursor.sql supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts
+git commit -m "$(cat <<'EOF'
+fix: match the lifecycle trigger gate's cursor comparison to the loader's
+
+Migration 077's 10-new-message gate counted with created_at > cursor --
+a plain timestamp, the same bug class the loader's compound
+(created_at, id) comparison exists to fix. A message sharing the
+cursor's timestamp was never counted as new, and could wait forever if
+nothing with a later, distinct timestamp ever arrived.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 12: Whole-branch verification
 
 **Files:**
 - Read-only checks. Modify only if a check fails, then re-run every check.
@@ -3919,7 +3997,7 @@ Expected:
 
 Run:
 ```bash
-npx eslint supabase/functions/_shared/tokenEstimate.ts supabase/functions/_shared/tokenEstimate.cases.test.ts supabase/functions/_shared/cost.ts supabase/functions/_shared/memoryV3/messages.ts supabase/functions/_shared/memoryV3/messages.cases.test.ts supabase/functions/_shared/memoryV3/dialoguePrompt.ts supabase/functions/_shared/memoryV3/dialoguePrompt.cases.test.ts supabase/functions/_shared/memoryV3/lifecyclePrompt.ts supabase/functions/_shared/memoryV3/lifecyclePrompt.cases.test.ts supabase/functions/_shared/memoryV3/dialogueShadowRunner.ts supabase/functions/_shared/memoryV3/dialogueShadowRunner.cases.test.ts supabase/functions/_shared/memoryV3/lifecycleShadowRunner.ts supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts supabase/functions/_shared/memoryV3/dialogueStore.ts supabase/functions/_shared/memoryV3/dialogueStore.cases.test.ts supabase/functions/_shared/memoryV3/lifecycleStore.ts supabase/functions/_shared/memoryV3/lifecycleStore.cases.test.ts scripts/memory-v3-pilot/lifecycle-model-benchmark-dataset.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-frozen.test.ts
+npx eslint supabase/functions/_shared/tokenEstimate.ts supabase/functions/_shared/tokenEstimate.cases.test.ts supabase/functions/_shared/cost.ts supabase/functions/_shared/memoryV3/messages.ts supabase/functions/_shared/memoryV3/messages.cases.test.ts supabase/functions/_shared/memoryV3/dialoguePrompt.ts supabase/functions/_shared/memoryV3/dialoguePrompt.cases.test.ts supabase/functions/_shared/memoryV3/lifecyclePrompt.ts supabase/functions/_shared/memoryV3/lifecyclePrompt.cases.test.ts supabase/functions/_shared/memoryV3/dialogueShadowRunner.ts supabase/functions/_shared/memoryV3/dialogueShadowRunner.cases.test.ts supabase/functions/_shared/memoryV3/lifecycleShadowRunner.ts supabase/functions/_shared/memoryV3/lifecycleShadowRunner.cases.test.ts supabase/functions/_shared/memoryV3/dialogueStore.ts supabase/functions/_shared/memoryV3/dialogueStore.cases.test.ts supabase/functions/_shared/memoryV3/lifecycleStore.ts supabase/functions/_shared/memoryV3/lifecycleStore.cases.test.ts supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts scripts/memory-v3-pilot/lifecycle-model-benchmark-dataset.test.ts scripts/memory-v3-pilot/lifecycle-history-backfill-frozen.test.ts
 ```
 
 Expected: exit code 0, no output. These files were lint-clean before this plan, and CI runs `npm run lint` on the whole repo.
@@ -3930,7 +4008,7 @@ The spec's revision (`72c83af`) and this plan were committed after `640b842`, so
 
 Run: `git diff --stat 640b842..HEAD -- . ':(exclude)docs/superpowers'`
 
-Expected: exactly these 19 paths and nothing else:
+Expected: exactly these 21 paths and nothing else:
 - `supabase/functions/_shared/tokenEstimate.ts`
 - `supabase/functions/_shared/tokenEstimate.cases.test.ts`
 - `supabase/functions/_shared/cost.ts`
@@ -3941,6 +4019,8 @@ Expected: exactly these 19 paths and nothing else:
 - `supabase/functions/_shared/memoryV3/lifecycleShadowRunner.ts` and `lifecycleShadowRunner.cases.test.ts`
 - `supabase/functions/_shared/memoryV3/dialogueStore.ts` and `dialogueStore.cases.test.ts`
 - `supabase/functions/_shared/memoryV3/lifecycleStore.ts` and `lifecycleStore.cases.test.ts`
+- `supabase/functions/_shared/memoryV3/lifecycleGateCompoundCursorMigration.cases.test.ts`
+- `supabase/migrations/20261013100000_078_memory_v3_lifecycle_gate_compound_cursor.sql`
 - `scripts/memory-v3-pilot/lifecycle-model-benchmark-dataset.test.ts`
 - `scripts/memory-v3-pilot/lifecycle-history-backfill-frozen.test.ts`
 
@@ -3954,10 +4034,16 @@ Expected: exactly two paths, `docs/superpowers/specs/2026-10-13-memory-v3-extrac
 
 Run:
 ```bash
-git diff 640b842..HEAD -- supabase/functions/staysee-chat/index.ts supabase/migrations supabase/functions/_shared/memoryV3/contract.ts supabase/functions/_shared/memoryV3/dialogueContract.ts supabase/functions/_shared/memoryV3/lifecycleContract.ts supabase/functions/_shared/memoryV3/dialogueReducer.ts supabase/functions/_shared/memoryV3/lifecycleReducer.ts supabase/functions/_shared/memoryV3/dialogueTransport.ts supabase/functions/_shared/memoryV3/lifecycleTransport.ts supabase/functions/_shared/memoryV3/shadowRunner.ts
+git diff 640b842..HEAD -- supabase/functions/staysee-chat/index.ts supabase/functions/_shared/memoryV3/contract.ts supabase/functions/_shared/memoryV3/dialogueContract.ts supabase/functions/_shared/memoryV3/lifecycleContract.ts supabase/functions/_shared/memoryV3/dialogueReducer.ts supabase/functions/_shared/memoryV3/lifecycleReducer.ts supabase/functions/_shared/memoryV3/dialogueTransport.ts supabase/functions/_shared/memoryV3/lifecycleTransport.ts supabase/functions/_shared/memoryV3/shadowRunner.ts
 ```
 
-Expected: no output at all. (`shadowRunner.ts` is listed because the two-argument loader call must keep serving it unchanged.)
+Expected: no output at all. (`shadowRunner.ts` is listed because the two-argument loader call must keep serving it unchanged. `supabase/migrations` is deliberately excluded from this check — Task 11 adds migration 078 there, found during review and not part of the original "no new migration" plan.)
+
+Then confirm migration 078 is the *only* new migration:
+
+Run: `git diff --stat 640b842..HEAD -- supabase/migrations`
+
+Expected: exactly one path, `supabase/migrations/20261013100000_078_memory_v3_lifecycle_gate_compound_cursor.sql`.
 
 - [ ] **Step 5: Optional Deno type check (CI does not run Deno)**
 
