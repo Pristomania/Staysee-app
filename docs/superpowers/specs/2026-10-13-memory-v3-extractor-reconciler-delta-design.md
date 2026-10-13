@@ -163,7 +163,7 @@ set during extraction is restricted to delta ids, context ids excluded.
 
 **Token budget is a priority order, not an unconditional ceiling.** The
 target is **4000 estimated tokens** (`estimateTokens`, chars/3.5) across
-context + delta, trimmed by dropping the oldest delta messages first. But
+context + delta, trimmed from the newest end of the chunk first (those messages open the next run). But
 two things are never dropped to hit it: the 5-message context block, and
 the single oldest undrained delta message (dropping the oldest-of-the-
 chunk would mean this run analyzes nothing new at all, defeating its own
@@ -268,7 +268,7 @@ the existing `*ShadowRunner.cases.test.ts` convention):
   invoked at all (not even with just the context block); the run still
   ends as a `succeeded` no-op through the same `compareAndSwap` contract
   as §3, with `extractorUsage: null`.
-- The 4000-token target truncates from the oldest end of the delta, never
+- The 4000-token target truncates from the newest end of the chunk, never
   drops the leading-context block and never drops the single oldest
   undrained delta message.
 - An extraction's evidence row citing a leading-context message (not a
