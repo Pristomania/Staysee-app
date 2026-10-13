@@ -95,33 +95,83 @@ parallel. Both, on every triggered run:
 
 ### 1. Delta-aware message loading
 
+**Revision (13.10.2026):** the first version of this section fetched the
+*newest* N messages after the cursor and advanced the watermark to the
+newest message in that set. An independent review (a second AI agent
+Настя consulted, cross-checked against the actual code) caught that this
+loses messages permanently whenever more than one window's worth of
+backlog accumulates between runs: the oldest messages in that backlog are
+never in the "newest N" set of *any* future run, because the cursor
+immediately jumps past them. This revision fixes that by draining
+**oldest-first**, as a sequence of runs when the backlog is large, never
+in one run no matter how big.
+
 `createMemoryV3MessageLoader` (in `messages.ts`) gains a second loading
 mode. The shadow runners look up the watermark **before** calling it:
 
 ```
 last succeeded run for (userId, conversationId)?
   none  -> full last-60-message window (today's existing behavior, unchanged)
-  found -> messages with created_at > that run's source_last_created_at
-           (the delta), plus the 5 messages immediately before that cursor
-           for continuity
+  found -> the OLDEST ≤55 messages with
+             (created_at, id) > (cursor.createdAt, cursor.messageId)
+           (the next undrained chunk, oldest-first), plus the 5 messages
+           at/before the cursor for continuity. If that query returns zero
+           rows, there is nothing new — see the empty-delta rule below,
+           the extractor is never called.
 ```
 
-This lookup already has a home: it's the same `source_last_message_id` /
-`source_last_created_at` columns `memory_v3_dialogue_runs` and
-`memory_v3_lifecycle_shadow_runs` already carry on every run row. Dialogue
-has no reservation-level watermark gate (left unthrottled, per Настя's
-standing decision) but **can still look up its own last succeeded run's
-cursor purely to decide what to load** — the delta-window optimization and
-the "should this run happen at all" gate are independent; this spec only
-touches the former.
+**Cursor comparison is compound, not time-only.** Two messages can share a
+`created_at` value (same-second writes, a batch insert, a races-prone
+client). A plain `created_at > cursor.createdAt` can skip or double-count
+a sibling row. The comparison is `(created_at, id) > (cursor.createdAt,
+cursor.messageId)`, lexicographic on the pair — same rule a composite-key
+range scan would use. (Migration 077's lifecycle trigger-count query has
+this same time-only gap; it only risks an off-by-one in a *count* used
+for a `>= 10` threshold, not data loss, so it's logged as a known, lower-
+severity follow-up and not fixed by this spec.)
 
-**Hard cap:** regardless of how large the delta is, the extractor's
-message payload is capped at **4000 estimated tokens** (via the project's
-existing `estimateTokens`, chars/3.5). If the delta + 5-message context
-would exceed that, truncate from the oldest end of the delta first (keep
-the most recent messages, since those are what the user just said that
-triggered this run) — never silently drop the 5-message context block,
-since that's what keeps a short delta interpretable.
+**Draining a large backlog takes multiple runs, by design.** When the
+undrained backlog exceeds 55 messages, this run processes the oldest 55
+of it and advances the watermark only to the last message *actually
+included in this run* — not to the true newest message in the
+conversation. The next triggered run (dialogue: the next message; lifecycle:
+once 10 more new messages accumulate) picks up exactly where this one
+stopped. No message is ever in the gap between "what the last succeeded
+run's cursor covers" and "what the next run starts from" — the cursor only
+ever advances to a message this specific run actually read and gave to
+the extractor.
+
+**Empty delta: skip the extractor, not just the reconciler.** If the
+oldest-undrained query returns zero rows (nothing written since the
+cursor), the run does not call the extractor at all — not even with just
+the 5-message context block. Calling the extractor on context alone
+would spend a real paid call re-reading messages it has already seen,
+risking it "re-discovering" and re-emitting a candidate from the exact
+same old evidence it used last time. This case is a no-op from before the
+extractor stage: same `compareAndSwap` contract as the empty-extraction
+fast path (§3), with `extractorUsage: null` too, since no model call
+happened at all.
+
+**Context messages inform; they do not become new evidence.** The 5
+leading-context messages are still sent to the extractor (to resolve
+pronouns, negations, and follow-ups in the delta), but the extractor's
+own evidence rows must cite only messages that are part of the *delta*,
+never the leading-context block. This is enforced the same way existing
+evidence validation already works in the prompt builders (an evidence row
+citing an id outside the known set fails contract validation) — the known
+set during extraction is restricted to delta ids, context ids excluded.
+
+**Token budget is a priority order, not an unconditional ceiling.** The
+target is **4000 estimated tokens** (`estimateTokens`, chars/3.5) across
+context + delta, trimmed by dropping the oldest delta messages first. But
+two things are never dropped to hit it: the 5-message context block, and
+the single oldest undrained delta message (dropping the oldest-of-the-
+chunk would mean this run analyzes nothing new at all, defeating its own
+purpose). If the context block alone, or one single delta message, is
+already larger than 4000 tokens, the actual request is larger than the
+target — this is an accepted, logged edge case (a single pathological
+message), not a silent failure, and never a reason to drop content that
+would cause a gap.
 
 ### 2. Reconciler input: evidence-only, not the delta again
 
@@ -204,12 +254,34 @@ the existing `*ShadowRunner.cases.test.ts` convention):
 - First-ever run for a conversation still gets the full last-60 window.
 - A run with an existing succeeded prior run gets only the delta + 5
   messages of leading context, not the full 60.
-- The 4000-token cap truncates from the oldest end of the delta, never
-  drops the leading-context block.
+- **More than 55 new messages accumulated since the last succeeded run:**
+  this run gets the OLDEST 55 of them (not the newest), and the resulting
+  cursor is the last message *in this run's own window* — proven by
+  asserting the next run (constructed immediately after) picks up exactly
+  at that boundary and sees the remaining backlog, with no gap and no
+  message appearing in neither run.
+- **Same `created_at`, different `id`:** two fixture messages sharing a
+  timestamp, one at/before the cursor and one after — the compound
+  `(created_at, id)` comparison places each on the correct side; neither
+  is skipped, neither is double-counted.
+- **No new messages since the cursor:** the extractor adapter is never
+  invoked at all (not even with just the context block); the run still
+  ends as a `succeeded` no-op through the same `compareAndSwap` contract
+  as §3, with `extractorUsage: null`.
+- The 4000-token target truncates from the oldest end of the delta, never
+  drops the leading-context block and never drops the single oldest
+  undrained delta message.
+- An extraction's evidence row citing a leading-context message (not a
+  delta message) is rejected by contract validation, the same way a
+  citation to an unknown id already is today.
 - Reconciler's request includes only the new candidates' evidence
   messages — not the full delta, not existing items' original evidence.
-- Empty extraction: reconciler adapter is never invoked; `compareAndSwap`
-  is called exactly once with `changed: false`; run ends `succeeded`.
+- Empty extraction (delta was non-empty, extractor ran, found nothing):
+  reconciler adapter is never invoked; `compareAndSwap` is called exactly
+  once with `changed: false`; run ends `succeeded`; `stateRevision` is
+  unchanged while the run's own status is `succeeded` and its watermark
+  still advances — a dedicated test asserts revision and status
+  separately so this distinction can't silently regress.
 - A failed run (any diagnostic) does not move the next run's delta cursor
   — the following run's loaded window still starts from the last
   *succeeded* run, proven by constructing a fail-then-succeed-then-fail
@@ -220,6 +292,13 @@ the existing `*ShadowRunner.cases.test.ts` convention):
 
 ## Review Focus
 
+- **A backlog larger than one chunk (>55 messages since the last succeeded
+  run) must never lose the middle.** This was an actual bug in this spec's
+  first draft (newest-first fetch, cursor jumping past undrained messages)
+  caught by independent review before implementation started — the single
+  highest-severity thing to re-verify once code exists: construct a
+  backlog of, say, 150 messages and walk the run sequence to its end,
+  asserting every message id was in exactly one run's window.
 - Does the 4000-token cap ever truncate away the *only* evidence message
   evidence a candidate claim depends on, leaving the reconciler a candidate
   whose cited `sourceMessageId` isn't in its own input? (Would fail the
