@@ -594,3 +594,92 @@ describe("Memory V3 dialogue store", () => {
     assert.equal(fake.calls.length, 0);
   });
 });
+
+function fakeTableClient(response: { data: unknown; error: unknown } | Error) {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const chain = {
+    select(...args: unknown[]) { calls.push({ method: "select", args }); return chain; },
+    eq(...args: unknown[]) { calls.push({ method: "eq", args }); return chain; },
+    order(...args: unknown[]) { calls.push({ method: "order", args }); return chain; },
+    limit(...args: unknown[]) {
+      calls.push({ method: "limit", args });
+      return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
+    },
+  };
+  return {
+    calls,
+    client: {
+      async rpc() { throw new Error("a cursor read must never call an RPC"); },
+      from(table: string) { calls.push({ method: "from", args: [table] }); return chain; },
+    },
+  };
+}
+
+describe("Memory V3 dialogue store cursor lookup", () => {
+  const cursorRow = {
+    source_last_message_id: MESSAGE_ID,
+    source_last_created_at: "2026-09-14T10:00:00.123456+00:00",
+  };
+
+  it("reads only succeeded runs of exactly this conversation, furthest source position first", async () => {
+    // Ordering by source position (not completion time) means a run that
+    // finishes late with an older window can never move the cursor back.
+    const fake = fakeTableClient({ data: [cursorRow], error: null });
+    assert.deepEqual(
+      await createMemoryV3DialogueStore(fake.client).lastSucceededCursor({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+      { messageId: MESSAGE_ID, createdAt: "2026-09-14T10:00:00.123456+00:00" },
+    );
+    assert.deepEqual(fake.calls, [
+      { method: "from", args: ["memory_v3_dialogue_runs"] },
+      { method: "select", args: ["source_last_message_id, source_last_created_at"] },
+      { method: "eq", args: ["user_id", USER_ID] },
+      { method: "eq", args: ["conversation_id", CONVERSATION_ID] },
+      { method: "eq", args: ["status", "succeeded"] },
+      { method: "order", args: ["source_last_created_at", { ascending: false }] },
+      { method: "order", args: ["source_last_message_id", { ascending: false }] },
+      { method: "limit", args: [1] },
+    ]);
+  });
+
+  it("returns null when no run of this conversation has ever succeeded", async () => {
+    const fake = fakeTableClient({ data: [], error: null });
+    assert.equal(
+      await createMemoryV3DialogueStore(fake.client).lastSucceededCursor({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+      null,
+    );
+  });
+
+  it("rejects malformed rows, extra columns, extra rows, and database errors with the generic store error", async () => {
+    for (const response of [
+      { data: null, error: { message: RAW_SECRET } },
+      { data: [{ ...cursorRow, source_last_message_id: "not-a-uuid" }], error: null },
+      { data: [{ ...cursorRow, source_last_created_at: "yesterday" }], error: null },
+      { data: [{ ...cursorRow, extra: RAW_SECRET }], error: null },
+      { data: [cursorRow, cursorRow], error: null },
+      new Error(RAW_SECRET),
+    ]) {
+      const fake = fakeTableClient(response);
+      await captureStoreError(() =>
+        createMemoryV3DialogueStore(fake.client).lastSucceededCursor({ userId: USER_ID, conversationId: CONVERSATION_ID }));
+    }
+  });
+
+  it("rejects invalid identifiers before any database access", async () => {
+    for (const input of [
+      { userId: "not-a-uuid", conversationId: CONVERSATION_ID },
+      { userId: USER_ID, conversationId: "not-a-uuid" },
+      { userId: USER_ID, conversationId: CONVERSATION_ID, extra: RAW_SECRET },
+    ]) {
+      const fake = fakeTableClient({ data: [], error: null });
+      await captureStoreError(() => createMemoryV3DialogueStore(fake.client).lastSucceededCursor(input as never));
+      assert.equal(fake.calls.length, 0);
+    }
+  });
+
+  it("still constructs from an rpc-only client, and the cursor read then fails closed", async () => {
+    const fake = fakeClient([]);
+    const store = createMemoryV3DialogueStore(fake.client);
+    await captureStoreError(() => store.lastSucceededCursor({ userId: USER_ID, conversationId: CONVERSATION_ID }));
+    assert.equal(fake.calls.length, 0);
+  });
+});
