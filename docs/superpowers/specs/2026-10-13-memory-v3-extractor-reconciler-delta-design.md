@@ -67,10 +67,11 @@ conclusion and proposed the concrete design below; this spec adopts it.
   pipeline, and carries real risk to the "было→стало" contradiction-
   tracking depth the current two-step design gives us. Not part of this
   spec.
-- **Changing the daily/count gates themselves** (dialogue: unthrottled by
+- **Changing the daily/count gates' semantics** (dialogue: unthrottled by
   product decision; lifecycle: 10 new per-conversation messages since the
   last succeeded run, restored in migration 077 / PR #121). This spec
-  changes what a triggered run *reads*, never *whether* it triggers.
+  changes what a triggered run *reads*, never *whether* it triggers --
+  with one companion correctness fix, migration 078, below.
 
 ## Current architecture (both pipelines, same shape)
 
@@ -233,8 +234,34 @@ treatment, applied independently (two call sites, two test suites) — they
 already share this structural shape today, so there is no new asymmetry to
 design around.
 
+### 5. Lifecycle trigger gate: matching compound cursor (migration 078)
+
+**Found during review (13.10.2026), not part of the original design.**
+Migration 077's reservation gate counts new messages with
+`m.created_at > v_last_cursor` — a plain timestamp comparison, the exact
+class of bug §1's loader fixes with a compound `(created_at, id)`
+comparison. If the cursor message shares its `created_at` with the very
+next message, that next message is never counted as "new" by this gate,
+even though the loader (once a run does trigger) reads it correctly. If no
+later, distinctly-timestamped message ever arrives in that conversation,
+the gate never reaches its 10-message threshold and lifecycle memory never
+triggers for it — not data loss (nothing is skipped once a run reads it),
+but a message that may never get a run to read it at all.
+
+Migration 078 fixes only this: the cursor lookup changes from
+`MAX(source_last_created_at)` to `ORDER BY source_last_created_at DESC,
+source_last_message_id DESC LIMIT 1` (so the paired id is available), and
+the count's `WHERE` clause becomes the same lexicographic compound
+comparison the loader uses. The 10-message threshold, the per-conversation
+scope, and the "only `succeeded` runs count" rule are all unchanged.
+
+**Not provable offline**, same as §1's keyset filter: confirm against
+staging (or a local `supabase start`) with two messages sharing a
+timestamp before relying on this in production.
+
 ## Files touched
 
+- `supabase/migrations/` — migration 078, `reserve_memory_v3_lifecycle_shadow_run`'s gate only (§5). No other migration.
 - `supabase/functions/_shared/memoryV3/messages.ts` — delta-aware loader mode.
 - `supabase/functions/_shared/memoryV3/dialogueShadowRunner.ts` /
   `lifecycleShadowRunner.ts` — watermark lookup before loading, empty-
@@ -289,6 +316,11 @@ the existing `*ShadowRunner.cases.test.ts` convention):
 - A concurrent run cannot have its watermark read clobber a newer
   succeeded run's cursor (same race-safety class already covered for
   `compareAndSwap` itself — mirror that pattern for the new lookup).
+- **Migration 078's gate:** a structural test (regex against the migration's
+  SQL, matching the existing `*Migration.cases.test.ts` convention) pins
+  the compound comparison and the unchanged 10-message threshold. This
+  cannot prove PostgREST/Postgres actually evaluates the compound `WHERE`
+  as intended — confirm against staging before production (§5).
 
 ## Review Focus
 
