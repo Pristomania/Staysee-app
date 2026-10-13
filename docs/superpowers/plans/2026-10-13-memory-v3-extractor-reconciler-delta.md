@@ -27,7 +27,7 @@
 - **Delta fetch bound.** The **oldest 55** messages with `(created_at, id) > (cursor.createdAt, cursor.messageId)`, never the newest. Context + delta ≤ **60**, which equals `MEMORY_V3_MAX_SOURCE_MESSAGES` and the run tables' `message_count BETWEEN 1 AND 60` CHECK. A larger backlog drains across runs.
 - **Where the cursor lands.** On the last message the run actually sent to the extractor, after both trims. It never lands on the conversation's newest message unless that message was sent.
 - **No cursor.** When no run has succeeded yet for this (user, conversation), the runner calls the loader with **two arguments** and gets **today's last-60 query, unchanged, with no token cap**, byte-fitted exactly as today.
-- **What counts as the cursor.** Only runs with `status = 'succeeded'`, the same rule migration 077 applies to the lifecycle trigger gate. Failed or reserved runs never advance it. A failed or malformed cursor lookup fails the run (`invalid_source`); it never falls back to a first-run window.
+- **What counts as the cursor.** Only runs with `status = 'succeeded'`, the same rule the lifecycle trigger gate applies (migration 077, with its cursor comparison corrected in Task 11 / migration 078). Failed or reserved runs never advance it. A failed or malformed cursor lookup fails the run (`invalid_source`); it never falls back to a first-run window.
 - **Reconciler `messages`.** Only messages whose `id` is a `sourceMessageId` in the **new extraction's** evidence. Existing items' source text is never re-sent, and `state.items` stays full and unchanged.
 - **Empty extraction** (`extraction.items.length === 0`):
   - the reconciler adapter is never invoked;
@@ -39,7 +39,9 @@
 - **Out of scope; do not touch:**
   - merging the extractor and reconciler;
   - semantic narrowing of `state.items`;
-  - reservation/trigger gates, and all migrations (no new migration);
+  - reservation/trigger gates' semantics (Task 11 is a scoped exception:
+    a correctness fix to the lifecycle gate's cursor comparison, found
+    during review — not a new gate, not a new threshold);
   - `contract.ts`, `dialogueContract.ts`, `lifecycleContract.ts`, `dialogueReducer.ts`, `lifecycleReducer.ts`, `dialogueTransport.ts`, `lifecycleTransport.ts`;
   - `supabase/functions/staysee-chat/index.ts`. Its existing `createMemoryV3MessageLoader(svc)` / `create*Store(svc)` wiring already supplies everything.
 - **Byte cap.** The 20 KB extractor cap stays 20 KB. First runs keep `fitExtractorDialogueToByteCap` exactly as it is (oldest end trimmed). Delta runs use `fitDeltaWindowToByteCap`: newest end trimmed, context block and oldest undrained message kept. If that minimum is still over 20 KB, it is sent anyway with one fixed-literal `console.warn`.
@@ -57,7 +59,7 @@
    - Expected: once anything new is written, the next run's input hash differs and the reservation accepts it. It must never be a silent, permanent `duplicate`.
    - Tests: Task 8 and Task 10, "folds the conversation's latest message into a delta run's input identity ...".
 3. **Nothing new since the last succeeded run.**
-   - Expected: the extractor is never called. The run reserves, makes one `compareAndSwap` no-op with `extractorUsage: null`, and ends `succeeded`. For lifecycle, migration 077's gate answers `daily_cap` first in production.
+   - Expected: the extractor is never called. The run reserves, makes one `compareAndSwap` no-op with `extractorUsage: null`, and ends `succeeded`. For lifecycle, the gate (migration 078, after Task 11) answers `daily_cap` first in production.
    - Tests: Task 2, "returns an empty delta when nothing new arrived since the cursor"; Task 8 and Task 10, "never calls the extractor when nothing new arrived ...".
 4. **Leading-context citations.**
    - Expected: `extractor_contract_invalid`, and the reconciler is never called.
@@ -105,7 +107,7 @@
 - **Compound keyset in PostgREST.** `(created_at, id) > cursor` is one `.or()` filter per query: `created_at.gt."<ts>",and(created_at.eq."<ts>",id.gt.<id>)`, mirrored with `lt`/`lte` for the context block. The timestamp is the exact string the store read back, at microsecond precision; the reserve RPC already relies on that string round-tripping (`m.created_at = p_source_last_created_at`). It is double-quoted for PostgREST. `inspectCursor` validates both parts first, so the string cannot carry a quote, comma, or parenthesis.
 - **Database order is authoritative.** Delta-mode rows keep the order the database returned (`created_at, id`; the context block is reversed from its descending fetch) and are never re-sorted client-side. `Date.parse` resolves milliseconds while `created_at` carries microseconds, so a client re-sort could swap two same-millisecond messages and land the cursor on the wrong one. The loader only rejects gross misordering.
 - **Delta-only evidence.** Enforced in the runner right after `normalizeMemoryV3LayeredResponse`, which still validates against the full window, so the user-role and mention-time rules are unchanged. Any evidence row citing a message outside this run's sent delta becomes `extractor_contract_invalid`, the same diagnostic an unknown id gets. Narrowing the dialogue passed to the normalizer instead would also reject *empty* extractions whenever the delta held no user message.
-- **Empty delta.** The run reserves with the context block as its window, so the source position stays on the cursor. Then one `compareAndSwap` no-op with `extractorUsage: null` and `reconcilerUsage: null`, and the normal succeeded result. For lifecycle, migration 077's gate answers `daily_cap` first in production (0 new messages); the no-op path is still implemented and tested, so both pipelines honor one contract. If the context block contains no user message, validation fails with `invalid_source` (rare: five assistant messages in a row ending at the cursor).
+- **Empty delta.** The run reserves with the context block as its window, so the source position stays on the cursor. Then one `compareAndSwap` no-op with `extractorUsage: null` and `reconcilerUsage: null`, and the normal succeeded result. For lifecycle, the gate (migration 078, after Task 11) answers `daily_cap` first in production (0 new messages); the no-op path is still implemented and tested, so both pipelines honor one contract. If the context block contains no user message, validation fails with `invalid_source` (rare: five assistant messages in a row ending at the cursor).
 - **Cursor lookup failure (changed from the first draft).** A throwing or malformed lookup now fails the run as `invalid_source` before loading, with the same fixed-literal `console.error`. The first draft fell back to the first-run window. But that window is byte-fitted from the newest end, so during a drain it would succeed and move the cursor past the undrained backlog.
 - **Drain-test infrastructure.** No shared helper module.
   - `messages.cases.test.ts` gains a table-backed fake client that actually evaluates the `.or()` keyset, ordering, and limits over an in-memory conversation. It replaces the first draft's canned-response fake, so one test walks a 150-message backlog through repeated real loads.
@@ -120,7 +122,7 @@
 
 ## Pre-flight
 
-The worktree is on `fix/memory-v3-lifecycle-watermark-restore`. The spec was committed as `640b842` and revised in `72c83af` (oldest-first draining); this plan was committed after both. Before Task 1, ask your human partner whether to keep committing on this branch or to branch off the current commit (for example `git switch -c feat/memory-v3-delta-windowing`). Either way, Task 11 diffs code against `640b842` and checks `docs/superpowers` separately.
+The worktree is on `fix/memory-v3-lifecycle-watermark-restore`. The spec was committed as `640b842` and revised in `72c83af` (oldest-first draining); this plan was committed after both. Before Task 1, ask your human partner whether to keep committing on this branch or to branch off the current commit (for example `git switch -c feat/memory-v3-delta-windowing`). Either way, Task 12 diffs code against `640b842` and checks `docs/superpowers` separately.
 
 ## File Structure
 
@@ -1663,7 +1665,8 @@ with:
   // Empty-extraction fast path (spec 2026-10-13 §3): nothing to reconcile, so
   // the reconciler is never called -- but the run still finishes as a normal
   // succeeded no-op through compareAndSwap, because that succeeded row is
-  // what the next run's delta cursor (and migration 077's gate) reads.
+  // what the next run's delta cursor (and the trigger gate -- migration
+  // 078, after Task 11) reads.
   if (extraction.items.length === 0) {
     const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
       runId, userId, expectedStateRevision: reserved.expectedStateRevision,
@@ -1916,7 +1919,8 @@ export interface MemoryV3DialogueStore {
   >;
   /** This conversation's newest *succeeded* run's source position, or null if
    * none has succeeded yet. Failed/reserved runs never count (spec 2026-10-13
-   * §3 -- the same rule migration 077 applies to lifecycle's trigger gate). */
+   * §3 -- the same rule the lifecycle trigger gate applies, migrations
+   * 077/078). */
   lastSucceededCursor(input: MemoryV3DialogueCursorInput): Promise<MemoryV3SourceCursor | null>;
 }
 ```
@@ -3341,8 +3345,11 @@ describe("Memory V3 lifecycle delta cursor", () => {
   });
 
   it("never calls the extractor when nothing new arrived since the cursor, and still ends as a succeeded no-op", async () => {
-    // In production migration 077's gate answers daily_cap first (0 new
-    // messages); this pins the runner's own contract regardless.
+    // This task does not touch the trigger gate itself -- in production the
+    // gate (migration 078, after Task 11) answers daily_cap first (0 new
+    // messages) before the runner is ever invoked; this test pins the
+    // runner's own contract regardless, using a harness that bypasses the
+    // gate to reach this code path directly.
     const test = withCursor(harness({
       async loadMessages() {
         test.calls.push("messages");
