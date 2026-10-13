@@ -291,6 +291,40 @@ async function persistFailure(
   }
 }
 
+// The terminal compareAndSwap write plus its result check, shared by the
+// normal path and the empty-extraction fast path. Returns null on success,
+// otherwise the already-persisted failure result.
+async function persistCompareAndSwap(
+  compareAndSwap: (input: never) => Promise<unknown>,
+  failStore: (input: never) => Promise<unknown>,
+  runId: string,
+  userId: string,
+  write: JsonRecord,
+  resultingStateRevision: number,
+): Promise<MemoryV3DialogueShadowResult | null> {
+  let cas: unknown;
+  try {
+    cas = await compareAndSwap(write as never);
+  } catch {
+    return await persistFailure(failStore, runId, userId, "state_write_failed");
+  }
+  try {
+    const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
+    if (status === "state_conflict") {
+      inspectExactRecord(cas, ["status"], "state_write_failed");
+      return await persistFailure(failStore, runId, userId, "state_conflict");
+    }
+    const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
+    if (result.status !== "succeeded" || result.resultingStateRevision !== resultingStateRevision) {
+      throw fail("state_write_failed");
+    }
+  } catch (error) {
+    const code = ownDiagnostic(error) ?? "state_write_failed";
+    return await persistFailure(failStore, runId, userId, code);
+  }
+  return null;
+}
+
 export async function runMemoryV3DialogueShadow(
   options: MemoryV3DialogueShadowOptions,
   reportTransportDiagnostic?: (
@@ -447,6 +481,27 @@ export async function runMemoryV3DialogueShadow(
     return await persistFailure(failStore, runId, userId, "state_too_large");
   }
 
+  // Empty-extraction fast path (spec 2026-10-13 §3): nothing to reconcile, so
+  // the reconciler is never called -- but the run still finishes as a normal
+  // succeeded no-op through compareAndSwap, because that succeeded row is
+  // what the next run's delta cursor reads.
+  if (extraction.items.length === 0) {
+    const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+      runId, userId, conversationId, expectedStateRevision: reserved.expectedStateRevision,
+      state, changed: false, extraction, operations: [], transitions: [],
+      extractorUsage: extractor.usage, reconcilerUsage: null,
+    }, state.stateRevision);
+    if (noopFailure !== null) return noopFailure;
+    return {
+      status: "succeeded",
+      runId,
+      itemCount: 0,
+      evidenceCount: 0,
+      transitionCount: 0,
+      stateRevision: state.stateRevision,
+    };
+  }
+
   let bundle;
   try {
     bundle = buildMemoryV3DialogueReconcileRequest({ userId, conversationId, messages: dialogue.messages, state, extraction });
@@ -551,28 +606,12 @@ export async function runMemoryV3DialogueShadow(
   } catch {
     return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent, reconcilerContext);
   }
-  let cas: unknown;
-  try {
-    cas = await compareAndSwap({
-      runId, userId, conversationId, expectedStateRevision: reserved.expectedStateRevision,
-      state: resultingState, changed: reduced.changed, extraction, operations: proposal,
-      transitions: reduced.transitions, extractorUsage: extractor.usage, reconcilerUsage: reconciler.usage,
-    } as never);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "state_write_failed");
-  }
-  try {
-    const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
-    if (status === "state_conflict") {
-      inspectExactRecord(cas, ["status"], "state_write_failed");
-      return await persistFailure(failStore, runId, userId, "state_conflict");
-    }
-    const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
-    if (result.status !== "succeeded" || result.resultingStateRevision !== resultingState.stateRevision) throw fail("state_write_failed");
-  } catch (error) {
-    const code = ownDiagnostic(error) ?? "state_write_failed";
-    return await persistFailure(failStore, runId, userId, code);
-  }
+  const casFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+    runId, userId, conversationId, expectedStateRevision: reserved.expectedStateRevision,
+    state: resultingState, changed: reduced.changed, extraction, operations: proposal,
+    transitions: reduced.transitions, extractorUsage: extractor.usage, reconcilerUsage: reconciler.usage,
+  }, resultingState.stateRevision);
+  if (casFailure !== null) return casFailure;
   return {
     status: "succeeded",
     runId,

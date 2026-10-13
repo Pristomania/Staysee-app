@@ -368,6 +368,66 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.equal(test.calls.some((entry) => entry.startsWith("fail:")), false);
   });
 
+  it("skips the reconciler entirely for an empty extraction but still persists a succeeded no-op run", async () => {
+    let reconcilerFactoryCalls = 0;
+    const extractorUsage = { promptTokens: 400, completionTokens: 20, costUsd: 0.0001 };
+    const test = harness({
+      extractorAdapterFactory: () => async () => ({ content: emptyExtractorContent, usage: extractorUsage }),
+      reconcilerAdapterFactory: () => {
+        reconcilerFactoryCalls += 1;
+        return async () => { throw new Error("the reconciler must not be called"); };
+      },
+    });
+    const logged: unknown[] = [];
+    const result = await runMemoryV3DialogueShadow(test.options, undefined, async (input) => { logged.push(input); });
+    assert.deepEqual(result, {
+      status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0, transitionCount: 0, stateRevision: 0,
+    });
+    assert.equal(reconcilerFactoryCalls, 0);
+    assert.equal(test.casInputs.length, 1);
+    assert.deepEqual(test.casInputs[0], {
+      runId: RUN_ID,
+      userId: USER_ID,
+      conversationId: CONVERSATION_ID,
+      expectedStateRevision: 0,
+      state: createEmptyMemoryV3DialogueState({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+      changed: false,
+      extraction: {
+        run: {
+          caseId: `memory-v3-shadow:${USER_ID}:${CONVERSATION_ID}`,
+          extractorVersion: MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
+        },
+        items: [],
+        evidence: [],
+      },
+      operations: [],
+      transitions: [],
+      extractorUsage,
+      reconcilerUsage: null,
+    });
+    assert.deepEqual(logged, [{
+      userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "extractor",
+      model: "google/gemini-3.7-flash", promptTokens: 400, completionTokens: 20, costUsd: 0.0001,
+      pipeline: "dialogue",
+    }]);
+    assert.deepEqual(test.failInputs, []);
+  });
+
+  it("terminalizes an empty-extraction run through fail() when its no-op CAS conflicts", async () => {
+    const test = harness({
+      extractorAdapterFactory: () => async () => ({ content: emptyExtractorContent, usage: null }),
+    });
+    test.options.store = {
+      ...test.store,
+      async compareAndSwap() { test.calls.push("cas"); return { status: "state_conflict" as const }; },
+    };
+    assert.deepEqual(await runMemoryV3DialogueShadow(test.options), {
+      status: "failed", runId: RUN_ID, diagnosticCode: "state_conflict",
+    });
+    assert.deepEqual(test.calls.slice(-2), ["cas", "fail:state_conflict"]);
+    assert.equal(test.calls.includes("reconcilerFactory"), false);
+  });
+
   it("stops duplicate and daily-cap reservations before providers", async () => {
     for (const status of ["duplicate", "daily_cap"] as const) {
       const test = harness({
