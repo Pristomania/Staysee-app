@@ -11,14 +11,11 @@
 -- processed" -- a transient failure no longer silently skips those
 -- messages forever.
 --
--- Adds a second, new gate on top (product decision, 13.10.2026): even once
--- 10 new messages accumulate, never run this paid check more than once per
--- calendar day for a given user across all of their conversations --
--- lifecycle state is shared account-wide, so a second success the same day
--- from a different busy conversation would just re-spend money re-deriving
--- a near-identical picture. Only a 'succeeded' run counts toward this cap;
--- a failed attempt must not use up today's slot, so the system keeps
--- retrying on the user's next message until it actually succeeds.
+-- No separate daily cap on top of the message-count gate -- product
+-- owner's requirement (13.10.2026) is exactly migration 053's rule: run
+-- only if 10 new messages have accumulated; if they haven't, no run is
+-- needed. An inactive user naturally never re-checks for days this way,
+-- without a second, independent day-based gate layered on top of it.
 --
 -- CREATE OR REPLACE is enough here: the parameter list, return shape, and
 -- every other clause (topic field, replaces/replacedBy link fields, the
@@ -36,7 +33,6 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   v_last_cursor timestamptz;
   v_new_message_count integer;
-  v_daily_success_count integer;
   v_claimed boolean;
   v_head public.memory_v3_lifecycle_shadow_heads%ROWTYPE;
   v_items jsonb;
@@ -77,14 +73,6 @@ BEGIN
       IF v_new_message_count < 10 THEN
         result := 'daily_cap'; run_id := NULL; expected_state_revision := NULL; state := NULL; RETURN NEXT; RETURN;
       END IF;
-    END IF;
-
-    SELECT pg_catalog.count(*)::integer INTO v_daily_success_count
-    FROM public.memory_v3_lifecycle_shadow_runs
-    WHERE user_id = p_user_id AND status = 'succeeded'
-      AND created_at >= pg_catalog.date_trunc('day', pg_catalog.now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
-    IF v_daily_success_count >= 1 THEN
-      result := 'daily_cap'; run_id := NULL; expected_state_revision := NULL; state := NULL; RETURN NEXT; RETURN;
     END IF;
 
     INSERT INTO public.memory_v3_lifecycle_shadow_identities(user_id, conversation_id, pipeline_version, input_hash)

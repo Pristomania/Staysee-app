@@ -25,16 +25,10 @@ describe("Memory V3 lifecycle watermark restore migration", () => {
     assert.match(sql, /IF v_new_message_count < 10 THEN/);
   });
 
-  it("caps successful runs at one per user per calendar day, but never counts a failed run toward that cap", () => {
-    assert.match(
-      sql,
-      /FROM public\.memory_v3_lifecycle_shadow_runs\s*\n\s*WHERE user_id = p_user_id AND status = 'succeeded'\s*\n\s*AND created_at >= pg_catalog\.date_trunc\('day', pg_catalog\.now\(\) AT TIME ZONE 'UTC'\) AT TIME ZONE 'UTC';/,
-    );
-    assert.match(sql, /IF v_daily_success_count >= 1 THEN/);
-  });
-
-  it("does not resurrect the old unscoped v_daily_count cap migration 069 accidentally restored", () => {
+  it("does not resurrect the old unscoped v_daily_count cap migration 069 accidentally restored, and adds no separate daily gate on top", () => {
     assert.equal(sql.includes("v_daily_count"), false);
+    assert.equal(sql.includes("v_daily_success_count"), false);
+    assert.equal((sql.match(/result := 'daily_cap';/g) ?? []).length, 1);
   });
 
   it("keeps everything else migrations 073-076 added: topic, the link-pointer fields, the exception handler, and the best-effort log guard", () => {
