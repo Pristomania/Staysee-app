@@ -73,6 +73,7 @@ function harness(overrides: Record<string, unknown> = {}) {
   const casInputs: unknown[] = [];
   const failInputs: unknown[] = [];
   const extractorRequests: unknown[] = [];
+  const cursorInputs: unknown[] = [];
   let active = 0;
   let maxActive = 0;
   const store: MemoryV3LifecycleStore = {
@@ -94,6 +95,10 @@ function harness(overrides: Record<string, unknown> = {}) {
       calls.push("cas");
       casInputs.push(input);
       return { status: "succeeded", resultingStateRevision: input.state.stateRevision };
+    },
+    async lastSucceededCursor(input) {
+      cursorInputs.push(input);
+      return null;
     },
   };
   const options = {
@@ -132,7 +137,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
-  return { options, calls, store, reserveInputs, casInputs, failInputs, extractorRequests, get maxActive() { return maxActive; } };
+  return { options, calls, store, reserveInputs, casInputs, failInputs, extractorRequests, cursorInputs, get maxActive() { return maxActive; } };
 }
 
 describe("Memory V3 lifecycle shadow runner gates", () => {
@@ -743,6 +748,338 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     const result = await runMemoryV3LifecycleShadow(cas.options);
     assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "state_write_failed" });
     assert.equal(JSON.stringify(result).includes(RAW_SECRET), false);
+  });
+});
+
+describe("Memory V3 lifecycle delta cursor", () => {
+  type Message = { id: string; role: "user" | "assistant"; text: string; createdAt: string };
+  const PRIOR_MESSAGE_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  const OTHER_MESSAGE_ID = "99999999-9999-4999-8999-999999999999";
+  const PRIOR: Message = { id: PRIOR_MESSAGE_ID, role: "assistant", text: "Привет! Как прошёл день?", createdAt: "2026-09-15T09:00:00Z" };
+  const NEW: Message = { id: MESSAGE_ID, role: "user", text: "Я люблю утренние прогулки", createdAt: CREATED_AT };
+  const LATER: Message = { id: OTHER_MESSAGE_ID, role: "user", text: "Сегодня снова гуляла", createdAt: "2026-09-15T11:00:00Z" };
+  const PRIOR_CURSOR = { messageId: PRIOR_MESSAGE_ID, createdAt: PRIOR.createdAt };
+  const NEW_CURSOR = { messageId: MESSAGE_ID, createdAt: CREATED_AT };
+  const sentIds = (request: unknown) =>
+    (request as { input: { messages: Array<{ id: string }> } }).input.messages.map(({ id }) => id);
+
+  function withCursor(test: ReturnType<typeof harness>, cursor: unknown) {
+    test.options.store = {
+      ...test.store,
+      async lastSucceededCursor(input) {
+        test.calls.push("cursor");
+        test.cursorInputs.push(input);
+        return cursor as never;
+      },
+    };
+    return test;
+  }
+
+  // Mirrors createMemoryV3MessageLoader's two call shapes over an in-memory
+  // conversation (its real queries are covered in messages.cases.test.ts):
+  // no cursor -> the last 60; a cursor -> the 5 messages ending at it, the
+  // oldest 55 after it, and the newest id. Records each call's cursor, or
+  // null for a two-argument call.
+  function windowLoader(conversation: () => Message[], seen: unknown[]) {
+    return async (_userId: string, _conversationId: string, ...cursor: unknown[]) => {
+      const visible = conversation();
+      if (cursor.length === 0) {
+        seen.push(null);
+        return visible.slice(-60);
+      }
+      seen.push(cursor[0]);
+      const at = visible.findIndex((message) => message.id === (cursor[0] as { messageId: string }).messageId);
+      return {
+        context: visible.slice(Math.max(0, at - 4), at + 1),
+        delta: visible.slice(at + 1, at + 56),
+        latestMessageId: visible[visible.length - 1].id,
+      };
+    };
+  }
+
+  // Tracks every reserved run and answers lastSucceededCursor the way the
+  // real query does: succeeded runs only, furthest (created_at, id) first.
+  // (Migration 077's 10-new-message gate is not modeled; it is out of scope.)
+  function trackingStore(seed: { messageId: string; createdAt: string } | null = null) {
+    const runs: Array<{ runId: string; status: "reserved" | "succeeded" | "failed"; messageId: string; createdAt: string }> = [];
+    const nextRunId = () => `eeeeeeee-eeee-4eee-8eee-${String(runs.length + 1).padStart(12, "0")}`;
+    if (seed !== null) runs.push({ runId: nextRunId(), status: "succeeded", ...seed });
+    const store: MemoryV3LifecycleStore = {
+      async reserve(input) {
+        const runId = nextRunId();
+        runs.push({ runId, status: "reserved", messageId: input.sourceLastMessageId, createdAt: input.sourceLastCreatedAt });
+        return {
+          status: "reserved", runId, expectedStateRevision: 0,
+          state: createEmptyMemoryV3LifecycleState({ userId: USER_ID }),
+        };
+      },
+      async fail(input) { runs.find((run) => run.runId === input.runId)!.status = "failed"; },
+      async compareAndSwap(input) {
+        runs.find((run) => run.runId === input.runId)!.status = "succeeded";
+        return { status: "succeeded", resultingStateRevision: input.state.stateRevision };
+      },
+      async lastSucceededCursor() {
+        const best = runs
+          .filter((run) => run.status === "succeeded")
+          .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) ||
+            (left.messageId < right.messageId ? 1 : left.messageId > right.messageId ? -1 : 0))[0];
+        return best ? { messageId: best.messageId, createdAt: best.createdAt } : null;
+      },
+    };
+    return { store, runs };
+  }
+
+  it("never looks up a delta cursor for disabled or non-allowlisted accounts", async () => {
+    for (const overrides of [{ rawMode: "off" }, { rawMode: "lifecycle_shadow", userId: OTHER_USER_ID }]) {
+      const test = harness(overrides);
+      assert.equal((await runMemoryV3LifecycleShadow(test.options)).status, "skipped");
+      assert.deepEqual(test.cursorInputs, []);
+    }
+  });
+
+  it("loads today's first-run window, with no cursor argument at all, when no run of this conversation has succeeded", async () => {
+    const loaderArgs: unknown[][] = [];
+    const test = harness({
+      async loadMessages(...args: unknown[]) {
+        loaderArgs.push(args);
+        return [NEW];
+      },
+    });
+    assert.equal((await runMemoryV3LifecycleShadow(test.options)).status, "succeeded");
+    assert.deepEqual(test.cursorInputs, [{ userId: USER_ID, conversationId: CONVERSATION_ID }]);
+    assert.deepEqual(loaderArgs, [[USER_ID, CONVERSATION_ID]]);
+  });
+
+  it("reads this conversation's last succeeded cursor before loading, then loads only what follows it", async () => {
+    const loaderArgs: unknown[][] = [];
+    const test = withCursor(harness({
+      async loadMessages(...args: unknown[]) {
+        test.calls.push("messages");
+        loaderArgs.push(args);
+        return { context: [PRIOR], delta: [NEW], latestMessageId: MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    assert.equal((await runMemoryV3LifecycleShadow(test.options)).status, "succeeded");
+    assert.deepEqual(test.calls.slice(0, 3), ["cursor", "messages", "reserve"]);
+    assert.deepEqual(test.cursorInputs, [{ userId: USER_ID, conversationId: CONVERSATION_ID }]);
+    assert.deepEqual(loaderArgs, [[USER_ID, CONVERSATION_ID, PRIOR_CURSOR]]);
+    assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
+    assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
+  });
+
+  it("fails the run before loading anything when the cursor lookup throws or returns garbage -- never a fallback window", async () => {
+    const original = console.error;
+    const logged: unknown[][] = [];
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      for (const lookup of [
+        async () => { throw new Error(RAW_SECRET); },
+        async () => ({ messageId: "not-a-uuid", createdAt: CREATED_AT }),
+        async () => ({ messageId: MESSAGE_ID, createdAt: "not-a-date" }),
+        async () => ({ messageId: MESSAGE_ID, createdAt: CREATED_AT, extra: RAW_SECRET }),
+        async () => "RAW",
+      ]) {
+        const test = harness();
+        test.options.store = { ...test.store, lastSucceededCursor: lookup as never };
+        assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+          status: "failed", runId: null, diagnosticCode: "invalid_source",
+        });
+        assert.deepEqual(test.calls, []);
+      }
+    } finally {
+      console.error = original;
+    }
+    assert.equal(logged.length, 5);
+    assert.deepEqual(logged[0], ["[memory-v3-lifecycle-cursor-lookup-failed]"]);
+    assert.equal(JSON.stringify(logged).includes(RAW_SECRET), false);
+  });
+
+  it("treats a store without lastSucceededCursor as invalid before any database or provider work", async () => {
+    const test = harness();
+    test.options.store = {
+      reserve: test.store.reserve,
+      fail: test.store.fail,
+      compareAndSwap: test.store.compareAndSwap,
+    } as never;
+    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+      status: "failed", runId: null, diagnosticCode: "invalid_source",
+    });
+    assert.deepEqual(test.calls, []);
+    assert.deepEqual(test.cursorInputs, []);
+  });
+
+  it("never calls the extractor when nothing new arrived since the cursor, and still ends as a succeeded no-op", async () => {
+    // This task does not touch the trigger gate itself -- in production the
+    // gate (migration 078, after Task 11) answers daily_cap first (0 new
+    // messages) before the runner is ever invoked; this test pins the
+    // runner's own contract regardless, using a harness that bypasses the
+    // gate to reach this code path directly.
+    const test = withCursor(harness({
+      async loadMessages() {
+        test.calls.push("messages");
+        return { context: [PRIOR, NEW], delta: [], latestMessageId: MESSAGE_ID };
+      },
+    }), NEW_CURSOR);
+    const logged: unknown[] = [];
+    const result = await runMemoryV3LifecycleShadow(test.options, undefined, async (input) => { logged.push(input); });
+    assert.deepEqual(result, {
+      status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0, transitionCount: 0, stateRevision: 0,
+    });
+    assert.deepEqual(test.calls, ["cursor", "messages", "reserve", "cas"]);
+    const reserved = test.reserveInputs[0] as { sourceLastMessageId: string; sourceLastCreatedAt: string };
+    assert.equal(reserved.sourceLastMessageId, MESSAGE_ID);
+    assert.equal(reserved.sourceLastCreatedAt, CREATED_AT);
+    assert.deepEqual(test.casInputs, [{
+      runId: RUN_ID,
+      userId: USER_ID,
+      expectedStateRevision: 0,
+      state: createEmptyMemoryV3LifecycleState({ userId: USER_ID }),
+      changed: false,
+      extraction: {
+        run: {
+          caseId: `memory-v3-shadow:${USER_ID}:${CONVERSATION_ID}`,
+          extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+        },
+        items: [],
+        evidence: [],
+      },
+      operations: [],
+      transitions: [],
+      extractorUsage: null,
+      reconcilerUsage: null,
+    }]);
+    assert.deepEqual(logged, []);
+    assert.deepEqual(test.failInputs, []);
+  });
+
+  it("rejects an extraction citing a leading-context message exactly like an unknown id, before the reconciler", async () => {
+    // The harness extractor cites MESSAGE_ID, which is a context message here.
+    const test = withCursor(harness({
+      async loadMessages() {
+        test.calls.push("messages");
+        return { context: [PRIOR, NEW], delta: [LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), NEW_CURSOR);
+    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+      status: "failed", runId: RUN_ID, diagnosticCode: "extractor_contract_invalid",
+    });
+    assert.equal(test.calls.includes("reconcilerFactory"), false);
+    assert.equal(test.calls.at(-1), "fail:extractor_contract_invalid");
+  });
+
+  it("sends the context and the oldest undrained message even over the byte cap, rather than skipping it", async () => {
+    const HUGE: Message = { ...NEW, text: `Я люблю утренние прогулки ${"x".repeat(21_000)}` };
+    const test = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR], delta: [HUGE, LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let status: string;
+    try {
+      status = (await runMemoryV3LifecycleShadow(test.options)).status;
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(status, "succeeded");
+    assert.deepEqual(warned, [["[memory-v3-lifecycle-delta-over-byte-cap]"]]);
+    assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
+    assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
+  });
+
+  it("folds the conversation's latest message into a delta run's input identity, so a failed window can be retried once anything new is written", async () => {
+    const hashes: string[] = [];
+    for (const latestMessageId of [MESSAGE_ID, MESSAGE_ID, OTHER_MESSAGE_ID]) {
+      const test = withCursor(harness({
+        async loadMessages() {
+          return { context: [PRIOR], delta: [NEW], latestMessageId };
+        },
+      }), PRIOR_CURSOR);
+      assert.equal((await runMemoryV3LifecycleShadow(test.options)).status, "succeeded");
+      hashes.push((test.reserveInputs[0] as { inputHash: string }).inputHash);
+    }
+    assert.equal(hashes[0], hashes[1]);
+    assert.notEqual(hashes[1], hashes[2]);
+  });
+
+  it("advances the delta cursor only on succeeded runs (fail, succeed, fail, then read)", async () => {
+    const conversation: Message[] = Array.from({ length: 8 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      role: "user",
+      text: `Сообщение ${index + 1}`,
+      createdAt: `2026-09-15T10:0${index}:00Z`,
+    }));
+    const tracked = trackingStore();
+    const seenCursors: unknown[] = [];
+    let visible = 0;
+    let extractorFails = false;
+    const options = {
+      ...harness().options,
+      store: tracked.store,
+      loadMessages: windowLoader(() => conversation.slice(0, visible), seenCursors),
+      extractorAdapterFactory: () => async () => {
+        if (extractorFails) throw new Error("provider down");
+        return { content: emptyExtractorContent, usage: null };
+      },
+    };
+    for (const step of [
+      { visible: 2, fails: true, status: "failed" },
+      { visible: 4, fails: false, status: "succeeded" },
+      { visible: 6, fails: true, status: "failed" },
+      { visible: 8, fails: false, status: "succeeded" },
+    ]) {
+      visible = step.visible;
+      extractorFails = step.fails;
+      assert.equal((await runMemoryV3LifecycleShadow(options)).status, step.status);
+    }
+    assert.deepEqual(tracked.runs.map((run) => run.status), ["failed", "succeeded", "failed", "succeeded"]);
+    const afterRun2 = { messageId: conversation[3].id, createdAt: conversation[3].createdAt };
+    assert.deepEqual(seenCursors, [null, null, afterRun2, afterRun2]);
+    assert.deepEqual(tracked.runs.map((run) => run.messageId), [1, 3, 5, 7].map((index) => conversation[index].id));
+  });
+
+  it("drains a 150-message backlog oldest-first across runs: every message reaches exactly one extractor window, none skipped", async () => {
+    const conversation: Message[] = Array.from({ length: 151 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      text: `${index + 1}: ${"я".repeat(300)}`,
+      createdAt: new Date(Date.UTC(2026, 8, 15, 10, 0, index)).toISOString(),
+    }));
+    const position = (id: string) => conversation.findIndex((message) => message.id === id);
+    const tracked = trackingStore({ messageId: conversation[0].id, createdAt: conversation[0].createdAt });
+    const seenCursors: unknown[] = [];
+    const sent: string[][] = [];
+    const options = {
+      ...harness().options,
+      store: tracked.store,
+      loadMessages: windowLoader(() => conversation, seenCursors),
+      extractorAdapterFactory: () => async (request: unknown) => {
+        sent.push(sentIds(request));
+        return { content: emptyExtractorContent, usage: null };
+      },
+    };
+    const drained: string[] = [];
+    for (let attempt = 1; ; attempt += 1) {
+      assert.equal(attempt <= 40, true);
+      const windowsBefore = sent.length;
+      assert.equal((await runMemoryV3LifecycleShadow(options)).status, "succeeded");
+      if (sent.length === windowsBefore) break; // the empty-delta run: no extractor call at all
+      const cursorId = (seenCursors.at(-1) as { messageId: string }).messageId;
+      const ids = sent[sent.length - 1];
+      const contextEnd = ids.indexOf(cursorId);
+      assert.equal(contextEnd >= 0 && contextEnd <= 4, true);
+      const delta = ids.slice(contextEnd + 1);
+      assert.equal(position(delta[0]), position(cursorId) + 1);
+      drained.push(...delta);
+    }
+    assert.deepEqual(drained, conversation.slice(1).map(({ id }) => id));
+    assert.equal(sent.length > 2, true);
+    assert.equal(sent.every((ids) => ids.length < 60), true);
+    assert.deepEqual(tracked.runs.slice(1, 1 + sent.length).map((run) => run.messageId), sent.map((ids) => ids[ids.length - 1]));
+    assert.equal(tracked.runs[tracked.runs.length - 1].messageId, conversation[150].id);
+    assert.equal(tracked.runs.every((run) => run.status === "succeeded"), true);
   });
 });
 

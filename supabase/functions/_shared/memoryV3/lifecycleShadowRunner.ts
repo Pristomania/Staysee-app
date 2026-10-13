@@ -1,11 +1,16 @@
 import {
   MEMORY_V3_MAX_PROMPT_BYTES,
+  MEMORY_V3_MAX_SOURCE_MESSAGES,
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
   type MemoryV3DialogueInput,
   type MemoryV3Extraction,
 } from "./contract.ts";
-import type { MemoryV3DialogueMessage } from "./messages.ts";
+import type {
+  MemoryV3DialogueMessage,
+  MemoryV3MessageLoader,
+  MemoryV3SourceCursor,
+} from "./messages.ts";
 import {
   MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
   buildMemoryV3LifecycleExtractorRequest,
@@ -56,7 +61,10 @@ export interface MemoryV3LifecycleShadowOptions {
   userId: string;
   conversationId: string;
   apiKey: string | null | undefined;
-  loadMessages: (userId: string, conversationId: string) => Promise<MemoryV3DialogueMessage[]>;
+  /** Called with two arguments for a first run (today's last-60 window), and
+   * with this conversation's last succeeded cursor otherwise -- then it
+   * returns a delta window (spec 2026-10-13 §1). */
+  loadMessages: MemoryV3MessageLoader;
   store: MemoryV3LifecycleStore;
   extractorAdapterFactory: (apiKey: string) => MemoryV3ModelAdapter;
   reconcilerAdapterFactory: (apiKey: string) => MemoryV3LifecycleModelAdapter;
@@ -118,6 +126,39 @@ function fitExtractorDialogueToByteCap(
   throw fail("invalid_source");
 }
 
+type FittedExtractorDialogue = {
+  dialogue: MemoryV3DialogueInput;
+  request: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>;
+};
+
+// Delta mode (spec 2026-10-13 §1): the same 20 KB cap, but trimmed from the
+// NEWEST end of the delta -- those messages simply open the next run, since
+// the cursor only advances to the last message actually sent. (The first-run
+// fit above trims the oldest end; here that would let the cursor jump past
+// messages no run ever read.) Never drops the context block or the oldest
+// undrained message, and stops before the window would hold no user message.
+// If even that minimum is over the cap, it is sent as-is: an accepted,
+// logged edge case -- never a gap.
+function fitDeltaWindowToByteCap(
+  caseId: string,
+  context: MemoryV3DialogueMessage[],
+  delta: MemoryV3DialogueMessage[],
+): FittedExtractorDialogue {
+  const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES);
+  let smallest: FittedExtractorDialogue | null = null;
+  for (let end = delta.length; end >= 1; end -= 1) {
+    const messages = [...context, ...delta.slice(0, end)];
+    if (!messages.some((message) => message.role === "user")) break;
+    const dialogue = validateMemoryV3Dialogue({ caseId, messages });
+    const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
+    if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) return { dialogue, request };
+    smallest = { dialogue, request };
+  }
+  if (smallest === null) throw fail("invalid_source");
+  console.warn("[memory-v3-lifecycle-delta-over-byte-cap]");
+  return smallest;
+}
+
 function inspectExactRecord(value: unknown, fields: readonly string[], code: MemoryV3LifecycleShadowDiagnostic): JsonRecord {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw fail(code);
@@ -167,7 +208,10 @@ function inspectDenseArray(value: unknown, maximum: number, code: MemoryV3Lifecy
   }
 }
 
-function ownMethod(value: unknown, name: "reserve" | "fail" | "compareAndSwap"): ((input: never) => Promise<unknown>) | null {
+function ownMethod(
+  value: unknown,
+  name: "reserve" | "fail" | "compareAndSwap" | "lastSucceededCursor",
+): ((input: never) => Promise<unknown>) | null {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const descriptor = Object.getOwnPropertyDescriptor(value, name);
@@ -176,6 +220,38 @@ function ownMethod(value: unknown, name: "reserve" | "fail" | "compareAndSwap"):
   } catch {
     return null;
   }
+}
+
+// The store's answer is untrusted until checked here; anything malformed
+// fails the run exactly like a failed lookup.
+function projectSourceCursor(value: unknown): MemoryV3SourceCursor | null {
+  if (value === null) return null;
+  const cursor = inspectExactRecord(value, ["messageId", "createdAt"], "invalid_source");
+  if (typeof cursor.messageId !== "string" || !UUID.test(cursor.messageId) ||
+      typeof cursor.createdAt !== "string" || !Number.isFinite(Date.parse(cursor.createdAt))) {
+    throw fail("invalid_source");
+  }
+  return { messageId: cursor.messageId, createdAt: cursor.createdAt };
+}
+
+// The loader's delta-mode answer, checked before anything trusts it. Both
+// blocks are validated together (unique ids across them, at most 60 in all,
+// at least one user message) and split back at the same boundary.
+function inspectDeltaWindow(value: unknown, caseId: string): {
+  context: MemoryV3DialogueMessage[];
+  delta: MemoryV3DialogueMessage[];
+  latestMessageId: string;
+} {
+  const window = inspectExactRecord(value, ["context", "delta", "latestMessageId"], "invalid_source");
+  const context = inspectDenseArray(window.context, MEMORY_V3_MAX_SOURCE_MESSAGES, "invalid_source");
+  const delta = inspectDenseArray(window.delta, MEMORY_V3_MAX_SOURCE_MESSAGES, "invalid_source");
+  if (typeof window.latestMessageId !== "string" || !UUID.test(window.latestMessageId)) throw fail("invalid_source");
+  const messages = validateMemoryV3Dialogue({ caseId, messages: [...context, ...delta] }).messages;
+  return {
+    context: messages.slice(0, context.length),
+    delta: messages.slice(context.length),
+    latestMessageId: window.latestMessageId,
+  };
 }
 
 function canonicalStringify(value: unknown): string {
@@ -187,14 +263,28 @@ function canonicalStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(",")}}`;
 }
 
-async function inputHash(userId: string, conversationId: string, dialogue: MemoryV3DialogueInput): Promise<string> {
+async function inputHash(
+  userId: string,
+  conversationId: string,
+  dialogue: MemoryV3DialogueInput,
+  latestMessageId: string | null,
+): Promise<string> {
   try {
-    const payload = {
+    const payload: JsonRecord = {
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
       userId,
       conversationId,
       messages: dialogue.messages.map(({ id, role, text, createdAt }) => ({ id, role, text, createdAt })),
     };
+    // Delta mode only (spec 2026-10-13 §1). A delta window need not end at the
+    // conversation's newest message, so after a failed run the next run can
+    // rebuild the very same window -- and the reservation's duplicate check is
+    // permanent (an input hash is never released, not even by a failed run),
+    // which would freeze this conversation's memory for good. Folding in the
+    // newest message id keeps "duplicate" meaning what it means for a first
+    // run: same input, same conversation state. A retry goes ahead as soon as
+    // anything new is written. First-run hashes are unchanged.
+    if (latestMessageId !== null) payload.latestMessageId = latestMessageId;
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalStringify(payload)));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   } catch (error) {
@@ -374,26 +464,62 @@ export async function runMemoryV3LifecycleShadow(
   const reserve = ownMethod(projected.store, "reserve");
   const failStore = ownMethod(projected.store, "fail");
   const compareAndSwap = ownMethod(projected.store, "compareAndSwap");
+  const lastSucceededCursor = ownMethod(projected.store, "lastSucceededCursor");
   if (typeof userId !== "string" || !UUID.test(userId) || typeof conversationId !== "string" || !UUID.test(conversationId) ||
       typeof apiKey !== "string" || apiKey.trim().length === 0 || typeof projected.loadMessages !== "function" ||
       typeof projected.extractorAdapterFactory !== "function" || typeof projected.reconcilerAdapterFactory !== "function" ||
-      !reserve || !failStore || !compareAndSwap) return failed(null, "invalid_source");
+      !reserve || !failStore || !compareAndSwap || !lastSucceededCursor) return failed(null, "invalid_source");
 
-  let dialogue: MemoryV3DialogueInput;
-  let extractorRequest;
+  // Delta windowing (spec 2026-10-13 §1, §3): only this conversation's last
+  // *succeeded* run counts as already analyzed. A failed or malformed lookup
+  // fails the run: falling back to the first-run window could move the cursor
+  // past a backlog no run has read. Console-only fixed literal; the error
+  // itself is never logged.
+  let sinceCursor: MemoryV3SourceCursor | null;
   try {
-    const source = await (projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"])(userId, conversationId);
-    const validated = validateMemoryV3Dialogue({ caseId: `memory-v3-shadow:${userId}:${conversationId}`, messages: source });
-    const fitted = fitExtractorDialogueToByteCap(validated);
-    dialogue = fitted.dialogue;
-    extractorRequest = fitted.request;
+    sinceCursor = projectSourceCursor(await lastSucceededCursor({ userId, conversationId } as never));
+  } catch {
+    console.error("[memory-v3-lifecycle-cursor-lookup-failed]");
+    return failed(null, "invalid_source");
+  }
+
+  // extractorRequest stays null for an empty delta (nothing new to read).
+  // deltaMessageIds is what this run may cite as evidence: null on a first run
+  // (any loaded message), otherwise exactly the delta it sends.
+  // latestMessageId feeds the input identity in delta mode only.
+  let dialogue: MemoryV3DialogueInput;
+  let extractorRequest: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> | null;
+  let deltaMessageIds: ReadonlySet<string> | null = null;
+  let latestMessageId: string | null = null;
+  try {
+    const caseId = `memory-v3-shadow:${userId}:${conversationId}`;
+    const load = projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"];
+    if (sinceCursor === null) {
+      const fitted = fitExtractorDialogueToByteCap(
+        validateMemoryV3Dialogue({ caseId, messages: await load(userId, conversationId) }),
+      );
+      dialogue = fitted.dialogue;
+      extractorRequest = fitted.request;
+    } else {
+      const loaded = inspectDeltaWindow(await load(userId, conversationId, sinceCursor), caseId);
+      latestMessageId = loaded.latestMessageId;
+      if (loaded.delta.length === 0) {
+        dialogue = validateMemoryV3Dialogue({ caseId, messages: loaded.context });
+        extractorRequest = null;
+      } else {
+        const fitted = fitDeltaWindowToByteCap(caseId, loaded.context, loaded.delta);
+        dialogue = fitted.dialogue;
+        extractorRequest = fitted.request;
+      }
+      deltaMessageIds = new Set(dialogue.messages.slice(loaded.context.length).map((message) => message.id));
+    }
   } catch {
     return failed(null, "invalid_source");
   }
 
   let hash: string;
   try {
-    hash = await inputHash(userId, conversationId, dialogue);
+    hash = await inputHash(userId, conversationId, dialogue, latestMessageId);
   } catch {
     return failed(null, "unknown_failure");
   }
@@ -461,6 +587,32 @@ export async function runMemoryV3LifecycleShadow(
     return await persistFailure(failStore, runId, userId, code);
   }
 
+  // Empty delta (spec 2026-10-13 §1): nothing was written after the cursor,
+  // so the extractor is never called -- not even on the context block alone,
+  // which a previous run already analyzed. Same succeeded no-op contract as an
+  // empty extraction (§3), with no model usage at all.
+  if (extractorRequest === null) {
+    const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+      runId, userId, expectedStateRevision: reserved.expectedStateRevision,
+      state, changed: false,
+      extraction: {
+        run: { caseId: dialogue.caseId, extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION },
+        items: [],
+        evidence: [],
+      },
+      operations: [], transitions: [], extractorUsage: null, reconcilerUsage: null,
+    }, state.stateRevision);
+    if (noopFailure !== null) return noopFailure;
+    return {
+      status: "succeeded",
+      runId,
+      itemCount: 0,
+      evidenceCount: 0,
+      transitionCount: 0,
+      stateRevision: state.stateRevision,
+    };
+  }
+
   let extractor: MemoryV3TransportResult;
   try {
     const adapter = (projected.extractorAdapterFactory as MemoryV3LifecycleShadowOptions["extractorAdapterFactory"])(apiKey);
@@ -503,6 +655,13 @@ export async function runMemoryV3LifecycleShadow(
       "cross_conversation",
     );
   } catch {
+    return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+  }
+  // Spec 2026-10-13 §1: the context block informs the extractor but is never
+  // new evidence -- the run that produced the cursor already analyzed it.
+  // Citing it is the same contract violation as citing an unknown message.
+  const citable = deltaMessageIds;
+  if (citable !== null && extraction.evidence.some((row) => !citable.has(row.sourceMessageId))) {
     return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
   }
   if (extraction.items.length > MEMORY_V3_LIFECYCLE_MAX_CANDIDATES ||
