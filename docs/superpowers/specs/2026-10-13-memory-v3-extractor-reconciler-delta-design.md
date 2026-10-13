@@ -255,9 +255,12 @@ the count's `WHERE` clause becomes the same lexicographic compound
 comparison the loader uses. The 10-message threshold, the per-conversation
 scope, and the "only `succeeded` runs count" rule are all unchanged.
 
-**Not provable offline**, same as §1's keyset filter: confirm against
-staging (or a local `supabase start`) with two messages sharing a
-timestamp before relying on this in production.
+**Not provable offline.** Unlike §1's loader (a PostgREST-translated `.or()`
+filter), this compound comparison runs as native SQL inside the `plpgsql`
+function itself — the risk here is "is the SQL correct", not "does
+PostgREST parse the filter as intended". Confirm against staging (or a
+local `supabase start`) with two messages sharing a timestamp before
+relying on this in production.
 
 ## Files touched
 
@@ -318,9 +321,11 @@ the existing `*ShadowRunner.cases.test.ts` convention):
   `compareAndSwap` itself — mirror that pattern for the new lookup).
 - **Migration 078's gate:** a structural test (regex against the migration's
   SQL, matching the existing `*Migration.cases.test.ts` convention) pins
-  the compound comparison and the unchanged 10-message threshold. This
-  cannot prove PostgREST/Postgres actually evaluates the compound `WHERE`
-  as intended — confirm against staging before production (§5).
+  the compound comparison and the unchanged 10-message threshold, plus
+  that a conversation with no prior succeeded run is unaffected (the
+  renamed cursor variable is correctly guarded). This cannot prove
+  Postgres actually evaluates the compound `WHERE` as intended when it
+  runs — confirm against staging before production (§5).
 
 ## Review Focus
 

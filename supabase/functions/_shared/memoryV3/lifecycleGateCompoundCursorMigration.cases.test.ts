@@ -42,6 +42,17 @@ describe("Memory V3 lifecycle gate compound-cursor migration", () => {
     assert.match(sql, /result := 'daily_cap';/);
   });
 
+  it("guards the count query with the renamed cursor variable, so a conversation with no prior succeeded run is unaffected", () => {
+    // The old gate's null-check (`IF v_last_cursor IS NOT NULL`) must not
+    // survive under its old name -- that would either fail to compile
+    // (v_last_cursor no longer declared) or, worse, silently reference some
+    // other identifier. First-run behavior (skip the count entirely) is
+    // preserved by construction: the count query is the only thing inside
+    // this IF, unchanged in shape from migration 077.
+    assert.match(sql, /IF v_last_cursor_at IS NOT NULL THEN/);
+    assert.equal(/IF v_last_cursor IS NOT NULL THEN/.test(sql), false);
+  });
+
   it("keeps everything migration 077 added: no separate daily-success cap, the topic field, the link-pointer fields, the exception handler", () => {
     assert.equal(sql.includes("v_daily_count"), false);
     assert.equal(sql.includes("v_daily_success_count"), false);
