@@ -155,8 +155,51 @@ function fitDeltaWindowToByteCap(
     smallest = { dialogue, request };
   }
   if (smallest === null) throw fail("invalid_source");
+  // The oldest undrained message alone -- plus the context block -- still
+  // exceeds the cap. Never drop it (the run must analyze something new) and
+  // never send it unbounded (a sufficiently long single message would risk
+  // exceeding the provider's real per-call token budget, not just this
+  // cap's accounting assumption, and would keep doing so on every retry).
+  // Binary-search the largest prefix of its text that brings the whole
+  // request back under cap; context and every other field are untouched.
+  const truncated = truncateOldestMessageToFit(caseId, context, delta[0], cap);
+  if (truncated !== null) {
+    console.warn("[memory-v3-lifecycle-delta-message-truncated]");
+    return truncated;
+  }
   console.warn("[memory-v3-lifecycle-delta-over-byte-cap]");
   return smallest;
+}
+
+function truncateOldestMessageToFit(
+  caseId: string,
+  context: MemoryV3DialogueMessage[],
+  oldest: MemoryV3DialogueMessage,
+  cap: number,
+): FittedExtractorDialogue | null {
+  let low = 1;
+  let high = oldest.text.length;
+  let best: FittedExtractorDialogue | null = null;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    try {
+      const dialogue = validateMemoryV3Dialogue({
+        caseId,
+        messages: [...context, { ...oldest, text: oldest.text.slice(0, mid) }],
+      });
+      const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
+      if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
+        best = { dialogue, request };
+        low = mid + 1;
+        continue;
+      }
+    } catch {
+      // A prefix can be blank after trimming (leading whitespace) even when
+      // the full text is not; shrink further rather than treat it as fatal.
+    }
+    high = mid - 1;
+  }
+  return best;
 }
 
 function inspectExactRecord(value: unknown, fields: readonly string[], code: MemoryV3LifecycleShadowDiagnostic): JsonRecord {

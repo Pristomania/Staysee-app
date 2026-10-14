@@ -967,7 +967,7 @@ describe("Memory V3 lifecycle delta cursor", () => {
     assert.equal(test.calls.at(-1), "fail:extractor_contract_invalid");
   });
 
-  it("sends the context and the oldest undrained message even over the byte cap, rather than skipping it", async () => {
+  it("truncates a single oversized undrained message to fit the byte cap, instead of sending it unbounded", async () => {
     const HUGE: Message = { ...NEW, text: `Я люблю утренние прогулки ${"x".repeat(21_000)}` };
     const test = withCursor(harness({
       async loadMessages() {
@@ -984,9 +984,35 @@ describe("Memory V3 lifecycle delta cursor", () => {
       console.warn = original;
     }
     assert.equal(status, "succeeded");
+    assert.deepEqual(warned, [["[memory-v3-lifecycle-delta-message-truncated]"]]);
+    assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
+    assert.equal(new TextEncoder().encode(JSON.stringify(test.extractorRequests[0])).byteLength <= 20_000, true);
+    const sentHuge = (test.extractorRequests[0] as { input: { messages: Array<{ id: string; text: string }> } })
+      .input.messages.find((message) => message.id === MESSAGE_ID)!;
+    assert.equal(sentHuge.text.length > 0, true);
+    assert.equal(sentHuge.text.length < HUGE.text.length, true);
+    assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
+  });
+
+  it("falls back to sending as-is when even the context block alone exceeds the byte cap and truncation cannot fit it", async () => {
+    const HUGE_CONTEXT: Message = { ...PRIOR, text: "я".repeat(30_000) };
+    const test = withCursor(harness({
+      async loadMessages() {
+        return { context: [HUGE_CONTEXT], delta: [NEW], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let status: string;
+    try {
+      status = (await runMemoryV3LifecycleShadow(test.options)).status;
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(status, "succeeded");
     assert.deepEqual(warned, [["[memory-v3-lifecycle-delta-over-byte-cap]"]]);
     assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
-    assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
   });
 
   it("folds the conversation's latest message into a delta run's input identity, so a failed window can be retried once anything new is written", async () => {
