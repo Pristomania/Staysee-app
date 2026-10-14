@@ -901,12 +901,37 @@ describe("Memory V3 dialogue delta cursor", () => {
     assert.equal(test.calls.at(-1), "fail:extractor_contract_invalid");
   });
 
-  it("truncates a single oversized undrained message to fit the byte cap, instead of sending it unbounded", async () => {
+  it("chunks a single oversized undrained message across several extractor calls and merges the results, instead of truncating it", async () => {
+    // Deliberately large enough to need more than one chunk under the real
+    // 20KB cap (the system instruction + schema overhead alone eats a
+    // meaningful share of it), but well under the 5-chunk safety ceiling.
     const HUGE: Message = { ...NEW, text: `Я люблю утренние прогулки ${"x".repeat(21_000)}` };
+    let calls = 0;
+    const sentRequests: unknown[] = [];
     const test = withCursor(harness({
       async loadMessages() {
         return { context: [PRIOR], delta: [HUGE, LATER], latestMessageId: OTHER_MESSAGE_ID };
       },
+      extractorAdapterFactory: () => async (request: unknown) => {
+        calls += 1;
+        sentRequests.push(request);
+        return {
+          content: extractorContent(`Claim ${calls}`),
+          usage: { promptTokens: 100, completionTokens: 10, costUsd: 0.0001 },
+        };
+      },
+      // The canned proposalContent handles exactly one candidate; this run's
+      // merged extraction has one per chunk, so answer "ignore" for every
+      // candidate the reconciler request actually lists.
+      reconcilerAdapterFactory: () => async (request: unknown) => ({
+        rawContent: JSON.stringify({
+          operations: (request as { input: { candidates: Array<{ candidateRef: string }> } })
+            .input.candidates.map(({ candidateRef }) => ({
+              type: "ignore", candidateRef, targetMemoryRef: null, topic: null, supersedesMemoryRef: null,
+            })),
+        }),
+        usage: null,
+      }),
     }), PRIOR_CURSOR);
     const original = console.warn;
     const warned: unknown[][] = [];
@@ -918,17 +943,64 @@ describe("Memory V3 dialogue delta cursor", () => {
       console.warn = original;
     }
     assert.equal(status, "succeeded");
-    assert.deepEqual(warned, [["[memory-v3-dialogue-delta-message-truncated]"]]);
-    assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
-    assert.equal(new TextEncoder().encode(JSON.stringify(test.extractorRequests[0])).byteLength <= 20_000, true);
-    const sentHuge = (test.extractorRequests[0] as { input: { messages: Array<{ id: string; text: string }> } })
-      .input.messages.find((message) => message.id === MESSAGE_ID)!;
-    assert.equal(sentHuge.text.length > 0, true);
-    assert.equal(sentHuge.text.length < HUGE.text.length, true);
+    assert.deepEqual(warned, [["[memory-v3-dialogue-delta-message-chunked]"]]);
+    assert.equal(calls > 1, true);
+    // Every chunk still only cites the real, whole message's id.
+    assert.deepEqual(sentRequests.map((request) => sentIds(request)), Array.from({ length: calls }, () => [PRIOR_MESSAGE_ID, MESSAGE_ID]));
+    assert.equal(sentRequests.every((request) =>
+      new TextEncoder().encode(JSON.stringify(request)).byteLength <= 20_000), true);
+    // Every chunk's text is a real slice of the original, and none of them is
+    // the full, untruncated message by itself.
+    const chunkTexts = sentRequests.map((request) =>
+      (request as { input: { messages: Array<{ id: string; text: string }> } })
+        .input.messages.find((message) => message.id === MESSAGE_ID)!.text);
+    for (const text of chunkTexts) assert.equal(text.length < HUGE.text.length, true);
+    const cas = test.casInputs[0] as {
+      extraction: { items: unknown[] };
+      extractorUsage: { promptTokens: number; completionTokens: number; costUsd: number };
+    };
+    // Nothing is merged away: one distinct item (distinct claim) per chunk.
+    assert.equal(cas.extraction.items.length, calls);
+    // Usage is the true sum of every chunk's call, not just the last one.
+    assert.equal(cas.extractorUsage.promptTokens, calls * 100);
+    assert.equal(cas.extractorUsage.completionTokens, calls * 10);
+    assert.equal(Math.round(cas.extractorUsage.costUsd * 1e8), Math.round(calls * 0.0001 * 1e8));
     assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
   });
 
-  it("falls back to sending as-is when even the context block alone exceeds the byte cap and truncation cannot fit it", async () => {
+  it("falls back to sending as-is at the extractor when a message would need more chunks than the safety ceiling allows", async () => {
+    const GIGANTIC: Message = { ...NEW, text: "я".repeat(80_000) };
+    const test = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR], delta: [GIGANTIC, LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let result: Awaited<ReturnType<typeof runMemoryV3DialogueShadow>>;
+    try {
+      result = await runMemoryV3DialogueShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    // The extractor layer's own 5-chunk ceiling is reached first, so it
+    // falls back to sending the oldest message as-is -- bounded to exactly
+    // one call, never unbounded chunking -- but a message this size is also
+    // too large for the reconciler's own, separate, pre-existing 80KB cap
+    // (evidence-only mode still sends that one cited message's full text),
+    // so the run still ends up failing there. That failure, and the
+    // repeated-failure risk it carries for a conversation that keeps
+    // receiving a message this large, is the same already-deferred
+    // territory as the reviewer's Finding #1 -- this fix only bounds the
+    // extractor's own wasted cost on a message already this hopeless.
+    assert.deepEqual(warned, [["[memory-v3-dialogue-delta-over-byte-cap]"]]);
+    assert.equal(test.extractorRequests.length, 1);
+    assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
+    assert.deepEqual(result, { status: "failed", runId: RUN_ID, diagnosticCode: "reconciler_request_too_large" });
+  });
+
+  it("falls back to sending as-is when even the context block alone exceeds the byte cap and chunking cannot fit it", async () => {
     const HUGE_CONTEXT: Message = { ...PRIOR, text: "я".repeat(30_000) };
     const test = withCursor(harness({
       async loadMessages() {

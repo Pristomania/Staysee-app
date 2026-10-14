@@ -46,6 +46,7 @@ import { getMemoryV3LifecycleReserveStage } from "./lifecycleStore.ts";
 import type {
   MemoryV3LifecycleStore,
   MemoryV3LifecycleStoredDiagnostic,
+  MemoryV3LifecycleUsage,
 } from "./lifecycleStore.ts";
 
 export type MemoryV3LifecycleShadowDiagnostic = MemoryV3LifecycleStoredDiagnostic;
@@ -128,8 +129,18 @@ function fitExtractorDialogueToByteCap(
 
 type FittedExtractorDialogue = {
   dialogue: MemoryV3DialogueInput;
-  request: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>;
+  requests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[];
 };
+
+// Safety ceiling on how many pieces a single oversized message is ever split
+// into (spec 2026-10-13, extended after review): bounds the worst-case cost
+// of one pathologically large paste to a handful of extractor calls. Chosen
+// against real practice, not guessed -- messaging and chat products cap a
+// single message at 4K-25K characters (Telegram 4,096; WhatsApp Web 10,000;
+// ChatGPT/Claude.ai treat pastes over ~20-25K characters specially), so a
+// message needing more than 5 chunks at this cap is already far outside any
+// of those norms.
+const MEMORY_V3_LIFECYCLE_DELTA_MAX_MESSAGE_CHUNKS = 5;
 
 // Delta mode (spec 2026-10-13 §1): the same 20 KB cap, but trimmed from the
 // NEWEST end of the delta -- those messages simply open the next run, since
@@ -145,61 +156,102 @@ function fitDeltaWindowToByteCap(
   delta: MemoryV3DialogueMessage[],
 ): FittedExtractorDialogue {
   const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES);
-  let smallest: FittedExtractorDialogue | null = null;
+  let smallest: { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> } | null = null;
   for (let end = delta.length; end >= 1; end -= 1) {
     const messages = [...context, ...delta.slice(0, end)];
     if (!messages.some((message) => message.role === "user")) break;
     const dialogue = validateMemoryV3Dialogue({ caseId, messages });
     const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
-    if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) return { dialogue, request };
+    if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) return { dialogue, requests: [request] };
     smallest = { dialogue, request };
   }
   if (smallest === null) throw fail("invalid_source");
   // The oldest undrained message alone -- plus the context block -- still
   // exceeds the cap. Never drop it (the run must analyze something new) and
-  // never send it unbounded (a sufficiently long single message would risk
-  // exceeding the provider's real per-call token budget, not just this
-  // cap's accounting assumption, and would keep doing so on every retry).
-  // Binary-search the largest prefix of its text that brings the whole
-  // request back under cap; context and every other field are untouched.
-  const truncated = truncateOldestMessageToFit(caseId, context, delta[0], cap);
-  if (truncated !== null) {
-    console.warn("[memory-v3-lifecycle-delta-message-truncated]");
-    return truncated;
+  // never silently lose part of it by truncating: a message this large is
+  // still a real message a person wrote in full, and the extractor should
+  // get to see every word of it eventually, just like Zep (a comparable
+  // memory-extraction product) chunks oversized input rather than cutting
+  // it. Split only its text into sequential pieces that each fit under cap
+  // and run the extractor once per piece; `dialogue` below keeps the real,
+  // whole, untruncated message for everything downstream (evidence
+  // validation, the reconciler step) -- only the extractor's own per-call
+  // input is ever split.
+  const fullDialogue = validateMemoryV3Dialogue({ caseId, messages: [...context, delta[0]] });
+  const chunks = chunkOldestMessageForExtraction(caseId, context, delta[0], cap);
+  if (chunks !== null) {
+    console.warn("[memory-v3-lifecycle-delta-message-chunked]");
+    return { dialogue: fullDialogue, requests: chunks };
   }
   console.warn("[memory-v3-lifecycle-delta-over-byte-cap]");
-  return smallest;
+  return { dialogue: smallest.dialogue, requests: [smallest.request] };
 }
 
-function truncateOldestMessageToFit(
+function chunkOldestMessageForExtraction(
   caseId: string,
   context: MemoryV3DialogueMessage[],
   oldest: MemoryV3DialogueMessage,
   cap: number,
-): FittedExtractorDialogue | null {
-  let low = 1;
-  let high = oldest.text.length;
-  let best: FittedExtractorDialogue | null = null;
-  while (low <= high) {
-    const mid = (low + high) >> 1;
-    try {
-      const dialogue = validateMemoryV3Dialogue({
-        caseId,
-        messages: [...context, { ...oldest, text: oldest.text.slice(0, mid) }],
-      });
-      const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
-      if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
-        best = { dialogue, request };
-        low = mid + 1;
-        continue;
+): ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] | null {
+  const requests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] = [];
+  let start = 0;
+  while (start < oldest.text.length) {
+    if (requests.length >= MEMORY_V3_LIFECYCLE_DELTA_MAX_MESSAGE_CHUNKS) return null;
+    let low = start + 1;
+    let high = oldest.text.length;
+    let bestEnd = -1;
+    let bestRequest: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> | null = null;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      try {
+        const dialogue = validateMemoryV3Dialogue({
+          caseId,
+          messages: [...context, { ...oldest, text: oldest.text.slice(start, mid) }],
+        });
+        const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
+        if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
+          bestEnd = mid;
+          bestRequest = request;
+          low = mid + 1;
+          continue;
+        }
+      } catch {
+        // A slice can be blank after trimming (leading whitespace) even when
+        // the full text is not; shrink further rather than treat it as fatal.
       }
-    } catch {
-      // A prefix can be blank after trimming (leading whitespace) even when
-      // the full text is not; shrink further rather than treat it as fatal.
+      high = mid - 1;
     }
-    high = mid - 1;
+    if (bestEnd === -1 || bestRequest === null) return null; // context alone already over cap
+    requests.push(bestRequest);
+    start = bestEnd;
   }
-  return best;
+  return requests;
+}
+
+// Merges one message's per-chunk extractions back into one (identity when
+// there was only ever one chunk). A collision between two chunks'
+// localItemKeys would mean the same structural candidate was independently
+// re-derived from two different slices of text -- treated as a contract
+// violation rather than silently keeping only one copy.
+function mergeMemoryV3Extractions(parts: MemoryV3Extraction[]): MemoryV3Extraction {
+  const items = parts.flatMap((part) => part.items);
+  const evidence = parts.flatMap((part) => part.evidence);
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (keys.has(item.localItemKey)) throw fail("extractor_contract_invalid");
+    keys.add(item.localItemKey);
+  }
+  return { run: parts[0].run, items, evidence };
+}
+
+function sumMemoryV3LifecycleUsage(usages: Array<MemoryV3LifecycleUsage | null>): MemoryV3LifecycleUsage | null {
+  const real = usages.filter((usage): usage is MemoryV3LifecycleUsage => usage !== null);
+  if (real.length === 0) return null;
+  return {
+    promptTokens: real.reduce((sum, usage) => sum + usage.promptTokens, 0),
+    completionTokens: real.reduce((sum, usage) => sum + usage.completionTokens, 0),
+    costUsd: real.reduce((sum, usage) => sum + usage.costUsd, 0),
+  };
 }
 
 function inspectExactRecord(value: unknown, fields: readonly string[], code: MemoryV3LifecycleShadowDiagnostic): JsonRecord {
@@ -526,12 +578,14 @@ export async function runMemoryV3LifecycleShadow(
     return failed(null, "invalid_source");
   }
 
-  // extractorRequest stays null for an empty delta (nothing new to read).
+  // extractorRequests stays null for an empty delta (nothing new to read).
+  // It is almost always exactly one request; more than one only when a
+  // single oversized message had to be chunked (spec 2026-10-13 §1, extended).
   // deltaMessageIds is what this run may cite as evidence: null on a first run
   // (any loaded message), otherwise exactly the delta it sends.
   // latestMessageId feeds the input identity in delta mode only.
   let dialogue: MemoryV3DialogueInput;
-  let extractorRequest: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> | null;
+  let extractorRequests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] | null;
   let deltaMessageIds: ReadonlySet<string> | null = null;
   let latestMessageId: string | null = null;
   try {
@@ -542,17 +596,17 @@ export async function runMemoryV3LifecycleShadow(
         validateMemoryV3Dialogue({ caseId, messages: await load(userId, conversationId) }),
       );
       dialogue = fitted.dialogue;
-      extractorRequest = fitted.request;
+      extractorRequests = [fitted.request];
     } else {
       const loaded = inspectDeltaWindow(await load(userId, conversationId, sinceCursor), caseId);
       latestMessageId = loaded.latestMessageId;
       if (loaded.delta.length === 0) {
         dialogue = validateMemoryV3Dialogue({ caseId, messages: loaded.context });
-        extractorRequest = null;
+        extractorRequests = null;
       } else {
         const fitted = fitDeltaWindowToByteCap(caseId, loaded.context, loaded.delta);
         dialogue = fitted.dialogue;
-        extractorRequest = fitted.request;
+        extractorRequests = fitted.requests;
       }
       deltaMessageIds = new Set(dialogue.messages.slice(loaded.context.length).map((message) => message.id));
     }
@@ -634,7 +688,7 @@ export async function runMemoryV3LifecycleShadow(
   // so the extractor is never called -- not even on the context block alone,
   // which a previous run already analyzed. Same succeeded no-op contract as an
   // empty extraction (§3), with no model usage at all.
-  if (extractorRequest === null) {
+  if (extractorRequests === null) {
     const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
       runId, userId, expectedStateRevision: reserved.expectedStateRevision,
       state, changed: false,
@@ -656,50 +710,65 @@ export async function runMemoryV3LifecycleShadow(
     };
   }
 
-  let extractor: MemoryV3TransportResult;
-  try {
-    const adapter = (projected.extractorAdapterFactory as MemoryV3LifecycleShadowOptions["extractorAdapterFactory"])(apiKey);
-    if (typeof adapter !== "function") throw fail("extractor_transport_failed");
-    extractor = transportResult(await adapter(extractorRequest));
-  } catch (error) {
-    const transportCode = projectSafeMemoryV3TransportDiagnostic(error);
-    const code = ownDiagnostic(error) ?? "extractor_transport_failed";
-    return await persistFailure(failStore, runId, userId, code, transportCode);
-  }
-  // Logged as soon as the response is in, regardless of whether the run
-  // later succeeds -- the extractor call's cost is already spent either way.
-  if (extractor.usage !== null) {
-    await logUsageSafely(logUsage, {
-      userId, conversationId, runId, stage: "extractor", model: MEMORY_V3_LIFECYCLE_MODEL,
-      promptTokens: extractor.usage.promptTokens,
-      completionTokens: extractor.usage.completionTokens,
-      costUsd: extractor.usage.costUsd,
-      pipeline: "lifecycle",
-    });
-  }
+  // Almost always one iteration. More than one only when a single oversized
+  // message was chunked: each chunk is its own extractor call, logged and
+  // accounted separately, then merged into one extraction before the
+  // existing single-extraction checks and the reconciler step run unchanged.
+  const extractionParts: MemoryV3Extraction[] = [];
+  const usageParts: Array<MemoryV3LifecycleUsage | null> = [];
+  for (const request of extractorRequests) {
+    let extractor: MemoryV3TransportResult;
+    try {
+      const adapter = (projected.extractorAdapterFactory as MemoryV3LifecycleShadowOptions["extractorAdapterFactory"])(apiKey);
+      if (typeof adapter !== "function") throw fail("extractor_transport_failed");
+      extractor = transportResult(await adapter(request));
+    } catch (error) {
+      const transportCode = projectSafeMemoryV3TransportDiagnostic(error);
+      const code = ownDiagnostic(error) ?? "extractor_transport_failed";
+      return await persistFailure(failStore, runId, userId, code, transportCode);
+    }
+    // Logged as soon as the response is in, regardless of whether the run
+    // later succeeds -- the extractor call's cost is already spent either way.
+    if (extractor.usage !== null) {
+      await logUsageSafely(logUsage, {
+        userId, conversationId, runId, stage: "extractor", model: MEMORY_V3_LIFECYCLE_MODEL,
+        promptTokens: extractor.usage.promptTokens,
+        completionTokens: extractor.usage.completionTokens,
+        costUsd: extractor.usage.costUsd,
+        pipeline: "lifecycle",
+      });
+    }
+    usageParts.push(extractor.usage);
 
-  let parsedExtraction: unknown;
-  try {
-    parsedExtraction = JSON.parse(extractor.content);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "extractor_parse_invalid");
-  }
-  try {
-    inspectExtractorEnvelope(parsedExtraction);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "extractor_shape_invalid");
+    let parsedExtraction: unknown;
+    try {
+      parsedExtraction = JSON.parse(extractor.content);
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_parse_invalid");
+    }
+    try {
+      inspectExtractorEnvelope(parsedExtraction);
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_shape_invalid");
+    }
+    try {
+      extractionParts.push(await normalizeMemoryV3LayeredResponse(
+        parsedExtraction,
+        dialogue,
+        MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+        "cross_conversation",
+      ));
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+    }
   }
   let extraction: MemoryV3Extraction;
   try {
-    extraction = await normalizeMemoryV3LayeredResponse(
-      parsedExtraction,
-      dialogue,
-      MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
-      "cross_conversation",
-    );
+    extraction = mergeMemoryV3Extractions(extractionParts);
   } catch {
     return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
   }
+  const extractorUsage = sumMemoryV3LifecycleUsage(usageParts);
   // Spec 2026-10-13 §1: the context block informs the extractor but is never
   // new evidence -- the run that produced the cursor already analyzed it.
   // Citing it is the same contract violation as citing an unknown message.
@@ -721,7 +790,7 @@ export async function runMemoryV3LifecycleShadow(
     const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
       runId, userId, expectedStateRevision: reserved.expectedStateRevision,
       state, changed: false, extraction, operations: [], transitions: [],
-      extractorUsage: extractor.usage, reconcilerUsage: null,
+      extractorUsage, reconcilerUsage: null,
     }, state.stateRevision);
     if (noopFailure !== null) return noopFailure;
     return {
@@ -841,7 +910,7 @@ export async function runMemoryV3LifecycleShadow(
   const casFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
     runId, userId, expectedStateRevision: reserved.expectedStateRevision,
     state: resultingState, changed: reduced.changed, extraction, operations: proposal,
-    transitions: reduced.transitions, extractorUsage: extractor.usage, reconcilerUsage: reconciler.usage,
+    transitions: reduced.transitions, extractorUsage, reconcilerUsage: reconciler.usage,
   }, resultingState.stateRevision);
   if (casFailure !== null) return casFailure;
   return {
