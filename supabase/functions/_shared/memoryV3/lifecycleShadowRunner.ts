@@ -305,7 +305,7 @@ function inspectDenseArray(value: unknown, maximum: number, code: MemoryV3Lifecy
 
 function ownMethod(
   value: unknown,
-  name: "reserve" | "fail" | "compareAndSwap" | "lastSucceededCursor",
+  name: "reserve" | "fail" | "compareAndSwap" | "lastSucceededCursor" | "recentConsecutiveFailureCount",
 ): ((input: never) => Promise<unknown>) | null {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -314,6 +314,29 @@ function ownMethod(
     return descriptor.value.bind(value);
   } catch {
     return null;
+  }
+}
+
+// After this many consecutive failed runs, stop retrying this conversation's
+// stuck point and give up on just the one oldest undrained message instead
+// (spec 2026-10-13, extended after review). The method is optional on the
+// store: a store that doesn't implement it, or a lookup that throws, is
+// treated as zero -- a missing safety net just means the run proceeds
+// normally, never an extra reason to fail it.
+const MEMORY_V3_LIFECYCLE_DELTA_GIVE_UP_AFTER_FAILURES = 3;
+
+async function hasExceededConsecutiveFailureLimit(
+  store: unknown,
+  userId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const check = ownMethod(store, "recentConsecutiveFailureCount");
+  if (!check) return false;
+  try {
+    const count = await check({ userId, conversationId } as never);
+    return typeof count === "number" && count >= MEMORY_V3_LIFECYCLE_DELTA_GIVE_UP_AFTER_FAILURES;
+  } catch {
+    return false;
   }
 }
 
@@ -602,6 +625,13 @@ export async function runMemoryV3LifecycleShadow(
       latestMessageId = loaded.latestMessageId;
       if (loaded.delta.length === 0) {
         dialogue = validateMemoryV3Dialogue({ caseId, messages: loaded.context });
+        extractorRequests = null;
+      } else if (await hasExceededConsecutiveFailureLimit(projected.store, userId, conversationId)) {
+        // Give up on just the single oldest undrained message: never stay
+        // stuck on the same point forever. Everything after it in the
+        // backlog is untouched and reaches the next run normally.
+        console.warn("[memory-v3-lifecycle-delta-forced-skip]");
+        dialogue = validateMemoryV3Dialogue({ caseId, messages: [...loaded.context, loaded.delta[0]] });
         extractorRequests = null;
       } else {
         const fitted = fitDeltaWindowToByteCap(caseId, loaded.context, loaded.delta);

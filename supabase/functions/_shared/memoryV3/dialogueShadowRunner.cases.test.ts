@@ -1148,6 +1148,69 @@ describe("Memory V3 dialogue delta cursor", () => {
     assert.equal(tracked.runs[tracked.runs.length - 1].messageId, conversation[150].id);
     assert.equal(tracked.runs.every((run) => run.status === "succeeded"), true);
   });
+
+  it("gives up on just the single oldest undrained message after enough consecutive failures, leaving the rest of the backlog untouched", async () => {
+    const test = withCursor(harness({
+      async loadMessages() {
+        test.calls.push("messages");
+        return { context: [PRIOR], delta: [NEW, LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    test.options.store = { ...test.options.store, async recentConsecutiveFailureCount() { return 3; } };
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let result: Awaited<ReturnType<typeof runMemoryV3DialogueShadow>>;
+    try {
+      result = await runMemoryV3DialogueShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.deepEqual(result, {
+      status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0, transitionCount: 0, stateRevision: 0,
+    });
+    assert.deepEqual(warned, [["[memory-v3-dialogue-delta-forced-skip]"]]);
+    assert.equal(test.calls.includes("extractorFactory"), false);
+    // Advances past exactly the one oldest message -- not LATER, not all the
+    // way to the conversation's actual latest message.
+    assert.equal((test.reserveInputs[0] as { sourceLastMessageId: string }).sourceLastMessageId, MESSAGE_ID);
+  });
+
+  it("keeps retrying normally below the give-up threshold", async () => {
+    const test = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR], delta: [NEW], latestMessageId: MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    test.options.store = { ...test.options.store, async recentConsecutiveFailureCount() { return 2; } };
+    assert.equal((await runMemoryV3DialogueShadow(test.options)).status, "succeeded");
+    assert.equal(test.calls.includes("extractorFactory"), true);
+  });
+
+  it("treats a missing or throwing recentConsecutiveFailureCount as zero and proceeds normally", async () => {
+    const withoutMethod = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR], delta: [NEW], latestMessageId: MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    const storeWithoutMethod: Record<string, unknown> = { ...withoutMethod.options.store };
+    delete storeWithoutMethod.recentConsecutiveFailureCount;
+    withoutMethod.options.store = storeWithoutMethod as never;
+    assert.equal((await runMemoryV3DialogueShadow(withoutMethod.options)).status, "succeeded");
+    assert.equal(withoutMethod.calls.includes("extractorFactory"), true);
+
+    const throwing = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR], delta: [NEW], latestMessageId: MESSAGE_ID };
+      },
+    }), PRIOR_CURSOR);
+    throwing.options.store = {
+      ...throwing.options.store,
+      async recentConsecutiveFailureCount() { throw new Error(RAW_SECRET); },
+    };
+    assert.equal((await runMemoryV3DialogueShadow(throwing.options)).status, "succeeded");
+    assert.equal(throwing.calls.includes("extractorFactory"), true);
+  });
 });
 
 describe("Memory V3 dialogue background isolation", () => {
