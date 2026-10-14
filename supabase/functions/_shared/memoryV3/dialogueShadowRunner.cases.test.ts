@@ -949,6 +949,28 @@ describe("Memory V3 dialogue delta cursor", () => {
     assert.deepEqual(sentIds(test.extractorRequests[0]), [PRIOR_MESSAGE_ID, MESSAGE_ID]);
   });
 
+  it("computes a literal, pinned SHA-256 input hash for a first run (golden value -- proves the delta identity fold leaves it unchanged)", async () => {
+    const test = harness({
+      async loadMessages() {
+        return [{
+          id: "00000000-0000-4000-8000-000000000001",
+          role: "user" as const,
+          text: "Golden hash fixture message",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }];
+      },
+    });
+    // The canned extractor response's evidence cites a different, fixed
+    // message id, so this particular run fails downstream -- irrelevant
+    // here: reserve() (and its inputHash) runs first, before the extractor.
+    await runMemoryV3DialogueShadow(test.options);
+    assert.equal(test.reserveInputs.length, 1);
+    assert.equal(
+      (test.reserveInputs[0] as { inputHash: string }).inputHash,
+      "5882c85d0bc5232883610362313b44e97671dd5bbcf6275de225b72a2bbe6d6d",
+    );
+  });
+
   it("folds the conversation's latest message into a delta run's input identity, so a failed window can be retried once anything new is written", async () => {
     const hashes: string[] = [];
     for (const latestMessageId of [MESSAGE_ID, MESSAGE_ID, OTHER_MESSAGE_ID]) {
