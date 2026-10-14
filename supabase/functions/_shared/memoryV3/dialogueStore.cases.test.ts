@@ -683,3 +683,75 @@ describe("Memory V3 dialogue store cursor lookup", () => {
     assert.equal(fake.calls.length, 0);
   });
 });
+
+describe("Memory V3 dialogue store recent consecutive failure count", () => {
+  it("counts leading failed runs, newest first, stopping at the first non-failed run", async () => {
+    const fake = fakeTableClient({
+      data: [{ status: "failed" }, { status: "failed" }, { status: "succeeded" }, { status: "failed" }],
+      error: null,
+    });
+    assert.equal(
+      await createMemoryV3DialogueStore(fake.client).recentConsecutiveFailureCount({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+      2,
+    );
+    assert.deepEqual(fake.calls, [
+      { method: "from", args: ["memory_v3_dialogue_runs"] },
+      { method: "select", args: ["status"] },
+      { method: "eq", args: ["user_id", USER_ID] },
+      { method: "eq", args: ["conversation_id", CONVERSATION_ID] },
+      { method: "order", args: ["created_at", { ascending: false }] },
+      { method: "order", args: ["id", { ascending: false }] },
+      { method: "limit", args: [10] },
+    ]);
+  });
+
+  it("returns 0 when the most recent run succeeded, is still reserved (in flight), or no run exists yet", async () => {
+    for (const data of [[{ status: "succeeded" }], [{ status: "reserved" }], []]) {
+      const fake = fakeTableClient({ data, error: null });
+      assert.equal(
+        await createMemoryV3DialogueStore(fake.client).recentConsecutiveFailureCount({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+        0,
+      );
+    }
+  });
+
+  it("counts every fetched run when all of them failed, without fetching further", async () => {
+    const fake = fakeTableClient({ data: Array.from({ length: 10 }, () => ({ status: "failed" })), error: null });
+    assert.equal(
+      await createMemoryV3DialogueStore(fake.client).recentConsecutiveFailureCount({ userId: USER_ID, conversationId: CONVERSATION_ID }),
+      10,
+    );
+  });
+
+  it("rejects malformed rows, extra columns, and database errors with the generic store error", async () => {
+    for (const response of [
+      { data: null, error: { message: RAW_SECRET } },
+      { data: [{ status: "failed" }, { status: "bogus" }], error: null },
+      { data: [{ status: "failed", extra: RAW_SECRET }], error: null },
+      new Error(RAW_SECRET),
+    ]) {
+      const fake = fakeTableClient(response);
+      await captureStoreError(() =>
+        createMemoryV3DialogueStore(fake.client).recentConsecutiveFailureCount({ userId: USER_ID, conversationId: CONVERSATION_ID }));
+    }
+  });
+
+  it("rejects invalid identifiers before any database access", async () => {
+    for (const input of [
+      { userId: "not-a-uuid", conversationId: CONVERSATION_ID },
+      { userId: USER_ID, conversationId: "not-a-uuid" },
+      { userId: USER_ID, conversationId: CONVERSATION_ID, extra: RAW_SECRET },
+    ]) {
+      const fake = fakeTableClient({ data: [], error: null });
+      await captureStoreError(() => createMemoryV3DialogueStore(fake.client).recentConsecutiveFailureCount(input as never));
+      assert.equal(fake.calls.length, 0);
+    }
+  });
+
+  it("still constructs from an rpc-only client, and the count then fails closed", async () => {
+    const fake = fakeClient([]);
+    const store = createMemoryV3DialogueStore(fake.client);
+    await captureStoreError(() => store.recentConsecutiveFailureCount({ userId: USER_ID, conversationId: CONVERSATION_ID }));
+    assert.equal(fake.calls.length, 0);
+  });
+});

@@ -110,6 +110,12 @@ export interface MemoryV3LifecycleStore {
    * none has succeeded yet. Per conversation (migrations 053/077); failed or
    * reserved runs never count (spec 2026-10-13 §3). */
   lastSucceededCursor(input: MemoryV3LifecycleCursorInput): Promise<MemoryV3SourceCursor | null>;
+  /** How many of this conversation's most recent runs failed in a row, newest
+   * first, stopping at the first non-failed run (capped at 10 -- enough
+   * headroom above the runner's own give-up threshold without an unbounded
+   * query). Lets a run give up on a message that keeps failing instead of
+   * blocking the conversation's memory forever. */
+  recentConsecutiveFailureCount(input: MemoryV3LifecycleCursorInput): Promise<number>;
 }
 
 const OWN_ERRORS = new WeakSet<object>();
@@ -551,6 +557,35 @@ export function createMemoryV3LifecycleStore(clientValue: MemoryV3LifecycleRpcCl
       if (typeof row.source_last_message_id !== "string" || !UUID.test(row.source_last_message_id) ||
         !isoDateTime(row.source_last_created_at)) throw fail();
       return { messageId: row.source_last_message_id, createdAt: row.source_last_created_at };
+    },
+
+    async recentConsecutiveFailureCount(inputValue) {
+      const input = record(inputValue, ["userId", "conversationId"]);
+      if (typeof input.userId !== "string" || !UUID.test(input.userId) ||
+        typeof input.conversationId !== "string" || !UUID.test(input.conversationId)) throw fail();
+      let response: unknown;
+      try {
+        let query = invoke(client.target, "from", "memory_v3_lifecycle_shadow_runs");
+        query = invoke(query, "select", "status");
+        query = invoke(query, "eq", "user_id", input.userId);
+        query = invoke(query, "eq", "conversation_id", input.conversationId);
+        query = invoke(query, "order", "created_at", { ascending: false });
+        query = invoke(query, "order", "id", { ascending: false });
+        response = await invoke(query, "limit", 10);
+      } catch {
+        throw fail();
+      }
+      const projected = projectedRecord(response, ["data", "error"]);
+      if (projected.error !== null) throw fail();
+      const rows = array(projected.data, 10);
+      let count = 0;
+      for (const raw of rows) {
+        const row = record(raw, ["status"]);
+        if (row.status !== "reserved" && row.status !== "succeeded" && row.status !== "failed") throw fail();
+        if (row.status !== "failed") break;
+        count += 1;
+      }
+      return count;
     },
   };
 }
