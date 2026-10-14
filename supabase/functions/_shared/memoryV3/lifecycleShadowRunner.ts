@@ -53,7 +53,14 @@ export type MemoryV3LifecycleShadowDiagnostic = MemoryV3LifecycleStoredDiagnosti
 
 export type MemoryV3LifecycleShadowResult =
   | { status: "skipped"; reason: "disabled" | "user_not_allowlisted" | "duplicate" | "daily_cap" }
-  | { status: "succeeded"; runId: string; itemCount: number; evidenceCount: number; transitionCount: number; stateRevision: number }
+  | {
+      status: "succeeded"; runId: string; itemCount: number; evidenceCount: number;
+      transitionCount: number; stateRevision: number;
+      /** Present (true) only when this run gave up on a message that kept
+       * failing (spec 2026-10-13, extended after review) instead of a
+       * normal or empty-delta no-op; absent otherwise. */
+      forcedSkip?: true;
+    }
   | { status: "failed"; runId: string | null; diagnosticCode: MemoryV3LifecycleShadowDiagnostic };
 
 export interface MemoryV3LifecycleShadowOptions {
@@ -611,6 +618,7 @@ export async function runMemoryV3LifecycleShadow(
   let extractorRequests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] | null;
   let deltaMessageIds: ReadonlySet<string> | null = null;
   let latestMessageId: string | null = null;
+  let forcedSkip = false;
   try {
     const caseId = `memory-v3-shadow:${userId}:${conversationId}`;
     const load = projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"];
@@ -633,6 +641,7 @@ export async function runMemoryV3LifecycleShadow(
         console.warn("[memory-v3-lifecycle-delta-forced-skip]");
         dialogue = validateMemoryV3Dialogue({ caseId, messages: [...loaded.context, loaded.delta[0]] });
         extractorRequests = null;
+        forcedSkip = true;
       } else {
         const fitted = fitDeltaWindowToByteCap(caseId, loaded.context, loaded.delta);
         dialogue = fitted.dialogue;
@@ -737,6 +746,7 @@ export async function runMemoryV3LifecycleShadow(
       evidenceCount: 0,
       transitionCount: 0,
       stateRevision: state.stateRevision,
+      ...(forcedSkip ? { forcedSkip: true as const } : {}),
     };
   }
 
@@ -957,15 +967,19 @@ function inspectBackgroundResult(value: unknown): MemoryV3LifecycleShadowResult 
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const status = Object.getOwnPropertyDescriptor(value, "status")?.value;
+    const hasForcedSkip = status === "succeeded" && Object.getOwnPropertyDescriptor(value, "forcedSkip") !== undefined;
     const fields = status === "failed"
       ? ["status", "runId", "diagnosticCode"]
       : status === "skipped"
       ? ["status", "reason"]
       : status === "succeeded"
-      ? ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision"]
+      ? (hasForcedSkip
+          ? ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision", "forcedSkip"]
+          : ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision"])
       : [];
     if (fields.length === 0) return null;
     const row = inspectExactRecord(value, fields, "unknown_failure");
+    if (hasForcedSkip && row.forcedSkip !== true) return null;
     if (status === "failed") {
       if ((row.runId !== null && (typeof row.runId !== "string" || !UUID.test(row.runId))) ||
           typeof row.diagnosticCode !== "string" ||
@@ -994,19 +1008,29 @@ function inspectBackgroundResult(value: unknown): MemoryV3LifecycleShadowResult 
 export async function runMemoryV3LifecycleShadowBackgroundSafely(
   run: () => Promise<MemoryV3LifecycleShadowResult>,
   logSafe: (code: MemoryV3LifecycleShadowDiagnostic) => void,
+  onForcedSkip?: () => void,
 ): Promise<void> {
   let diagnostic: MemoryV3LifecycleShadowDiagnostic | null = null;
+  let skipped = false;
   try {
     if (typeof run !== "function") throw fail("unknown_failure");
     const result = inspectBackgroundResult(await run());
     if (result?.status === "failed") diagnostic = result.diagnosticCode;
     else if (result === null) diagnostic = "unknown_failure";
+    else if (result.status === "succeeded" && result.forcedSkip === true) skipped = true;
   } catch (error) {
     diagnostic = ownDiagnostic(error) ?? "unknown_failure";
   }
   if (diagnostic !== null && typeof logSafe === "function") {
     try {
       logSafe(diagnostic);
+    } catch {
+      // Background shadow logging must never affect the reply path.
+    }
+  }
+  if (skipped && typeof onForcedSkip === "function") {
+    try {
+      onForcedSkip();
     } catch {
       // Background shadow logging must never affect the reply path.
     }

@@ -99,6 +99,7 @@ describe("Memory V3 Telegram alert boundary", () => {
       ["write", "invalid_source"],
       ["write", "state_write_failed"],
       ["write", "unknown_failure"],
+      ["write", "forced_skip"],
     ];
     for (const [path, diagnosticCode] of valid) {
       const { options, reserved, fetchCalls } = harness({ path, diagnosticCode });

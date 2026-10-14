@@ -1216,6 +1216,7 @@ describe("Memory V3 lifecycle delta cursor", () => {
     }
     assert.deepEqual(result, {
       status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0, transitionCount: 0, stateRevision: 0,
+      forcedSkip: true,
     });
     assert.deepEqual(warned, [["[memory-v3-lifecycle-delta-forced-skip]"]]);
     assert.equal(test.calls.includes("extractorFactory"), false);
@@ -1302,6 +1303,67 @@ describe("Memory V3 lifecycle background isolation", () => {
       (code) => logged.push(code),
     );
     assert.deepEqual(logged, ["unknown_failure", "unknown_failure", "unknown_failure", "unknown_failure"]);
+  });
+
+  it("calls onForcedSkip exactly when the result is a succeeded forced skip, and never otherwise", async () => {
+    const skips: number[] = [];
+    await runMemoryV3LifecycleShadowBackgroundSafely(
+      async () => ({
+        status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0,
+        transitionCount: 0, stateRevision: 0, forcedSkip: true,
+      }),
+      () => {},
+      () => { skips.push(1); },
+    );
+    await runMemoryV3LifecycleShadowBackgroundSafely(
+      async () => ({
+        status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0,
+        transitionCount: 0, stateRevision: 0,
+      }),
+      () => {},
+      () => { skips.push(1); },
+    );
+    await runMemoryV3LifecycleShadowBackgroundSafely(
+      async () => ({ status: "failed", runId: RUN_ID, diagnosticCode: "extractor_parse_invalid" }),
+      () => {},
+      () => { skips.push(1); },
+    );
+    assert.deepEqual(skips, [1]);
+  });
+
+  it("never rejects when onForcedSkip itself throws, and tolerates a missing onForcedSkip callback", async () => {
+    await runMemoryV3LifecycleShadowBackgroundSafely(
+      async () => ({
+        status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0,
+        transitionCount: 0, stateRevision: 0, forcedSkip: true,
+      }),
+      () => {},
+      () => { throw new Error(RAW_SECRET); },
+    );
+    await runMemoryV3LifecycleShadowBackgroundSafely(
+      async () => ({
+        status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0,
+        transitionCount: 0, stateRevision: 0, forcedSkip: true,
+      }),
+      () => {},
+    );
+  });
+
+  it("treats a succeeded result with forcedSkip not literally true as malformed, not as a forced skip", async () => {
+    const logged: string[] = [];
+    const skips: number[] = [];
+    for (const forcedSkip of [false, "true", 1]) {
+      await runMemoryV3LifecycleShadowBackgroundSafely(
+        async () => ({
+          status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0,
+          transitionCount: 0, stateRevision: 0, forcedSkip,
+        } as never),
+        (code) => logged.push(code),
+        () => { skips.push(1); },
+      );
+    }
+    assert.deepEqual(logged, ["unknown_failure", "unknown_failure", "unknown_failure"]);
+    assert.deepEqual(skips, []);
   });
 });
 

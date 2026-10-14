@@ -99,4 +99,17 @@ describe("Memory V3 full-product wiring", () => {
     const dialogueWriteBlock = text.slice(dialogueWriteStart, dialogueWriteEnd);
     assert.match(dialogueWriteBlock, /scheduleMemoryV3TelegramAlert\("write", code\)/);
   });
+
+  it("alerts before a run gives up on a message that kept failing, for both pipelines", () => {
+    const text = source();
+    const writeStart = text.indexOf("runMemoryV3LifecycleShadowBackgroundSafely(");
+    const writeEnd = text.indexOf(': memoryV3Mode === "shadow"', writeStart);
+    const writeBlock = text.slice(writeStart, writeEnd);
+    assert.match(writeBlock, /scheduleMemoryV3TelegramAlert\("write", "forced_skip"\)/);
+
+    const dialogueWriteStart = text.indexOf("runMemoryV3DialogueShadowBackgroundSafely(");
+    const dialogueWriteEnd = text.indexOf("const memoryV3Mode = parseMemoryV3ShadowMode", dialogueWriteStart);
+    const dialogueWriteBlock = text.slice(dialogueWriteStart, dialogueWriteEnd);
+    assert.match(dialogueWriteBlock, /scheduleMemoryV3TelegramAlert\("write", "forced_skip"\)/);
+  });
 });

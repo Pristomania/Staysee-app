@@ -18,7 +18,8 @@ export type MemoryV3TelegramAlertDiagnostic =
   | "state_conflict"
   | "state_write_failed"
   | "reservation_failed"
-  | "unknown_failure";
+  | "unknown_failure"
+  | "forced_skip";
 
 export interface MemoryV3TelegramAlertOptions {
   botToken: string | null | undefined;
@@ -67,6 +68,7 @@ const WRITE_DIAGNOSTICS = new Set<MemoryV3TelegramAlertDiagnostic>([
   "state_write_failed",
   "reservation_failed",
   "unknown_failure",
+  "forced_skip",
 ]);
 
 type ProjectedOptions = {
