@@ -27,8 +27,15 @@ import { createMemoryV3LifecycleStore } from "../_shared/memoryV3/lifecycleStore
 import { resolveMemoryV3LifecycleReadEligibility } from "../_shared/memoryV3/lifecycleReadMode.ts";
 import { createMemoryV3LifecycleReadStore } from "../_shared/memoryV3/lifecycleReadStore.ts";
 import type { MemoryV3LifecycleReadContext } from "../_shared/memoryV3/lifecycleReadStore.ts";
-import { createMemoryV3OpenRouterAdapter } from "../_shared/memoryV3/transport.ts";
-import { createMemoryV3LifecycleOpenRouterAdapter } from "../_shared/memoryV3/lifecycleTransport.ts";
+import {
+  createMemoryV3OpenRouterAdapter,
+  projectSafeMemoryV3TransportDiagnostic,
+} from "../_shared/memoryV3/transport.ts";
+import {
+  createMemoryV3LifecycleOpenRouterAdapter,
+  projectSafeMemoryV3LifecycleTransportDiagnostic,
+} from "../_shared/memoryV3/lifecycleTransport.ts";
+import { runWithOneConflictRetry, withOneTransientRetry } from "../_shared/memoryV3/retry.ts";
 import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
@@ -41,7 +48,10 @@ import {
   runMemoryV3DialogueShadow,
   runMemoryV3DialogueShadowBackgroundSafely,
 } from "../_shared/memoryV3/dialogueShadowRunner.ts";
-import { createMemoryV3DialogueOpenRouterAdapter } from "../_shared/memoryV3/dialogueTransport.ts";
+import {
+  createMemoryV3DialogueOpenRouterAdapter,
+  projectSafeMemoryV3DialogueTransportDiagnostic,
+} from "../_shared/memoryV3/dialogueTransport.ts";
 import { createMemoryV3DialogueStore } from "../_shared/memoryV3/dialogueStore.ts";
 import { resolveMemoryV3DialogueEligibility } from "../_shared/memoryV3/dialogueMode.ts";
 import { createMemoryV3DialogueReadStore } from "../_shared/memoryV3/dialogueReadStore.ts";
@@ -1694,22 +1704,32 @@ Deno.serve(async (req: Request) => {
             });
             const dialogueMemoryPromise = dialogueEligibility.eligible
               ? runMemoryV3DialogueShadowBackgroundSafely(
-                () => runMemoryV3DialogueShadow({
+                // One second attempt before a failure is reported (the alert below
+                // fires only when the retry failed too): a transient model-call
+                // failure is retried inside the adapter, a write conflict between
+                // overlapping runs re-runs the whole run on fresh state.
+                () => runWithOneConflictRetry(() => runMemoryV3DialogueShadow({
                   userId,
                   conversationId,
                   apiKey: Deno.env.get("OPENROUTER_API_KEY"),
                   loadMessages: createMemoryV3MessageLoader(svc),
                   store: createMemoryV3DialogueStore(svc),
-                  extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                    apiKey,
-                    fetchImpl: globalThis.fetch.bind(globalThis),
-                  }),
-                  reconcilerAdapterFactory: (apiKey) => createMemoryV3DialogueOpenRouterAdapter({
-                    apiKey,
-                    fetchImpl: globalThis.fetch.bind(globalThis),
-                  }),
+                  extractorAdapterFactory: (apiKey) => withOneTransientRetry(
+                    createMemoryV3OpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                    projectSafeMemoryV3TransportDiagnostic,
+                  ),
+                  reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
+                    createMemoryV3DialogueOpenRouterAdapter({
+                      apiKey,
+                      fetchImpl: globalThis.fetch.bind(globalThis),
+                    }),
+                    projectSafeMemoryV3DialogueTransportDiagnostic,
+                  ),
                 }, (code) => console.error("[memory-v3-dialogue-transport]", code),
-                  (usage) => logMemoryV3LifecycleUsage(svc, usage)),
+                  (usage) => logMemoryV3LifecycleUsage(svc, usage))),
                 (code) => {
                   console.error("[memory-v3-dialogue-shadow]", code);
                   scheduleMemoryV3TelegramAlert("write", code);
@@ -1727,7 +1747,7 @@ Deno.serve(async (req: Request) => {
                 (memoryV3Mode === "lifecycle_shadow" ||
                   memoryV3Mode === "lifecycle_all")
               ? runMemoryV3LifecycleShadowBackgroundSafely(
-                  () => runMemoryV3LifecycleShadow({
+                  () => runWithOneConflictRetry(() => runMemoryV3LifecycleShadow({
                     rawMode: memoryV3Mode,
                     rawAllowedUserId: Deno.env.get("STAYSEE_MEMORY_V3_SHADOW_USER_ID"),
                     userId,
@@ -1735,16 +1755,22 @@ Deno.serve(async (req: Request) => {
                     apiKey: Deno.env.get("OPENROUTER_API_KEY"),
                     loadMessages: createMemoryV3MessageLoader(svc),
                     store: createMemoryV3LifecycleStore(svc),
-                    extractorAdapterFactory: (apiKey) => createMemoryV3OpenRouterAdapter({
-                      apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
-                    }),
-                    reconcilerAdapterFactory: (apiKey) => createMemoryV3LifecycleOpenRouterAdapter({
-                      apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
-                    }),
+                    extractorAdapterFactory: (apiKey) => withOneTransientRetry(
+                      createMemoryV3OpenRouterAdapter({
+                        apiKey,
+                        fetchImpl: globalThis.fetch.bind(globalThis),
+                      }),
+                      projectSafeMemoryV3TransportDiagnostic,
+                    ),
+                    reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
+                      createMemoryV3LifecycleOpenRouterAdapter({
+                        apiKey,
+                        fetchImpl: globalThis.fetch.bind(globalThis),
+                      }),
+                      projectSafeMemoryV3LifecycleTransportDiagnostic,
+                    ),
                   }, (code) => console.error("[memory-v3-lifecycle-transport]", code),
-                    (usage) => logMemoryV3LifecycleUsage(svc, usage)),
+                    (usage) => logMemoryV3LifecycleUsage(svc, usage))),
                   (code) => {
                     console.error("[memory-v3-lifecycle-shadow]", code);
                     scheduleMemoryV3TelegramAlert("write", code);

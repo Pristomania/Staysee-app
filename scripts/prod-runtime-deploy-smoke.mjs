@@ -8,8 +8,11 @@ import {
   seedMessage,
   withTestConversation,
 } from "./lib/prod-test-env.mjs";
+import { getTechnicalUserAccessToken } from "./lib/prod-test-session.mjs";
 
 const { url, serviceKey, testUserId } = assertProdTestAllowed();
+// The chat accepts only a signed-in user's own token; a service-role key gets 401.
+const accessToken = await getTechnicalUserAccessToken({ url, serviceKey, testUserId });
 
 const ARC_A = [
   {
@@ -47,7 +50,7 @@ async function chat(message, conversationId, requestId) {
   const res = await fetch(`${url}/functions/v1/staysee-chat`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${serviceKey}`,
+      Authorization: `Bearer ${accessToken}`,
       apikey: serviceKey,
       "Content-Type": "application/json",
     },
