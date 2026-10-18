@@ -2,7 +2,9 @@
 //
 //   npx supabase start
 //   eval "$(npx supabase status -o env)"
-//   SUPABASE_URL="$API_URL" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" npm run test:db
+//   SUPABASE_URL="$API_URL" SUPABASE_ANON_KEY="$ANON_KEY" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" npm run test:db
+//
+// SUPABASE_ANON_KEY is optional: without it the "not callable by the public key" checks are skipped.
 //
 // These tests create and delete users and data, so they REFUSE to run against
 // anything but a local database. Without connection settings they skip

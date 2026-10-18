@@ -60,7 +60,7 @@ jobs:
       - name: Database integration tests
         run: |
           eval "$(supabase status -o env)"
-          export SUPABASE_URL="$API_URL" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" REQUIRE_DB_TESTS=1
+          export SUPABASE_URL="$API_URL" SUPABASE_ANON_KEY="$ANON_KEY" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" REQUIRE_DB_TESTS=1
           npm run test:db
 
       - name: Stop local Supabase
