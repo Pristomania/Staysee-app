@@ -15,6 +15,7 @@ import {
   MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
   buildMemoryV3LifecycleExtractorRequest,
 } from "./lifecycleExtractorPrompt.ts";
+import { dropMemoryV3ContextCitations, withMemoryV3EarlierContextNotice } from "./deltaContext.ts";
 import {
   projectSafeMemoryV3TransportDiagnostic,
   type MemoryV3ModelAdapter,
@@ -168,7 +169,7 @@ function fitDeltaWindowToByteCap(
     const messages = [...context, ...delta.slice(0, end)];
     if (!messages.some((message) => message.role === "user")) break;
     const dialogue = validateMemoryV3Dialogue({ caseId, messages });
-    const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
+    const request = withMemoryV3EarlierContextNotice(buildMemoryV3LifecycleExtractorRequest(dialogue), context.length);
     if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) return { dialogue, requests: [request] };
     smallest = { dialogue, request };
   }
@@ -215,7 +216,7 @@ function chunkOldestMessageForExtraction(
           caseId,
           messages: [...context, { ...oldest, text: oldest.text.slice(start, mid) }],
         });
-        const request = buildMemoryV3LifecycleExtractorRequest(dialogue);
+        const request = withMemoryV3EarlierContextNotice(buildMemoryV3LifecycleExtractorRequest(dialogue), context.length);
         if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
           bestEnd = mid;
           bestRequest = request;
@@ -810,11 +811,15 @@ export async function runMemoryV3LifecycleShadow(
   }
   const extractorUsage = sumMemoryV3LifecycleUsage(usageParts);
   // Spec 2026-10-13 §1: the context block informs the extractor but is never
-  // new evidence -- the run that produced the cursor already analyzed it.
-  // Citing it is the same contract violation as citing an unknown message.
-  const citable = deltaMessageIds;
-  if (citable !== null && extraction.evidence.some((row) => !citable.has(row.sourceMessageId))) {
-    return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+  // new evidence -- the run that produced the cursor already analyzed it. An
+  // item citing it is dropped, not a reason to fail the run: failing would
+  // leave the cursor stuck on the same messages for the next attempt too.
+  if (deltaMessageIds !== null) {
+    const kept = dropMemoryV3ContextCitations(extraction, deltaMessageIds);
+    if (kept !== extraction) {
+      console.warn("[memory-v3-lifecycle-context-citation-dropped]");
+      extraction = kept;
+    }
   }
   if (extraction.items.length > MEMORY_V3_LIFECYCLE_MAX_CANDIDATES ||
       extraction.evidence.length > MEMORY_V3_LIFECYCLE_MAX_CANDIDATE_EVIDENCE) {

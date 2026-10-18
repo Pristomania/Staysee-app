@@ -952,7 +952,7 @@ describe("Memory V3 lifecycle delta cursor", () => {
     assert.deepEqual(test.failInputs, []);
   });
 
-  it("rejects an extraction citing a leading-context message exactly like an unknown id, before the reconciler", async () => {
+  it("drops an item that cites only a leading-context message instead of failing the run, ending as a succeeded no-op without the reconciler", async () => {
     // The harness extractor cites MESSAGE_ID, which is a context message here.
     const test = withCursor(harness({
       async loadMessages() {
@@ -960,11 +960,95 @@ describe("Memory V3 lifecycle delta cursor", () => {
         return { context: [PRIOR, NEW], delta: [LATER], latestMessageId: OTHER_MESSAGE_ID };
       },
     }), NEW_CURSOR);
-    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
-      status: "failed", runId: RUN_ID, diagnosticCode: "extractor_contract_invalid",
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let result: Awaited<ReturnType<typeof runMemoryV3LifecycleShadow>>;
+    try {
+      result = await runMemoryV3LifecycleShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.deepEqual(result, {
+      status: "succeeded", runId: RUN_ID, itemCount: 0, evidenceCount: 0, transitionCount: 0, stateRevision: 0,
     });
+    assert.deepEqual(warned, [["[memory-v3-lifecycle-context-citation-dropped]"]]);
     assert.equal(test.calls.includes("reconcilerFactory"), false);
-    assert.equal(test.calls.at(-1), "fail:extractor_contract_invalid");
+    assert.deepEqual(test.failInputs, []);
+    assert.equal(test.calls.at(-1), "cas");
+  });
+
+  it("keeps an item that cites only new messages and drops, whole, an item that cites a context message -- even alongside a new one", async () => {
+    const row = (itemRef: string, sourceMessageId: string, claim: string) => ({
+      item: {
+        itemRef, kind: "event", claim, status: "active", sensitivity: "normal",
+        eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      },
+      evidence: { itemRef, sourceMessageId, relation: "supports", supportType: null, episodeKey: `episode:${itemRef}` },
+    });
+    const contextOnly = row("item:1", MESSAGE_ID, "Любит утренние прогулки");
+    const newOnly = row("item:2", OTHER_MESSAGE_ID, "Снова гуляла сегодня");
+    const mixed = row("item:3", OTHER_MESSAGE_ID, "Гуляет регулярно");
+    const mixedExtra = { ...mixed.evidence, sourceMessageId: MESSAGE_ID };
+    const content = JSON.stringify({
+      layerDecisions: [
+        { kind: "event", decision: "emit", itemRefs: ["item:1", "item:2", "item:3"] },
+        { kind: "recurrence", decision: "omit", itemRefs: [] },
+        { kind: "hypothesis", decision: "omit", itemRefs: [] },
+      ],
+      items: [contextOnly.item, newOnly.item, mixed.item],
+      evidence: [contextOnly.evidence, newOnly.evidence, mixed.evidence, mixedExtra],
+    });
+    const test = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR, NEW], delta: [LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+      extractorAdapterFactory: () => async () => ({ content, usage: null }),
+      reconcilerAdapterFactory: () => async (request: unknown) => ({
+        rawContent: JSON.stringify({
+          operations: (request as { input: { candidates: Array<{ candidateRef: string }> } })
+            .input.candidates.map(({ candidateRef }) => ({
+              type: "ignore", candidateRef, targetMemoryRef: null, topic: null, supersedesMemoryRef: null,
+            })),
+        }),
+        usage: null,
+      }),
+    }), NEW_CURSOR);
+    const original = console.warn;
+    console.warn = () => {};
+    let result: Awaited<ReturnType<typeof runMemoryV3LifecycleShadow>>;
+    try {
+      result = await runMemoryV3LifecycleShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(result.status, "succeeded");
+    const cas = test.casInputs[0] as {
+      extraction: { items: Array<{ claim: string }>; evidence: Array<{ sourceMessageId: string }> };
+    };
+    assert.deepEqual(cas.extraction.items.map((item) => item.claim), ["Снова гуляла сегодня"]);
+    assert.deepEqual(cas.extraction.evidence.map((evidence) => evidence.sourceMessageId), [OTHER_MESSAGE_ID]);
+  });
+
+  it("tells the extractor how many leading messages are earlier context in delta mode, and says nothing on a first run", async () => {
+    const delta = withCursor(harness({
+      async loadMessages() {
+        return { context: [PRIOR, NEW], delta: [LATER], latestMessageId: OTHER_MESSAGE_ID };
+      },
+    }), NEW_CURSOR);
+    const original = console.warn;
+    console.warn = () => {};
+    try {
+      await runMemoryV3LifecycleShadow(delta.options);
+      const first = harness();
+      await runMemoryV3LifecycleShadow(first.options);
+      const deltaSystem = (delta.extractorRequests[0] as { system: string }).system;
+      assert.equal(deltaSystem.startsWith(MEMORY_V3_LIFECYCLE_EXTRACTOR_SYSTEM_INSTRUCTION), true);
+      assert.equal(deltaSystem.includes("The first 2 messages of the supplied dialogue are earlier context"), true);
+      assert.equal((first.extractorRequests[0] as { system: string }).system, MEMORY_V3_LIFECYCLE_EXTRACTOR_SYSTEM_INSTRUCTION);
+    } finally {
+      console.warn = original;
+    }
   });
 
   it("chunks a single oversized undrained message across several extractor calls and merges the results, instead of truncating it", async () => {
