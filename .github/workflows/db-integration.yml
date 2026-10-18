@@ -1,0 +1,68 @@
+name: DB integration tests
+
+# Runs tests/db against a real local Supabase (Postgres + PostgREST + auth) started
+# inside the job. The offline suite cannot prove how real Postgres and PostgREST
+# behave (migration SQL, keyset filters, constraints); this does, on every change
+# that can affect them. Separate from the deploy workflow on purpose: it never
+# touches production and a failure here cannot block or alter a deploy.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - 'tests/db/**'
+      - 'scripts/run-db-tests.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/db-integration.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/**'
+      - 'tests/db/**'
+      - 'scripts/run-db-tests.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/db-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  db-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.120.0
+
+      - name: Start local Supabase (applies every migration in order)
+        run: >
+          supabase start
+          -x studio,realtime,logflare,vector,imgproxy,edge-runtime,mailpit,postgres-meta,supavisor
+
+      - name: Database integration tests
+        run: |
+          eval "$(supabase status -o env)"
+          export SUPABASE_URL="$API_URL" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" REQUIRE_DB_TESTS=1
+          npm run test:db
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
