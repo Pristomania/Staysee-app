@@ -4,6 +4,7 @@ import { before, describe, it } from "node:test";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { MEMORY_V3_HEALTH_ALERT_KEYS } from "../../supabase/functions/_shared/memoryV3/healthCheck.ts";
 import { adminClient } from "./helpers.ts";
 
 // The Telegram alert sender builds a key "<path>:<diagnostic>" and asks the
@@ -27,6 +28,7 @@ function diagnosticsOf(setName: string): string[] {
 const KEYS = [
   ...diagnosticsOf("READ_DIAGNOSTICS").map((code) => `read:${code}`),
   ...diagnosticsOf("WRITE_DIAGNOSTICS").map((code) => `write:${code}`),
+  ...MEMORY_V3_HEALTH_ALERT_KEYS,
 ];
 
 describe("Memory V3 alert keys on real Postgres", () => {
@@ -37,8 +39,9 @@ describe("Memory V3 alert keys on real Postgres", () => {
   });
 
   it("finds the code's alert keys, including the forced-skip one", () => {
-    assert.ok(KEYS.length >= 19, `expected the full list, got ${KEYS.length}`);
+    assert.ok(KEYS.length >= 21, `expected the full list, got ${KEYS.length}`);
     assert.ok(KEYS.includes("write:forced_skip"));
+    assert.ok(KEYS.includes("health:failure_rate") && KEYS.includes("health:silent"));
   });
 
   for (const key of KEYS) {

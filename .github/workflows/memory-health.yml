@@ -1,0 +1,71 @@
+name: Memory health check
+
+# Once an hour, asks the memory-health-check function to look at the last two
+# hours of Memory V3 runs in the production database and to alert Telegram
+# (@error_stayseeai_bot) if runs fail too often or the memory has gone silent.
+# The check itself runs inside Supabase, where the database and Telegram keys
+# already live; this workflow holds only the shared secret that lets it call
+# the function. If the function cannot be reached, answers an error, or is not
+# configured, this job FAILS and GitHub emails the repository owner -- a broken
+# monitor never looks like a healthy one.
+#
+# Manual run: Actions -> Memory health check -> Run workflow, with mode
+#   check      normal run (alerts if something is wrong)
+#   dry-run    report what it sees, send nothing
+#   test       send one connectivity-test message to Telegram
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'check, dry-run or test'
+        type: choice
+        options:
+          - check
+          - dry-run
+          - test
+        default: check
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Call the memory-health-check function
+        env:
+          HEALTH_SECRET: ${{ secrets.MEMORY_HEALTH_SECRET }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HEALTH_SECRET:-}" ]; then
+            echo "::error::The MEMORY_HEALTH_SECRET repository secret is not set."
+            exit 1
+          fi
+          case "${MODE:-check}" in
+            dry-run) body='{"dryRun":true}' ;;
+            test)    body='{"test":true}' ;;
+            *)       body='{}' ;;
+          esac
+          code=$(curl -sS --max-time 60 --retry 2 --retry-delay 10 --retry-connrefused \
+            -o response.json -w '%{http_code}' -X POST \
+            "https://jnxrildlwvtxhtiwucbt.supabase.co/functions/v1/memory-health-check" \
+            -H "X-Health-Secret: ${HEALTH_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          echo "HTTP ${code}"
+          cat response.json
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::memory-health-check answered HTTP ${code}"
+            exit 1
+          fi

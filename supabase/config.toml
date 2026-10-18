@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.purge-scheduled-rooms]
 verify_jwt = false
+
+[functions.memory-health-check]
+verify_jwt = false
