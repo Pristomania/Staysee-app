@@ -44,6 +44,20 @@ describe("Memory V3 health rules", () => {
     assert.deepEqual(evaluateMemoryV3Health(snapshot({ dialogue: pipeline(70, 10, 0, { state_write_failed: 10 }) })), []);
   });
 
+  it("does not count write conflicts as failures: the run is repeated automatically", () => {
+    assert.deepEqual(evaluateMemoryV3Health(snapshot({ dialogue: pipeline(7, 5, 0, { state_conflict: 5 }) })), []);
+  });
+
+  it("still counts every other failure next to conflicts, and does not list conflicts as a cause", () => {
+    const findings = evaluateMemoryV3Health(snapshot({
+      dialogue: pipeline(3, 6, 0, { state_conflict: 3, extractor_transport_failed: 3 }),
+    }));
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].line, /3 из 9/);
+    assert.match(findings[0].line, /extractor_transport_failed \(3\)/);
+    assert.doesNotMatch(findings[0].line, /state_conflict/);
+  });
+
   it("counts runs stuck in 'reserved' as failures", () => {
     const findings = evaluateMemoryV3Health(snapshot({ lifecycle: pipeline(2, 0, 4) }));
     assert.equal(findings.length, 1);

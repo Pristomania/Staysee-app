@@ -79,9 +79,14 @@ function inspectSnapshot(value: unknown): MemoryV3HealthSnapshot {
 
 const windowLabel = (minutes: number): string => (minutes % 60 === 0 ? `${minutes / 60} ч` : `${minutes} мин`);
 
+// Two overlapping runs can collide on the memory state; the loser is simply run
+// again (retry.ts), and only a repeated collision raises its own immediate alert.
+// A collision is therefore normal contention, not a sign the memory is broken.
+const BENIGN_CODE = "state_conflict";
+
 function topCodes(codes: Record<string, number>): string {
   return Object.entries(codes)
-    .filter(([, count]) => count > 0)
+    .filter(([code, count]) => count > 0 && code !== BENIGN_CODE)
     .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : 1))
     .slice(0, 3)
     .map(([code, count]) => `${code} (${count})`)
@@ -95,8 +100,9 @@ export function evaluateMemoryV3Health(snapshotValue: unknown): MemoryV3HealthFi
 
   for (const [name, label] of [["dialogue", "диалоговая"], ["lifecycle", "сквозная"]] as const) {
     const health = snapshot[name];
-    const bad = health.failed + health.stuck;
-    const total = health.succeeded + bad;
+    const conflicts = Math.min(health.failedByCode[BENIGN_CODE] ?? 0, health.failed);
+    const bad = health.failed - conflicts + health.stuck;
+    const total = health.succeeded + health.failed + health.stuck;
     if (bad >= MIN_BAD && bad / total >= BAD_SHARE) {
       const codes = topCodes(health.failedByCode);
       findings.push({
