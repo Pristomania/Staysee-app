@@ -7,7 +7,10 @@
  * cursor, so the next attempt reads the same messages again.
  */
 
-export const MEMORY_V3_RETRY_DELAY_MS = 2_000;
+// Ten seconds, not two: a rate limit or a provider hiccup rarely clears in two,
+// and nothing here is user-facing (the run is a background task). Worst case a
+// run now waits this long once per model call.
+export const MEMORY_V3_RETRY_DELAY_MS = 10_000;
 
 // Failures where asking again can help: the connection broke or timed out, the
 // provider answered 5xx, or answered 4xx (this includes rate limiting; a

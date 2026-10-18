@@ -15,6 +15,12 @@ const sleeper = () => {
 const diagnosticOf = (error: unknown) => (error as { diagnostic?: string }).diagnostic ?? null;
 const failure = (diagnostic: string) => Object.assign(new Error(diagnostic), { diagnostic });
 
+describe("how long to wait before the second attempt", () => {
+  it("waits 10 seconds: long enough for a rate limit or a provider hiccup to pass, short enough to finish the run", () => {
+    assert.equal(MEMORY_V3_RETRY_DELAY_MS, 10_000);
+  });
+});
+
 describe("one retry for a transient model call failure", () => {
   it("calls once and does not wait when the first call works", async () => {
     const s = sleeper();
