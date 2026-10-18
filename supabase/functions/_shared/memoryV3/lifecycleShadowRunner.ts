@@ -1,15 +1,21 @@
 import {
   MEMORY_V3_MAX_PROMPT_BYTES,
+  MEMORY_V3_MAX_SOURCE_MESSAGES,
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
   type MemoryV3DialogueInput,
   type MemoryV3Extraction,
 } from "./contract.ts";
-import type { MemoryV3DialogueMessage } from "./messages.ts";
+import type {
+  MemoryV3DialogueMessage,
+  MemoryV3MessageLoader,
+  MemoryV3SourceCursor,
+} from "./messages.ts";
 import {
   MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
   buildMemoryV3LifecycleExtractorRequest,
 } from "./lifecycleExtractorPrompt.ts";
+import { dropMemoryV3ContextCitations, withMemoryV3EarlierContextNotice } from "./deltaContext.ts";
 import {
   projectSafeMemoryV3TransportDiagnostic,
   type MemoryV3ModelAdapter,
@@ -41,13 +47,21 @@ import { getMemoryV3LifecycleReserveStage } from "./lifecycleStore.ts";
 import type {
   MemoryV3LifecycleStore,
   MemoryV3LifecycleStoredDiagnostic,
+  MemoryV3LifecycleUsage,
 } from "./lifecycleStore.ts";
 
 export type MemoryV3LifecycleShadowDiagnostic = MemoryV3LifecycleStoredDiagnostic;
 
 export type MemoryV3LifecycleShadowResult =
   | { status: "skipped"; reason: "disabled" | "user_not_allowlisted" | "duplicate" | "daily_cap" }
-  | { status: "succeeded"; runId: string; itemCount: number; evidenceCount: number; transitionCount: number; stateRevision: number }
+  | {
+      status: "succeeded"; runId: string; itemCount: number; evidenceCount: number;
+      transitionCount: number; stateRevision: number;
+      /** Present (true) only when this run gave up on a message that kept
+       * failing (spec 2026-10-13, extended after review) instead of a
+       * normal or empty-delta no-op; absent otherwise. */
+      forcedSkip?: true;
+    }
   | { status: "failed"; runId: string | null; diagnosticCode: MemoryV3LifecycleShadowDiagnostic };
 
 export interface MemoryV3LifecycleShadowOptions {
@@ -56,7 +70,10 @@ export interface MemoryV3LifecycleShadowOptions {
   userId: string;
   conversationId: string;
   apiKey: string | null | undefined;
-  loadMessages: (userId: string, conversationId: string) => Promise<MemoryV3DialogueMessage[]>;
+  /** Called with two arguments for a first run (today's last-60 window), and
+   * with this conversation's last succeeded cursor otherwise -- then it
+   * returns a delta window (spec 2026-10-13 §1). */
+  loadMessages: MemoryV3MessageLoader;
   store: MemoryV3LifecycleStore;
   extractorAdapterFactory: (apiKey: string) => MemoryV3ModelAdapter;
   reconcilerAdapterFactory: (apiKey: string) => MemoryV3LifecycleModelAdapter;
@@ -118,6 +135,133 @@ function fitExtractorDialogueToByteCap(
   throw fail("invalid_source");
 }
 
+type FittedExtractorDialogue = {
+  dialogue: MemoryV3DialogueInput;
+  requests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[];
+};
+
+// Safety ceiling on how many pieces a single oversized message is ever split
+// into (spec 2026-10-13, extended after review): bounds the worst-case cost
+// of one pathologically large paste to a handful of extractor calls. Chosen
+// against real practice, not guessed -- messaging and chat products cap a
+// single message at 4K-25K characters (Telegram 4,096; WhatsApp Web 10,000;
+// ChatGPT/Claude.ai treat pastes over ~20-25K characters specially), so a
+// message needing more than 5 chunks at this cap is already far outside any
+// of those norms.
+const MEMORY_V3_LIFECYCLE_DELTA_MAX_MESSAGE_CHUNKS = 5;
+
+// Delta mode (spec 2026-10-13 §1): the same 20 KB cap, but trimmed from the
+// NEWEST end of the delta -- those messages simply open the next run, since
+// the cursor only advances to the last message actually sent. (The first-run
+// fit above trims the oldest end; here that would let the cursor jump past
+// messages no run ever read.) Never drops the context block or the oldest
+// undrained message, and stops before the window would hold no user message.
+// If even that minimum is over the cap, it is sent as-is: an accepted,
+// logged edge case -- never a gap.
+function fitDeltaWindowToByteCap(
+  caseId: string,
+  context: MemoryV3DialogueMessage[],
+  delta: MemoryV3DialogueMessage[],
+): FittedExtractorDialogue {
+  const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES);
+  let smallest: { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> } | null = null;
+  for (let end = delta.length; end >= 1; end -= 1) {
+    const messages = [...context, ...delta.slice(0, end)];
+    if (!messages.some((message) => message.role === "user")) break;
+    const dialogue = validateMemoryV3Dialogue({ caseId, messages });
+    const request = withMemoryV3EarlierContextNotice(buildMemoryV3LifecycleExtractorRequest(dialogue), context.length);
+    if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) return { dialogue, requests: [request] };
+    smallest = { dialogue, request };
+  }
+  if (smallest === null) throw fail("invalid_source");
+  // The oldest undrained message alone -- plus the context block -- still
+  // exceeds the cap. Never drop it (the run must analyze something new) and
+  // never silently lose part of it by truncating: a message this large is
+  // still a real message a person wrote in full, and the extractor should
+  // get to see every word of it eventually, just like Zep (a comparable
+  // memory-extraction product) chunks oversized input rather than cutting
+  // it. Split only its text into sequential pieces that each fit under cap
+  // and run the extractor once per piece; `dialogue` below keeps the real,
+  // whole, untruncated message for everything downstream (evidence
+  // validation, the reconciler step) -- only the extractor's own per-call
+  // input is ever split.
+  const fullDialogue = validateMemoryV3Dialogue({ caseId, messages: [...context, delta[0]] });
+  const chunks = chunkOldestMessageForExtraction(caseId, context, delta[0], cap);
+  if (chunks !== null) {
+    console.warn("[memory-v3-lifecycle-delta-message-chunked]");
+    return { dialogue: fullDialogue, requests: chunks };
+  }
+  console.warn("[memory-v3-lifecycle-delta-over-byte-cap]");
+  return { dialogue: smallest.dialogue, requests: [smallest.request] };
+}
+
+function chunkOldestMessageForExtraction(
+  caseId: string,
+  context: MemoryV3DialogueMessage[],
+  oldest: MemoryV3DialogueMessage,
+  cap: number,
+): ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] | null {
+  const requests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] = [];
+  let start = 0;
+  while (start < oldest.text.length) {
+    if (requests.length >= MEMORY_V3_LIFECYCLE_DELTA_MAX_MESSAGE_CHUNKS) return null;
+    let low = start + 1;
+    let high = oldest.text.length;
+    let bestEnd = -1;
+    let bestRequest: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest> | null = null;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      try {
+        const dialogue = validateMemoryV3Dialogue({
+          caseId,
+          messages: [...context, { ...oldest, text: oldest.text.slice(start, mid) }],
+        });
+        const request = withMemoryV3EarlierContextNotice(buildMemoryV3LifecycleExtractorRequest(dialogue), context.length);
+        if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
+          bestEnd = mid;
+          bestRequest = request;
+          low = mid + 1;
+          continue;
+        }
+      } catch {
+        // A slice can be blank after trimming (leading whitespace) even when
+        // the full text is not; shrink further rather than treat it as fatal.
+      }
+      high = mid - 1;
+    }
+    if (bestEnd === -1 || bestRequest === null) return null; // context alone already over cap
+    requests.push(bestRequest);
+    start = bestEnd;
+  }
+  return requests;
+}
+
+// Merges one message's per-chunk extractions back into one (identity when
+// there was only ever one chunk). A collision between two chunks'
+// localItemKeys would mean the same structural candidate was independently
+// re-derived from two different slices of text -- treated as a contract
+// violation rather than silently keeping only one copy.
+function mergeMemoryV3Extractions(parts: MemoryV3Extraction[]): MemoryV3Extraction {
+  const items = parts.flatMap((part) => part.items);
+  const evidence = parts.flatMap((part) => part.evidence);
+  const keys = new Set<string>();
+  for (const item of items) {
+    if (keys.has(item.localItemKey)) throw fail("extractor_contract_invalid");
+    keys.add(item.localItemKey);
+  }
+  return { run: parts[0].run, items, evidence };
+}
+
+function sumMemoryV3LifecycleUsage(usages: Array<MemoryV3LifecycleUsage | null>): MemoryV3LifecycleUsage | null {
+  const real = usages.filter((usage): usage is MemoryV3LifecycleUsage => usage !== null);
+  if (real.length === 0) return null;
+  return {
+    promptTokens: real.reduce((sum, usage) => sum + usage.promptTokens, 0),
+    completionTokens: real.reduce((sum, usage) => sum + usage.completionTokens, 0),
+    costUsd: real.reduce((sum, usage) => sum + usage.costUsd, 0),
+  };
+}
+
 function inspectExactRecord(value: unknown, fields: readonly string[], code: MemoryV3LifecycleShadowDiagnostic): JsonRecord {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw fail(code);
@@ -167,7 +311,10 @@ function inspectDenseArray(value: unknown, maximum: number, code: MemoryV3Lifecy
   }
 }
 
-function ownMethod(value: unknown, name: "reserve" | "fail" | "compareAndSwap"): ((input: never) => Promise<unknown>) | null {
+function ownMethod(
+  value: unknown,
+  name: "reserve" | "fail" | "compareAndSwap" | "lastSucceededCursor" | "recentConsecutiveFailureCount",
+): ((input: never) => Promise<unknown>) | null {
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const descriptor = Object.getOwnPropertyDescriptor(value, name);
@@ -176,6 +323,61 @@ function ownMethod(value: unknown, name: "reserve" | "fail" | "compareAndSwap"):
   } catch {
     return null;
   }
+}
+
+// After this many consecutive failed runs, stop retrying this conversation's
+// stuck point and give up on just the one oldest undrained message instead
+// (spec 2026-10-13, extended after review). The method is optional on the
+// store: a store that doesn't implement it, or a lookup that throws, is
+// treated as zero -- a missing safety net just means the run proceeds
+// normally, never an extra reason to fail it.
+const MEMORY_V3_LIFECYCLE_DELTA_GIVE_UP_AFTER_FAILURES = 3;
+
+async function hasExceededConsecutiveFailureLimit(
+  store: unknown,
+  userId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const check = ownMethod(store, "recentConsecutiveFailureCount");
+  if (!check) return false;
+  try {
+    const count = await check({ userId, conversationId } as never);
+    return typeof count === "number" && count >= MEMORY_V3_LIFECYCLE_DELTA_GIVE_UP_AFTER_FAILURES;
+  } catch {
+    return false;
+  }
+}
+
+// The store's answer is untrusted until checked here; anything malformed
+// fails the run exactly like a failed lookup.
+function projectSourceCursor(value: unknown): MemoryV3SourceCursor | null {
+  if (value === null) return null;
+  const cursor = inspectExactRecord(value, ["messageId", "createdAt"], "invalid_source");
+  if (typeof cursor.messageId !== "string" || !UUID.test(cursor.messageId) ||
+      typeof cursor.createdAt !== "string" || !Number.isFinite(Date.parse(cursor.createdAt))) {
+    throw fail("invalid_source");
+  }
+  return { messageId: cursor.messageId, createdAt: cursor.createdAt };
+}
+
+// The loader's delta-mode answer, checked before anything trusts it. Both
+// blocks are validated together (unique ids across them, at most 60 in all,
+// at least one user message) and split back at the same boundary.
+function inspectDeltaWindow(value: unknown, caseId: string): {
+  context: MemoryV3DialogueMessage[];
+  delta: MemoryV3DialogueMessage[];
+  latestMessageId: string;
+} {
+  const window = inspectExactRecord(value, ["context", "delta", "latestMessageId"], "invalid_source");
+  const context = inspectDenseArray(window.context, MEMORY_V3_MAX_SOURCE_MESSAGES, "invalid_source");
+  const delta = inspectDenseArray(window.delta, MEMORY_V3_MAX_SOURCE_MESSAGES, "invalid_source");
+  if (typeof window.latestMessageId !== "string" || !UUID.test(window.latestMessageId)) throw fail("invalid_source");
+  const messages = validateMemoryV3Dialogue({ caseId, messages: [...context, ...delta] }).messages;
+  return {
+    context: messages.slice(0, context.length),
+    delta: messages.slice(context.length),
+    latestMessageId: window.latestMessageId,
+  };
 }
 
 function canonicalStringify(value: unknown): string {
@@ -187,14 +389,28 @@ function canonicalStringify(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(",")}}`;
 }
 
-async function inputHash(userId: string, conversationId: string, dialogue: MemoryV3DialogueInput): Promise<string> {
+async function inputHash(
+  userId: string,
+  conversationId: string,
+  dialogue: MemoryV3DialogueInput,
+  latestMessageId: string | null,
+): Promise<string> {
   try {
-    const payload = {
+    const payload: JsonRecord = {
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
       userId,
       conversationId,
       messages: dialogue.messages.map(({ id, role, text, createdAt }) => ({ id, role, text, createdAt })),
     };
+    // Delta mode only (spec 2026-10-13 §1). A delta window need not end at the
+    // conversation's newest message, so after a failed run the next run can
+    // rebuild the very same window -- and the reservation's duplicate check is
+    // permanent (an input hash is never released, not even by a failed run),
+    // which would freeze this conversation's memory for good. Folding in the
+    // newest message id keeps "duplicate" meaning what it means for a first
+    // run: same input, same conversation state. A retry goes ahead as soon as
+    // anything new is written. First-run hashes are unchanged.
+    if (latestMessageId !== null) payload.latestMessageId = latestMessageId;
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalStringify(payload)));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   } catch (error) {
@@ -307,6 +523,40 @@ export type MemoryV3LifecycleUsageLogger = (input: {
   pipeline: "dialogue" | "lifecycle";
 }) => Promise<void>;
 
+// The terminal compareAndSwap write plus its result check, shared by the
+// normal path and the empty-extraction fast path. Returns null on success,
+// otherwise the already-persisted failure result.
+async function persistCompareAndSwap(
+  compareAndSwap: (input: never) => Promise<unknown>,
+  failStore: (input: never) => Promise<unknown>,
+  runId: string,
+  userId: string,
+  write: JsonRecord,
+  resultingStateRevision: number,
+): Promise<MemoryV3LifecycleShadowResult | null> {
+  let cas: unknown;
+  try {
+    cas = await compareAndSwap(write as never);
+  } catch {
+    return await persistFailure(failStore, runId, userId, "state_write_failed");
+  }
+  try {
+    const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
+    if (status === "state_conflict") {
+      inspectExactRecord(cas, ["status"], "state_write_failed");
+      return await persistFailure(failStore, runId, userId, "state_conflict");
+    }
+    const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
+    if (result.status !== "succeeded" || result.resultingStateRevision !== resultingStateRevision) {
+      throw fail("state_write_failed");
+    }
+  } catch (error) {
+    const code = ownDiagnostic(error) ?? "state_write_failed";
+    return await persistFailure(failStore, runId, userId, code);
+  }
+  return null;
+}
+
 export async function runMemoryV3LifecycleShadow(
   options: MemoryV3LifecycleShadowOptions,
   reportTransportDiagnostic?: (
@@ -340,26 +590,73 @@ export async function runMemoryV3LifecycleShadow(
   const reserve = ownMethod(projected.store, "reserve");
   const failStore = ownMethod(projected.store, "fail");
   const compareAndSwap = ownMethod(projected.store, "compareAndSwap");
+  const lastSucceededCursor = ownMethod(projected.store, "lastSucceededCursor");
   if (typeof userId !== "string" || !UUID.test(userId) || typeof conversationId !== "string" || !UUID.test(conversationId) ||
       typeof apiKey !== "string" || apiKey.trim().length === 0 || typeof projected.loadMessages !== "function" ||
       typeof projected.extractorAdapterFactory !== "function" || typeof projected.reconcilerAdapterFactory !== "function" ||
-      !reserve || !failStore || !compareAndSwap) return failed(null, "invalid_source");
+      !reserve || !failStore || !compareAndSwap || !lastSucceededCursor) return failed(null, "invalid_source");
 
-  let dialogue: MemoryV3DialogueInput;
-  let extractorRequest;
+  // Delta windowing (spec 2026-10-13 §1, §3): only this conversation's last
+  // *succeeded* run counts as already analyzed. A failed or malformed lookup
+  // fails the run: falling back to the first-run window could move the cursor
+  // past a backlog no run has read. Console-only fixed literal; the error
+  // itself is never logged.
+  let sinceCursor: MemoryV3SourceCursor | null;
   try {
-    const source = await (projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"])(userId, conversationId);
-    const validated = validateMemoryV3Dialogue({ caseId: `memory-v3-shadow:${userId}:${conversationId}`, messages: source });
-    const fitted = fitExtractorDialogueToByteCap(validated);
-    dialogue = fitted.dialogue;
-    extractorRequest = fitted.request;
+    sinceCursor = projectSourceCursor(await lastSucceededCursor({ userId, conversationId } as never));
+  } catch {
+    console.error("[memory-v3-lifecycle-cursor-lookup-failed]");
+    return failed(null, "invalid_source");
+  }
+
+  // extractorRequests stays null for an empty delta (nothing new to read).
+  // It is almost always exactly one request; more than one only when a
+  // single oversized message had to be chunked (spec 2026-10-13 §1, extended).
+  // deltaMessageIds is what this run may cite as evidence: null on a first run
+  // (any loaded message), otherwise exactly the delta it sends.
+  // latestMessageId feeds the input identity in delta mode only.
+  let dialogue: MemoryV3DialogueInput;
+  let extractorRequests: ReturnType<typeof buildMemoryV3LifecycleExtractorRequest>[] | null;
+  let deltaMessageIds: ReadonlySet<string> | null = null;
+  let latestMessageId: string | null = null;
+  let forcedSkip = false;
+  try {
+    const caseId = `memory-v3-shadow:${userId}:${conversationId}`;
+    const load = projected.loadMessages as MemoryV3LifecycleShadowOptions["loadMessages"];
+    if (sinceCursor === null) {
+      const fitted = fitExtractorDialogueToByteCap(
+        validateMemoryV3Dialogue({ caseId, messages: await load(userId, conversationId) }),
+      );
+      dialogue = fitted.dialogue;
+      extractorRequests = [fitted.request];
+    } else {
+      const loaded = inspectDeltaWindow(await load(userId, conversationId, sinceCursor), caseId);
+      latestMessageId = loaded.latestMessageId;
+      if (loaded.delta.length === 0) {
+        dialogue = validateMemoryV3Dialogue({ caseId, messages: loaded.context });
+        extractorRequests = null;
+      } else if (await hasExceededConsecutiveFailureLimit(projected.store, userId, conversationId)) {
+        // Give up on just the single oldest undrained message: never stay
+        // stuck on the same point forever. Everything after it in the
+        // backlog is untouched and reaches the next run normally.
+        console.warn("[memory-v3-lifecycle-delta-forced-skip]");
+        dialogue = validateMemoryV3Dialogue({ caseId, messages: [...loaded.context, loaded.delta[0]] });
+        extractorRequests = null;
+        forcedSkip = true;
+      } else {
+        const fitted = fitDeltaWindowToByteCap(caseId, loaded.context, loaded.delta);
+        dialogue = fitted.dialogue;
+        extractorRequests = fitted.requests;
+      }
+      deltaMessageIds = new Set(dialogue.messages.slice(loaded.context.length).map((message) => message.id));
+    }
   } catch {
     return failed(null, "invalid_source");
   }
 
   let hash: string;
   try {
-    hash = await inputHash(userId, conversationId, dialogue);
+    hash = await inputHash(userId, conversationId, dialogue, latestMessageId);
   } catch {
     return failed(null, "unknown_failure");
   }
@@ -427,53 +724,128 @@ export async function runMemoryV3LifecycleShadow(
     return await persistFailure(failStore, runId, userId, code);
   }
 
-  let extractor: MemoryV3TransportResult;
-  try {
-    const adapter = (projected.extractorAdapterFactory as MemoryV3LifecycleShadowOptions["extractorAdapterFactory"])(apiKey);
-    if (typeof adapter !== "function") throw fail("extractor_transport_failed");
-    extractor = transportResult(await adapter(extractorRequest));
-  } catch (error) {
-    const transportCode = projectSafeMemoryV3TransportDiagnostic(error);
-    const code = ownDiagnostic(error) ?? "extractor_transport_failed";
-    return await persistFailure(failStore, runId, userId, code, transportCode);
-  }
-  // Logged as soon as the response is in, regardless of whether the run
-  // later succeeds -- the extractor call's cost is already spent either way.
-  if (extractor.usage !== null) {
-    await logUsageSafely(logUsage, {
-      userId, conversationId, runId, stage: "extractor", model: MEMORY_V3_LIFECYCLE_MODEL,
-      promptTokens: extractor.usage.promptTokens,
-      completionTokens: extractor.usage.completionTokens,
-      costUsd: extractor.usage.costUsd,
-      pipeline: "lifecycle",
-    });
+  // Empty delta (spec 2026-10-13 §1): nothing was written after the cursor,
+  // so the extractor is never called -- not even on the context block alone,
+  // which a previous run already analyzed. Same succeeded no-op contract as an
+  // empty extraction (§3), with no model usage at all.
+  if (extractorRequests === null) {
+    const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+      runId, userId, expectedStateRevision: reserved.expectedStateRevision,
+      state, changed: false,
+      extraction: {
+        run: { caseId: dialogue.caseId, extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION },
+        items: [],
+        evidence: [],
+      },
+      operations: [], transitions: [], extractorUsage: null, reconcilerUsage: null,
+    }, state.stateRevision);
+    if (noopFailure !== null) return noopFailure;
+    return {
+      status: "succeeded",
+      runId,
+      itemCount: 0,
+      evidenceCount: 0,
+      transitionCount: 0,
+      stateRevision: state.stateRevision,
+      ...(forcedSkip ? { forcedSkip: true as const } : {}),
+    };
   }
 
-  let parsedExtraction: unknown;
-  try {
-    parsedExtraction = JSON.parse(extractor.content);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "extractor_parse_invalid");
-  }
-  try {
-    inspectExtractorEnvelope(parsedExtraction);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "extractor_shape_invalid");
+  // Almost always one iteration. More than one only when a single oversized
+  // message was chunked: each chunk is its own extractor call, logged and
+  // accounted separately, then merged into one extraction before the
+  // existing single-extraction checks and the reconciler step run unchanged.
+  const extractionParts: MemoryV3Extraction[] = [];
+  const usageParts: Array<MemoryV3LifecycleUsage | null> = [];
+  for (const request of extractorRequests) {
+    let extractor: MemoryV3TransportResult;
+    try {
+      const adapter = (projected.extractorAdapterFactory as MemoryV3LifecycleShadowOptions["extractorAdapterFactory"])(apiKey);
+      if (typeof adapter !== "function") throw fail("extractor_transport_failed");
+      extractor = transportResult(await adapter(request));
+    } catch (error) {
+      const transportCode = projectSafeMemoryV3TransportDiagnostic(error);
+      const code = ownDiagnostic(error) ?? "extractor_transport_failed";
+      return await persistFailure(failStore, runId, userId, code, transportCode);
+    }
+    // Logged as soon as the response is in, regardless of whether the run
+    // later succeeds -- the extractor call's cost is already spent either way.
+    if (extractor.usage !== null) {
+      await logUsageSafely(logUsage, {
+        userId, conversationId, runId, stage: "extractor", model: MEMORY_V3_LIFECYCLE_MODEL,
+        promptTokens: extractor.usage.promptTokens,
+        completionTokens: extractor.usage.completionTokens,
+        costUsd: extractor.usage.costUsd,
+        pipeline: "lifecycle",
+      });
+    }
+    usageParts.push(extractor.usage);
+
+    let parsedExtraction: unknown;
+    try {
+      parsedExtraction = JSON.parse(extractor.content);
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_parse_invalid");
+    }
+    try {
+      inspectExtractorEnvelope(parsedExtraction);
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_shape_invalid");
+    }
+    try {
+      extractionParts.push(await normalizeMemoryV3LayeredResponse(
+        parsedExtraction,
+        dialogue,
+        MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
+        "cross_conversation",
+      ));
+    } catch {
+      return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+    }
   }
   let extraction: MemoryV3Extraction;
   try {
-    extraction = await normalizeMemoryV3LayeredResponse(
-      parsedExtraction,
-      dialogue,
-      MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
-      "cross_conversation",
-    );
+    extraction = mergeMemoryV3Extractions(extractionParts);
   } catch {
     return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+  }
+  const extractorUsage = sumMemoryV3LifecycleUsage(usageParts);
+  // Spec 2026-10-13 §1: the context block informs the extractor but is never
+  // new evidence -- the run that produced the cursor already analyzed it. An
+  // item citing it is dropped, not a reason to fail the run: failing would
+  // leave the cursor stuck on the same messages for the next attempt too.
+  if (deltaMessageIds !== null) {
+    const kept = dropMemoryV3ContextCitations(extraction, deltaMessageIds);
+    if (kept !== extraction) {
+      console.warn("[memory-v3-lifecycle-context-citation-dropped]");
+      extraction = kept;
+    }
   }
   if (extraction.items.length > MEMORY_V3_LIFECYCLE_MAX_CANDIDATES ||
       extraction.evidence.length > MEMORY_V3_LIFECYCLE_MAX_CANDIDATE_EVIDENCE) {
     return await persistFailure(failStore, runId, userId, "state_too_large");
+  }
+
+  // Empty-extraction fast path (spec 2026-10-13 §3): nothing to reconcile, so
+  // the reconciler is never called -- but the run still finishes as a normal
+  // succeeded no-op through compareAndSwap, because that succeeded row is
+  // what the next run's delta cursor (and the trigger gate -- migration
+  // 078, after Task 11) reads.
+  if (extraction.items.length === 0) {
+    const noopFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+      runId, userId, expectedStateRevision: reserved.expectedStateRevision,
+      state, changed: false, extraction, operations: [], transitions: [],
+      extractorUsage, reconcilerUsage: null,
+    }, state.stateRevision);
+    if (noopFailure !== null) return noopFailure;
+    return {
+      status: "succeeded",
+      runId,
+      itemCount: 0,
+      evidenceCount: 0,
+      transitionCount: 0,
+      stateRevision: state.stateRevision,
+    };
   }
 
   let bundle;
@@ -580,28 +952,12 @@ export async function runMemoryV3LifecycleShadow(
   } catch {
     return await persistFailure(failStore, runId, userId, "reconciler_contract_invalid", null, reconciler.rawContent, reconcilerContext);
   }
-  let cas: unknown;
-  try {
-    cas = await compareAndSwap({
-      runId, userId, expectedStateRevision: reserved.expectedStateRevision,
-      state: resultingState, changed: reduced.changed, extraction, operations: proposal,
-      transitions: reduced.transitions, extractorUsage: extractor.usage, reconcilerUsage: reconciler.usage,
-    } as never);
-  } catch {
-    return await persistFailure(failStore, runId, userId, "state_write_failed");
-  }
-  try {
-    const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
-    if (status === "state_conflict") {
-      inspectExactRecord(cas, ["status"], "state_write_failed");
-      return await persistFailure(failStore, runId, userId, "state_conflict");
-    }
-    const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
-    if (result.status !== "succeeded" || result.resultingStateRevision !== resultingState.stateRevision) throw fail("state_write_failed");
-  } catch (error) {
-    const code = ownDiagnostic(error) ?? "state_write_failed";
-    return await persistFailure(failStore, runId, userId, code);
-  }
+  const casFailure = await persistCompareAndSwap(compareAndSwap, failStore, runId, userId, {
+    runId, userId, expectedStateRevision: reserved.expectedStateRevision,
+    state: resultingState, changed: reduced.changed, extraction, operations: proposal,
+    transitions: reduced.transitions, extractorUsage, reconcilerUsage: reconciler.usage,
+  }, resultingState.stateRevision);
+  if (casFailure !== null) return casFailure;
   return {
     status: "succeeded",
     runId,
@@ -616,15 +972,19 @@ function inspectBackgroundResult(value: unknown): MemoryV3LifecycleShadowResult 
   try {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
     const status = Object.getOwnPropertyDescriptor(value, "status")?.value;
+    const hasForcedSkip = status === "succeeded" && Object.getOwnPropertyDescriptor(value, "forcedSkip") !== undefined;
     const fields = status === "failed"
       ? ["status", "runId", "diagnosticCode"]
       : status === "skipped"
       ? ["status", "reason"]
       : status === "succeeded"
-      ? ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision"]
+      ? (hasForcedSkip
+          ? ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision", "forcedSkip"]
+          : ["status", "runId", "itemCount", "evidenceCount", "transitionCount", "stateRevision"])
       : [];
     if (fields.length === 0) return null;
     const row = inspectExactRecord(value, fields, "unknown_failure");
+    if (hasForcedSkip && row.forcedSkip !== true) return null;
     if (status === "failed") {
       if ((row.runId !== null && (typeof row.runId !== "string" || !UUID.test(row.runId))) ||
           typeof row.diagnosticCode !== "string" ||
@@ -653,19 +1013,29 @@ function inspectBackgroundResult(value: unknown): MemoryV3LifecycleShadowResult 
 export async function runMemoryV3LifecycleShadowBackgroundSafely(
   run: () => Promise<MemoryV3LifecycleShadowResult>,
   logSafe: (code: MemoryV3LifecycleShadowDiagnostic) => void,
+  onForcedSkip?: () => void,
 ): Promise<void> {
   let diagnostic: MemoryV3LifecycleShadowDiagnostic | null = null;
+  let skipped = false;
   try {
     if (typeof run !== "function") throw fail("unknown_failure");
     const result = inspectBackgroundResult(await run());
     if (result?.status === "failed") diagnostic = result.diagnosticCode;
     else if (result === null) diagnostic = "unknown_failure";
+    else if (result.status === "succeeded" && result.forcedSkip === true) skipped = true;
   } catch (error) {
     diagnostic = ownDiagnostic(error) ?? "unknown_failure";
   }
   if (diagnostic !== null && typeof logSafe === "function") {
     try {
       logSafe(diagnostic);
+    } catch {
+      // Background shadow logging must never affect the reply path.
+    }
+  }
+  if (skipped && typeof onForcedSkip === "function") {
+    try {
+      onForcedSkip();
     } catch {
       // Background shadow logging must never affect the reply path.
     }

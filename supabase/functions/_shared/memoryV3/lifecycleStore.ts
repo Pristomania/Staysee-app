@@ -1,4 +1,5 @@
 import type { MemoryV3Extraction } from "./contract.ts";
+import type { MemoryV3SourceCursor } from "./messages.ts";
 import {
   MEMORY_V3_LIFECYCLE_MAX_CANDIDATES,
   MEMORY_V3_LIFECYCLE_MAX_CANDIDATE_EVIDENCE,
@@ -87,8 +88,16 @@ export interface MemoryV3LifecycleSuccessWrite {
   reconcilerUsage: MemoryV3LifecycleUsage | null;
 }
 
+export interface MemoryV3LifecycleCursorInput {
+  userId: string;
+  conversationId: string;
+}
+
 export interface MemoryV3LifecycleRpcClient {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
+  /** Plain table reads -- used only by lastSucceededCursor(). Optional so an
+   * rpc-only client still constructs; that one method then fails closed. */
+  from?(table: string): unknown;
 }
 
 export interface MemoryV3LifecycleStore {
@@ -97,6 +106,16 @@ export interface MemoryV3LifecycleStore {
   compareAndSwap(input: MemoryV3LifecycleSuccessWrite): Promise<
     { status: "succeeded"; resultingStateRevision: number } | { status: "state_conflict" }
   >;
+  /** This conversation's newest *succeeded* run's source position, or null if
+   * none has succeeded yet. Per conversation (migrations 053/077); failed or
+   * reserved runs never count (spec 2026-10-13 §3). */
+  lastSucceededCursor(input: MemoryV3LifecycleCursorInput): Promise<MemoryV3SourceCursor | null>;
+  /** How many of this conversation's most recent runs failed in a row, newest
+   * first, stopping at the first non-failed run (capped at 10 -- enough
+   * headroom above the runner's own give-up threshold without an unbounded
+   * query). Lets a run give up on a message that keeps failing instead of
+   * blocking the conversation's memory forever. */
+  recentConsecutiveFailureCount(input: MemoryV3LifecycleCursorInput): Promise<number>;
 }
 
 const OWN_ERRORS = new WeakSet<object>();
@@ -285,6 +304,27 @@ function inspectClient(value: unknown): InspectedClient {
     current = prototypeOf(current);
   }
   throw fail();
+}
+
+function findMethod(target: object, name: string): (...args: unknown[]) => unknown {
+  const seen = new WeakSet<object>();
+  let current: object | null = target;
+  while (current !== null) {
+    if (seen.has(current)) throw fail();
+    seen.add(current);
+    const own = descriptor(current, name);
+    if (own) {
+      if (!("value" in own) || typeof own.value !== "function") throw fail();
+      return own.value as (...args: unknown[]) => unknown;
+    }
+    current = prototypeOf(current);
+  }
+  throw fail();
+}
+
+function invoke(target: unknown, name: string, ...args: unknown[]): unknown {
+  if ((typeof target !== "object" && typeof target !== "function") || target === null) throw fail();
+  return findMethod(target, name).apply(target, args);
 }
 
 async function callRpc(client: InspectedClient, name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -488,6 +528,64 @@ export function createMemoryV3LifecycleStore(clientValue: MemoryV3LifecycleRpcCl
       }
       if (row.result !== "succeeded" || row.resulting_state_revision !== expectedResultingRevision) throw fail();
       return { status: "succeeded", resultingStateRevision: expectedResultingRevision };
+    },
+
+    async lastSucceededCursor(inputValue) {
+      const input = record(inputValue, ["userId", "conversationId"]);
+      if (typeof input.userId !== "string" || !UUID.test(input.userId) ||
+        typeof input.conversationId !== "string" || !UUID.test(input.conversationId)) throw fail();
+      let response: unknown;
+      try {
+        let query = invoke(client.target, "from", "memory_v3_lifecycle_shadow_runs");
+        query = invoke(query, "select", "source_last_message_id, source_last_created_at");
+        query = invoke(query, "eq", "user_id", input.userId);
+        query = invoke(query, "eq", "conversation_id", input.conversationId);
+        query = invoke(query, "eq", "status", "succeeded");
+        // By source position, not completion time: a run that finishes late
+        // with an older window can never move the cursor backwards.
+        query = invoke(query, "order", "source_last_created_at", { ascending: false });
+        query = invoke(query, "order", "source_last_message_id", { ascending: false });
+        response = await invoke(query, "limit", 1);
+      } catch {
+        throw fail();
+      }
+      const projected = projectedRecord(response, ["data", "error"]);
+      if (projected.error !== null) throw fail();
+      const rows = array(projected.data, 1);
+      if (rows.length === 0) return null;
+      const row = record(rows[0], ["source_last_message_id", "source_last_created_at"]);
+      if (typeof row.source_last_message_id !== "string" || !UUID.test(row.source_last_message_id) ||
+        !isoDateTime(row.source_last_created_at)) throw fail();
+      return { messageId: row.source_last_message_id, createdAt: row.source_last_created_at };
+    },
+
+    async recentConsecutiveFailureCount(inputValue) {
+      const input = record(inputValue, ["userId", "conversationId"]);
+      if (typeof input.userId !== "string" || !UUID.test(input.userId) ||
+        typeof input.conversationId !== "string" || !UUID.test(input.conversationId)) throw fail();
+      let response: unknown;
+      try {
+        let query = invoke(client.target, "from", "memory_v3_lifecycle_shadow_runs");
+        query = invoke(query, "select", "status");
+        query = invoke(query, "eq", "user_id", input.userId);
+        query = invoke(query, "eq", "conversation_id", input.conversationId);
+        query = invoke(query, "order", "created_at", { ascending: false });
+        query = invoke(query, "order", "id", { ascending: false });
+        response = await invoke(query, "limit", 10);
+      } catch {
+        throw fail();
+      }
+      const projected = projectedRecord(response, ["data", "error"]);
+      if (projected.error !== null) throw fail();
+      const rows = array(projected.data, 10);
+      let count = 0;
+      for (const raw of rows) {
+        const row = record(raw, ["status"]);
+        if (row.status !== "reserved" && row.status !== "succeeded" && row.status !== "failed") throw fail();
+        if (row.status !== "failed") break;
+        count += 1;
+      }
+      return count;
     },
   };
 }

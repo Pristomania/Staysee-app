@@ -205,7 +205,16 @@ describe('synthetic lifecycle model gold replay', () => {
         extraction: testCase.extraction,
       });
       assert.equal(bundle.request.input.session.conversationId, testCase.conversationId);
-      assert.equal(bundle.request.input.messages.length, testCase.messages.length);
+      // Evidence-only reconciler input (spec 2026-10-13 §2): exactly the
+      // messages this case's candidates cite, or just the session anchor
+      // when there are no candidates.
+      const citedIds = new Set(testCase.extraction.evidence.map((row) => row.sourceMessageId));
+      const sentIds = bundle.request.input.messages.map((message) => message.id);
+      if (citedIds.size > 0) {
+        assert.deepEqual([...sentIds].sort(), [...citedIds].sort());
+      } else {
+        assert.deepEqual(sentIds, [bundle.request.input.session.sourceLastMessageId]);
+      }
     }
   });
 

@@ -1714,6 +1714,10 @@ Deno.serve(async (req: Request) => {
                   console.error("[memory-v3-dialogue-shadow]", code);
                   scheduleMemoryV3TelegramAlert("write", code);
                 },
+                () => {
+                  console.error("[memory-v3-dialogue-shadow-forced-skip]");
+                  scheduleMemoryV3TelegramAlert("write", "forced_skip");
+                },
               )
               : Promise.resolve();
             const memoryV3Mode = parseMemoryV3ShadowMode(
@@ -1744,6 +1748,10 @@ Deno.serve(async (req: Request) => {
                   (code) => {
                     console.error("[memory-v3-lifecycle-shadow]", code);
                     scheduleMemoryV3TelegramAlert("write", code);
+                  },
+                  () => {
+                    console.error("[memory-v3-lifecycle-shadow-forced-skip]");
+                    scheduleMemoryV3TelegramAlert("write", "forced_skip");
                   },
                 )
               : crossMemoryOnForWrite && memoryV3Mode === "shadow"

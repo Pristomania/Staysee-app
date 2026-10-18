@@ -360,10 +360,7 @@ export async function logUsage(
 
 // ── Token estimation (rough, no tokenizer needed) ────────────────────────────
 
-export function estimateTokens(text: string): number {
-  // ~1 token per 3.5 chars is a conservative estimate for mixed Russian/English
-  return Math.ceil(text.length / 3.5);
-}
+export { estimateTokens } from "./tokenEstimate.ts";
 
 // ── Context trimming ─────────────────────────────────────────────────────────
 

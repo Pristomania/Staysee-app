@@ -501,3 +501,52 @@ describe("Memory V3 lifecycle reconciler boundary", () => {
     assertSafeReject(() => build({ messages: sourceMessages, state: emptyState, extraction: excessiveExtraction }));
   });
 });
+
+describe("Memory V3 lifecycle reconciler evidence-only messages", () => {
+  it("sends only the messages the new candidates cite, in chronological order", () => {
+    const bundle = build();
+    assert.deepEqual(
+      bundle.request.input.messages.map((message) => message.id),
+      [MESSAGE_IDS[0], MESSAGE_IDS[2], MESSAGE_IDS[4]],
+    );
+    assert.equal(bundle.request.input.messages.some((message) => message.role === "assistant"), false);
+  });
+
+  it("keeps the session pointing at the full window's last message even when that message is not cited", () => {
+    const single = extraction();
+    single.items = single.items.filter((item) => item.localItemKey === "Z-candidate");
+    single.evidence = single.evidence.filter((row) => row.itemKey === "Z-candidate");
+    const bundle = build({ extraction: single });
+    assert.deepEqual(bundle.request.input.messages.map((message) => message.id), [MESSAGE_IDS[2]]);
+    assert.deepEqual(bundle.request.input.session, {
+      conversationId: CONVERSATION_ID,
+      sourceLastMessageId: MESSAGE_IDS[4],
+      sourceLastCreatedAt: "2026-01-05T10:00:00Z",
+    });
+  });
+
+  it("never re-sends the original text behind already-stored items", () => {
+    const stored = state();
+    stored.items[1].evidence[0].sourceMessageId = MESSAGE_IDS[3];
+    const bundle = build({ state: stored });
+    assert.equal(bundle.request.input.messages.some((message) => message.id === MESSAGE_IDS[3]), false);
+    assert.equal(bundle.request.input.currentItems[0].evidence[0].sourceMessageId, MESSAGE_IDS[3]);
+  });
+
+  it("sends only the session anchor message for an empty extraction", () => {
+    const empty = extraction();
+    empty.items = [];
+    empty.evidence = [];
+    const bundle = build({ extraction: empty });
+    assert.deepEqual(bundle.request.input.messages.map((message) => message.id), [MESSAGE_IDS[4]]);
+    assert.equal(bundle.request.input.session.sourceLastMessageId, MESSAGE_IDS[4]);
+  });
+
+  it("rejects a candidate citing a message outside the window instead of sending it without its source", () => {
+    const outside = extraction();
+    outside.evidence = outside.evidence.map((row) => row.itemKey === "Z-candidate"
+      ? { ...row, sourceMessageId: "55555555-5555-4555-8555-555555555555" }
+      : row);
+    assertSafeReject(() => build({ extraction: outside }));
+  });
+});
