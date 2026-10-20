@@ -18,9 +18,21 @@ export const STUCK_AFTER_MS = 120_000;
 
 const byCreatedAt = (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at);
 
+// A state_conflict means two runs wrote the same memory state at once; the app reruns once and
+// the monitor does not count it as a failure. It is only a problem when no run succeeded after it.
+function isRecoveredConflict(run, runs) {
+  return run.diagnostic_code === 'state_conflict' &&
+    runs.some((other) => other.status === 'succeeded' && byCreatedAt(other, run) > 0);
+}
+
 function commonRunProblems(label, runs, now) {
   const problems = [];
-  const failed = runs.filter((run) => run.status === 'failed');
+  const notes = [];
+  const recovered = runs.filter((run) => run.status === 'failed' && isRecoveredConflict(run, runs));
+  if (recovered.length > 0) {
+    notes.push(`${recovered.length} state conflict(s) in ${label} runs, retried and recovered`);
+  }
+  const failed = runs.filter((run) => run.status === 'failed' && !recovered.includes(run));
   if (failed.length > 0) {
     const codes = [...new Set(failed.map((run) => {
       const code = run.diagnostic_code ?? 'no code';
@@ -32,7 +44,7 @@ function commonRunProblems(label, runs, now) {
   if (stuck.length > 0) {
     problems.push(`${stuck.length} ${label} run(s) stuck in "reserved" for over ${STUCK_AFTER_MS / 1000}s`);
   }
-  return problems;
+  return { problems, notes };
 }
 
 export function checkDialogueRuns(rows, { totalMessages, now = Date.now() }) {
@@ -40,8 +52,7 @@ export function checkDialogueRuns(rows, { totalMessages, now = Date.now() }) {
     return { problems: ['no dialogue memory runs were recorded for the test conversation'], notes: [] };
   }
   const runs = [...rows].sort(byCreatedAt);
-  const problems = commonRunProblems('dialogue', runs, now);
-  const notes = [];
+  const { problems, notes } = commonRunProblems('dialogue', runs, now);
 
   const succeeded = runs.filter((run) => run.status === 'succeeded');
   if (succeeded.length < 2) {
@@ -82,10 +93,11 @@ export function checkLifecycleRuns(rows, { now = Date.now() }) {
     return { problems: ['no lifecycle memory runs were recorded for the test conversation'], notes: [] };
   }
   const runs = [...rows].sort(byCreatedAt);
-  const problems = commonRunProblems('lifecycle', runs, now);
+  const { problems, notes } = commonRunProblems('lifecycle', runs, now);
   const succeeded = runs.filter((run) => run.status === 'succeeded');
   if (succeeded.length === 0) problems.push('no succeeded lifecycle run');
-  return { problems, notes: [`${runs.length} lifecycle runs (${succeeded.length} succeeded)`] };
+  notes.push(`${runs.length} lifecycle runs (${succeeded.length} succeeded)`);
+  return { problems, notes };
 }
 
 export function checkMemoryItems(items) {

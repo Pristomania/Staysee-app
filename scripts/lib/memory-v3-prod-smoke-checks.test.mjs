@@ -64,6 +64,28 @@ describe('dialogue memory runs in production', () => {
     assert.match(result.problems.join('\n'), /extractor_transport_failed \(provider_http_4xx\)/);
   });
 
+  it('does not fail on a state conflict that a later run recovered from, but notes it', () => {
+    const runs = [
+      run({ message_count: 2, created_at: minutesAgo(30) }),
+      run({ status: 'failed', diagnostic_code: 'state_conflict', created_at: minutesAgo(20) }),
+      run({ message_count: 7, created_at: minutesAgo(19) }),
+      run({ message_count: 8, created_at: minutesAgo(10) }),
+    ];
+    const result = checkDialogueRuns(runs, { totalMessages: 28, now: NOW });
+    assert.deepEqual(result.problems, []);
+    assert.match(result.notes.join('\n'), /1 state conflict.*retried/);
+  });
+
+  it('still fails on a state conflict nothing recovered from', () => {
+    const runs = [
+      run({ message_count: 2, created_at: minutesAgo(30) }),
+      run({ message_count: 7, created_at: minutesAgo(20) }),
+      run({ status: 'failed', diagnostic_code: 'state_conflict', created_at: minutesAgo(5) }),
+    ];
+    const result = checkDialogueRuns(runs, { totalMessages: 28, now: NOW });
+    assert.match(result.problems.join('\n'), /1 failed.*state_conflict/);
+  });
+
   it('fails on a run stuck in reserved, but not on one that just started', () => {
     const stuck = checkDialogueRuns([...healthy(), run({ status: 'reserved', created_at: minutesAgo(5) })], { totalMessages: 28, now: NOW });
     assert.match(stuck.problems.join('\n'), /stuck/);
@@ -110,6 +132,16 @@ describe('cross-conversation (lifecycle) memory runs in production', () => {
   it('fails when nothing ran, or nothing succeeded', () => {
     assert.match(checkLifecycleRuns([], { now: NOW }).problems.join('\n'), /no lifecycle memory runs/);
     assert.match(checkLifecycleRuns([run({ status: 'reserved', created_at: minutesAgo(0.1) })], { now: NOW }).problems.join('\n'), /no succeeded/);
+  });
+
+  it('does not fail on a state conflict that a later run recovered from', () => {
+    const runs = [
+      run({ status: 'failed', diagnostic_code: 'state_conflict', created_at: minutesAgo(20) }),
+      run({ created_at: minutesAgo(19) }),
+    ];
+    const result = checkLifecycleRuns(runs, { now: NOW });
+    assert.deepEqual(result.problems, []);
+    assert.match(result.notes.join('\n'), /1 state conflict.*retried/);
   });
 
   it('fails on a failed run', () => {
