@@ -46,6 +46,7 @@ import {
 } from "../_shared/longMessages.ts";
 import { createLongMessageStore, recordLongMessageEvent } from "../_shared/longMessageStore.ts";
 import { createLongMessageSummarizer } from "../_shared/longMessageSummarizer.ts";
+import { waitForUserMessageSaved } from "../_shared/turnMessageWait.ts";
 import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
@@ -1761,6 +1762,24 @@ Deno.serve(async (req: Request) => {
           result.content &&
           !isCalmFallbackContent
         ? (async () => {
+            // The website saves the turn's messages after it receives the reply, so wait (briefly, at most
+            // 10 s, and not before the reply) until this turn's message exists. Otherwise the first message
+            // of a conversation could be read before it is saved: invalid_source, an alert, no run.
+            await waitForUserMessageSaved({
+              load: async () => {
+                const { data, error } = await svc
+                  .from("messages")
+                  .select("content, created_at")
+                  .eq("conversation_id", conversationId)
+                  .eq("sender", "user")
+                  .order("created_at", { ascending: false })
+                  .limit(3);
+                if (error) throw new Error("messages lookup failed");
+                return (data ?? []) as Array<{ content: string; created_at: string }>;
+              },
+              text: message,
+              sinceMs: startMs - 5_000,
+            });
             const crossMemoryOnForWrite = await fetchConversationCrossMemoryEnabled(
               svc,
               userId,
