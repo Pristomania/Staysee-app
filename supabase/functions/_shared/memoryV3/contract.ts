@@ -68,6 +68,15 @@ const REQUIRED: Record<MemoryKind, Record<string, EvidenceRelation>> = {
   hypothesis: { candidate: "supports", supported: "supports", stale: "contradicts", rejected: "rejects" },
 };
 
+// Why a response was rejected: one fixed word per stage of normalizeMemoryV3LayeredResponse, never any text from
+// the response. The runners store it with the failure, so "extractor_contract_invalid" says which check failed
+// instead of leaving it to guesswork (it took three attempts to find the cause of one on 2026-10-20).
+const FAILURE_REASONS = new WeakMap<object, string>();
+
+export function memoryV3ContractFailureReason(error: unknown): string | null {
+  return typeof error === "object" && error !== null ? FAILURE_REASONS.get(error) ?? null : null;
+}
+
 function fail(): Error {
   const error = new Error("[memory-v3:contract] invalid input");
   error.name = "MemoryV3ContractError";
@@ -248,6 +257,7 @@ export async function normalizeMemoryV3LayeredResponse(
   scopeMode: "cross_conversation" | "conversation",
   options: { dropUnsupportedItems?: boolean } = {},
 ): Promise<MemoryV3Extraction> {
+  let step = "input";
   try {
     const validated = validateMemoryV3Dialogue(input);
     if (!isNonEmptyString(extractorVersion)) throw fail();
@@ -255,8 +265,10 @@ export async function normalizeMemoryV3LayeredResponse(
     const scopedConversationId = scopeMode === "conversation"
       ? conversationIdFromCaseId(validated.caseId)
       : null;
+    step = "response_shape";
     const response = inspectRecord(parseRaw(raw), RESPONSE_FIELDS);
     const rawItems = inspectDenseArray(response.items);
+    step = "items";
     const refs = new Map<string, { key: string; kind: MemoryKind }>();
     const items: MemoryV3Extraction["items"] = [];
     for (let index = 0; index < rawItems.length; index += 1) {
@@ -279,6 +291,7 @@ export async function normalizeMemoryV3LayeredResponse(
       items.push({ ...normalized, localItemKey: key });
     }
 
+    step = "layer_decisions";
     const rawDecisions = inspectDenseArray(response.layerDecisions);
     if (rawDecisions.length !== 3) throw fail();
     const decidedRefs = new Set<string>();
@@ -297,11 +310,15 @@ export async function normalizeMemoryV3LayeredResponse(
     const messages = new Map(validated.messages.map((message) => [message.id, message]));
     const evidence: MemoryV3Extraction["evidence"] = [];
     const seenEvidence = new Set<string>();
+    step = "evidence_fields";
     for (const rawRow of inspectDenseArray(response.evidence)) {
+      step = "evidence_fields";
       const row = inspectRecord(rawRow, EVIDENCE_FIELDS);
       if (!isNonEmptyString(row.itemRef) || !refs.has(row.itemRef) || !isNonEmptyString(row.sourceMessageId) || !RELATIONS.has(row.relation as EvidenceRelation)) throw fail();
+      step = "evidence_message";
       const message = messages.get(row.sourceMessageId);
       if (!message || message.role !== "user") throw fail();
+      step = "evidence_support";
       const target = refs.get(row.itemRef)!;
       const relation = row.relation as EvidenceRelation;
       const typed = target.kind === "recurrence" && relation === "supports";
@@ -310,6 +327,7 @@ export async function normalizeMemoryV3LayeredResponse(
         if (row.supportType === "episode_observation" ? !isNonEmptyString(row.episodeKey) : row.episodeKey !== null) throw fail();
       } else if (row.supportType !== null || !isNonEmptyString(row.episodeKey)) throw fail();
       const identity = `${target.key}\0${message.id}\0${relation}`;
+      step = "evidence_duplicate";
       if (seenEvidence.has(identity)) throw fail();
       seenEvidence.add(identity);
       evidence.push({
@@ -323,6 +341,7 @@ export async function normalizeMemoryV3LayeredResponse(
       });
     }
 
+    step = "item_support";
     const unsupported = new Set<string>();
     for (const item of items) {
       const related = evidence.filter((row) => row.itemKey === item.localItemKey);
@@ -345,7 +364,12 @@ export async function normalizeMemoryV3LayeredResponse(
     }
     return { run: { caseId: validated.caseId, extractorVersion }, items, evidence };
   } catch (error) {
-    if (typeof error === "object" && error !== null && OWN_ERRORS.has(error)) throw error;
-    throw fail();
+    if (typeof error === "object" && error !== null && OWN_ERRORS.has(error)) {
+      if (!FAILURE_REASONS.has(error)) FAILURE_REASONS.set(error, step);
+      throw error;
+    }
+    const own = fail();
+    FAILURE_REASONS.set(own, step);
+    throw own;
   }
 }

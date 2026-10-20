@@ -573,6 +573,62 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     }
   });
 
+  it("stores which contract check failed, as a fixed word, with the failure", async () => {
+    // Evidence that cites a message which is not in the dialogue.
+    const content = JSON.stringify({
+      layerDecisions: [
+        { kind: "event", decision: "emit", itemRefs: ["item:1"] },
+        { kind: "recurrence", decision: "omit", itemRefs: [] },
+        { kind: "hypothesis", decision: "omit", itemRefs: [] },
+      ],
+      items: [{
+        itemRef: "item:1", kind: "event", claim: "Любит утренние прогулки", status: "active",
+        sensitivity: "normal", eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      }],
+      evidence: [{
+        itemRef: "item:1", sourceMessageId: "99999999-9999-4999-8999-999999999999",
+        relation: "supports", supportType: null, episodeKey: "episode:m1",
+      }],
+    });
+    const test = harness({ extractorAdapterFactory: () => async () => ({ content, usage: null }) });
+    assert.deepEqual(await runMemoryV3LifecycleShadow(test.options), {
+      status: "failed", runId: RUN_ID, diagnosticCode: "extractor_contract_invalid",
+    });
+    assert.equal((test.failInputs[0] as { transportDetail: string | null }).transportDetail, "contract:evidence_message");
+  });
+
+  it("merges the identical item that two pieces of one long message both produce, instead of failing the run", async () => {
+    // Each piece of a long message is read on its own, so a fact mentioned in both comes back twice.
+    const BIG = "Я люблю утренние прогулки. ".repeat(350);
+    const test = harness({
+      async loadMessages() {
+        return [{ id: MESSAGE_ID, role: "user" as const, text: BIG, createdAt: CREATED_AT }];
+      },
+      extractorAdapterFactory: () => async () => ({ content: extractorContent(), usage: null }),
+      reconcilerAdapterFactory: () => async (request: unknown) => ({
+        rawContent: JSON.stringify({
+          operations: (request as { input: { candidates: Array<{ candidateRef: string }> } })
+            .input.candidates.map(({ candidateRef }) => ({
+              type: "ignore", candidateRef, targetMemoryRef: null, topic: null, supersedesMemoryRef: null,
+            })),
+        }),
+        usage: null,
+      }),
+    });
+    const original = console.warn;
+    console.warn = () => {};
+    let result: Awaited<ReturnType<typeof runMemoryV3LifecycleShadow>>;
+    try {
+      result = await runMemoryV3LifecycleShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    const cas = test.casInputs[0] as { extraction: { items: unknown[]; evidence: unknown[] } };
+    assert.equal(cas.extraction.items.length, 1);
+    assert.equal(cas.extraction.evidence.length, 1);
+  });
+
   it("enforces the reconciler byte cap after extraction and before its adapter", async () => {
     const test = harness({
       extractorAdapterFactory: () => async () => ({ content: extractorContent("x".repeat(81_000)), usage: null }),
