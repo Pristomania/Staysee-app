@@ -28,6 +28,7 @@ import {
   checkDialogueRuns,
   checkLifecycleRuns,
   checkMemoryItems,
+  hasPendingConflictRetry,
 } from './lib/memory-v3-prod-smoke-checks.mjs';
 
 const { url, serviceKey, testUserId } = assertProdTestAllowed();
@@ -96,7 +97,9 @@ async function readRuns(headers, conversationId) {
 }
 
 // Memory runs happen in the background after each reply: wait until nothing is
-// still running and no new run has appeared for two polls in a row.
+// still running and no new run has appeared for two polls in a row, and no conflicted
+// run is still waiting for its automatic rerun (deleting the conversation then would
+// make the rerun fail and raise a false alert).
 async function waitForRunsToSettle(headers, conversationId) {
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   let previous = '';
@@ -106,7 +109,8 @@ async function waitForRunsToSettle(headers, conversationId) {
     const running = [...runs.dialogue, ...runs.lifecycle].filter((run) => run.status === 'reserved').length;
     const signature = `${runs.dialogue.length}/${runs.lifecycle.length}`;
     stableRounds = running === 0 && signature === previous ? stableRounds + 1 : 0;
-    if (stableRounds >= 2) break;
+    const rerunPending = hasPendingConflictRetry(runs.dialogue) || hasPendingConflictRetry(runs.lifecycle);
+    if (stableRounds >= 2 && !rerunPending) break;
     previous = signature;
     await sleep(POLL_EVERY_MS);
     runs = await readRuns(headers, conversationId);
