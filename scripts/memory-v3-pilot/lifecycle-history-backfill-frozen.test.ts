@@ -20,7 +20,7 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/lifecycleContract.ts':
-    '933194DDB51111A91E85030914A2112EA89347ECE5947D7FB7C5AE20ECF2B095',
+    'B72A6B0A2C87061BFA0D6945E80B07F8A23E85ED51427BDEDDF060D2308FB99D',
   'supabase/functions/_shared/memoryV3/lifecyclePrompt.ts':
     'F71347719F2AC0F83E0FA580E6EFF1354A489D7220ADDF2A3BFFA272E8DDF1DF',
   'supabase/functions/_shared/memoryV3/lifecycleReducer.ts':
@@ -28,7 +28,7 @@ const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/transport.ts':
     '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D',
   'supabase/functions/_shared/memoryV3/lifecycleTransport.ts':
-    'D555A57FE81EBB6BA72DE3E6A801CFEFE4F782080BD9A23E4C3BEA0533270DEB',
+    '5DE7A1720B020EE22121B3F00D23D6A2B35D35850C7A3F20BDA663939823C42C',
   'supabase/functions/_shared/memoryV3/messages.ts':
     'DF5E3447A4620184D5C6F34E45619C90EB7578C632BF7E64F120B6E6F2E65B61',
   'supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql':
@@ -84,7 +84,7 @@ describe('Memory V3 historical backfill frozen baseline', () => {
       MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
       32_768,
     );
-    assert.equal(MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL, 1_200);
+    assert.equal(MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL, 4_000);
     assert.equal(MEMORY_V3_LIFECYCLE_MAX_STATE_ITEMS, 100);
     assert.equal(MEMORY_V3_LIFECYCLE_MAX_STATE_EVIDENCE, 500);
     assert.equal(MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN, 2);

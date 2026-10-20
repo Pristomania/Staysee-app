@@ -212,7 +212,7 @@ function providerFetch(log: string[]) {
  * dialogue-history-backfill-cli.test.ts's own providerFetchWithFailingConversation).
  * Routes by request content (the extractor request's caseId embeds the
  * conversationId) and by the extractor/reconciler max_tokens split (4096 vs
- * 1200), not by call-count parity, so ordering across conversations never
+ * 4000), not by call-count parity, so ordering across conversations never
  * matters. */
 function providerFetchWithFailingConversation(log: string[], failingConversationId: string) {
   const calls: Array<{ url: string; init: RequestInit }> = [];

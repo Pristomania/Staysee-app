@@ -252,7 +252,7 @@ describe('Memory V3 lifecycle history backfill CLI', () => {
         LIFECYCLE_HISTORY_PRIMARY_MODEL,
         LIFECYCLE_HISTORY_FALLBACK_MODEL,
       ]);
-      assert.equal(body.max_tokens, index === 0 ? 4_096 : 1_200);
+      assert.equal(body.max_tokens, index === 0 ? 4_096 : 4_000);
       assert.deepEqual(body.reasoning, { effort: 'low' });
       assert.deepEqual(body.provider, {
         allow_fallbacks: true,

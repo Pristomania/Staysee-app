@@ -160,7 +160,7 @@ describe('history backfill profile', () => {
     });
     assert.equal(MEMORY_V3_LIFECYCLE_MAX_EXTRACTOR_BYTES, 20_000);
     assert.equal(LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES, 40_000);
-    assert.equal(MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL, 1_200);
+    assert.equal(MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL, 4_000);
   });
 
   it('rejects unknown strings, objects, boxed strings, symbols, arrays, and null', () => {

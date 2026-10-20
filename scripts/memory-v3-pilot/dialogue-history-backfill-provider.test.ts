@@ -159,7 +159,7 @@ describe('history-only OpenRouter model route (dialogue scope)', () => {
     assert.equal(fetchImpl.calls.length, 1);
     assert.equal(response.textCalls, 1);
     assertRouteAndPrivacy(routedBody(fetchImpl));
-    assert.equal(routedBody(fetchImpl).max_tokens, 1_200);
+    assert.equal(routedBody(fetchImpl).max_tokens, 4_000);
     assert.equal(result.rawContent, JSON.stringify(RECONCILED));
     assert.equal(result.resolvedModel, LIFECYCLE_HISTORY_FALLBACK_MODEL);
   });

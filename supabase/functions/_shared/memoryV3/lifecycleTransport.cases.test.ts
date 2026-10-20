@@ -133,7 +133,7 @@ describe("Memory V3 lifecycle injected OpenRouter transport", () => {
     assert.equal(headers["Content-Type"], "application/json");
     const body = JSON.parse(String(fetchImpl.calls[0].init.body));
     assert.equal(body.model, "google/gemini-3.7-flash");
-    assert.equal(body.max_tokens, 1200);
+    assert.equal(body.max_tokens, 4000);
     assert.equal(Object.hasOwn(body, "max_completion_tokens"), false);
     assert.deepEqual(body.reasoning, { effort: "low" });
     assert.equal(Object.hasOwn(body, "reasoning_effort"), false);

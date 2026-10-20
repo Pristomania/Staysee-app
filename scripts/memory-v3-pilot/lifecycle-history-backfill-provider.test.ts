@@ -162,7 +162,7 @@ describe('history-only OpenRouter model route', () => {
     assert.equal(fetchImpl.calls.length, 1);
     assert.equal(response.textCalls, 1);
     assertRouteAndPrivacy(routedBody(fetchImpl));
-    assert.equal(routedBody(fetchImpl).max_tokens, 1_200);
+    assert.equal(routedBody(fetchImpl).max_tokens, 4_000);
     assert.equal(result.rawContent, JSON.stringify(RECONCILED));
     assert.equal(result.resolvedModel, LIFECYCLE_HISTORY_FALLBACK_MODEL);
   });
@@ -327,7 +327,7 @@ describe('history provider isolation', () => {
 
     for (const [relative, expected] of [
       ['../../supabase/functions/_shared/memoryV3/transport.ts', '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D'],
-      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', 'D555A57FE81EBB6BA72DE3E6A801CFEFE4F782080BD9A23E4C3BEA0533270DEB'],
+      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', '5DE7A1720B020EE22121B3F00D23D6A2B35D35850C7A3F20BDA663939823C42C'],
     ] as const) {
       const bytes = await readFile(fileURLToPath(new URL(relative, import.meta.url)));
       assert.equal(createHash('sha256').update(bytes).digest('hex').toUpperCase(), expected);

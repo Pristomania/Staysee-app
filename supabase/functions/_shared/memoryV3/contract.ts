@@ -3,14 +3,14 @@ import type { MemoryV3DialogueMessage } from "./messages.ts";
 export const MEMORY_V3_EXTRACTOR_VERSION = "memory-v3-openrouter-gemini-3.7-flash-shadow-v2";
 export const MEMORY_V3_MODEL = "google/gemini-3.7-flash";
 export const MEMORY_V3_MAX_PROMPT_BYTES = 20_000;
-export const MEMORY_V3_MAX_OUTPUT_TOKENS = 1_200;
+export const MEMORY_V3_MAX_OUTPUT_TOKENS = 4_000;
 export const MEMORY_V3_RESERVED_INPUT_TOKENS = 32_768;
 export const MEMORY_V3_MAX_SOURCE_MESSAGES = 60;
 export const MEMORY_V3_MAX_DAILY_RESERVATIONS = 4;
 export const MEMORY_V3_INPUT_NANODOLLARS_PER_TOKEN = 750;
 export const MEMORY_V3_OUTPUT_NANODOLLARS_PER_TOKEN = 3_750;
-export const MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_RUN = 29_076_000;
-export const MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_DAY = 116_304_000;
+export const MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_RUN = 39_576_000;
+export const MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_DAY = 158_304_000;
 
 export interface MemoryV3DialogueInput {
   caseId: string;

@@ -318,7 +318,7 @@ describe('Memory V3 lifecycle history backfill engine', () => {
       assert.equal(body.messages.length, 2);
     }
     assert.equal(JSON.parse(String(extractorFetch.calls[0].init.body)).max_tokens, 4_096);
-    assert.equal(JSON.parse(String(reconcilerFetch.calls[0].init.body)).max_tokens, 1_200);
+    assert.equal(JSON.parse(String(reconcilerFetch.calls[0].init.body)).max_tokens, 4_000);
     assert.deepEqual(Object.keys(JSON.parse(String(extractorFetch.calls[0].init.body))).sort(), [
       'max_tokens', 'messages', 'models', 'provider', 'reasoning', 'response_format', 'stream',
     ]);

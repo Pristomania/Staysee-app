@@ -321,7 +321,7 @@ function providerFetch() {
  * failure while every other conversation's extractor+reconciler calls still
  * succeed normally. Routes by request content (the extractor request's
  * caseId embeds the conversationId, see prompt.ts's buildMemoryV3ExtractorRequest)
- * and by the extractor/reconciler max_tokens split (4096 vs 1200, see
+ * and by the extractor/reconciler max_tokens split (4096 vs 4000, see
  * dialogue-history-backfill-provider.ts and dialogueTransport.ts), not by
  * call-count parity -- so it stays correct regardless of how many
  * conversations/chunks precede the failing one. */
@@ -499,7 +499,7 @@ describe('Memory V3 dialogue history backfill CLI', () => {
         HISTORY_BACKFILL_PRIMARY_MODEL,
         HISTORY_BACKFILL_FALLBACK_MODEL,
       ]);
-      assert.equal(body.max_tokens, index === 0 ? 4_096 : 1_200);
+      assert.equal(body.max_tokens, index === 0 ? 4_096 : 4_000);
       assert.deepEqual(body.reasoning, { effort: 'low' });
       assert.deepEqual(body.provider, {
         allow_fallbacks: true,

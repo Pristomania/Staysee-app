@@ -104,6 +104,17 @@ describe("Memory V3 production contract", () => {
     );
   });
 
+  it("leaves the extractor room for its real answers instead of cutting them off mid-JSON", () => {
+    // Measured on live calls (2026-10-20): answers of 884-1,822 tokens, median 1,323. The old 1,200-token
+    // limit cut about 60% of them off, which looked like a transport failure and could not be retried
+    // (the identical request is cut at the same place). The limit is only a ceiling: only generated
+    // tokens are billed.
+    assert.equal(MEMORY_V3_MAX_OUTPUT_TOKENS, 4_000);
+    assert.ok(MEMORY_V3_MAX_OUTPUT_TOKENS >= 2 * 1_822);
+    assert.equal(MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_RUN, 39_576_000);
+    assert.equal(MEMORY_V3_CONFIGURED_CEILING_NANODOLLARS_PER_DAY, 158_304_000);
+  });
+
   it("validates dialogue without mutation and returns allowlisted copies", () => {
     const input = dialogue();
     const snapshot = structuredClone(input);

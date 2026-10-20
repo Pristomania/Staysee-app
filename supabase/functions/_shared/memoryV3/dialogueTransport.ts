@@ -1,4 +1,4 @@
-import { MEMORY_V3_MAX_SOURCE_MESSAGES } from "./contract.ts";
+import { MEMORY_V3_MAX_OUTPUT_TOKENS, MEMORY_V3_MAX_SOURCE_MESSAGES } from "./contract.ts";
 import {
   MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION,
   type MemoryV3DialogueReconcileRequest,
@@ -37,7 +37,7 @@ type JsonRecord = Record<string, unknown>;
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "google/gemini-3.7-flash";
-const MAX_COMPLETION_TOKENS = 1_200;
+const MAX_COMPLETION_TOKENS = MEMORY_V3_MAX_OUTPUT_TOKENS;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_ITEMS = 100;
