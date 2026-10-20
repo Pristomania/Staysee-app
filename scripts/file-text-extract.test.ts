@@ -6,7 +6,9 @@ import * as mammothModule from 'mammoth/mammoth.browser';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 import {
+  DOCX_MAX_XML_BYTES,
   FileTextError,
+  PDF_MAX_PAGES,
   extractDocxText,
   extractPdfText,
   readFileAsText,
@@ -31,7 +33,7 @@ async function docxWithParagraphs(paragraphs: string[]): Promise<ArrayBuffer> {
   zip.file('word/document.xml',
     '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
     `<w:body>${body}</w:body></w:document>`);
-  return await zip.generateAsync({ type: 'arraybuffer' });
+  return await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' });
 }
 
 // A minimal PDF with one line of text per page (standard font, ASCII text).
@@ -64,6 +66,7 @@ function pdfWithPages(lines: string[]): ArrayBuffer {
 const loaders = {
   loadDocx: async () => mammoth,
   loadPdf: async () => pdfjs as never,
+  loadZip: async () => JSZip as never,
 };
 
 describe('Word files', () => {
@@ -107,5 +110,76 @@ describe('PDF files', () => {
       () => readFileAsText(new File(['просто текст'], 'сломанный.pdf'), loaders),
       (error: unknown) => error instanceof FileTextError && error.problem === 'unreadable',
     );
+  });
+});
+
+describe('heavy Word files', () => {
+  // A small .docx can unpack into a huge document.xml. It is refused by reading at most DOCX_MAX_XML_BYTES of the
+  // real unpacked bytes (not by trusting the sizes the file declares), before anything is parsed.
+  it('refuses a document.xml that unpacks beyond the limit, though the file itself is tiny', async () => {
+    const buffer = await docxWithParagraphs(['а'.repeat(DOCX_MAX_XML_BYTES)]);
+    assert.ok(buffer.byteLength < 200_000, `the file is only ${buffer.byteLength} bytes`);
+    await assert.rejects(
+      () => readFileAsText(new File([buffer], 'бомба.docx'), loaders),
+      (error: unknown) => error instanceof FileTextError && error.problem === 'too_big',
+    );
+  });
+
+  it('still reads an ordinary document of a few hundred kilobytes of XML', async () => {
+    const buffer = await docxWithParagraphs(Array.from({ length: 2_000 }, (_, index) => `Абзац номер ${index}, про жизнь.`));
+    const text = await readFileAsText(new File([buffer], 'длинный.docx'), loaders);
+    assert.match(text, /Абзац номер 1999/);
+  });
+});
+
+describe('heavy and leaking PDF files', () => {
+  function stubPdf(options: { numPages: number; failOnPage?: number; destroyCalls: { count: number } }) {
+    return {
+      getDocument: () => ({
+        promise: Promise.resolve({
+          numPages: options.numPages,
+          getPage: async (index: number) => {
+            if (index === options.failOnPage) throw new Error('page failed');
+            return { getTextContent: async () => ({ items: [{ str: `страница ${index}`, hasEOL: true }] }) };
+          },
+        }),
+        destroy: async () => { options.destroyCalls.count += 1; },
+      }),
+    };
+  }
+
+  it('releases the document after reading, after a failure on a page, and after a failure to open it', async () => {
+    const ok = { count: 0 };
+    await extractPdfText(new ArrayBuffer(8), stubPdf({ numPages: 2, destroyCalls: ok }) as never);
+    assert.equal(ok.count, 1);
+
+    const failedPage = { count: 0 };
+    await assert.rejects(() => extractPdfText(new ArrayBuffer(8), stubPdf({ numPages: 3, failOnPage: 2, destroyCalls: failedPage }) as never));
+    assert.equal(failedPage.count, 1);
+
+    const failedOpen = { count: 0 };
+    await assert.rejects(() => extractPdfText(new ArrayBuffer(8), {
+      getDocument: () => ({ promise: Promise.reject(new Error('not a pdf')), destroy: async () => { failedOpen.count += 1; } }),
+    } as never));
+    assert.equal(failedOpen.count, 1);
+  });
+
+  it('refuses a PDF with more pages than the limit, without reading a page, and still releases it', async () => {
+    const calls = { count: 0 };
+    await assert.rejects(
+      () => extractPdfText(new ArrayBuffer(8), stubPdf({ numPages: PDF_MAX_PAGES + 1, destroyCalls: calls }) as never),
+      (error: unknown) => error instanceof FileTextError && error.problem === 'too_many_pages',
+    );
+    assert.equal(calls.count, 1);
+  });
+
+  it('gives up on a file that never finishes reading, at the deadline', async () => {
+    const never = { loadDocx: async () => mammoth, loadPdf: () => new Promise<never>(() => {}), loadZip: async () => JSZip as never };
+    const started = Date.now();
+    await assert.rejects(
+      () => readFileAsText(new File([pdfWithPages(['x'])], 'вечный.pdf'), never, { deadlineMs: 50 }),
+      (error: unknown) => error instanceof FileTextError && error.problem === 'unreadable',
+    );
+    assert.ok(Date.now() - started < 2_000);
   });
 });

@@ -7,9 +7,16 @@ import { MAX_MESSAGE_CHARS } from './messageLimits';
 /** Protects the browser from a huge file; the 10,000-character limit on the text is what really bounds a file. */
 export const FILE_MAX_BYTES = 5 * 1024 * 1024;
 
+/** A PDF with more pages than this is refused: no text of the allowed size needs that many. */
+export const PDF_MAX_PAGES = 200;
+/** A Word file whose main document unpacks to more than this is refused (read for real, not by its declared size). */
+export const DOCX_MAX_XML_BYTES = 8 * 1024 * 1024;
+/** Reading a file gives up after this long, so a heavy file cannot leave the screen waiting for ever. */
+export const FILE_READ_DEADLINE_MS = 30_000;
+
 const READABLE_EXTENSIONS = new Set(['txt', 'md', 'docx', 'pdf']);
 
-export type FileTextProblem = 'unsupported' | 'too_big' | 'unreadable' | 'empty' | 'too_long';
+export type FileTextProblem = 'unsupported' | 'too_big' | 'too_many_pages' | 'unreadable' | 'empty' | 'too_long';
 
 export class FileTextError extends Error {
   readonly problem: FileTextProblem;
@@ -80,6 +87,8 @@ export function fileProblemMessage(problem: FileTextProblem, length?: number): s
       return 'Такой файл я не умею читать. Подойдут .txt, .md, .docx и .pdf с текстом.';
     case 'too_big':
       return `Файл слишком большой: больше ${FILE_MAX_BYTES / (1024 * 1024)} МБ.`;
+    case 'too_many_pages':
+      return `В PDF больше ${PDF_MAX_PAGES} страниц. Раздели файл на части.`;
     case 'empty':
       return 'В файле нет текста. Если это скан или картинка, прочитать его пока нельзя.';
     case 'too_long':
@@ -99,6 +108,7 @@ export interface MammothLike {
 /** The part of pdf.js used here. */
 export interface PdfJsLike {
   getDocument(source: { data: Uint8Array }): {
+    destroy(): Promise<void> | void;
     promise: Promise<{
       numPages: number;
       getPage(index: number): Promise<{
@@ -108,9 +118,49 @@ export interface PdfJsLike {
   };
 }
 
+/** The part of JSZip used to look inside a Word file before it is parsed. */
+export interface ZipLike {
+  loadAsync(data: ArrayBuffer): Promise<{
+    file(name: string): null | {
+      internalStream(type: 'uint8array'): {
+        on(event: 'data', callback: (chunk: Uint8Array) => void): unknown;
+        on(event: 'error', callback: (error: unknown) => void): unknown;
+        on(event: 'end', callback: () => void): unknown;
+        pause(): unknown;
+        resume(): unknown;
+      };
+    };
+  }>;
+}
+
 export interface FileTextLoaders {
   loadDocx(): Promise<MammothLike>;
   loadPdf(): Promise<PdfJsLike>;
+  loadZip(): Promise<ZipLike>;
+}
+
+/**
+ * A Word file is a zip, and a tiny one can unpack into a huge document. The main document is unpacked for real,
+ * counting the bytes that actually come out (not the sizes the file declares), and unpacking stops at the limit.
+ */
+export async function assertDocxNotHeavy(buffer: ArrayBuffer, zipLibrary: ZipLike): Promise<void> {
+  const archive = await zipLibrary.loadAsync(buffer);
+  const document = archive.file('word/document.xml');
+  if (document === null) throw new FileTextError('unreadable');
+  await new Promise<void>((resolve, reject) => {
+    let total = 0;
+    const stream = document.internalStream('uint8array');
+    stream.on('data', (chunk: Uint8Array) => {
+      total += chunk.length;
+      if (total > DOCX_MAX_XML_BYTES) {
+        stream.pause();
+        reject(new FileTextError('too_big'));
+      }
+    });
+    stream.on('error', reject);
+    stream.on('end', () => resolve());
+    stream.resume();
+  });
 }
 
 export async function extractDocxText(buffer: ArrayBuffer, mammoth: MammothLike): Promise<string> {
@@ -121,22 +171,34 @@ export async function extractDocxText(buffer: ArrayBuffer, mammoth: MammothLike)
 const PDF_TEXT_CEILING = MAX_MESSAGE_CHARS * 3;
 
 export async function extractPdfText(buffer: ArrayBuffer, pdfjs: PdfJsLike): Promise<string> {
-  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const pages: string[] = [];
-  let total = 0;
-  for (let index = 1; index <= document.numPages && total <= PDF_TEXT_CEILING; index += 1) {
-    const content = await (await document.getPage(index)).getTextContent();
-    const text = content.items.map((item) => `${item.str ?? ''}${item.hasEOL ? '\n' : ''}`).join('');
-    pages.push(text);
-    total += text.length;
+  const loading = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+  try {
+    const document = await loading.promise;
+    if (document.numPages > PDF_MAX_PAGES) throw new FileTextError('too_many_pages');
+    const pages: string[] = [];
+    let total = 0;
+    for (let index = 1; index <= document.numPages && total <= PDF_TEXT_CEILING; index += 1) {
+      const content = await (await document.getPage(index)).getTextContent();
+      const text = content.items.map((item) => `${item.str ?? ''}${item.hasEOL ? '\n' : ''}`).join('');
+      pages.push(text);
+      total += text.length;
+    }
+    return pages.join('\n\n');
+  } finally {
+    // The document and its share of the worker are released whether reading worked or not.
+    try {
+      await loading.destroy();
+    } catch {
+      // Nothing more to do: the text (or the error) is what matters.
+    }
   }
-  return pages.join('\n\n');
 }
 
 // Each library is loaded once, the first time such a file is picked. The PDF worker is bundled by the site build as
 // a .js file (a separate .mjs asset would depend on the web server's MIME types).
 let docxLibrary: Promise<MammothLike> | null = null;
 let pdfLibrary: Promise<PdfJsLike> | null = null;
+let zipLibrary: Promise<ZipLike> | null = null;
 
 const defaultLoaders: FileTextLoaders = {
   loadDocx: () => {
@@ -144,6 +206,10 @@ const defaultLoaders: FileTextLoaders = {
       (module) => (module.default ?? module) as MammothLike,
     );
     return docxLibrary;
+  },
+  loadZip: () => {
+    zipLibrary ??= import('jszip').then((module) => (module.default ?? module) as unknown as ZipLike);
+    return zipLibrary;
   },
   loadPdf: () => {
     pdfLibrary ??= Promise.all([
@@ -157,19 +223,38 @@ const defaultLoaders: FileTextLoaders = {
   },
 };
 
+/** Rejects with 'unreadable' if the work has not finished in time (the work itself cannot be stopped from here). */
+function withDeadline<T>(work: Promise<T>, deadlineMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new FileTextError('unreadable')), deadlineMs);
+    work.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 /** Reads a picked file as text. Throws FileTextError with the reason, which fileProblemMessage turns into words. */
-export async function readFileAsText(file: File, loaders: FileTextLoaders = defaultLoaders): Promise<string> {
+export async function readFileAsText(
+  file: File,
+  loaders: FileTextLoaders = defaultLoaders,
+  options: { deadlineMs?: number } = {},
+): Promise<string> {
   const early = checkFileBeforeReading(file.name, file.size);
   if (early !== null) throw new FileTextError(early);
-  try {
+  const extension = fileExtension(file.name);
+  const read = async (): Promise<string> => {
     const buffer = await file.arrayBuffer();
-    const extension = fileExtension(file.name);
-    let text: string;
-    if (extension === 'docx') text = await extractDocxText(buffer, await loaders.loadDocx());
-    else if (extension === 'pdf') text = await extractPdfText(buffer, await loaders.loadPdf());
-    else text = decodeTextFile(buffer);
-    return normalizeExtractedText(text);
-  } catch {
-    throw new FileTextError('unreadable');
+    if (extension === 'docx') {
+      await assertDocxNotHeavy(buffer, await loaders.loadZip());
+      return await extractDocxText(buffer, await loaders.loadDocx());
+    }
+    if (extension === 'pdf') return await extractPdfText(buffer, await loaders.loadPdf());
+    return decodeTextFile(buffer);
+  };
+  try {
+    return normalizeExtractedText(await withDeadline(read(), options.deadlineMs ?? FILE_READ_DEADLINE_MS));
+  } catch (error) {
+    throw error instanceof FileTextError ? error : new FileTextError('unreadable');
   }
 }
