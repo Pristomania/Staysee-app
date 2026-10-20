@@ -137,6 +137,24 @@ async function settle(conversationId) {
   }
 }
 
+// Memory runs are deleted together with the test conversation, so what went wrong has to be
+// read first. Both run tables, failed rows only; transport_detail names a provider problem.
+async function collectFailedRuns(conversationId) {
+  const failures = [];
+  for (const [pipeline, table] of [['dialogue', 'memory_v3_dialogue_runs'], ['lifecycle', 'memory_v3_lifecycle_shadow_runs']]) {
+    for (const columns of ['diagnostic_code,transport_detail,created_at', 'diagnostic_code,created_at']) {
+      try {
+        const rows = await restJson(url, headers, `${table}?conversation_id=eq.${conversationId}&status=eq.failed&select=${columns}&order=created_at`);
+        for (const row of rows ?? []) failures.push({ pipeline, ...row });
+        break;
+      } catch {
+        // The column is missing on this table; retry with the shorter list.
+      }
+    }
+  }
+  return failures;
+}
+
 async function runVariant(label, userId) {
   const startedAt = new Date().toISOString();
   const accessToken = await getTechnicalUserAccessToken({ url, serviceKey, testUserId: userId });
@@ -194,7 +212,8 @@ async function runVariant(label, userId) {
       log(`probe ${probe.id}: ${SAMPLES} replies`);
     }
     await sleep(15_000);
-    return { replies, summaryRowsBeforeProbes, usage: await usageByKind(userId, startedAt), conversationId };
+    const failedRuns = await collectFailedRuns(conversationId);
+    return { replies, summaryRowsBeforeProbes, usage: await usageByKind(userId, startedAt), conversationId, failedRuns };
   } finally {
     try {
       await deleteTestConversation(url, headers, conversationId);
@@ -275,9 +294,14 @@ for (const [label, run] of [['включён', on], ['выключен', off]]) 
   const total = Object.values(run.usage).reduce((sum, v) => sum + v.cost, 0);
   lines.push(`- ${label}: итого $${total.toFixed(3)} — ${parts.join('; ')}`);
 }
+lines.push('', '## Упавшие запуски памяти (записи удаляются вместе с беседой, поэтому сняты до очистки)', '');
+for (const [label, run] of [['включён', on], ['выключен', off]]) {
+  const list = run.failedRuns.map((f) => `${f.pipeline}: ${f.diagnostic_code}${f.transport_detail ? ` (${f.transport_detail})` : ''} в ${String(f.created_at).slice(11, 19)}`);
+  lines.push(`- ${label}: ${list.length === 0 ? 'нет' : list.join('; ')}`);
+}
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(join(OUT_DIR, 'report.md'), lines.join('\n'), 'utf8');
-writeFileSync(join(OUT_DIR, 'details.json'), JSON.stringify({ summary, coverage, details, usage: { on: on.usage, off: off.usage } }, null, 2), 'utf8');
+writeFileSync(join(OUT_DIR, 'details.json'), JSON.stringify({ summary, coverage, details, usage: { on: on.usage, off: off.usage }, failedRuns: { on: on.failedRuns, off: off.failedRuns } }, null, 2), 'utf8');
 
 const pairProbes = ['open_loop', 'emotional_arc', 'sensitive_not_raised', 'listen_first', 'mother', 'thread_summary'];
 const replies = {};

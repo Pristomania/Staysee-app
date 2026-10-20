@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { dedupeMemoryItems, normalizeDedupKey } from './memoryDisplay';
 import { filterTensionNotes, type ProgressEntry } from './progressDiary';
-import { parseConversationMemory, type StructuredMemory } from './memoryUi';
+import { selectRepeatingThemes } from './dynamicsThemes';
 import { exportMemoryV3Data } from './memoryV3Viewer';
 
 export interface MessageActivityWindow {
@@ -50,7 +50,7 @@ export function humanizeRepeatingTheme(text: string): string {
 
 export interface DynamicsAliveItem {
   text: string;
-  source: 'open_loops' | 'tension' | 'weekly';
+  source: 'tension' | 'weekly';
 }
 
 export interface LinkedMemoryPair {
@@ -60,7 +60,8 @@ export interface LinkedMemoryPair {
 }
 
 export interface ConversationDynamicsData {
-  memory: StructuredMemory;
+  /** Confirmed recurring patterns of this conversation, from the new memory. */
+  repeatingThemes: string[];
   weeklies: ProgressEntry[];
   tensions: ProgressEntry[];
   linkedPairs: LinkedMemoryPair[];
@@ -156,7 +157,7 @@ export function buildChangingView(data: ConversationDynamicsData): DynamicsChang
 
 export function buildRepeatingView(data: ConversationDynamicsData): DynamicsRepeatingItem[] {
   const themes = dedupeMemoryItems(
-    data.memory.themes
+    data.repeatingThemes
       .map((text, index) => ({ fieldKey: 'themes' as const, index, text: text.trim() }))
       .filter((i) => i.text.length > 0),
   );
@@ -181,9 +182,6 @@ export function buildRepeatingView(data: ConversationDynamicsData): DynamicsRepe
 export function buildAliveView(data: ConversationDynamicsData): DynamicsAliveItem[] {
   const items: DynamicsAliveItem[] = [];
 
-  for (const text of dedupeTexts(data.memory.open_loops)) {
-    items.push({ text, source: 'open_loops' });
-  }
   for (const entry of data.tensions) {
     const text = entry.content.trim();
     if (!text) continue;
@@ -201,18 +199,11 @@ export function buildAliveView(data: ConversationDynamicsData): DynamicsAliveIte
   return items;
 }
 
-export async function fetchConversationMemory(
-  userId: string,
-  conversationId: string,
-): Promise<StructuredMemory | null> {
-  const { data, error } = await supabase
-    .from('conversations')
-    .select('conversation_summary')
-    .eq('id', conversationId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  return parseConversationMemory((data?.conversation_summary as string | null) ?? null);
+/** The new memory's confirmed recurring patterns for this conversation (never other chats'). */
+export async function fetchRepeatingThemes(conversationId: string): Promise<string[]> {
+  const result = await exportMemoryV3Data();
+  if (result.error) return [];
+  return selectRepeatingThemes(result.dialogue, conversationId);
 }
 
 export async function fetchMessageActivityForConversation(

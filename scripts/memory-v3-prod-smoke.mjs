@@ -81,7 +81,7 @@ async function chat(message, conversationId, requestId) {
 }
 
 const RUN_COLUMNS =
-  'status,diagnostic_code,message_count,user_message_count,extractor_prompt_tokens,created_at,completed_at';
+  'status,diagnostic_code,transport_detail,message_count,user_message_count,extractor_prompt_tokens,created_at,completed_at';
 
 async function readRuns(headers, conversationId) {
   const dialogue = await restJson(

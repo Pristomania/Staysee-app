@@ -70,6 +70,17 @@ assertMatch(
 // sites lingered. Removed entirely rather than left as a permanent no-op.
 assertDoesNotMatch(source, /repeatedItems/, "repeatedItems should be fully removed -- it was always []");
 
+// "Что повторяется" and "нерешённое" no longer come from the old conversation summary: the
+// summary is being switched off, and a screen that kept reading it would freeze. Repeating
+// themes now come from the new memory's confirmed recurring patterns; unfinished items from
+// the person's own notes and the weekly reflection.
+assertDoesNotMatch(source, /conversation_summary/, "the dynamics view must not read the legacy summary");
+assertDoesNotMatch(source, /parseConversationMemory/, "the legacy summary parser should be gone from the view");
+assertDoesNotMatch(source, /open_loops/, "the legacy open_loops field should be gone from the view");
+assertMatch(source, /export async function fetchRepeatingThemes/, "fetchRepeatingThemes should be exported");
+assertMatch(source, /selectRepeatingThemes\(/, "repeating themes should be chosen by selectRepeatingThemes");
+assertMatch(source, /repeatingThemes: string\[\]/, "ConversationDynamicsData should declare repeatingThemes");
+
 console.log("PASS: conversationDynamicsView.cases.test.ts (structural checks)");
 
 // The checks above only confirm source TEXT, not BEHAVIOR -- they would
@@ -106,10 +117,6 @@ const stubbedSource = behavioralSource
     "const filterTensionNotes = undefined; type ProgressEntry = any;",
   )
   .replace(
-    "import { parseConversationMemory, type StructuredMemory } from './memoryUi';",
-    "const parseConversationMemory = undefined; type StructuredMemory = any;",
-  )
-  .replace(
     "import { exportMemoryV3Data } from './memoryV3Viewer';",
     "const exportMemoryV3Data = undefined;",
   );
@@ -131,7 +138,7 @@ let buildChangingView: (data: DynamicsData) => {
   empty: boolean;
 };
 let buildRepeatingView: (data: DynamicsData) => Array<{ text: string; sublabel: string; displayText: string }>;
-let buildAliveView: (data: DynamicsData) => Array<{ text: string; source: 'open_loops' | 'tension' | 'weekly' }>;
+let buildAliveView: (data: DynamicsData) => Array<{ text: string; source: 'tension' | 'weekly' }>;
 try {
   nodeFsSync.writeFileSync(tempModuleUrl, stubbedSource);
   const imported = (await import(`${tempModuleUrl.href}?t=${Date.now()}`)) as {
@@ -148,7 +155,7 @@ try {
 
 function baseData(overrides: Partial<Parameters<typeof buildChangingView>[0]> = {}) {
   return {
-    memory: { themes: [], emotional_state: [], open_loops: [] } as never,
+    repeatingThemes: [],
     weeklies: [],
     tensions: [],
     linkedPairs: [],
@@ -241,7 +248,7 @@ console.log("\n=== buildRepeatingView theme classification (behavioral) ===\n");
 // "returnsHere", not just "inFocus".
 {
   const result = buildRepeatingView(baseData({
-    memory: { themes: ['страх'], emotional_state: [], open_loops: [] } as never,
+    repeatingThemes: ['страх'],
     weeklies: [
       { content: 'на этой неделе снова был страх перед разговором' } as never,
       { content: 'в начале недели тоже был страх' } as never,
@@ -256,7 +263,7 @@ console.log("\n=== buildRepeatingView theme classification (behavioral) ===\n");
 // "inFocus" instead.
 {
   const result = buildRepeatingView(baseData({
-    memory: { themes: ['истощение'], emotional_state: [], open_loops: [] } as never,
+    repeatingThemes: ['истощение'],
     weeklies: [{ content: 'ничего похожего тут нет' } as never],
   }));
   const match = result.find((r) => r.text === 'истощение');
@@ -266,9 +273,7 @@ console.log("\n=== buildRepeatingView theme classification (behavioral) ===\n");
 
 // No themes at all -- must return an empty list, not throw.
 {
-  const result = buildRepeatingView(baseData({
-    memory: { themes: [], emotional_state: [], open_loops: [] } as never,
-  }));
+  const result = buildRepeatingView(baseData({ repeatingThemes: [] }));
   assertMatch(String(result.length), /^0$/, 'no themes should produce an empty repeating view');
 }
 
@@ -276,23 +281,13 @@ console.log("All buildRepeatingView behavioral cases passed.");
 
 console.log("\n=== buildAliveView source tagging (behavioral) ===\n");
 
-// open_loops entries should come through tagged source: 'open_loops'.
+// The old summary's open_loops no longer feed this view -- only the person's own notes
+// (tensions) and the weekly reflection do. Tension notes come through tagged 'tension'
+// and an exact duplicate is shown once.
 {
   const result = buildAliveView(baseData({
-    memory: { themes: [], emotional_state: [], open_loops: ['найти нового терапевта'] } as never,
-  }));
-  const match = result.find((r) => r.text === 'найти нового терапевта');
-  if (!match) throw new Error('expected open_loop item to appear in buildAliveView output');
-  assertMatch(match.source, /^open_loops$/, 'an open_loops entry should be tagged source open_loops');
-}
-
-// tensions entries should come through tagged source: 'tension', and a
-// tension that duplicates an already-added open_loop must be skipped
-// rather than shown twice.
-{
-  const result = buildAliveView(baseData({
-    memory: { themes: [], emotional_state: [], open_loops: ['конфликт с мамой'] } as never,
     tensions: [
+      { content: 'конфликт с мамой' } as never,
       { content: 'конфликт с мамой' } as never,
       { content: 'тревога перед экзаменом' } as never,
     ],
@@ -301,7 +296,9 @@ console.log("\n=== buildAliveView source tagging (behavioral) ===\n");
   if (!distinctTension) throw new Error('expected distinct tension item to appear in buildAliveView output');
   assertMatch(distinctTension.source, /^tension$/, 'a tensions entry should be tagged source tension');
   const duplicateCount = result.filter((r) => r.text === 'конфликт с мамой').length;
-  assertMatch(String(duplicateCount), /^1$/, 'a tension duplicating an open_loop should not be shown a second time');
+  assertMatch(String(duplicateCount), /^1$/, 'a duplicated tension note should be shown once');
+  const legacy = result.filter((r) => (r.source as string) === 'open_loops').length;
+  assertMatch(String(legacy), /^0$/, 'nothing is tagged with the retired open_loops source');
 }
 
 // A line in the latest weekly matching the "unfinished" phrasing should

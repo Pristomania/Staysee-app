@@ -11,7 +11,7 @@ import {
   buildAliveView,
   buildChangingView,
   buildRepeatingView,
-  fetchConversationMemory,
+  fetchRepeatingThemes,
   fetchLinkedMemoryPairs,
   fetchMessageActivityForConversation,
   fetchTensionsForConversation,
@@ -29,7 +29,6 @@ import {
   type ProgressEntry,
   type WeeklyCooldownStatus,
 } from '../../lib/progressDiary';
-import { emptyMemory } from '../../lib/memoryUi';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 import type { Conversation } from '../../types';
 
@@ -375,9 +374,9 @@ export function ConversationDynamicsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [weeklyRows, memory, tensions, linkedPairs, activity, cd] = await Promise.all([
+      const [weeklyRows, repeatingThemes, tensions, linkedPairs, activity, cd] = await Promise.all([
         fetchWeeklyDynamics(user.id, convId),
-        fetchConversationMemory(user.id, convId),
+        fetchRepeatingThemes(convId),
         fetchTensionsForConversation(user.id, convId),
         fetchLinkedMemoryPairs(convId),
         fetchMessageActivityForConversation(convId),
@@ -386,7 +385,7 @@ export function ConversationDynamicsScreen() {
       setWeeklies(weeklyRows);
       setCooldown(cd);
       setDynamicsData({
-        memory: memory ?? emptyMemory(),
+        repeatingThemes,
         weeklies: weeklyRows,
         tensions,
         linkedPairs,
@@ -430,7 +429,6 @@ export function ConversationDynamicsScreen() {
     (changing.newItems.length > 0 || changing.fadedItems.length > 0);
 
   function aliveSublabel(source: string): string | undefined {
-    if (source === 'open_loops') return DYNAMICS_COPY.fromMemory;
     if (source === 'tension') return DYNAMICS_COPY.fromNote;
     return undefined;
   }
