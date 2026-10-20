@@ -773,6 +773,7 @@ export async function runMemoryV3DialogueShadow(
         dialogue,
         MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
         "conversation",
+        { dropUnsupportedItems: true },
       ));
     } catch {
       return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");

@@ -237,11 +237,16 @@ function validateItemFields(raw: unknown): Record<string, unknown> {
   return item;
 }
 
+// With dropUnsupportedItems, an item the model gave no sufficient supporting evidence for is dropped,
+// whole and together with its evidence rows, instead of rejecting the entire answer: one item the model
+// forgot to cite must not throw away the others (a live run answered with 4 items and 3 evidence rows).
+// Every other defect still rejects the answer.
 export async function normalizeMemoryV3LayeredResponse(
   raw: unknown,
   input: unknown,
   extractorVersion: string,
   scopeMode: "cross_conversation" | "conversation",
+  options: { dropUnsupportedItems?: boolean } = {},
 ): Promise<MemoryV3Extraction> {
   try {
     const validated = validateMemoryV3Dialogue(input);
@@ -318,13 +323,25 @@ export async function normalizeMemoryV3LayeredResponse(
       });
     }
 
+    const unsupported = new Set<string>();
     for (const item of items) {
       const related = evidence.filter((row) => row.itemKey === item.localItemKey);
-      if (!related.some((row) => row.relation === REQUIRED[item.kind][item.status])) throw fail();
-      if (item.kind === "recurrence" && (item.status === "candidate" || item.status === "active")) {
+      let supported = related.some((row) => row.relation === REQUIRED[item.kind][item.status]);
+      if (supported && item.kind === "recurrence" && (item.status === "candidate" || item.status === "active")) {
         const observations = new Set(related.filter((row) => row.relation === "supports" && row.supportType === "episode_observation").map((row) => row.episodeKey));
-        if (observations.size < 2) throw fail();
+        supported = observations.size >= 2;
       }
+      if (supported) continue;
+      if (options.dropUnsupportedItems !== true) throw fail();
+      unsupported.add(item.localItemKey);
+    }
+    if (unsupported.size > 0) {
+      console.warn("[memory-v3-unsupported-item-dropped]");
+      return {
+        run: { caseId: validated.caseId, extractorVersion },
+        items: items.filter((item) => !unsupported.has(item.localItemKey)),
+        evidence: evidence.filter((row) => !unsupported.has(row.itemKey)),
+      };
     }
     return { run: { caseId: validated.caseId, extractorVersion }, items, evidence };
   } catch (error) {

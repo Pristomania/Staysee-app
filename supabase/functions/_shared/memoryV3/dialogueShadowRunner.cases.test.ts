@@ -968,6 +968,49 @@ describe("Memory V3 dialogue delta cursor", () => {
     assert.deepEqual(cas.extraction.evidence.map((evidence) => evidence.sourceMessageId), [OTHER_MESSAGE_ID]);
   });
 
+  it("keeps the supported items and drops one the model gave no evidence for, instead of failing the whole run", async () => {
+    // A live run answered with 4 items and 3 evidence rows; the strict contract rejected all four.
+    const row = (itemRef: string, claim: string) => ({
+      itemRef, kind: "event", claim, status: "active", sensitivity: "normal",
+      eventTimeStart: null, eventTimeEnd: null, alternative: null,
+    });
+    const content = JSON.stringify({
+      layerDecisions: [
+        { kind: "event", decision: "emit", itemRefs: ["item:1", "item:2"] },
+        { kind: "recurrence", decision: "omit", itemRefs: [] },
+        { kind: "hypothesis", decision: "omit", itemRefs: [] },
+      ],
+      items: [row("item:1", "Любит утренние прогулки"), row("item:2", "Факт без цитаты")],
+      evidence: [{ itemRef: "item:1", sourceMessageId: MESSAGE_ID, relation: "supports", supportType: null, episodeKey: "episode:m1" }],
+    });
+    const test = harness({
+      extractorAdapterFactory: () => async () => ({ content, usage: null }),
+      reconcilerAdapterFactory: () => async (request: unknown) => ({
+        rawContent: JSON.stringify({
+          operations: (request as { input: { candidates: Array<{ candidateRef: string }> } })
+            .input.candidates.map(({ candidateRef }) => ({
+              type: "ignore", candidateRef, targetMemoryRef: null, topic: null, supersedesMemoryRef: null,
+            })),
+        }),
+        usage: null,
+      }),
+    });
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let result: Awaited<ReturnType<typeof runMemoryV3DialogueShadow>>;
+    try {
+      result = await runMemoryV3DialogueShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(warned, [["[memory-v3-unsupported-item-dropped]"]]);
+    const cas = test.casInputs[0] as { extraction: { items: Array<{ claim: string }> } };
+    assert.deepEqual(cas.extraction.items.map((item) => item.claim), ["Любит утренние прогулки"]);
+    assert.deepEqual(test.failInputs, []);
+  });
+
   it("tells the extractor how many leading messages are earlier context in delta mode, and says nothing on a first run", async () => {
     const delta = withCursor(harness({
       async loadMessages() {

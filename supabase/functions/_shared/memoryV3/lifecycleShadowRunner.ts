@@ -802,6 +802,7 @@ export async function runMemoryV3LifecycleShadow(
         dialogue,
         MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
         "cross_conversation",
+        { dropUnsupportedItems: true },
       ));
     } catch {
       return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
