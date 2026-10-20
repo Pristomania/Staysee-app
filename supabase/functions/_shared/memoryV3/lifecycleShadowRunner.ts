@@ -544,7 +544,11 @@ async function persistCompareAndSwap(
     const status = Object.getOwnPropertyDescriptor(cas as object, "status")?.value;
     if (status === "state_conflict") {
       inspectExactRecord(cas, ["status"], "state_write_failed");
-      return await persistFailure(failStore, runId, userId, "state_conflict");
+      // The database function that refused the write has already closed this run as
+      // failed/state_conflict. Closing it again would be refused ("run is not open"), which
+      // used to be reported as state_write_failed: an alert for a normal overlap of two runs,
+      // and no automatic rerun (the rerun starts only on state_conflict).
+      return failed(runId, "state_conflict");
     }
     const result = inspectExactRecord(cas, ["status", "resultingStateRevision"], "state_write_failed");
     if (result.status !== "succeeded" || result.resultingStateRevision !== resultingStateRevision) {

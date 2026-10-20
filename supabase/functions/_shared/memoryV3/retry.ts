@@ -44,8 +44,12 @@ export function withOneTransientRetry<Input, Output>(
 
 // Two runs for the same conversation (or account) that overlap can both read
 // the same memory state; the one finishing second finds it changed and its write
-// is refused ("state_conflict"). Running it again is the right recovery: the
-// second run re-reads the state and takes only what the first did not cover.
+// is refused ("state_conflict"; the database has already closed that run). Running
+// it again re-reads the state and takes only what the first did not cover. When
+// nothing new arrived in the pause, the database recognises the identical window
+// and skips the rerun ("duplicate"); that is not a failure either, because the
+// refused run never moved the conversation's cursor, so the next reply's run
+// reads the missed messages again (tests/db/conflictRecovery.dbtest.ts).
 export async function runWithOneConflictRetry<Result extends { status: string }>(
   run: () => Promise<Result>,
   options: Sleep = {},

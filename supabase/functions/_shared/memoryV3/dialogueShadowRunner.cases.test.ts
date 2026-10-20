@@ -418,7 +418,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(test.failInputs, []);
   });
 
-  it("terminalizes an empty-extraction run through fail() when its no-op CAS conflicts", async () => {
+  it("reports a conflicting no-op CAS as state_conflict without closing the run a second time", async () => {
     const test = harness({
       extractorAdapterFactory: () => async () => ({ content: emptyExtractorContent, usage: null }),
     });
@@ -429,7 +429,10 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(await runMemoryV3DialogueShadow(test.options), {
       status: "failed", runId: RUN_ID, diagnosticCode: "state_conflict",
     });
-    assert.deepEqual(test.calls.slice(-2), ["cas", "fail:state_conflict"]);
+    // The database function that refused the write already closed the run as failed/state_conflict;
+    // closing it again is refused, which used to surface as state_write_failed.
+    assert.equal(test.calls.at(-1), "cas");
+    assert.equal(test.calls.some((entry) => entry.startsWith("fail")), false);
     assert.equal(test.calls.includes("reconcilerFactory"), false);
   });
 
@@ -656,7 +659,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.equal(test.calls.filter((entry) => entry === "fail").length, 1);
   });
 
-  it("persists state_conflict via fail after the terminal CAS, so the run never sits stuck", async () => {
+  it("does not close the run again after a state_conflict: the database already did", async () => {
     const test = harness({
       store: {
         ...harness().store,
@@ -672,10 +675,11 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(await runMemoryV3DialogueShadow(test.options), {
       status: "failed", runId: RUN_ID, diagnosticCode: "state_conflict",
     });
-    // A terminal CAS outcome must always be written back via fail(), even for
-    // state_conflict -- otherwise the run row is left at "reserved" forever
-    // with no diagnostic, indistinguishable from a genuinely stuck pipeline.
-    assert.equal(test.calls.at(-1), "fail:state_conflict");
+    // apply_memory_v3_*_state marks the run failed/state_conflict itself in the same transaction (see
+    // tests/db/conflictRecovery.dbtest.ts, which proves it on a real database). A second close is
+    // refused with "run is not open", which would be reported as state_write_failed and raise an alert.
+    assert.equal(test.calls.at(-1), "cas");
+    assert.equal(test.calls.some((entry) => entry.startsWith("fail")), false);
   });
 
   it("sanitizes reservation and state-write failures", async () => {
