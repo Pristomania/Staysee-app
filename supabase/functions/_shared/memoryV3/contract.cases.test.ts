@@ -164,6 +164,68 @@ describe("Memory V3 production contract", () => {
     assert.match(caught.message, /^\[memory-v3:contract\]/);
   });
 
+  describe("dropping an item the model gave no supporting evidence for", () => {
+    const dropping = { dropUnsupportedItems: true };
+    const normalize = (value: unknown, options?: { dropUnsupportedItems?: boolean }) =>
+      normalizeMemoryV3LayeredResponse(value, dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation", options);
+
+    // Two active events; the model cited evidence for the first only. A live run did exactly this
+    // (4 items, 3 evidence rows) and the strict check rejected the whole answer, losing the good items.
+    function twoEventsOneWithoutEvidence() {
+      const first = { ...item("event", "active"), itemRef: "i1", claim: "Первый факт." };
+      const second = { ...item("event", "active"), itemRef: "i2", claim: "Факт без цитаты." };
+      return {
+        layerDecisions: [
+          { kind: "event", decision: "emit", itemRefs: ["i1", "i2"] },
+          { kind: "recurrence", decision: "omit", itemRefs: [] },
+          { kind: "hypothesis", decision: "omit", itemRefs: [] },
+        ],
+        items: [first, second],
+        evidence: [evidence({ itemRef: "i1" })],
+      };
+    }
+
+    it("still rejects the whole answer by default", async () => {
+      await rejectsSafely(twoEventsOneWithoutEvidence());
+    });
+
+    it("keeps the supported item with its evidence and drops the unsupported one", async () => {
+      const result = await normalize(twoEventsOneWithoutEvidence(), dropping);
+      assert.deepEqual(result.items.map((entry) => entry.claim), ["Первый факт."]);
+      assert.equal(result.evidence.length, 1);
+      assert.equal(result.evidence[0].itemKey, result.items[0].localItemKey);
+    });
+
+    it("drops a recurrence that has only one observation instead of failing", async () => {
+      const raw = rawFor("recurrence", "active");
+      raw.evidence = raw.evidence.slice(0, 1);
+      assert.deepEqual(await normalize(raw, dropping), {
+        run: { caseId: dialogue().caseId, extractorVersion: MEMORY_V3_EXTRACTOR_VERSION },
+        items: [],
+        evidence: [],
+      });
+    });
+
+    it("ends with an empty extraction when no item is supported", async () => {
+      const raw = twoEventsOneWithoutEvidence();
+      raw.evidence = [];
+      const result = await normalize(raw, dropping);
+      assert.deepEqual([result.items, result.evidence], [[], []]);
+    });
+
+    it("does not forgive other defects: unknown message, duplicate reference, empty claim", async () => {
+      const unknownMessage = twoEventsOneWithoutEvidence();
+      unknownMessage.evidence = [evidence({ itemRef: "i1", sourceMessageId: "99999999-9999-4999-8999-999999999999" })];
+      const duplicateRef = twoEventsOneWithoutEvidence();
+      duplicateRef.items[1].itemRef = "i1";
+      const emptyClaim = twoEventsOneWithoutEvidence();
+      emptyClaim.items[0].claim = "";
+      for (const raw of [unknownMessage, duplicateRef, emptyClaim]) {
+        await assert.rejects(() => normalize(raw, dropping), /^MemoryV3ContractError: \[memory-v3:contract\]/);
+      }
+    });
+  });
+
   it("accepts JSON text and empty abstention", async () => {
     const empty = {
       layerDecisions: ["event", "recurrence", "hypothesis"].map((kind) => ({ kind, decision: "omit", itemRefs: [] })),
