@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_MAX_RECONCILER_BYTES,
   MEMORY_V3_LIFECYCLE_MODEL,
   MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
@@ -133,10 +132,10 @@ describe('lifecycle model benchmark frozen profile', () => {
       profile.maxInputTokensPerCase,
       MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
     );
-    assert.equal(
-      profile.maxOutputTokensPerCase,
-      MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL,
-    );
+    // The benchmark profile is frozen at the 1,200-token limit the models were measured with (its
+    // hand-checked $0.348912 ceiling below depends on it). It is deliberately not tied to the
+    // production limit, which was raised to 4,000 when extractor answers were found cut off.
+    assert.equal(profile.maxOutputTokensPerCase, 1_200);
   });
 
   it('produces the hand-checked $0.348912 ceiling under the $0.36 gate', () => {

@@ -190,12 +190,24 @@ describe("Memory V3 lifecycle constants", () => {
       extractorBytes: 20_000,
       reconcilerBytes: 80_000,
       inputTokens: 32_768,
-      outputTokens: 1_200,
+      outputTokens: 4_000,
       calls: 2,
       reservations: 1,
-      ceiling: 58_152_000,
-      hardGate: 65_000_000,
+      ceiling: 79_152_000,
+      hardGate: 90_000_000,
     });
+  });
+
+  it("keeps the configured run ceiling equal to its parts and below the hard gate", () => {
+    const perCall = MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL * 750 +
+      MEMORY_V3_LIFECYCLE_MAX_OUTPUT_TOKENS_PER_CALL * 3_750;
+    assert.equal(
+      perCall * MEMORY_V3_LIFECYCLE_MAX_MODEL_CALLS_PER_RUN,
+      MEMORY_V3_LIFECYCLE_CONFIGURED_CEILING_NANODOLLARS_PER_RUN,
+    );
+    assert.ok(
+      MEMORY_V3_LIFECYCLE_CONFIGURED_CEILING_NANODOLLARS_PER_RUN <= MEMORY_V3_LIFECYCLE_HARD_GATE_NANODOLLARS_PER_RUN,
+    );
   });
 });
 

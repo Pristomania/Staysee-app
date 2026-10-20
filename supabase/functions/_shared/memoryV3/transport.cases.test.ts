@@ -95,7 +95,7 @@ describe("Memory V3 injected OpenRouter transport", () => {
     assert.equal(headers["Content-Type"], "application/json");
     const body = JSON.parse(String(fetchImpl.calls[0].init.body));
     assert.equal(body.model, "google/gemini-3.7-flash");
-    assert.equal(body.max_tokens, 1200);
+    assert.equal(body.max_tokens, 4000);
     assert.deepEqual(body.reasoning, { effort: "low" });
     assert.deepEqual(body.provider, {
       allow_fallbacks: true,
