@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Paperclip } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -74,6 +74,7 @@ import {
 } from '../../lib/chatVoiceIntegration';
 import { messageLengthHint, messageLengthState } from '../../lib/messageLimits';
 import { reportOverLimit, shouldReportOverLimit } from '../../lib/overLimitReport';
+import { FileTextError, fileProblemMessage, messageFromFileText, readFileAsText } from '../../lib/fileText';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -911,6 +912,39 @@ export function ChatScreen() {
     resizeChatComposer(inputRef.current);
   }
 
+  // Attaching a file = turning it into text in the browser and putting that text into the box, as if it had been
+  // pasted. Nothing is sent until the person presses Send, and the usual 10,000-character limit applies.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileReading, setFileReading] = useState(false);
+
+  async function handleFilePicked(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // so the same file can be picked again
+    if (!file) return;
+    setSendError(null);
+    setFileReading(true);
+    try {
+      const text = await readFileAsText(file);
+      const built = messageFromFileText(file.name, text);
+      if (!built.ok) {
+        setSendError(fileProblemMessage(built.problem, built.length));
+        return;
+      }
+      setInputValue((current) => (current.trim() ? `${current.trim()}
+
+${built.message}` : built.message));
+      requestAnimationFrame(() => {
+        resizeChatComposer(inputRef.current);
+        inputRef.current?.focus();
+      });
+    } catch (error) {
+      const problem = error instanceof FileTextError ? error.problem : 'unreadable';
+      setSendError(fileProblemMessage(problem, error instanceof FileTextError ? error.length : undefined));
+    } finally {
+      setFileReading(false);
+    }
+  }
+
   function insertGuidedPhrase(phrase: string) {
     voice.clearError();
     setInputValue(phrase);
@@ -1407,6 +1441,27 @@ export function ChatScreen() {
                     className={`chat-compose-input flex-1 bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
                     style={{ maxHeight: '120px' }}
                   />
+                  {!sending && (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".txt,.md,.docx,.pdf"
+                        className="hidden"
+                        onChange={handleFilePicked}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={fileReading}
+                        aria-label="Прикрепить файл"
+                        title="Прикрепить файл (.txt, .md, .docx, .pdf с текстом)"
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
+                      >
+                        <Paperclip className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                      </button>
+                    </>
+                  )}
                   {!sending && (
                     <button
                       type="button"
