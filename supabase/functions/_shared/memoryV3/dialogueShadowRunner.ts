@@ -1,6 +1,7 @@
 import {
   MEMORY_V3_MAX_PROMPT_BYTES,
   MEMORY_V3_MAX_SOURCE_MESSAGES,
+  memoryV3ContractFailureReason,
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
   type MemoryV3DialogueInput,
@@ -258,18 +259,26 @@ function chunkOldestMessageForExtraction(
 }
 
 // Merges one message's per-chunk extractions back into one (identity when
-// there was only ever one chunk). A collision between two chunks'
-// localItemKeys would mean the same structural candidate was independently
-// re-derived from two different slices of text -- treated as a contract
-// violation rather than silently keeping only one copy.
+// there was only ever one chunk). Each piece of a long message is read on its
+// own, so a fact mentioned in two pieces comes back twice. The same
+// localItemKey is the same normalized content, so the later copy is simply
+// dropped and its evidence kept once, instead of failing the whole run (an
+// alert, and the message never analysed) for something a long text naturally
+// does.
 function mergeMemoryV3Extractions(parts: MemoryV3Extraction[]): MemoryV3Extraction {
-  const items = parts.flatMap((part) => part.items);
-  const evidence = parts.flatMap((part) => part.evidence);
   const keys = new Set<string>();
-  for (const item of items) {
-    if (keys.has(item.localItemKey)) throw fail("extractor_contract_invalid");
+  const items = parts.flatMap((part) => part.items).filter((item) => {
+    if (keys.has(item.localItemKey)) return false;
     keys.add(item.localItemKey);
-  }
+    return true;
+  });
+  const seen = new Set<string>();
+  const evidence = parts.flatMap((part) => part.evidence).filter((row) => {
+    const identity = JSON.stringify([row.itemKey, row.sourceMessageId, row.relation]);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
   return { run: parts[0].run, items, evidence };
 }
 
@@ -797,15 +806,17 @@ export async function runMemoryV3DialogueShadow(
         "conversation",
         { dropUnsupportedItems: true },
       ));
-    } catch {
-      return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+    } catch (error) {
+      // Which check failed, as a fixed word (never any text from the response).
+      const reason = memoryV3ContractFailureReason(error);
+      return await persistFailure(failStore, runId, userId, "extractor_contract_invalid", reason === null ? null : `contract:${reason}`);
     }
   }
   let extraction: MemoryV3Extraction;
   try {
     extraction = mergeMemoryV3Extractions(extractionParts);
   } catch {
-    return await persistFailure(failStore, runId, userId, "extractor_contract_invalid");
+    return await persistFailure(failStore, runId, userId, "extractor_contract_invalid", "contract:merge");
   }
   const extractorUsage = sumMemoryV3DialogueUsage(usageParts);
   // Spec 2026-10-13 §1: the context block informs the extractor but is never

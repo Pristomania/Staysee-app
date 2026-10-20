@@ -12,6 +12,7 @@ import {
   MEMORY_V3_MAX_OUTPUT_TOKENS,
   MEMORY_V3_OUTPUT_NANODOLLARS_PER_TOKEN,
   MEMORY_V3_RESERVED_INPUT_TOKENS,
+  memoryV3ContractFailureReason,
   normalizeMemoryV3LayeredResponse,
   validateMemoryV3Dialogue,
 } from "./contract.ts";
@@ -162,6 +163,76 @@ describe("Memory V3 production contract", () => {
     }
     assert.ok(caught instanceof Error);
     assert.match(caught.message, /^\[memory-v3:contract\]/);
+  });
+
+  describe("the reason a response was rejected (a fixed word, never any text)", () => {
+    async function reasonOf(raw: unknown, options?: { dropUnsupportedItems?: boolean }) {
+      try {
+        await normalizeMemoryV3LayeredResponse(raw, dialogue(), MEMORY_V3_EXTRACTOR_VERSION, "cross_conversation", options);
+      } catch (error) {
+        return memoryV3ContractFailureReason(error);
+      }
+      return "accepted";
+    }
+    const twoEvents = () => {
+      const first = { ...item("event", "active"), itemRef: "i1", claim: "Первый факт." };
+      const second = { ...item("event", "active"), itemRef: "i2", claim: "Второй факт." };
+      return {
+        layerDecisions: [
+          { kind: "event", decision: "emit", itemRefs: ["i1", "i2"] },
+          { kind: "recurrence", decision: "omit", itemRefs: [] },
+          { kind: "hypothesis", decision: "omit", itemRefs: [] },
+        ],
+        items: [first, second],
+        evidence: [evidence({ itemRef: "i1" }), evidence({ itemRef: "i2" })],
+      };
+    };
+
+    it("names the stage that failed", async () => {
+      assert.equal(await reasonOf({ ...rawFor(), extra: 1 }), "response_shape");
+      const emptyClaim = twoEvents();
+      emptyClaim.items[0].claim = "";
+      assert.equal(await reasonOf(emptyClaim), "items");
+      const sameRef = twoEvents();
+      sameRef.items[1].itemRef = "i1";
+      assert.equal(await reasonOf(sameRef), "items");
+      const badDecisions = twoEvents();
+      badDecisions.layerDecisions[0].itemRefs = ["i1"];
+      assert.equal(await reasonOf(badDecisions), "layer_decisions");
+    });
+
+    it("tells apart the ways the evidence can be wrong", async () => {
+      const unknownMessage = twoEvents();
+      unknownMessage.evidence[1] = evidence({ itemRef: "i2", sourceMessageId: "99999999-9999-4999-8999-999999999999" });
+      assert.equal(await reasonOf(unknownMessage), "evidence_message");
+      const assistantMessage = twoEvents();
+      assistantMessage.evidence[1] = evidence({ itemRef: "i2", sourceMessageId: ASSISTANT });
+      assert.equal(await reasonOf(assistantMessage), "evidence_message");
+      const duplicate = twoEvents();
+      duplicate.evidence.push(evidence({ itemRef: "i1", episodeKey: "episode:other" }));
+      assert.equal(await reasonOf(duplicate), "evidence_duplicate");
+      const unknownItem = twoEvents();
+      unknownItem.evidence[1] = evidence({ itemRef: "nope" });
+      assert.equal(await reasonOf(unknownItem), "evidence_fields");
+    });
+
+    it("names an item left without enough evidence", async () => {
+      const lacking = twoEvents();
+      lacking.evidence = [lacking.evidence[0]];
+      assert.equal(await reasonOf(lacking), "item_support");
+      assert.equal(await reasonOf(lacking, { dropUnsupportedItems: true }), "accepted");
+    });
+
+    it("has a reason only for contract rejections, and never carries the response text", async () => {
+      assert.equal(memoryV3ContractFailureReason(new Error("boom")), null);
+      assert.equal(memoryV3ContractFailureReason(null), null);
+      const secret = twoEvents();
+      secret.items[0].claim = "RAW_SECRET_SENTINEL";
+      secret.evidence = [];
+      const reason = await reasonOf(secret);
+      assert.match(String(reason), /^[a-z_]+$/);
+      assert.equal(String(reason).includes("SECRET"), false);
+    });
   });
 
   describe("dropping an item the model gave no supporting evidence for", () => {
