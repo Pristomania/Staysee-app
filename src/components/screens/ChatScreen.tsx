@@ -73,6 +73,7 @@ import {
   voiceComposerMode,
 } from '../../lib/chatVoiceIntegration';
 import { messageLengthHint, messageLengthState } from '../../lib/messageLimits';
+import { reportOverLimit, shouldReportOverLimit } from '../../lib/overLimitReport';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -140,6 +141,15 @@ export function ChatScreen() {
   const [inputValue, setInputValue] = useState('');
   // One message is at most 10,000 characters: the count shows near the limit, and a longer text is not sent.
   const lengthState = messageLengthState(inputValue);
+  // Each time the text goes over the maximum, its length (never the text) is reported once, so that over
+  // time we can see whether people need a longer limit.
+  const wasTooLongRef = useRef(false);
+  useEffect(() => {
+    if (shouldReportOverLimit(wasTooLongRef.current, lengthState.tooLong)) {
+      void reportOverLimit(lengthState.length);
+    }
+    wasTooLongRef.current = lengthState.tooLong;
+  }, [lengthState.tooLong, lengthState.length]);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   /** Per-room message list — source of truth for the active chat. */

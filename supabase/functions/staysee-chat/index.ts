@@ -40,10 +40,11 @@ import { isLegacySummaryDisabled, withoutLegacySummary } from "../_shared/legacy
 import {
   compactLongMessagesForModel,
   isMessageTooLong,
+  LONG_MESSAGE_CHARS,
   MAX_MESSAGE_CHARS,
   SUMMARY_MODEL,
 } from "../_shared/longMessages.ts";
-import { createLongMessageStore } from "../_shared/longMessageStore.ts";
+import { createLongMessageStore, recordLongMessageEvent } from "../_shared/longMessageStore.ts";
 import { createLongMessageSummarizer } from "../_shared/longMessageSummarizer.ts";
 import {
   runMemoryV3Shadow,
@@ -653,6 +654,12 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ content: CALM_ERRORS.duplicate }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Note every long message by its length only (never its text), so that over time we can see whether the
+    // limit and the context need to grow. Never delays or fails the reply.
+    if (message.length > LONG_MESSAGE_CHARS) {
+      EdgeRuntime.waitUntil(recordLongMessageEvent(makeServiceClient(), userId, message.length));
     }
 
     // ── L7: Rate limit check ────────────────────────────────────────────────

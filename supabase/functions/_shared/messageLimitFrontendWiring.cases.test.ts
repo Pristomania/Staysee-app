@@ -26,6 +26,12 @@ describe("the message length limit reaches the input box", () => {
     assert.match(screen, /disabled=\{!inputValue\.trim\(\) \|\| lengthState\.tooLong\}/);
   });
 
+  it("reports the length (never the text) once each time the box goes over the maximum", () => {
+    assert.match(screen, /from '\.\.\/\.\.\/lib\/overLimitReport'/);
+    assert.match(screen, /shouldReportOverLimit\(wasTooLongRef\.current, lengthState\.tooLong\)/);
+    assert.match(screen, /reportOverLimit\(lengthState\.length\)/);
+  });
+
   it("shows a line only for a text that is too long, and never a counter", () => {
     assert.match(screen, /messageLengthHint\(lengthState\)/);
     assert.match(screen, /role="status"/);
