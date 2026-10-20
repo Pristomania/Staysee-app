@@ -230,8 +230,68 @@ export async function seedMessage(baseUrl, headers, conversationId, testUserId, 
   });
 }
 
+// Test conversations are KEPT when a test ends, for this long. Deleting them at once raised false alerts when
+// memory was still writing, and destroyed the evidence needed to find out why a run failed. The next test run
+// removes the ones older than this; STAYSEE_TEST_DELETE_NOW=1 deletes at the end instead.
+export const TEST_CONVERSATION_KEEP_MINUTES = 60;
+
+export function shouldDeleteTestConversationNow(env = process.env) {
+  return env.STAYSEE_TEST_DELETE_NOW === "1";
+}
+
+/** Test conversations (by title) that are at least `olderThanMinutes` old. */
+export function selectStaleTestConversations(
+  rows,
+  { now = Date.now(), olderThanMinutes = TEST_CONVERSATION_KEEP_MINUTES } = {}
+) {
+  const cutoff = now - olderThanMinutes * 60_000;
+  return rows.filter(
+    (row) => isTestConversationTitle(row.title) && Date.parse(row.created_at) <= cutoff
+  );
+}
+
+/** Removes this test account's test conversations older than the limit; returns how many were removed. */
+export async function removeStaleTestConversations(
+  baseUrl,
+  headers,
+  testUserId,
+  { now = Date.now(), olderThanMinutes = TEST_CONVERSATION_KEEP_MINUTES, log = console.log } = {}
+) {
+  assertExplicitTestUserId(testUserId);
+  const rows = await restJson(
+    baseUrl,
+    headers,
+    `conversations?user_id=eq.${testUserId}&select=id,title,created_at&order=created_at.asc&limit=500`
+  );
+  const stale = selectStaleTestConversations(rows ?? [], { now, olderThanMinutes });
+  for (const conversation of stale) {
+    await deleteTestConversation(baseUrl, headers, conversation.id);
+    log(`[cleanup] removed old test conversation ${conversation.id}`);
+  }
+  return stale.length;
+}
+
+/** At the end of a test: keep the conversation (default) or delete it now (STAYSEE_TEST_DELETE_NOW=1). */
+export async function releaseTestConversation(baseUrl, headers, conversationId, { log = console.log } = {}) {
+  if (!conversationId) return;
+  if (!shouldDeleteTestConversationNow()) {
+    log(
+      `\n[kept] test conversation ${conversationId} is kept for investigation; the next test run removes it ` +
+        `after ${TEST_CONVERSATION_KEEP_MINUTES} minutes, or now: node scripts/cleanup-prod-test-conversations.mjs --apply --older-than-minutes 0`
+    );
+    return;
+  }
+  try {
+    await deleteTestConversation(baseUrl, headers, conversationId);
+    log(`\n[cleanup] deleted test conversation ${conversationId}`);
+  } catch (e) {
+    console.error(`[cleanup] FAILED for ${conversationId}:`, e.message);
+  }
+}
+
 /**
- * Run prod test with guaranteed cleanup in finally.
+ * Run prod test. The conversation is kept afterwards (see TEST_CONVERSATION_KEEP_MINUTES); leftovers older than
+ * an hour from earlier runs are removed first.
  */
 export async function withTestConversation(
   { url, serviceKey, testUserId },
@@ -242,17 +302,15 @@ export async function withTestConversation(
   const headers = makeServiceHeaders(serviceKey);
   let conversationId = null;
   try {
+    try {
+      await removeStaleTestConversations(url, headers, testUserId);
+    } catch (e) {
+      console.error("[cleanup] could not remove old test conversations:", e.message);
+    }
     const created = await createTestConversation(url, headers, testUserId, titleSuffix);
     conversationId = created.conversationId;
     return await fn({ conversationId, title: created.title, headers, testUserId });
   } finally {
-    if (conversationId) {
-      try {
-        await deleteTestConversation(url, headers, conversationId);
-        console.log(`\n[cleanup] deleted test conversation ${conversationId}`);
-      } catch (e) {
-        console.error(`[cleanup] FAILED for ${conversationId}:`, e.message);
-      }
-    }
+    await releaseTestConversation(url, headers, conversationId);
   }
 }
