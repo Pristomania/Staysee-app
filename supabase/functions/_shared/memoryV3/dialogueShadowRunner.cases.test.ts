@@ -171,7 +171,7 @@ describe("Memory V3 dialogue shadow runner gates", () => {
     const oversized = harness({
       async loadMessages() {
         oversized.calls.push("messages");
-        return [{ id: MESSAGE_ID, role: "user" as const, text: "x".repeat(21_000), createdAt: CREATED_AT }];
+        return [{ id: MESSAGE_ID, role: "user" as const, text: "x".repeat(100_000), createdAt: CREATED_AT }];
       },
     });
     assert.deepEqual(await runMemoryV3DialogueShadow(oversized.options), {
@@ -1030,6 +1030,53 @@ describe("Memory V3 dialogue delta cursor", () => {
     } finally {
       console.warn = original;
     }
+  });
+
+  it("reads a first-run message above the byte cap in pieces instead of refusing it (a 10,000-character message is allowed)", async () => {
+    // The system instruction takes about 6 KB of the 20 KB cap, so a single Russian message of more than
+    // about 7,000 characters did not fit and the whole run failed with invalid_source (an alert).
+    const BIG = "Я люблю утренние прогулки. ".repeat(350); // about 9,450 characters, about 18 KB
+    const sentRequests: unknown[] = [];
+    const test = harness({
+      async loadMessages() {
+        return [{ id: MESSAGE_ID, role: "user" as const, text: BIG, createdAt: CREATED_AT }];
+      },
+      extractorAdapterFactory: () => async (request: unknown) => {
+        sentRequests.push(request);
+        return { content: emptyExtractorContent, usage: null };
+      },
+    });
+    const original = console.warn;
+    const warned: unknown[][] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args); };
+    let result: Awaited<ReturnType<typeof runMemoryV3DialogueShadow>>;
+    try {
+      result = await runMemoryV3DialogueShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.equal(sentRequests.length > 1, true, "the message is read in more than one piece");
+    assert.equal(sentRequests.every((request) =>
+      new TextEncoder().encode(JSON.stringify(request)).byteLength <= 20_000), true);
+    assert.deepEqual(warned, [["[memory-v3-dialogue-first-run-message-chunked]"]]);
+    const pieces = sentRequests.map((request) =>
+      (request as { input: { messages: Array<{ id: string; text: string }> } })
+        .input.messages.find((message) => message.id === MESSAGE_ID)!.text);
+    assert.equal(pieces.join(""), BIG, "no part of the message is lost");
+  });
+
+  it("still refuses, before any database or provider work, a first-run message that would need more than five pieces", async () => {
+    const test = harness({
+      async loadMessages() {
+        test.calls.push("messages");
+        return [{ id: MESSAGE_ID, role: "user" as const, text: "Слово ".repeat(40_000), createdAt: CREATED_AT }];
+      },
+    });
+    assert.deepEqual(await runMemoryV3DialogueShadow(test.options), {
+      status: "failed", runId: null, diagnosticCode: "invalid_source",
+    });
+    assert.deepEqual(test.calls, ["messages"]);
   });
 
   it("chunks a single oversized undrained message across several extractor calls and merges the results, instead of truncating it", async () => {

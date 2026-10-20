@@ -118,7 +118,7 @@ function ownDiagnostic(error: unknown): MemoryV3DialogueShadowDiagnostic | null 
 
 function fitExtractorDialogueToByteCap(
   dialogue: MemoryV3DialogueInput,
-): { dialogue: MemoryV3DialogueInput; request: ReturnType<typeof buildMemoryV3DialogueExtractorRequest> } {
+): { dialogue: MemoryV3DialogueInput; requests: ReturnType<typeof buildMemoryV3DialogueExtractorRequest>[] } {
   const cap = Math.min(MEMORY_V3_MAX_PROMPT_BYTES, MEMORY_V3_DIALOGUE_MAX_EXTRACTOR_BYTES);
   for (let start = 0; start < dialogue.messages.length; start += 1) {
     const messages = dialogue.messages.slice(start);
@@ -128,7 +128,29 @@ function fitExtractorDialogueToByteCap(
       : validateMemoryV3Dialogue({ caseId: dialogue.caseId, messages });
     const request = buildMemoryV3DialogueExtractorRequest(candidate);
     if (new TextEncoder().encode(JSON.stringify(request)).byteLength <= cap) {
-      return { dialogue: candidate, request };
+      return { dialogue: candidate, requests: [request] };
+    }
+  }
+  // Nothing fits: the newest message from the person is over the cap on its own (the system instruction
+  // takes about 6 KB of the 20 KB, so a single Russian message of more than about 7,000 characters, and
+  // the maximum is 10,000, does not fit). Never refuse it and never cut it: split its text into pieces
+  // that each fit and read them one after another, like a later run does. Older messages are dropped, as
+  // above. Only a message needing more than the piece ceiling is refused.
+  let lastUser = -1;
+  for (let index = dialogue.messages.length - 1; index >= 0; index -= 1) {
+    if (dialogue.messages[index].role === "user") {
+      lastUser = index;
+      break;
+    }
+  }
+  if (lastUser >= 0) {
+    const pieces = chunkOldestMessageForExtraction(dialogue.caseId, [], dialogue.messages[lastUser], cap);
+    if (pieces !== null) {
+      console.warn("[memory-v3-dialogue-first-run-message-chunked]");
+      return {
+        dialogue: validateMemoryV3Dialogue({ caseId: dialogue.caseId, messages: dialogue.messages.slice(lastUser) }),
+        requests: pieces,
+      };
     }
   }
   throw fail("invalid_source");
@@ -603,7 +625,7 @@ export async function runMemoryV3DialogueShadow(
         validateMemoryV3Dialogue({ caseId, messages: await load(userId, conversationId) }),
       );
       dialogue = fitted.dialogue;
-      extractorRequests = [fitted.request];
+      extractorRequests = fitted.requests;
     } else {
       const loaded = inspectDeltaWindow(await load(userId, conversationId, sinceCursor), caseId);
       latestMessageId = loaded.latestMessageId;
