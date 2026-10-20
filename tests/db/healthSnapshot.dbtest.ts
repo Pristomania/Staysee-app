@@ -104,6 +104,29 @@ describe("Memory V3 health snapshot on real Postgres", () => {
     assert.equal(lifecycle.byCode("reservation_failed"), 1);
   });
 
+  it("counts failed reservations, which leave no run row, as failures of their pipeline", async () => {
+    // A reservation that fails writes to memory_v3_reservation_failures and never creates a run. The monitor used to
+    // look only at the run tables, so a pipeline whose runs all failed to reserve looked healthy after one success.
+    const before = await snapshot();
+    const failure = (kind: "dialogue" | "lifecycle", created_at: string) => ({
+      kind, user_id: userId, conversation_id: conversationId, detail: "synthetic reservation failure", created_at,
+    });
+    await must(client.from("memory_v3_reservation_failures").insert([
+      failure("dialogue", minutesAgo(5)), failure("dialogue", minutesAgo(20)), failure("dialogue", minutesAgo(50)),
+      failure("dialogue", minutesAgo(300)), // outside the window
+      failure("lifecycle", minutesAgo(7)), failure("lifecycle", minutesAgo(30)),
+    ]), "seed reservation failures");
+
+    const after = await snapshot();
+    const dialogue = diff(after.dialogue, before.dialogue);
+    assert.equal(dialogue.failed, 3);
+    assert.equal(dialogue.byCode("reservation_failed"), 3);
+    assert.equal(dialogue.succeeded, 0);
+    const lifecycle = diff(after.lifecycle, before.lifecycle);
+    assert.equal(lifecycle.failed, 2);
+    assert.equal(lifecycle.byCode("reservation_failed"), 2);
+  });
+
   it("returns only aggregate numbers: nothing that names an account, conversation or message", async () => {
     const text = JSON.stringify(await snapshot());
     assert.equal(text.includes(userId), false);
