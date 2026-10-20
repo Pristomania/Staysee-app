@@ -18,7 +18,10 @@ export const SUMMARY_MAX_CHARS = 1_500;
 /** At most this many short versions are made while answering one message. */
 export const MAX_NEW_SUMMARIES_PER_REPLY = 2;
 
-const SUMMARY_MAX_TOKENS = 700;
+// The model "thinks" before it writes and that counts against max_tokens: with 700 and no reasoning
+// setting, 671 tokens went to thinking and the short version came out 91-115 characters long. Low
+// reasoning plus room for the text gives 800-900 characters. Only generated tokens are billed.
+const SUMMARY_MAX_TOKENS = 2_000;
 
 export function isMessageTooLong(text: string): boolean {
   return text.length > MAX_MESSAGE_CHARS;
@@ -128,6 +131,7 @@ export function buildLongMessageSummaryRequest(text: string) {
       { role: "user" as const, content: text },
     ],
     max_tokens: SUMMARY_MAX_TOKENS,
+    reasoning: { effort: "low" as const },
     temperature: 0.2,
     stream: false,
     provider: { allow_fallbacks: true, data_collection: "deny", zdr: true },
@@ -160,7 +164,9 @@ export function parseLongMessageSummaryResponse(body: unknown): LongMessageSumma
   if (typeof content !== "string") return null;
   let summary = content.trim();
   if (summary === "") return null;
-  if (choice?.finish_reason === "length") summary = cutBackToLastSentence(summary);
+  // An answer that ran into the limit is cut off mid-thought and would lose most of the message: no
+  // short version is better than a cut one (the full text stays).
+  if (choice?.finish_reason === "length") return null;
   if (summary.length > SUMMARY_MAX_CHARS) summary = cutBackToLastSentence(summary.slice(0, SUMMARY_MAX_CHARS));
   if (summary.length > SUMMARY_MAX_CHARS) summary = summary.slice(0, SUMMARY_MAX_CHARS);
   return { summary, usage: readUsage((body as { usage?: unknown }).usage) };

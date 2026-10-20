@@ -189,7 +189,11 @@ describe("the request for a short version", () => {
     assert.equal(request.model, "google/gemini-3.7-flash");
     assert.deepEqual(request.provider, { allow_fallbacks: true, data_collection: "deny", zdr: true });
     assert.equal(request.stream, false);
-    assert.ok(request.max_tokens >= 500 && request.max_tokens <= 1_000);
+    // The model "thinks" before it writes and that counts against max_tokens. With 700 and no reasoning
+    // setting, 671 tokens went to thinking and the short version came out 91-115 characters long
+    // (measured live 2026-10-20). Low reasoning and room for the text give 800-900 characters.
+    assert.deepEqual(request.reasoning, { effort: "low" });
+    assert.ok(request.max_tokens >= 1_500 && request.max_tokens <= 3_000);
   });
 });
 
@@ -213,12 +217,16 @@ describe("reading the answer for a short version", () => {
     }
   });
 
-  it("cuts an answer that ran into the limit back to its last full sentence, and caps the length", () => {
+  it("refuses an answer that ran into the limit: a cut-off short version would lose most of the message, so the full text stays", () => {
     const body = ok("Первая мысль. Вторая мысль. Третья обор");
     body.choices[0].finish_reason = "length";
-    assert.equal(parseLongMessageSummaryResponse(body)?.summary, "Первая мысль. Вторая мысль.");
+    assert.equal(parseLongMessageSummaryResponse(body), null);
+  });
+
+  it("caps the length of a very long answer at a sentence", () => {
     const huge = parseLongMessageSummaryResponse(ok(`${"Слово. ".repeat(600)}`));
     assert.ok((huge?.summary.length ?? 0) <= 1_500);
+    assert.ok(huge?.summary.endsWith("."));
   });
 
   it("takes usage as missing, not as zero, when the provider sent none", () => {
