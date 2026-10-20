@@ -20,13 +20,17 @@ function stripContinuationPrefix(s: string): string {
   return t;
 }
 
-/** Remove orphan «дальше» the model inserts between continuation chunks. */
+/**
+ * Remove an orphan «дальше» the model puts between continuation chunks: only when it stands alone on
+ * its own line. This runs on every reply (polishMergedReply), so it must never touch the ordinary word
+ * inside a sentence -- an earlier inline rule turned «как двигаться дальше. Но…» into
+ * «как двигаться Но…» and «что будет дальше и как» into «что будет и как».
+ */
 export function stripOrphanContinueMarkers(text: string): string {
   return text
     .replace(/([—–-])\s*\n+\s*дальше[.!…:]*\s*\n+\s*/giu, "$1 ")
     .replace(/\n{2,}\s*дальше[.!…:]*\s*\n{2,}/giu, "\n\n")
     .replace(/(^|\n)\s*дальше[.!…:]*\s*(?=\n)/giu, "$1")
-    .replace(/\s+дальше[.!…:]*\s+(?=[а-яё])/giu, " ")
     .trim();
 }
 
