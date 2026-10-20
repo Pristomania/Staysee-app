@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION } from "./dialoguePrompt.ts";
+import {
+  createMemoryV3DialogueOpenRouterAdapter,
+  projectSafeMemoryV3DialogueTransportDiagnostic,
+} from "./dialogueTransport.ts";
 import {
   MEMORY_V3_RETRY_DELAY_MS,
   runWithOneConflictRetry,
@@ -135,5 +140,56 @@ describe("one retry of a whole memory run after a write conflict", () => {
       /boom/,
     );
     assert.equal(calls, 1);
+  });
+});
+
+describe("a rate limit (HTTP 429) from the real reconciler transport", () => {
+  // The reconciler transports report 429 as its own code, provider_http_429, which an earlier version of the
+  // retry list did not contain: a rate limit was never retried (found by an independent review, 2026-10-20).
+  const reconcileRequest = () => ({
+    system: MEMORY_V3_DIALOGUE_SYSTEM_INSTRUCTION,
+    input: {
+      schemaVersion: "memory-v3-dialogue-reconcile-request-v1",
+      userLanguage: "ru",
+      session: {
+        conversationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        sourceLastMessageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        sourceLastCreatedAt: "2026-09-05T10:00:00.000Z",
+      },
+      messages: [{
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        role: "user",
+        text: "Когда мне страшно, я шучу.",
+        createdAt: "2026-09-05T10:00:00.000Z",
+      }],
+      currentItems: [],
+      candidates: [],
+    },
+  });
+
+  it("is retried once, after the pause", async () => {
+    let fetchCalls = 0;
+    const adapter = createMemoryV3DialogueOpenRouterAdapter({
+      apiKey: "test-key",
+      fetchImpl: (async () => { fetchCalls += 1; return new Response("{}", { status: 429 }); }) as unknown as typeof fetch,
+    });
+    const { waits, sleep } = sleeper();
+    const retrying = withOneTransientRetry(adapter, projectSafeMemoryV3DialogueTransportDiagnostic, { sleep });
+    await assert.rejects(() => retrying(reconcileRequest() as never));
+    assert.equal(fetchCalls, 2);
+    assert.deepEqual(waits, [MEMORY_V3_RETRY_DELAY_MS]);
+  });
+
+  it("is still not retried when the request itself is wrong (HTTP 400)", async () => {
+    let fetchCalls = 0;
+    const adapter = createMemoryV3DialogueOpenRouterAdapter({
+      apiKey: "test-key",
+      fetchImpl: (async () => { fetchCalls += 1; return new Response("{}", { status: 400 }); }) as unknown as typeof fetch,
+    });
+    const { waits, sleep } = sleeper();
+    const retrying = withOneTransientRetry(adapter, projectSafeMemoryV3DialogueTransportDiagnostic, { sleep });
+    await assert.rejects(() => retrying(reconcileRequest() as never));
+    assert.equal(fetchCalls, 1);
+    assert.deepEqual(waits, []);
   });
 });

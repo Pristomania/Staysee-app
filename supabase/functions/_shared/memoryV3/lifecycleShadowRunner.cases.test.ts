@@ -629,6 +629,59 @@ describe("Memory V3 lifecycle shadow ordered orchestration", () => {
     assert.equal(cas.extraction.evidence.length, 1);
   });
 
+  it("merges a fact that two pieces of one long message find at different positions of their answers", async () => {
+    // The item key contains the item's position in its piece's answer, so "Любит прогулки" is item 2 in the first
+    // piece and item 1 in the second: different keys, same fact. It must be stored once.
+    const BIG = "Я люблю утренние прогулки. ".repeat(350);
+    const answer = (claims: string[]) => JSON.stringify({
+      layerDecisions: [
+        { kind: "event", decision: "emit", itemRefs: claims.map((_, index) => `item:${index + 1}`) },
+        { kind: "recurrence", decision: "omit", itemRefs: [] },
+        { kind: "hypothesis", decision: "omit", itemRefs: [] },
+      ],
+      items: claims.map((claim, index) => ({
+        itemRef: `item:${index + 1}`, kind: "event", claim, status: "active", sensitivity: "normal",
+        eventTimeStart: null, eventTimeEnd: null, alternative: null,
+      })),
+      evidence: claims.map((_, index) => ({
+        itemRef: `item:${index + 1}`, sourceMessageId: MESSAGE_ID, relation: "supports", supportType: null,
+        episodeKey: `episode:${index + 1}`,
+      })),
+    });
+    const answers = [answer(["Любит чай", "Любит прогулки"]), answer(["Любит прогулки"])];
+    let call = 0;
+    const test = harness({
+      async loadMessages() {
+        return [{ id: MESSAGE_ID, role: "user" as const, text: BIG, createdAt: CREATED_AT }];
+      },
+      extractorAdapterFactory: () => async () => ({ content: answers[Math.min(call++, answers.length - 1)], usage: null }),
+      reconcilerAdapterFactory: () => async (request: unknown) => ({
+        rawContent: JSON.stringify({
+          operations: (request as { input: { candidates: Array<{ candidateRef: string }> } })
+            .input.candidates.map(({ candidateRef }) => ({
+              type: "ignore", candidateRef, targetMemoryRef: null, topic: null, supersedesMemoryRef: null,
+            })),
+        }),
+        usage: null,
+      }),
+    });
+    const original = console.warn;
+    console.warn = () => {};
+    let result: Awaited<ReturnType<typeof runMemoryV3LifecycleShadow>>;
+    try {
+      result = await runMemoryV3LifecycleShadow(test.options);
+    } finally {
+      console.warn = original;
+    }
+    assert.equal(result.status, "succeeded", JSON.stringify(result));
+    assert.equal(call > 1, true, "the message was read in more than one piece");
+    const cas = test.casInputs[0] as { extraction: { items: Array<{ claim: string; localItemKey: string }>; evidence: Array<{ itemKey: string }> } };
+    assert.deepEqual(cas.extraction.items.map((item) => item.claim), ["Любит чай", "Любит прогулки"]);
+    assert.equal(cas.extraction.evidence.length, 2, "one evidence row per fact");
+    const keys = new Set(cas.extraction.items.map((item) => item.localItemKey));
+    assert.equal(cas.extraction.evidence.every((row) => keys.has(row.itemKey)), true, "every evidence row points at a kept fact");
+  });
+
   it("enforces the reconciler byte cap after extraction and before its adapter", async () => {
     const test = harness({
       extractorAdapterFactory: () => async () => ({ content: extractorContent("x".repeat(81_000)), usage: null }),

@@ -16,7 +16,15 @@ export const MEMORY_V3_RETRY_DELAY_MS = 10_000;
 // provider answered 5xx, or answered 4xx (this includes rate limiting; a
 // permanent 4xx simply fails again at no cost). Not "provider_response_invalid":
 // that answer arrived and was paid for, it was just unusable.
-const TRANSIENT = new Set(["transport_failed", "transport_timeout", "provider_http_5xx", "provider_http_4xx"]);
+// provider_http_429 is the reconciler transports' own code for a rate limit (the extractor transport reports it
+// as provider_http_4xx). provider_http_400, a request the provider refuses, is not worth repeating.
+const TRANSIENT = new Set([
+  "transport_failed",
+  "transport_timeout",
+  "provider_http_5xx",
+  "provider_http_4xx",
+  "provider_http_429",
+]);
 
 type Sleep = { sleep?: (ms: number) => Promise<void> };
 

@@ -15,7 +15,12 @@ const row = (content: string, secondsAgo = 0) => ({ content, created_at: new Dat
 function clock() {
   let now = NOW;
   const sleeps: number[] = [];
-  return { sleeps, now: () => now, sleep: async (ms: number) => { sleeps.push(ms); now += ms; } };
+  return {
+    sleeps,
+    now: () => now,
+    advance: (ms: number) => { now += ms; },
+    sleep: async (ms: number) => { sleeps.push(ms); now += ms; },
+  };
 }
 
 describe("waiting for the turn's message to be saved", () => {
@@ -66,6 +71,37 @@ describe("waiting for the turn's message to be saved", () => {
       load: async () => [row("Привет")], text: "  Привет \n", sinceMs: NOW - 1_000, now: c.now, sleep: c.sleep,
     });
     assert.equal(found, true);
+  });
+
+  it("stops waiting for a lookup that never answers, at the deadline", async () => {
+    const started = Date.now();
+    const found = await waitForUserMessageSaved({
+      load: () => new Promise(() => {}), text: "Привет", sinceMs: started - 1_000, timeoutMs: 60, intervalMs: 10,
+    });
+    assert.equal(found, false);
+    assert.equal(Date.now() - started < 1_000, true);
+  });
+
+  it("does not count a match that arrives after the deadline", async () => {
+    // A lookup that answers late (the clock jumped past the deadline while it ran) is too late to count.
+    const c = clock();
+    const found = await waitForUserMessageSaved({
+      load: async () => { c.advance(20_000); return [row("Привет")]; },
+      text: "Привет", sinceMs: NOW - 1_000, now: c.now, sleep: c.sleep, timeoutMs: 10_000,
+    });
+    assert.equal(found, false);
+  });
+
+  it("clears its timer whichever way the lookup ends", async () => {
+    const active = new Set<unknown>();
+    const timers = {
+      setTimer: (fn: () => void, ms: number) => { const handle = setTimeout(fn, ms); active.add(handle); return handle; },
+      clearTimer: (handle: unknown) => { clearTimeout(handle as ReturnType<typeof setTimeout>); active.delete(handle); },
+    };
+    await waitForUserMessageSaved({ load: async () => [row("Привет")], text: "Привет", sinceMs: NOW - 1_000, ...timers });
+    await waitForUserMessageSaved({ load: async () => { throw new Error("down"); }, text: "Привет", sinceMs: NOW - 1_000, ...timers });
+    await waitForUserMessageSaved({ load: () => new Promise(() => {}), text: "Привет", sinceMs: Date.now() - 1_000, timeoutMs: 30, intervalMs: 5, ...timers });
+    assert.equal(active.size, 0, "no timer is left running");
   });
 
   it("never throws: a failing lookup just means it stops waiting", async () => {
