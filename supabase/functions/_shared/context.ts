@@ -52,6 +52,7 @@ import { formatMemoryV3DialoguePromptBlock } from "./memoryV3/dialogueReadPrompt
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface RecentMessage {
+  id?: string;
   role: "user" | "assistant";
   content: string;
   created_at: string;
@@ -251,7 +252,7 @@ async function fetchRecentMessages(
   // Admin UI must not expose message content.
   const { data, error } = await supabase
     .from("messages")
-    .select("sender, role, content, created_at")
+    .select("id, sender, role, content, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
     .limit(MAX_RECENT_MESSAGES);
@@ -259,6 +260,7 @@ async function fetchRecentMessages(
   if (!data) return [];
   // Reverse so oldest-first for the model
   return data.reverse().map((m) => ({
+    id: typeof m.id === "string" ? m.id : undefined,
     role: normalizeMessageRole(m),
     content: m.content,
     created_at: m.created_at,
