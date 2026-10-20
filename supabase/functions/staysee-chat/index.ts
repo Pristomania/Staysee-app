@@ -36,6 +36,7 @@ import {
   projectSafeMemoryV3LifecycleTransportDiagnostic,
 } from "../_shared/memoryV3/lifecycleTransport.ts";
 import { runWithOneConflictRetry, withOneTransientRetry } from "../_shared/memoryV3/retry.ts";
+import { isLegacySummaryDisabled, withoutLegacySummary } from "../_shared/legacySummaryMode.ts";
 import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
@@ -619,6 +620,12 @@ Deno.serve(async (req: Request) => {
 
     const userId = verifiedUser.userId;
     const authToken = verifiedUser.authToken;
+    // Legacy rolling summary ("ПАМЯТЬ БЕСЕДЫ") and its phrase-catcher corrections.
+    // ON unless STAYSEE_LEGACY_SUMMARY_OFF says otherwise (see legacySummaryMode.ts).
+    const legacySummaryOff = isLegacySummaryDisabled(
+      userId,
+      Deno.env.get("STAYSEE_LEGACY_SUMMARY_OFF"),
+    );
 
     // ── L7: Duplicate prevention ────────────────────────────────────────────
 
@@ -777,13 +784,14 @@ Deno.serve(async (req: Request) => {
           global: { headers: { Authorization: `Bearer ${authToken}` } },
         });
 
-        let packet = await buildContextPacket({
+        const builtPacket = await buildContextPacket({
           conversationId,
           userId,
           authToken,
           supabaseUrl,
           supabaseAnonKey,
         });
+        let packet = legacySummaryOff ? withoutLegacySummary(builtPacket) : builtPacket;
 
         if (sameTurnDurableCorrection) {
           packet = {
@@ -862,11 +870,13 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        const preTranscript = await fetchTranscriptForSummary(
-          userSupabase,
-          conversationId,
-          summaryUpdatedAt
-        );
+        const preTranscript = legacySummaryOff
+          ? []
+          : await fetchTranscriptForSummary(
+            userSupabase,
+            conversationId,
+            summaryUpdatedAt
+          );
         smokeDiagSnapshot.pre_transcript_len = preTranscript.length;
         smokeDiagSnapshot.messages_since_summary = packet.messagesSinceSummary;
         const preHints = [
@@ -877,7 +887,7 @@ Deno.serve(async (req: Request) => {
         ];
 
         if (
-          shouldEagerRefreshSummary({
+          !legacySummaryOff && shouldEagerRefreshSummary({
             conversationSummary: getConversationSummary(packet.conversationMeta),
             summaryUpdatedAt,
             messagesSinceSummary: packet.messagesSinceSummary,
@@ -1828,6 +1838,7 @@ Deno.serve(async (req: Request) => {
             : Promise.resolve(),
 
           // Rolling summary — full transcript fetch + merge (background)
+          !legacySummaryOff &&
           conversationId &&
           packetForSummary &&
           result.content &&
