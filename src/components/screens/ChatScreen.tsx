@@ -683,7 +683,7 @@ export function ChatScreen() {
       voice.stop();
       return;
     }
-    if (!inputValue.trim() || lengthState.tooLong || sending || sendLockRef.current || !user || !currentConversation) {
+    if (!inputValue.trim() || lengthState.tooLong || fileReading || sending || sendLockRef.current || !user || !currentConversation) {
       return;
     }
     const convId = currentConversation.id;
@@ -916,6 +916,14 @@ export function ChatScreen() {
   // pasted. Nothing is sent until the person presses Send, and the usual 10,000-character limit applies.
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileReading, setFileReading] = useState(false);
+  // Which pick is the current one. A result is used only if no newer pick started and the conversation did not
+  // change while the file was being read; otherwise it would land in the wrong draft.
+  const fileOperationRef = useRef(0);
+  const openConversationId = currentConversation?.id ?? null;
+  useEffect(() => {
+    fileOperationRef.current += 1;
+    setFileReading(false);
+  }, [openConversationId]);
 
   async function handleFilePicked(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -923,8 +931,10 @@ export function ChatScreen() {
     if (!file) return;
     setSendError(null);
     setFileReading(true);
+    const operation = ++fileOperationRef.current;
     try {
       const text = await readFileAsText(file);
+      if (operation !== fileOperationRef.current) return;
       const built = messageFromFileText(file.name, text);
       if (!built.ok) {
         setSendError(fileProblemMessage(built.problem, built.length));
@@ -938,10 +948,11 @@ ${built.message}` : built.message));
         inputRef.current?.focus();
       });
     } catch (error) {
+      if (operation !== fileOperationRef.current) return;
       const problem = error instanceof FileTextError ? error.problem : 'unreadable';
       setSendError(fileProblemMessage(problem, error instanceof FileTextError ? error.length : undefined));
     } finally {
-      setFileReading(false);
+      if (operation === fileOperationRef.current) setFileReading(false);
     }
   }
 
@@ -1466,7 +1477,7 @@ ${built.message}` : built.message));
                     <button
                       type="button"
                       onClick={handleVoicePress}
-                      disabled={voiceConsentOpen || !canStartVoiceDictation({
+                      disabled={fileReading || voiceConsentOpen || !canStartVoiceDictation({
                         sending,
                         phase: voice.snapshot.phase,
                       })}
@@ -1497,7 +1508,7 @@ ${built.message}` : built.message));
                     <button
                       type="button"
                       onClick={handleSend}
-                      disabled={!inputValue.trim() || lengthState.tooLong}
+                      disabled={!inputValue.trim() || lengthState.tooLong || fileReading}
                       aria-label="Отправить"
                       className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
                     >

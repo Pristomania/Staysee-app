@@ -326,11 +326,12 @@ describe('history provider isolation', () => {
     assert.equal(source.includes('node:fs'), false);
 
     for (const [relative, expected] of [
-      ['../../supabase/functions/_shared/memoryV3/transport.ts', '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D'],
-      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', '5DE7A1720B020EE22121B3F00D23D6A2B35D35850C7A3F20BDA663939823C42C'],
+      ['../../supabase/functions/_shared/memoryV3/transport.ts', '3B51D9FB962DC7EEABD0F3C62EC362D3F3D8DA916CFAA1760B9623F8AA95A4BB'],
+      ['../../supabase/functions/_shared/memoryV3/lifecycleTransport.ts', '86064F2B59C1AADA614F7A20F2A928FA7D0AB6520F2F7CFEBB1AEE9B3AE7C1F0'],
     ] as const) {
-      const bytes = await readFile(fileURLToPath(new URL(relative, import.meta.url)));
-      assert.equal(createHash('sha256').update(bytes).digest('hex').toUpperCase(), expected);
+      // Line endings are made the same before hashing (a Windows checkout turns LF into CRLF).
+      const text = (await readFile(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')).replace(/\r\n/g, '\n');
+      assert.equal(createHash('sha256').update(text, 'utf8').digest('hex').toUpperCase(), expected);
     }
   });
 });

@@ -75,6 +75,13 @@ assertEqual(
   'too long',
 );
 
+// A PDF with too many pages gets its own words.
+assertEqual(
+  fileProblemMessage('too_many_pages'),
+  'В PDF больше 200 страниц. Раздели файл на части.',
+  'too many pages',
+);
+
 // Text and Markdown files are read here; the file name and the size are checked before anything is read.
 const note = new File(['Привет\r\n\r\n\r\nмир'], 'заметка.md', { type: 'text/markdown' });
 assertEqual(await readFileAsText(note), 'Привет\n\nмир', 'markdown file');

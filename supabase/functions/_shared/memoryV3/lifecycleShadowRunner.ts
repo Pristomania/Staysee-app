@@ -261,25 +261,34 @@ function chunkOldestMessageForExtraction(
 
 // Merges one message's per-chunk extractions back into one (identity when
 // there was only ever one chunk). Each piece of a long message is read on its
-// own, so a fact mentioned in two pieces comes back twice. The same
-// localItemKey is the same normalized content, so the later copy is simply
-// dropped and its evidence kept once, instead of failing the whole run (an
-// alert, and the message never analysed) for something a long text naturally
-// does.
+// own, so a fact mentioned in two pieces comes back twice. The item key also
+// contains the item's position in its piece's answer, so the same fact found at
+// different positions has different keys: facts are recognised by their content
+// (every field but the key), the later copy is dropped and its evidence is
+// pointed at the first copy, then evidence is de-duplicated. Failing the run
+// instead (an alert, and the message never analysed) would punish a long text
+// for doing what long texts do.
 function mergeMemoryV3Extractions(parts: MemoryV3Extraction[]): MemoryV3Extraction {
-  const keys = new Set<string>();
+  const firstKeyByContent = new Map<string, string>();
+  const keyAlias = new Map<string, string>();
   const items = parts.flatMap((part) => part.items).filter((item) => {
-    if (keys.has(item.localItemKey)) return false;
-    keys.add(item.localItemKey);
+    const { localItemKey, ...content } = item;
+    const identity = JSON.stringify(content, Object.keys(content).sort());
+    const first = firstKeyByContent.get(identity);
+    keyAlias.set(localItemKey, first ?? localItemKey);
+    if (first !== undefined) return false;
+    firstKeyByContent.set(identity, localItemKey);
     return true;
   });
   const seen = new Set<string>();
-  const evidence = parts.flatMap((part) => part.evidence).filter((row) => {
-    const identity = JSON.stringify([row.itemKey, row.sourceMessageId, row.relation]);
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  });
+  const evidence = parts.flatMap((part) => part.evidence)
+    .map((row) => ({ ...row, itemKey: keyAlias.get(row.itemKey) ?? row.itemKey }))
+    .filter((row) => {
+      const identity = JSON.stringify([row.itemKey, row.sourceMessageId, row.relation]);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
   return { run: parts[0].run, items, evidence };
 }
 

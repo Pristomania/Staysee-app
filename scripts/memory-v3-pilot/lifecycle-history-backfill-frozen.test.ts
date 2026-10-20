@@ -20,23 +20,23 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/lifecycleContract.ts':
-    'B72A6B0A2C87061BFA0D6945E80B07F8A23E85ED51427BDEDDF060D2308FB99D',
+    '8487279F70337D6EF3FBE6519CD491C2592833850C9A1C6DEE182E17907E7BE5',
   'supabase/functions/_shared/memoryV3/lifecyclePrompt.ts':
-    'F71347719F2AC0F83E0FA580E6EFF1354A489D7220ADDF2A3BFFA272E8DDF1DF',
+    '10F3BD2656DA99610FCF20899DF57E02167FD532EBF2C56ED6873342AC742521',
   'supabase/functions/_shared/memoryV3/lifecycleReducer.ts':
-    '99EE66F532C50B5245B5279299958687ADBD7B2079D61A8F817EE11F6D05B581',
+    'C7ED099FB0EF6447162B8EF7C53F4A45BDC99CAA735337593BBFEF1FF4D2A493',
   'supabase/functions/_shared/memoryV3/transport.ts':
-    '4C549142FBDBA49BAAEAD76E1B162462095E545833407A853458505924398C6D',
+    '3B51D9FB962DC7EEABD0F3C62EC362D3F3D8DA916CFAA1760B9623F8AA95A4BB',
   'supabase/functions/_shared/memoryV3/lifecycleTransport.ts':
-    '5DE7A1720B020EE22121B3F00D23D6A2B35D35850C7A3F20BDA663939823C42C',
+    '86064F2B59C1AADA614F7A20F2A928FA7D0AB6520F2F7CFEBB1AEE9B3AE7C1F0',
   'supabase/functions/_shared/memoryV3/messages.ts':
-    'DF5E3447A4620184D5C6F34E45619C90EB7578C632BF7E64F120B6E6F2E65B61',
+    'CAF019478CFEEBDB57692E5348FFB0EE6625C07F637A425111C3655F67DBB2BD',
   'supabase/migrations/20260914220000_034_memory_v3_lifecycle_shadow.sql':
-    '6BAF2F0D95FF483DF488AB7CCC473366362C12475538C2AC0FFCE921A26A7334',
+    '1BC7454D2140156ACEA1DE0F8FC89959D0590A26BC3E73BBDDC3774E5FE5AB21',
   'supabase/migrations/20260920010000_036_memory_v3_lifecycle_read_canary.sql':
-    '0D2F680B52E536BED3372EECF18B3F5F740A47CE0EC2C1427461002D9AC9D385',
+    'A81C4C01C5059E3F259F5D141825404B4F00623D980EEA67B9751B20EB070099',
   'docs/superpowers/specs/2026-09-20-memory-v3-historical-backfill-design.md':
-    '40412BAAE1A88B3E8C5D126188A3E68B7D950D10FB69C47CB7E8B3DC7594FE90',
+    'FC773260D68317DF4B863B76CD0B7E9383B963E2500BAD575E086636A958B9AD',
 });
 
 const EXPECTED_IMPORTS = Object.freeze([
@@ -49,11 +49,11 @@ const EXPECTED_IMPORTS = Object.freeze([
   '../../supabase/functions/_shared/memoryV3/lifecycleContract.ts',
 ]);
 
+// Line endings are made the same before hashing: the files are committed with LF, and a Windows checkout
+// (core.autocrlf) turns them into CRLF, which must not break this gate. Any other change still does.
 function sha256(relativePath: string): string {
-  return createHash('sha256')
-    .update(readFileSync(resolve(REPOSITORY_ROOT, relativePath)))
-    .digest('hex')
-    .toUpperCase();
+  const text = readFileSync(resolve(REPOSITORY_ROOT, relativePath), 'utf8').replace(/\r\n/g, '\n');
+  return createHash('sha256').update(text, 'utf8').digest('hex').toUpperCase();
 }
 
 function sourceImportSpecifiers(source: string): string[] {

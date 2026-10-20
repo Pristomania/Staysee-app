@@ -74,6 +74,17 @@ describe("message length events on the real database", () => {
     assert.deepEqual(await events("over_limit"), [{ kind: "over_limit", char_count: 12_345 }]);
   });
 
+  it("keeps to one report per ten seconds even when many arrive at the same moment", { skip: !hasAnon }, async () => {
+    // Without a lock, parallel calls all find no recent report and all write one (found by an independent review).
+    const { error: clearError } = await admin.from("message_length_events").delete().eq("user_id", userId).eq("kind", "over_limit");
+    assert.equal(clearError, null);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const results = await Promise.all(Array.from({ length: 60 }, (_, index) =>
+      (signedIn as SupabaseClient).rpc("record_over_limit_hit", { p_char_count: 20_000 + index })));
+    assert.deepEqual(results.map((result) => result.error), Array.from({ length: 60 }, () => null));
+    assert.equal((await events("over_limit")).length, 1);
+  });
+
   it("refuses a report that is not over the limit, and a report from nobody signed in", { skip: !hasAnon }, async () => {
     const small = await (signedIn as SupabaseClient).rpc("record_over_limit_hit", { p_char_count: 10_000 });
     assert.notEqual(small.error, null);
