@@ -22,7 +22,10 @@ function commonRunProblems(label, runs, now) {
   const problems = [];
   const failed = runs.filter((run) => run.status === 'failed');
   if (failed.length > 0) {
-    const codes = [...new Set(failed.map((run) => run.diagnostic_code ?? 'no code'))].join(', ');
+    const codes = [...new Set(failed.map((run) => {
+      const code = run.diagnostic_code ?? 'no code';
+      return run.transport_detail ? `${code} (${run.transport_detail})` : code;
+    }))].join(', ');
     problems.push(`${failed.length} failed ${label} run(s): ${codes}`);
   }
   const stuck = runs.filter((run) => run.status === 'reserved' && now - Date.parse(run.created_at) > STUCK_AFTER_MS);

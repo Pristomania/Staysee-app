@@ -58,6 +58,12 @@ describe('dialogue memory runs in production', () => {
     assert.match(result.problems.join('\n'), /1 failed.*state_write_failed/);
   });
 
+  it('shows the transport detail of a failed run, so a provider problem can be told from a timeout', () => {
+    const runs = [...healthy(), run({ status: 'failed', diagnostic_code: 'extractor_transport_failed', transport_detail: 'provider_http_4xx', created_at: minutesAgo(5) })];
+    const result = checkDialogueRuns(runs, { totalMessages: 28, now: NOW });
+    assert.match(result.problems.join('\n'), /extractor_transport_failed \(provider_http_4xx\)/);
+  });
+
   it('fails on a run stuck in reserved, but not on one that just started', () => {
     const stuck = checkDialogueRuns([...healthy(), run({ status: 'reserved', created_at: minutesAgo(5) })], { totalMessages: 28, now: NOW });
     assert.match(stuck.problems.join('\n'), /stuck/);

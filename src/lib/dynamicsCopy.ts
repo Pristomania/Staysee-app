@@ -24,7 +24,6 @@ export const DYNAMICS_COPY = {
   rhythm: 'Ритм беседы',
   inFocus: 'Сейчас в фокусе',
   returnsHere: 'Возвращается в этой беседе',
-  fromMemory: 'Из памяти беседы',
   fromNote: 'Из вашей записки',
   hubChat: 'Чат',
   hubMemory: 'Память',
