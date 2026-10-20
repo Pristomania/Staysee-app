@@ -21,6 +21,7 @@ import {
   assertProdTestAllowed,
   restJson,
   seedMessage,
+  shouldDeleteTestConversationNow,
   withTestConversation,
 } from './lib/prod-test-env.mjs';
 import { getTechnicalUserAccessToken } from './lib/prod-test-session.mjs';
@@ -169,8 +170,9 @@ await withTestConversation(
   },
 );
 
-// The test must leave nothing behind (runs and identities go with the conversation).
-if (conversationIdForCleanupCheck) {
+// When the conversation is deleted at the end (STAYSEE_TEST_DELETE_NOW=1), the test must leave nothing behind
+// (runs and identities go with the conversation). By default the conversation is kept for investigation.
+if (conversationIdForCleanupCheck && shouldDeleteTestConversationNow()) {
   const left = await restJson(
     url, headersForCleanupCheck,
     `memory_v3_dialogue_runs?conversation_id=eq.${conversationIdForCleanupCheck}&select=id`,

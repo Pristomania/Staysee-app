@@ -23,7 +23,7 @@ import {
   assertExplicitTestUserId,
   assertProdTestAllowed,
   createTestConversation,
-  deleteTestConversation,
+  releaseTestConversation,
   loadEnvFile,
   makeServiceHeaders,
   restJson,
@@ -217,12 +217,8 @@ async function runVariant(label, userId) {
     const failedRuns = await collectFailedRuns(conversationId);
     return { replies, summaryRowsBeforeProbes, usage: await usageByKind(userId, startedAt), conversationId, failedRuns };
   } finally {
-    try {
-      await deleteTestConversation(url, headers, conversationId);
-      log(`cleanup: deleted ${conversationId}`);
-    } catch (error) {
-      console.error(`[${label}] cleanup FAILED for ${conversationId}: ${error.message}`);
-    }
+    // Kept for investigation (removed after an hour by the next test run); see prod-test-env.mjs.
+    await releaseTestConversation(url, headers, conversationId, { log });
   }
 }
 

@@ -3,10 +3,15 @@
  *
  *   node scripts/cleanup-prod-test-conversations.mjs --dry-run
  *   node scripts/cleanup-prod-test-conversations.mjs --apply
+ *   node scripts/cleanup-prod-test-conversations.mjs --apply --older-than-minutes 60
+ *
+ * Test conversations are kept when a test ends (so memory can finish and failures can be examined); the next
+ * test run removes the ones older than an hour. This removes them on request, optionally only the old ones.
  */
 
 import {
   isTestConversationTitle,
+  selectStaleTestConversations,
   deleteTestConversation,
   getServiceKey,
   getSupabaseUrl,
@@ -15,7 +20,14 @@ import {
   restJson,
 } from "./lib/prod-test-env.mjs";
 
-const args = new Set(process.argv.slice(2));
+const rawArgs = process.argv.slice(2);
+const args = new Set(rawArgs);
+const olderIndex = rawArgs.indexOf("--older-than-minutes");
+const olderThanMinutes = olderIndex === -1 ? null : Number(rawArgs[olderIndex + 1]);
+if (olderIndex !== -1 && (!Number.isFinite(olderThanMinutes) || olderThanMinutes < 0)) {
+  console.error("--older-than-minutes needs a number of minutes (0 or more)");
+  process.exit(1);
+}
 const dryRun = args.has("--dry-run") || !args.has("--apply");
 
 if (!args.has("--dry-run") && !args.has("--apply")) {
@@ -49,7 +61,9 @@ const allConvs = await restJson(
   "conversations?select=id,title,user_id,created_at&order=created_at.desc&limit=500"
 );
 
-const targets = (allConvs ?? []).filter((c) => isTestTitle(c.title));
+const targets = olderThanMinutes === null
+  ? (allConvs ?? []).filter((c) => isTestTitle(c.title))
+  : selectStaleTestConversations(allConvs ?? [], { olderThanMinutes });
 
 console.log(`Mode: ${dryRun ? "DRY-RUN (no deletes)" : "APPLY (will delete)"}`);
 console.log(`Supabase: ${url}`);
