@@ -176,6 +176,14 @@ describe("the request for a short version", () => {
     assert.match(system, /не (?:оценивай|советуй|смягчай)/i);
   });
 
+  it("keeps the person's gender as they write about themselves, and never guesses it", () => {
+    // A live short version called a woman "он" ("ему тридцать четыре года").
+    const system = buildLongMessageSummaryRequest("Мой текст").messages[0].content;
+    assert.match(system, /род/i);
+    assert.match(system, /глагол/i);
+    assert.match(system, /(?:без|избегай)[^.]*местоимени/i);
+  });
+
   it("goes through the private route like the memory calls", () => {
     const request = buildLongMessageSummaryRequest("Мой текст");
     assert.equal(request.model, "google/gemini-3.7-flash");
