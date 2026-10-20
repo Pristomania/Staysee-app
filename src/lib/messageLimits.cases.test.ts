@@ -1,5 +1,4 @@
 import {
-  COUNTER_FROM_CHARS,
   MAX_MESSAGE_CHARS,
   messageLengthHint,
   messageLengthState,
@@ -26,14 +25,12 @@ assertEqual(messageLengthState(text(10_001)).tooLong, true, 'one over refused');
 assertEqual(messageLengthState(text(10_001)).overBy, 1, 'over by one');
 assertEqual(messageLengthState(text(9_000)).overBy, 0, 'not over');
 
-// The counter appears only near the maximum.
-assertEqual(messageLengthState(text(COUNTER_FROM_CHARS - 1)).showCounter, false, 'no counter below');
-assertEqual(messageLengthState(text(COUNTER_FROM_CHARS)).showCounter, true, 'counter at the threshold');
-assertEqual(messageLengthState(text(12_000)).showCounter, true, 'counter above the maximum');
-
-// Nothing to say for a normal message; a count near the limit; a request to split a text that is too long.
+// No counter in the chat: it distracts. Nothing is shown for any text up to the maximum, however close to it.
 assertEqual(messageLengthHint(messageLengthState('Привет')), null, 'normal message');
-assertEqual(messageLengthHint(messageLengthState(text(8_500))), '8\u00a0500 из 10\u00a0000', 'count near the limit');
+assertEqual(messageLengthHint(messageLengthState(text(8_500))), null, 'no count near the limit');
+assertEqual(messageLengthHint(messageLengthState(text(10_000))), null, 'no count at the maximum');
+
+// Only a text that is too long gets a line, because Send does not work and the person needs to know why.
 assertEqual(
   messageLengthHint(messageLengthState(text(10_340))),
   'Слишком длинно: 10\u00a0340 из 10\u00a0000. Раздели на части.',

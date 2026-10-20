@@ -26,8 +26,9 @@ describe("the message length limit reaches the input box", () => {
     assert.match(screen, /disabled=\{!inputValue\.trim\(\) \|\| lengthState\.tooLong\}/);
   });
 
-  it("shows the count near the limit and a clear request to split a text that is too long", () => {
+  it("shows a line only for a text that is too long, and never a counter", () => {
     assert.match(screen, /messageLengthHint\(lengthState\)/);
     assert.match(screen, /role="status"/);
+    assert.doesNotMatch(limits, /COUNTER_FROM_CHARS|showCounter/);
   });
 });
