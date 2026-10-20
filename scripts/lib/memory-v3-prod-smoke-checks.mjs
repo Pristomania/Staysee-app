@@ -18,6 +18,20 @@ export const STUCK_AFTER_MS = 120_000;
 
 const byCreatedAt = (left, right) => Date.parse(left.created_at) - Date.parse(right.created_at);
 
+// After a state_conflict the app waits 10 s and reruns once. During that pause no run is "reserved",
+// so a test that sees nothing running would delete its conversation under the rerun, which then fails
+// and raises a false alert. Keep waiting while a conflict has no later run, but only for a grace
+// period so a rerun that never comes cannot hang the test.
+export const CONFLICT_RETRY_GRACE_MS = 60_000;
+
+export function hasPendingConflictRetry(runs, now = Date.now()) {
+  return runs.some((run) =>
+    run.status === 'failed' &&
+    run.diagnostic_code === 'state_conflict' &&
+    now - Date.parse(run.completed_at ?? run.created_at) < CONFLICT_RETRY_GRACE_MS &&
+    !runs.some((other) => byCreatedAt(other, run) > 0));
+}
+
 // A state_conflict means two runs wrote the same memory state at once; the app reruns once and
 // the monitor does not count it as a failure. It is only a problem when no run succeeded after it.
 function isRecoveredConflict(run, runs) {

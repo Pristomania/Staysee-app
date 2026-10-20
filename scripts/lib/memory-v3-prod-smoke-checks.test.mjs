@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CONFLICT_RETRY_GRACE_MS,
   DELTA_WINDOW_MAX,
   checkDialogueRuns,
   checkLifecycleRuns,
   checkMemoryItems,
+  hasPendingConflictRetry,
 } from './memory-v3-prod-smoke-checks.mjs';
 
 const NOW = Date.parse('2026-10-18T16:00:00Z');
@@ -159,5 +161,35 @@ describe('memory items extracted in production', () => {
 
   it('fails when nothing was extracted from a conversation full of personal facts', () => {
     assert.match(checkMemoryItems([]).problems.join('\n'), /no memory items/);
+  });
+});
+
+describe('waiting for the automatic rerun after a state conflict', () => {
+  // The app reruns a conflicted run once, after a 10 s pause. In that pause nothing is "reserved",
+  // so a test that deletes its conversation then makes the rerun fail and raises a false alert.
+  const conflict = (secondsAgo) => run({
+    status: 'failed',
+    diagnostic_code: 'state_conflict',
+    created_at: new Date(NOW - (secondsAgo + 8) * 1000).toISOString(),
+    completed_at: new Date(NOW - secondsAgo * 1000).toISOString(),
+  });
+
+  it('is pending right after a conflict that has no later run yet', () => {
+    assert.equal(hasPendingConflictRetry([run({ created_at: minutesAgo(5) }), conflict(3)], NOW), true);
+  });
+
+  it('is not pending once a later run exists (the rerun has started)', () => {
+    const rerun = run({ status: 'reserved', created_at: new Date(NOW - 1000).toISOString() });
+    assert.equal(hasPendingConflictRetry([conflict(12), rerun], NOW), false);
+  });
+
+  it('stops waiting after the grace period, so a rerun that never came cannot hang the test', () => {
+    assert.equal(hasPendingConflictRetry([conflict(CONFLICT_RETRY_GRACE_MS / 1000 + 5)], NOW), false);
+  });
+
+  it('ignores other failures and healthy runs', () => {
+    const other = run({ status: 'failed', diagnostic_code: 'extractor_transport_failed', completed_at: new Date(NOW - 2000).toISOString() });
+    assert.equal(hasPendingConflictRetry([run(), other], NOW), false);
+    assert.equal(hasPendingConflictRetry([], NOW), false);
   });
 });

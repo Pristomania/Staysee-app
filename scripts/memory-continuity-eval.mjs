@@ -30,6 +30,7 @@ import {
   seedMessage,
 } from './lib/prod-test-env.mjs';
 import { getTechnicalUserAccessToken } from './lib/prod-test-session.mjs';
+import { hasPendingConflictRetry } from './lib/memory-v3-prod-smoke-checks.mjs';
 import {
   PROBES,
   buildBlindPairs,
@@ -124,14 +125,15 @@ async function settle(conversationId) {
   let stable = 0;
   while (Date.now() < deadline) {
     const [dialogue, lifecycle] = await Promise.all([
-      restJson(url, headers, `memory_v3_dialogue_runs?conversation_id=eq.${conversationId}&select=status`),
-      restJson(url, headers, `memory_v3_lifecycle_shadow_runs?conversation_id=eq.${conversationId}&select=status`),
+      restJson(url, headers, `memory_v3_dialogue_runs?conversation_id=eq.${conversationId}&select=status,diagnostic_code,created_at,completed_at`),
+      restJson(url, headers, `memory_v3_lifecycle_shadow_runs?conversation_id=eq.${conversationId}&select=status,diagnostic_code,created_at,completed_at`),
     ]);
     const all = [...(dialogue ?? []), ...(lifecycle ?? [])];
+    const rerunPending = hasPendingConflictRetry(dialogue ?? []) || hasPendingConflictRetry(lifecycle ?? []);
     const running = all.filter((run) => run.status === 'reserved').length;
     const signature = String(all.length);
     stable = running === 0 && signature === previous ? stable + 1 : 0;
-    if (stable >= 2) return;
+    if (stable >= 2 && !rerunPending) return;
     previous = signature;
     await sleep(6_000);
   }
