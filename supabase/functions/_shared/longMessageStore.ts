@@ -4,6 +4,7 @@
  */
 
 export const MESSAGE_MODEL_SUMMARIES_TABLE = "message_model_summaries";
+export const MESSAGE_LENGTH_EVENTS_TABLE = "message_length_events";
 
 // The part of a Supabase client this store uses, so tests can use the real client or a fake.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,4 +33,19 @@ export function createLongMessageStore(client: TableClient) {
       if (error) throw new Error("long message summary could not be saved");
     },
   };
+}
+
+/**
+ * Notes that a long message (over 4,000 characters) arrived: only its length, never its text, so that over
+ * time we can see whether the limit and the context need to grow. Never throws and never delays the reply.
+ */
+export async function recordLongMessageEvent(client: TableClient, userId: string, charCount: number): Promise<void> {
+  try {
+    const { error } = await client
+      .from(MESSAGE_LENGTH_EVENTS_TABLE)
+      .insert({ user_id: userId, kind: "long_message", char_count: charCount });
+    if (error) console.error("[long-message-event] not saved");
+  } catch {
+    console.error("[long-message-event] not saved");
+  }
 }

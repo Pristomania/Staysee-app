@@ -23,6 +23,15 @@ describe("long messages are wired into the chat function", () => {
     assert.match(chat, /createLongMessageSummarizer\(/);
   });
 
+  it("notes every long message by its length only, after the duplicate check and without delaying the reply", () => {
+    const note = chat.indexOf("recordLongMessageEvent(");
+    assert.ok(note > 0, "the long-message event is not recorded");
+    assert.match(chat.slice(note - 300, note + 200), /message\.length > LONG_MESSAGE_CHARS/);
+    assert.match(chat.slice(note - 300, note + 200), /EdgeRuntime\.waitUntil/);
+    assert.ok(note > chat.indexOf("duplicate request blocked"), "must come after the duplicate check");
+    assert.doesNotMatch(chat.slice(note, note + 200), /message,|content:/);
+  });
+
   it("logs the cost of making a short version", () => {
     assert.match(chat, /callKind: "long_message_summary"/);
   });
