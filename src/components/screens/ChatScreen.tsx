@@ -72,6 +72,7 @@ import {
   shouldStopVoiceDictation,
   voiceComposerMode,
 } from '../../lib/chatVoiceIntegration';
+import { messageLengthHint, messageLengthState } from '../../lib/messageLimits';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -137,6 +138,8 @@ export function ChatScreen() {
   const { theme } = useTheme();
 
   const [inputValue, setInputValue] = useState('');
+  // One message is at most 10,000 characters: the count shows near the limit, and a longer text is not sent.
+  const lengthState = messageLengthState(inputValue);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   /** Per-room message list — source of truth for the active chat. */
@@ -669,7 +672,7 @@ export function ChatScreen() {
       voice.stop();
       return;
     }
-    if (!inputValue.trim() || sending || sendLockRef.current || !user || !currentConversation) {
+    if (!inputValue.trim() || lengthState.tooLong || sending || sendLockRef.current || !user || !currentConversation) {
       return;
     }
     const convId = currentConversation.id;
@@ -1345,6 +1348,15 @@ export function ChatScreen() {
               />
             )}
 
+            {messageLengthHint(lengthState) && (
+              <p
+                className={`text-xs font-light mb-2 px-1 ${lengthState.tooLong ? 'text-[#c9806e]' : theme.textMuted}`}
+                role="status"
+              >
+                {messageLengthHint(lengthState)}
+              </p>
+            )}
+
             {/* Input field */}
             <div className={`flex items-end gap-3 rounded-xl px-4 py-3 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
               {voiceComposer === 'preparing' ? (
@@ -1420,7 +1432,7 @@ export function ChatScreen() {
                     <button
                       type="button"
                       onClick={handleSend}
-                      disabled={!inputValue.trim()}
+                      disabled={!inputValue.trim() || lengthState.tooLong}
                       aria-label="Отправить"
                       className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
                     >

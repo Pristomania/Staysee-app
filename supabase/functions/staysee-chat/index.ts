@@ -38,6 +38,14 @@ import {
 import { runWithOneConflictRetry, withOneTransientRetry } from "../_shared/memoryV3/retry.ts";
 import { isLegacySummaryDisabled, withoutLegacySummary } from "../_shared/legacySummaryMode.ts";
 import {
+  compactLongMessagesForModel,
+  isMessageTooLong,
+  MAX_MESSAGE_CHARS,
+  SUMMARY_MODEL,
+} from "../_shared/longMessages.ts";
+import { createLongMessageStore } from "../_shared/longMessageStore.ts";
+import { createLongMessageSummarizer } from "../_shared/longMessageSummarizer.ts";
+import {
   runMemoryV3Shadow,
   runMemoryV3ShadowBackgroundSafely,
 } from "../_shared/memoryV3/shadowRunner.ts";
@@ -551,6 +559,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // One message is at most MAX_MESSAGE_CHARS (the input box enforces it too). Checked before any
+    // model, memory or database work, so an oversized request costs nothing.
+    if (isMessageTooLong(message)) {
+      return new Response(
+        JSON.stringify({ error: "message_too_long", maxChars: MAX_MESSAGE_CHARS }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const providerKey: AiProvider = reqProvider ?? ACTIVE_PROVIDER;
     const config = PROVIDERS[providerKey];
     if (!config) {
@@ -792,6 +809,41 @@ Deno.serve(async (req: Request) => {
           supabaseAnonKey,
         });
         let packet = legacySummaryOff ? withoutLegacySummary(builtPacket) : builtPacket;
+
+        // A long message (over 4,000 characters) is read in full for the next 10 replies, then as a
+        // short version made once and stored (longMessages.ts). The person always sees the full text.
+        // Anything that goes wrong here leaves the full text in place. STAYSEE_LONG_MESSAGE_COMPACTION=off
+        // turns it off.
+        if (Deno.env.get("STAYSEE_LONG_MESSAGE_COMPACTION") !== "off") {
+          const compactionClient = makeServiceClient();
+          const summarizeLongMessage = createLongMessageSummarizer({
+            apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+            fetchImpl: globalThis.fetch.bind(globalThis),
+          });
+          packet = {
+            ...packet,
+            recentMessages: [...await compactLongMessagesForModel(packet.recentMessages, userId, {
+              ...createLongMessageStore(compactionClient),
+              summarize: async (text) => {
+                const made = await summarizeLongMessage(text);
+                if (made?.usage) {
+                  EdgeRuntime.waitUntil(logOpenRouterUsage(compactionClient, buildUsageLogRow({
+                    userId,
+                    conversationId,
+                    model: SUMMARY_MODEL,
+                    promptTokens: made.usage.promptTokens,
+                    completionTokens: made.usage.completionTokens,
+                    usage: { cost: made.usage.costUsd },
+                    memoryTokens: 0,
+                    summaryTokens: 0,
+                    callKind: "long_message_summary",
+                  })));
+                }
+                return made;
+              },
+            })],
+          };
+        }
 
         if (sameTurnDurableCorrection) {
           packet = {

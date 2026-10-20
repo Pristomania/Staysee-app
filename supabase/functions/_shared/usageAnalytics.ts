@@ -41,7 +41,8 @@ export type UsageCallKind =
   | "legacy_conversation_summary"
   | "legacy_cross_memory_synthesis"
   | "memory_lifecycle_extractor"
-  | "memory_lifecycle_reconciler";
+  | "memory_lifecycle_reconciler"
+  | "long_message_summary";
 
 export type UsageCostCategory = "automatic" | "technical";
 
