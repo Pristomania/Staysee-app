@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
 
     const { data: conv, error: convErr } = await userSupabase
       .from("conversations")
-      .select("id, title, conversation_summary")
+      .select("id, title")
       .eq("id", conversationId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -110,7 +110,6 @@ Deno.serve(async (req) => {
       {
         conversationId,
         conversationTitle: conv.title ?? null,
-        conversationSummary: conv.conversation_summary ?? null,
       },
       {
         baseUrl: "https://openrouter.ai/api/v1",

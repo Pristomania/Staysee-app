@@ -138,7 +138,7 @@ console.log("All fetchConfirmedMemoryForConversation cases passed.");
 console.log("\n=== buildWeeklyReflectionPrompt confirmed-memory block ===\n");
 
 const withConfirmed = buildWeeklyReflectionPrompt({
-  title: "эта беседа", memory: null, transcript: [], activeDays: 1,
+  title: "эта беседа", transcript: [], activeDays: 1,
   confirmedMemory: [
     { kind: "event", claim: "Сменила работу", alternative: null },
     { kind: "hypothesis", claim: "Юмор помогает", alternative: "Юмор помогает другим" },
@@ -150,7 +150,7 @@ assert(withConfirmed.includes("Юмор помогает") && withConfirmed.incl
   "should include a supported hypothesis with its alternative");
 
 const withoutConfirmed = buildWeeklyReflectionPrompt({
-  title: "эта беседа", memory: null, transcript: [], activeDays: 1,
+  title: "эта беседа", transcript: [], activeDays: 1,
   confirmedMemory: [],
   linkedPairs: [],
 });
@@ -161,7 +161,7 @@ console.log("All buildWeeklyReflectionPrompt confirmed-memory cases passed.");
 console.log("\n=== buildWeeklyReflectionPrompt linked-pairs block ===\n");
 
 const withPairs = buildWeeklyReflectionPrompt({
-  title: "эта беседа", memory: null, transcript: [], activeDays: 1, confirmedMemory: [],
+  title: "эта беседа", transcript: [], activeDays: 1, confirmedMemory: [],
   linkedPairs: [{ newClaim: "сменила работу", oldClaim: "боялась сменить работу" }],
 });
 assert(withPairs.includes("сменила работу"), "should include the new claim");
@@ -169,7 +169,7 @@ assert(withPairs.includes("боялась сменить работу"), "should
 assert(/на ваше усмотрение/i.test(withPairs), "should leave attribution to the model's judgment");
 
 const withoutPairs = buildWeeklyReflectionPrompt({
-  title: "эта беседа", memory: null, transcript: [], activeDays: 1, confirmedMemory: [],
+  title: "эта беседа", transcript: [], activeDays: 1, confirmedMemory: [],
   linkedPairs: [],
 });
 assert(!withoutPairs.includes("ПЕРЕМЕНЫ"), "should omit the block entirely when no pairs are passed");
@@ -252,7 +252,7 @@ console.log("\n=== generateWeeklyReflectionText caps reasoning effort ===\n");
     const userClient = createClient("https://sentinel.supabase.co", "ANON_SENTINEL_KEY");
     const result = await generateWeeklyReflectionText(
       userClient,
-      { conversationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", conversationTitle: "Тест", conversationSummary: null },
+      { conversationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", conversationTitle: "Тест" },
       { baseUrl: "https://openrouter.ai/api/v1", model: "google/gemini-3.7-flash", apiKey: "test-key" },
     );
     assert(result.generated, "should have generated via the model, not the fallback");
@@ -267,3 +267,84 @@ console.log("\n=== generateWeeklyReflectionText caps reasoning effort ===\n");
 }
 
 console.log("generateWeeklyReflectionText reasoning-effort case passed.");
+
+console.log("\n=== the weekly reflection no longer uses the old conversation summary ===\n");
+
+// The old rolling summary ("ПАМЯТЬ БЕСЕДЫ") was switched off for everyone on 2026-10-20 and is no longer updated.
+// A reflection that still read it would mix stale text with the new memory. Only the new memory of this
+// conversation and the week's messages feed the reflection.
+{
+  const MARKER = "СТАРЫЙ_ПЕРЕСКАЗ_МАРКЕР";
+  const oldSummary = JSON.stringify({
+    people: [], themes: [MARKER], emotional_state: [MARKER], open_loops: [MARKER], events: [], preferences: [], risks: [],
+  });
+  const { createClient } = await import("@supabase/supabase-js");
+  const originalFetch = globalThis.fetch;
+  let promptSent = "";
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes("openrouter.ai")) {
+      promptSent = String(JSON.parse(String(init?.body)).messages?.[0]?.content ?? "");
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "Достаточно длинный текст снимка недели для проверки длины." } }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const userClient = createClient("https://sentinel.supabase.co", "ANON_SENTINEL_KEY");
+    // The old field is passed on purpose: even if a caller still sends it, it must not reach the model.
+    const meta = { conversationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", conversationTitle: "Тест", conversationSummary: oldSummary };
+    await generateWeeklyReflectionText(userClient, meta as never, { baseUrl: "https://openrouter.ai/api/v1", model: "m", apiKey: "k" });
+    assert(promptSent.length > 0, "the model should have been called");
+    assert(!promptSent.includes(MARKER), "the old summary must not reach the model");
+    assert(!promptSent.includes("ПАМЯТЬ ЭТОЙ БЕСЕДЫ"), "the old summary's block must be gone");
+    assert(promptSent.includes("ПОДТВЕРЖДЁННЫЕ ФАКТЫ И ПАТТЕРНЫ ЭТОЙ БЕСЕДЫ"), "the new memory's block stays");
+
+    // And without a model (no key) the plain fallback must not use it either.
+    const fallback = await generateWeeklyReflectionText(userClient, meta as never, { baseUrl: "x", model: "m", apiKey: "" });
+    assert(!fallback.text.includes(MARKER), "the fallback text must not use the old summary");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const nodeFs = (await import(/* @vite-ignore */ "node:fs/promises" as string)) as {
+    readFile: (path: URL, encoding: string) => Promise<string>;
+  };
+  const shared = await nodeFs.readFile(new URL("./weeklyReflection.ts", import.meta.url), "utf8");
+  const handler = await nodeFs.readFile(new URL("../weekly-reflection/index.ts", import.meta.url), "utf8");
+  assert(!shared.includes("parseStoredMemory") && !shared.includes("formatMemoryForInjection"), "the module must not read the old memory format at all");
+  assert(!handler.includes("conversation_summary"), "the handler must not even read the old summary column");
+}
+
+console.log("Old-summary exclusion cases passed.");
+
+console.log("\n=== a sensitive fact never reaches the 'before -> now' block ===\n");
+
+// The main list already left sensitive facts out; the block of changes ("раньше было ... -> стало ...") did not, so a
+// sensitive claim could still be named there (found by an independent review, 2026-10-20).
+{
+  const originalFetch = globalThis.fetch;
+  const rows = [
+    { memory_key: "k-old-normal", claim: "боялась сменить работу", sensitivity: "normal", replaces_memory_key: null },
+    { memory_key: "k-new-normal", claim: "сменила работу", sensitivity: "normal", replaces_memory_key: "k-old-normal" },
+    { memory_key: "k-old-sensitive", claim: "СЕКРЕТ_СТАРЫЙ", sensitivity: "sensitive", replaces_memory_key: null },
+    { memory_key: "k-new-after-sensitive", claim: "обычное новое после секрета", sensitivity: "normal", replaces_memory_key: "k-old-sensitive" },
+    { memory_key: "k-old-after", claim: "обычное старое", sensitivity: "normal", replaces_memory_key: null },
+    { memory_key: "k-new-sensitive", claim: "СЕКРЕТ_НОВЫЙ", sensitivity: "sensitive", replaces_memory_key: "k-old-after" },
+  ];
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify(rows), { status: 200, headers: { "Content-Type": "application/json" } })
+  ) as typeof fetch;
+  try {
+    const pairs = await fetchLinkedPairsForConversation("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    assert(pairs.length === 1, `only the pair of two ordinary claims may remain, got ${pairs.length}`);
+    assert(pairs[0].newClaim === "сменила работу" && pairs[0].oldClaim === "боялась сменить работу", "the ordinary pair stays");
+    assert(!JSON.stringify(pairs).includes("СЕКРЕТ"), "no sensitive claim, old or new, may appear");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+console.log("Sensitive-pair exclusion cases passed.");
