@@ -52,6 +52,17 @@ describe('production deployment gate', () => {
     assert.match(workflow, /curl[^\n]*https:\/\/staysee\.ru\//u);
   });
 
+  it('clears a stray package-lock.json change on the server before deploy-staysee pulls', () => {
+    // deploy-staysee starts with `git pull`. A local edit of package-lock.json left on the server (a leftover of
+    // an earlier install) makes git refuse the pull as soon as a commit changes that file, and the site stays on
+    // the old version while the workflow turns red. The lock file on the server is never edited on purpose.
+    const reset = position('checkout -- package-lock.json');
+    const pull = workflow.search(/^ +deploy-staysee\s*$/mu);
+    assert.notEqual(pull, -1, 'the deploy-staysee call is missing');
+    assert.ok(reset < pull, 'the reset must come before deploy-staysee');
+    assert.ok(reset > position('name: Deploy to VPS'), 'the reset belongs to the Deploy to VPS step');
+  });
+
   it('keeps the complete offline suite and bundle smoke behind package scripts', () => {
     assert.equal(
       packageJson.scripts['test:offline'],
