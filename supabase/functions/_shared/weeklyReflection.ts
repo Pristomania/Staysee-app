@@ -3,11 +3,6 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import {
-  formatMemoryForInjection,
-  parseStoredMemory,
-  type StructuredMemory,
-} from "./memory.ts";
 import { makeServiceClient } from "./cost.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 
@@ -18,7 +13,6 @@ const MAX_USER_EXCERPT_CHARS = 280;
 export interface WeeklyReflectionInput {
   conversationId: string;
   conversationTitle: string | null;
-  conversationSummary: string | null;
 }
 
 export interface WeeklyReflectionLinkedPair {
@@ -103,7 +97,6 @@ export async function fetchWeekTranscript(
 
 export function buildWeeklyReflectionPrompt(input: {
   title: string;
-  memory: StructuredMemory | null;
   transcript: WeekTranscriptLine[];
   activeDays: number;
   confirmedMemory: WeeklyReflectionConfirmedItem[];
@@ -111,12 +104,6 @@ export function buildWeeklyReflectionPrompt(input: {
 }): string {
   const title = input.title.trim() || "эта беседа";
   const days = dayWordRu(input.activeDays);
-
-  let memoryBlock = "Память беседы пока пуста.";
-  if (input.memory) {
-    const { text } = formatMemoryForInjection(input.memory);
-    if (text.trim()) memoryBlock = text;
-  }
 
   const transcriptBlock = input.transcript.length
     ? input.transcript
@@ -156,9 +143,6 @@ export function buildWeeklyReflectionPrompt(input: {
 
 Контекст: за 7 дней пользователь заглядывал сюда ${input.activeDays} ${days}.
 
-ПАМЯТЬ ЭТОЙ БЕСЕДЫ:
-${memoryBlock}
-
 ПОДТВЕРЖДЁННЫЕ ФАКТЫ И ПАТТЕРНЫ ЭТОЙ БЕСЕДЫ:
 ${confirmedBlock}${pairsBlock}
 
@@ -170,7 +154,6 @@ ${transcriptBlock}
 
 export function buildWeeklyReflectionFallback(input: {
   title: string;
-  memory: StructuredMemory | null;
   activeDays: number;
   hadTranscript: boolean;
 }): string {
@@ -186,16 +169,6 @@ export function buildWeeklyReflectionFallback(input: {
 
   lines.push(`В «${title}» за семь дней вы заглядывали ${input.activeDays} ${days}.`);
 
-  const mem = input.memory;
-  if (mem?.themes?.length) {
-    lines.push(`Возвращались к: ${mem.themes.slice(0, 3).join("; ")}.`);
-  }
-  if (mem?.emotional_state?.length) {
-    lines.push(`По ощущению: ${mem.emotional_state.slice(0, 2).join("; ")}.`);
-  }
-  if (mem?.open_loops?.length) {
-    lines.push(`Остаётся живым: ${mem.open_loops.slice(0, 2).join("; ")}.`);
-  }
   lines.push("Можно без спешки оглянуться — что из этого откликается именно сейчас.");
   return lines.join("\n\n");
 }
@@ -208,6 +181,30 @@ export function countActiveDays(transcript: WeekTranscriptLine[]): number {
   return days.size;
 }
 
+export interface LinkedPairRow {
+  memory_key: string;
+  claim: string;
+  sensitivity: string;
+  replaces_memory_key: string | null;
+}
+
+/**
+ * "Before -> now" pairs. A pair is dropped when either side is sensitive: the list of confirmed facts already
+ * leaves sensitive facts out, and this block must not name one either.
+ */
+export function selectLinkedPairs(rows: LinkedPairRow[]): WeeklyReflectionLinkedPair[] {
+  const byKey = new Map(rows.map((row) => [row.memory_key, row]));
+  const pairs: WeeklyReflectionLinkedPair[] = [];
+  for (const row of rows) {
+    if (!row.replaces_memory_key) continue;
+    const old = byKey.get(row.replaces_memory_key);
+    if (!old) continue;
+    if (row.sensitivity === "sensitive" || old.sensitivity === "sensitive") continue;
+    pairs.push({ newClaim: row.claim, oldClaim: old.claim });
+  }
+  return pairs;
+}
+
 export async function fetchLinkedPairsForConversation(
   conversationId: string
 ): Promise<WeeklyReflectionLinkedPair[]> {
@@ -218,7 +215,7 @@ export async function fetchLinkedPairsForConversation(
   const supabase = makeServiceClient();
   const { data, error } = await supabase
     .from("memory_v3_dialogue_items")
-    .select("memory_key, claim, replaces_memory_key")
+    .select("memory_key, claim, sensitivity, replaces_memory_key")
     .eq("conversation_id", conversationId);
 
   if (error) {
@@ -226,20 +223,7 @@ export async function fetchLinkedPairsForConversation(
     return [];
   }
 
-  const rows = (data ?? []) as Array<{
-    memory_key: string;
-    claim: string;
-    replaces_memory_key: string | null;
-  }>;
-  const byKey = new Map(rows.map((row) => [row.memory_key, row]));
-  const pairs: WeeklyReflectionLinkedPair[] = [];
-  for (const row of rows) {
-    if (!row.replaces_memory_key) continue;
-    const old = byKey.get(row.replaces_memory_key);
-    if (!old) continue;
-    pairs.push({ newClaim: row.claim, oldClaim: old.claim });
-  }
-  return pairs;
+  return selectLinkedPairs((data ?? []) as LinkedPairRow[]);
 }
 
 export async function fetchConfirmedMemoryForConversation(
@@ -295,7 +279,6 @@ export async function generateWeeklyReflectionText(
   const transcript = await fetchWeekTranscript(supabase, meta.conversationId);
   const confirmedMemory = await fetchConfirmedMemoryForConversation(meta.conversationId);
   const linkedPairs = await fetchLinkedPairsForConversation(meta.conversationId);
-  const memory = parseStoredMemory(meta.conversationSummary);
   const activeDays = countActiveDays(transcript);
   const title = meta.conversationTitle ?? "эта беседа";
 
@@ -303,7 +286,6 @@ export async function generateWeeklyReflectionText(
     return {
       text: buildWeeklyReflectionFallback({
         title,
-        memory,
         activeDays,
         hadTranscript: transcript.some((l) => l.role === "user"),
       }),
@@ -313,7 +295,6 @@ export async function generateWeeklyReflectionText(
 
   const prompt = buildWeeklyReflectionPrompt({
     title,
-    memory,
     transcript,
     activeDays,
     confirmedMemory,
@@ -357,7 +338,6 @@ export async function generateWeeklyReflectionText(
     return {
       text: buildWeeklyReflectionFallback({
         title,
-        memory,
         activeDays,
         hadTranscript: transcript.some((l) => l.role === "user"),
       }),
