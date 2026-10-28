@@ -106,6 +106,17 @@ jobs:
             # to tolerate this: reload-or-start-nginx.sh below already
             # starts nginx on its own if it isn't running, and fails loudly
             # if that doesn't work either.
+            # deploy-staysee starts with `git pull`. A local edit of package-lock.json left on the server
+            # (a leftover of an earlier install) makes git refuse the pull as soon as a commit changes that
+            # file -- the site then stays on the old version while this step fails. Nobody edits the lock file
+            # on the server on purpose, so the repository version simply wins. Where the file is untouched
+            # this does nothing. A failure here is only reported: whether the deploy can go on is decided by
+            # deploy-staysee below, which stops loudly if the pull still cannot happen.
+            for repo in "$HOME/Staysee-app" /var/www/Staysee-app; do
+              if [ -d "$repo/.git" ]; then
+                git -C "$repo" checkout -- package-lock.json || echo "could not reset package-lock.json in $repo"
+              fi
+            done
             deploy-staysee
             NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
             chmod +x "$NGINX_SCRIPTS"/*.sh
