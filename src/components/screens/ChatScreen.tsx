@@ -35,7 +35,7 @@ import {
   renderAiMessageBody,
   shouldAnimateReveal,
 } from '../../lib/aiMessageFormat';
-import { appendToConversationMemory } from '../../lib/conversationMemoryCapture';
+import { takeMemorySnapshot, waitForRememberedItem } from '../../lib/rememberConfirmation';
 import {
   CAPTURE_NUDGE_COPY,
   detectAiNotesNudge,
@@ -725,6 +725,8 @@ export function ChatScreen() {
 
     const userCapture = detectUserCaptureIntent(content);
     let notesNudgeFromUser = false;
+    let rememberSnippet = '';
+    let rememberBefore: ReturnType<typeof takeMemorySnapshot> | null = null;
 
     if (userCapture?.action === 'dialog_memory') {
       const memoryContext = roomMessagesRef.current
@@ -735,17 +737,10 @@ export function ChatScreen() {
             m.content.trim(),
         )
         .map((m) => ({ sender: m.sender, content: m.content }));
-      const memoryPayload = resolveMemoryPayloadFromChat(content, memoryContext);
-
-      void appendToConversationMemory(convId, user.id, memoryPayload).then(
-        ({ ok }) => {
-          if (!ok || epoch !== generationEpochRef.current) return;
-          const key = nudgeDedupeKey('memory', memoryPayload);
-          if (lastCaptureNudgeKeyRef.current === key) return;
-          lastCaptureNudgeKeyRef.current = key;
-          setCaptureNudge({ kind: 'memory_saved', snippet: memoryPayload });
-        },
-      );
+      rememberSnippet = resolveMemoryPayloadFromChat(content, memoryContext);
+      // What the new memory holds before the request. "Запомнила" is shown only if it really holds something new
+      // after the reply (see rememberConfirmation.ts); the old summary is switched off and is not written to.
+      rememberBefore = takeMemorySnapshot(convId);
     } else if (userCapture?.action === 'notes') {
       const key = nudgeDedupeKey('notes', userCapture.payload);
       if (lastCaptureNudgeKeyRef.current !== key) {
@@ -836,6 +831,21 @@ export function ChatScreen() {
         aiId: aiSavedRow?.id,
       };
 
+      if (rememberBefore !== null) {
+        const snippet = rememberSnippet;
+        void rememberBefore
+          .then((before) =>
+            waitForRememberedItem({ before, takeSnapshot: () => takeMemorySnapshot(convId) }),
+          )
+          .then((stored) => {
+            if (!stored || openConversationRef.current !== convId) return;
+            const key = nudgeDedupeKey('memory', snippet);
+            if (lastCaptureNudgeKeyRef.current === key) return;
+            lastCaptureNudgeKeyRef.current = key;
+            setCaptureNudge({ kind: 'memory_saved', snippet });
+          });
+      }
+
       if (epoch !== generationEpochRef.current) {
         await rollbackPersistedTurn();
         return;
@@ -920,7 +930,10 @@ export function ChatScreen() {
   // change while the file was being read; otherwise it would land in the wrong draft.
   const fileOperationRef = useRef(0);
   const openConversationId = currentConversation?.id ?? null;
+  // The conversation open right now, for callbacks that finish later (the "Запомнила" line, a picked file).
+  const openConversationRef = useRef<string | null>(openConversationId);
   useEffect(() => {
+    openConversationRef.current = openConversationId;
     fileOperationRef.current += 1;
     setFileReading(false);
   }, [openConversationId]);
