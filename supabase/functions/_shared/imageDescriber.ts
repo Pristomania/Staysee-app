@@ -4,7 +4,9 @@ import { parseLongMessageSummaryResponse, readUsage } from "./longMessages.ts";
 export const IMAGE_DESCRIBE_MODEL = "google/gemini-3.7-flash";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_TIMEOUT_MS = 25_000;
-const DESCRIBE_MAX_TOKENS = 1_000;
+// A description is about 300 tokens, but the model thinks first and those tokens count against the limit
+// (a live check used 890 of 1,000). You pay only for the tokens used, so the limit is generous.
+const DESCRIBE_MAX_TOKENS = 3_000;
 
 export const IMAGE_DESCRIPTION_PROMPT = [
   "Ты помогаешь психологическому приложению. Человек прислал картинку. Напиши по-русски короткое описание",
