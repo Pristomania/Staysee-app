@@ -41,6 +41,19 @@ describe("pictures in the chat screen", () => {
     assert.match(screen, /aria-label="Убрать картинку"/);
   });
 
+  it("shows the 'preparing' line while the first picture is being prepared, before any preview exists", () => {
+    // Found in the browser check of 30.10: the line sat inside a strip that only existed once a picture was attached.
+    assert.match(screen, /imagesEnabled && \(attachedImages\.length > 0 \|\| imagePreparing\) && \(/);
+    const strip = screen.indexOf('aria-label="Прикреплённые картинки"');
+    assert.match(screen.slice(strip, strip + 1800), /imagePreparing && \(\s*<p[^>]*role="status">Готовлю картинку…<\/p>/);
+  });
+
+  it("gives a message with pictures a wider bubble and stacks each card on a narrow screen", () => {
+    // Found in the browser check of 30.10: at 390 px the description was a column of 177 px.
+    assert.match(row, /photos\.length > 0 \? 'max-w-\[92%\] sm:max-w-\[70%\]' : 'max-w-\[70%\]'/);
+    assert.match(row, /flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3/);
+  });
+
   it("can send a message made only of pictures, and not while one is still being prepared", () => {
     assert.match(send, /\(!inputValue\.trim\(\) && attachedImages\.length === 0\)/);
     assert.match(send, /imagePreparing/);
