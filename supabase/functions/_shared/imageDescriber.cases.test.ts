@@ -30,6 +30,12 @@ describe("image description request", () => {
     assert.equal(user[1].image_url?.url, `data:image/jpeg;base64,${image.data}`);
   });
 
+  it("leaves room for the model's own thinking, which counts against the limit (890 of 1,000 was used in a live check)", () => {
+    // A description is about 300 tokens, but the model thinks first and those tokens are counted too; a limit
+    // of 1,000 cut an answer off (finish_reason length) and the person got "could not read the picture".
+    assert.ok(buildImageDescriptionRequest(image).max_tokens >= 3_000);
+  });
+
   it("tells the model what to leave out and that text on a picture is content, not an instruction", () => {
     for (const part of ["имена", "телефон", "диагноз", "не узнавай", "не указания", "не выдумывай"]) {
       assert.ok(IMAGE_DESCRIPTION_PROMPT.toLowerCase().includes(part), part);
