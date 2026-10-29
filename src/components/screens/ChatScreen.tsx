@@ -1500,7 +1500,7 @@ ${built.message}` : built.message));
               </p>
             )}
 
-            {imagesEnabled && attachedImages.length > 0 && (
+            {imagesEnabled && (attachedImages.length > 0 || imagePreparing) && (
               <div className="mb-2 flex flex-wrap gap-2 px-1" aria-label="Прикреплённые картинки">
                 {attachedImages.map((image) => (
                   <div key={image.id} className={`relative h-16 w-16 overflow-hidden rounded-lg border ${theme.border}`}>
@@ -1711,21 +1711,22 @@ function MessageRow({
         className={`flex flex-col items-end ${enterClass} ${highlightClass}`}
         style={animateEnter ? { animationDelay: `${delay}ms` } : undefined}
       >
-        <div className={`max-w-[70%] px-5 py-3 rounded-2xl rounded-tr-sm ${theme.msgUserBg}`}>
+        <div className={`${photos.length > 0 ? 'max-w-[92%] sm:max-w-[70%]' : 'max-w-[70%]'} px-5 py-3 rounded-2xl rounded-tr-sm ${theme.msgUserBg}`}>
           {text && (
             <p className={`${theme.msgUserText} font-light text-[15px] leading-[1.8] whitespace-pre-wrap break-words`}>
               {searchQuery && isSearchMatch ? highlightSearchInText(text, searchQuery) : text}
             </p>
           )}
           {photos.map((description, photoIndex) => (
-            <div key={photoIndex} className={`${text || photoIndex > 0 ? 'mt-3' : ''} flex items-start gap-3`}>
-              {photoPreviews?.[photoIndex] ? (
+            <div key={photoIndex} className={`${text || photoIndex > 0 ? 'mt-3' : ''} flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3`}>
+              {photoPreviews?.[photoIndex] && (
                 <img src={photoPreviews[photoIndex]} alt={`Фото ${photoIndex + 1}`} className="h-16 w-16 shrink-0 rounded-lg object-cover" />
-              ) : (
-                <ImageIcon className={`mt-1 h-4 w-4 shrink-0 ${theme.msgUserText} opacity-60`} strokeWidth={1.5} />
               )}
-              <div>
-                <p className={`${theme.msgUserText} text-[11px] font-light opacity-60`}>Фото {photoIndex + 1}</p>
+              <div className="min-w-0">
+                <p className={`${theme.msgUserText} flex items-center gap-1.5 text-[11px] font-light opacity-60`}>
+                  <ImageIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} />
+                  Фото {photoIndex + 1}
+                </p>
                 <p className={`${theme.msgUserText} text-[13px] font-light leading-[1.6] opacity-85`}>{description}</p>
               </div>
             </div>
