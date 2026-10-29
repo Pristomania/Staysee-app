@@ -45,6 +45,23 @@ import {
   SUMMARY_MODEL,
 } from "../_shared/longMessages.ts";
 import { createLongMessageStore, recordLongMessageEvent } from "../_shared/longMessageStore.ts";
+import {
+  appendPhotoBlocks,
+  IMAGE_CALL_KIND,
+  imagesAllowedForUser,
+  type ImageInput,
+  MAX_IMAGES_PER_DAY,
+  modelAcceptsImages,
+  resolveImagesMode,
+  validateImages,
+  withImageParts,
+} from "../_shared/imageAttachments.ts";
+import {
+  countImagesDescribedSince,
+  createImageDescriber,
+  describeImages,
+  IMAGE_DESCRIBE_MODEL,
+} from "../_shared/imageDescriber.ts";
 import { createLongMessageSummarizer } from "../_shared/longMessageSummarizer.ts";
 import { waitForUserMessageSaved } from "../_shared/turnMessageWait.ts";
 import {
@@ -296,6 +313,8 @@ interface RequestBody {
   requestId?: string;
   /** Browser pause metadata — injected into system prompt only */
   timeGap?: TimeGapMeta;
+  /** Up to three small JPEGs (base64) sent with the message; see imageAttachments.ts */
+  images?: unknown;
 }
 
 type MemoryV3LifecycleReadDiagnostic =
@@ -397,7 +416,8 @@ async function callModel(
   maxTokens: number,
   temperature: number,
   modelOverride?: string,
-  fallbackModelOverride?: string
+  fallbackModelOverride?: string,
+  images: readonly ImageInput[] = [],
 ): Promise<{
   content: string;
   provider: string;
@@ -442,7 +462,10 @@ async function callModel(
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...(images.length > 0 && modelAcceptsImages(model) ? withImageParts(messages, images) : messages),
+          ],
           max_tokens: maxTokens,
           temperature,
           usage: { include: true },
@@ -545,7 +568,7 @@ Deno.serve(async (req: Request) => {
   try {
     const body: RequestBody = await req.json();
     const {
-      message,
+      message: typedMessage,
       conversationId,
       userId: requestedUserId,
       provider: reqProvider,
@@ -554,7 +577,14 @@ Deno.serve(async (req: Request) => {
       timeGap,
     } = body;
 
-    if (!message || typeof message !== "string" || message.trim() === "") {
+    // The text the whole turn works on. Pictures add their description lines to it (see the picture step below).
+    let message = typedMessage;
+    const hasImages =
+      body.images !== undefined &&
+      body.images !== null &&
+      !(Array.isArray(body.images) && body.images.length === 0);
+
+    if (typeof message !== "string" || (message.trim() === "" && !hasImages)) {
       return new Response(
         JSON.stringify({ error: "message is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -686,6 +716,71 @@ Deno.serve(async (req: Request) => {
         status: mapped.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // ── Photos and screenshots (imageAttachments.ts, imageDescriber.ts) ─────────────
+    // Each picture is described once by a cheap vision model; the description lines are added to the message
+    // text, so every check below and the memory work on text. All or nothing: if one description fails, nothing
+    // goes on. This runs before the daily message slot is used, so a refused picture costs the person nothing.
+    let turnImages: ImageInput[] = [];
+    if (hasImages) {
+      const unprocessable = (error: string, extra: Record<string, unknown> = {}) =>
+        new Response(JSON.stringify({ error, ...extra }), {
+          status: 422,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      if (!imagesAllowedForUser(
+        resolveImagesMode(Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS")),
+        userId,
+        Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS_USER_IDS"),
+      )) {
+        return unprocessable("images_disabled");
+      }
+      const checkedImages = validateImages(body.images);
+      if (!checkedImages.ok) return unprocessable("images_invalid", { problem: checkedImages.problem });
+      turnImages = checkedImages.images;
+
+      const imageClient = makeServiceClient();
+      let describedToday: number;
+      try {
+        describedToday = await countImagesDescribedSince(
+          imageClient,
+          userId,
+          new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+        );
+      } catch {
+        console.error("[staysee-chat] image count unavailable");
+        return unprocessable("images_unavailable");
+      }
+      if (describedToday + turnImages.length > MAX_IMAGES_PER_DAY) return unprocessable("images_daily_limit");
+
+      const imageModel = Deno.env.get("STAYSEE_IMAGE_DESCRIBE_MODEL")?.trim() || IMAGE_DESCRIBE_MODEL;
+      const described = await describeImages(
+        turnImages,
+        createImageDescriber({
+          apiKey: Deno.env.get("OPENROUTER_API_KEY"),
+          fetchImpl: globalThis.fetch.bind(globalThis),
+          model: imageModel,
+        }),
+      );
+      for (const paid of described.paid) {
+        EdgeRuntime.waitUntil(logOpenRouterUsage(imageClient, buildUsageLogRow({
+          userId,
+          conversationId,
+          model: imageModel,
+          promptTokens: paid.usage?.promptTokens ?? 0,
+          completionTokens: paid.usage?.completionTokens ?? 0,
+          usage: { cost: paid.usage?.costUsd ?? 0 },
+          memoryTokens: 0,
+          summaryTokens: 0,
+          callKind: IMAGE_CALL_KIND,
+        })));
+      }
+      if (!described.descriptions) {
+        console.warn("[staysee-chat] image description failed");
+        return unprocessable("image_unreadable");
+      }
+      message = appendPhotoBlocks(typedMessage, described.descriptions.map((entry) => entry.description));
     }
 
     // ── Free message-only guards (no daily slot) ────────────────────────────
@@ -1361,7 +1456,8 @@ Deno.serve(async (req: Request) => {
       outputBudget,
       tierCfg.temperature,
       turnModel,
-      modelRoute.fallbackModel
+      modelRoute.fallbackModel,
+      turnImages
     );
 
     // ── Reply completion routes ─────────────────────────────────────────────
@@ -2143,6 +2239,7 @@ Deno.serve(async (req: Request) => {
         content: result.content,
         provider: result.provider,
         model: result.model,
+        ...(turnImages.length > 0 ? { userText: message } : {}),
         ...(pipelineTrace.length > 0 ? { _replyPipelineTrace: pipelineTrace } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

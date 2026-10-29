@@ -74,7 +74,7 @@ export function createImageDescriber(options: {
       const parsed = parseLongMessageSummaryResponse(await response.json());
       if (!parsed) return null;
       const description = cleanDescription(parsed.summary);
-      return description === "" ? null : { description, usage: parsed.usage };
+      return description === "" ? null : { description, usage: parsed.usage ?? null };
     } catch {
       return null;
     } finally {
