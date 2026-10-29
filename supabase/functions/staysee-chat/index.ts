@@ -782,6 +782,9 @@ Deno.serve(async (req: Request) => {
       }
       message = appendPhotoBlocks(typedMessage, described.descriptions.map((entry) => entry.description));
     }
+    // Every answer after this point carries the text that was used, so the saved message has the description
+    // lines that the safety checks and the memory read.
+    const userTextField = turnImages.length > 0 ? { userText: message } : {};
 
     // ── Free message-only guards (no daily slot) ────────────────────────────
 
@@ -792,6 +795,7 @@ Deno.serve(async (req: Request) => {
           content: safety.immediateResponse,
           provider: providerKey,
           model: reqModel ?? config.model,
+          ...userTextField,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -822,6 +826,7 @@ Deno.serve(async (req: Request) => {
           content: explicitPromptAttackStop.response,
           provider: providerKey,
           model: reqModel ?? config.model,
+          ...userTextField,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -2239,7 +2244,7 @@ Deno.serve(async (req: Request) => {
         content: result.content,
         provider: result.provider,
         model: result.model,
-        ...(turnImages.length > 0 ? { userText: message } : {}),
+        ...userTextField,
         ...(pipelineTrace.length > 0 ? { _replyPipelineTrace: pipelineTrace } : {}),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

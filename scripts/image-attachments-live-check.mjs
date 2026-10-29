@@ -2,6 +2,9 @@
 //
 //   STAYSEE_ALLOW_PROD_TESTS=1 node scripts/image-attachments-live-check.mjs <picture> [<picture> [<picture>]]
 //
+// With STAYSEE_LIVE_CHECK_VIA_SITE=1 the chat requests go through the site's own address (https://staysee.ru/supabase),
+// i.e. through the proxy with its 4 MB limit, the way the browser sends them. Without it they go straight to Supabase.
+//
 // Needs the picture switch to include the test user (STAYSEE_IMAGE_ATTACHMENTS=list and
 // STAYSEE_IMAGE_ATTACHMENTS_USER_IDS). Use synthetic pictures only: descriptions are printed.
 // Sends: one picture with a question, all pictures with a question, a picture with no text, and four pictures
@@ -25,10 +28,12 @@ const { url, serviceKey, testUserId } = assertProdTestAllowed();
 const accessToken = await getTechnicalUserAccessToken({ url, serviceKey, testUserId });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const startedMs = Date.now();
+const chatBase = process.env.STAYSEE_LIVE_CHECK_VIA_SITE === "1" ? "https://staysee.ru/supabase" : url;
+console.log(`Chat requests go ${chatBase === url ? "straight to Supabase" : "through the site proxy"}.`);
 
 async function chat({ message, conversationId, images, tag }) {
   const started = Date.now();
-  const response = await fetch(`${url}/functions/v1/staysee-chat`, {
+  const response = await fetch(`${chatBase}/functions/v1/staysee-chat`, {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, apikey: serviceKey, "Content-Type": "application/json" },
     body: JSON.stringify({ message, conversationId, userId: testUserId, requestId: `images-${Date.now()}-${tag}`, images }),
