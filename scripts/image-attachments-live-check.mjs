@@ -51,6 +51,12 @@ await withTestConversation({ url, serviceKey, testUserId }, `image-live-check ${
     ...(pictures.length > 1
       ? [{ tag: "all", label: `${pictures.length} pictures with a question`, message: "А теперь посмотри на все вместе. Что общего?", images: pictures }]
       : []),
+    {
+      tag: "personal",
+      label: "a personal message with a screenshot of a friend's chat (memory must not take her lines as the person's facts)",
+      message: "Это моя подруга Лена. Мы поссорились на прошлой неделе, мне обидно, что она считает, будто я пропадаю. Вот наша переписка.",
+      images: pictures.slice(0, 1),
+    },
     { tag: "only", label: "a picture with no text", message: "", images: pictures.slice(0, 1) },
     { tag: "four", label: "four pictures (must be refused)", message: "Много картинок", images: [...pictures, ...pictures, ...pictures, ...pictures].slice(0, 4) },
   ];
@@ -59,6 +65,7 @@ await withTestConversation({ url, serviceKey, testUserId }, `image-live-check ${
     const { status, data, seconds } = await chat({ message: step.message, conversationId, images: step.images, tag: step.tag });
     console.log(`\n== ${step.label}: HTTP ${status} in ${seconds} s`);
     if (data.error) console.log(`   refused: ${data.error}${data.problem ? ` (${data.problem})` : ""}`);
+    if (Array.isArray(data.reasons)) console.log(`   reasons: ${data.reasons.join(",")}`);
     if (typeof data.userText === "string") console.log(`   saved text: ${oneLine(data.userText).slice(0, 700)}`);
     if (typeof data.content === "string") console.log(`   reply: ${oneLine(data.content).slice(0, 400)}`);
     if (status === 200 && typeof data.content === "string") {

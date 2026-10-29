@@ -88,6 +88,89 @@ describe("image describer", () => {
   });
 });
 
+describe("why a description failed", () => {
+  const usageBody = { prompt_tokens: 900, completion_tokens: 300, cost: 0.002 };
+
+  it("says why by a short code, with the billed usage when there is one, never with the answer", async () => {
+    const cases: Array<[() => Promise<Response>, string, boolean]> = [
+      [async () => jsonResponse({ error: "boom" }, 400), "http_400", false],
+      [async () => jsonResponse({ error: "no endpoints" }, 404), "http_404", false],
+      [async () => new Response("not json", { status: 200 }), "bad_json", false],
+      [async () => jsonResponse({ choices: [{ finish_reason: "stop", message: { content: "" } }], usage: usageBody }), "empty", true],
+      [async () => jsonResponse({ choices: [{ finish_reason: "length", message: { content: "обрыв" } }], usage: usageBody }), "cut_off", true],
+      [async () => jsonResponse({ choices: [{ finish_reason: "content_filter", message: { content: "" } }], usage: usageBody }), "finish_content_filter", true],
+      [async () => jsonResponse({ choices: [] }), "unusable", false],
+    ];
+    for (const [attempt, code, billed] of cases) {
+      const seen: Array<[string, unknown]> = [];
+      const describe = createImageDescriber({
+        apiKey: "k",
+        fetchImpl: async () => attempt(),
+        onFailure: (failure, usage) => { seen.push([failure, usage]); },
+      });
+      assert.equal(await describe(image), null);
+      assert.ok(seen.length >= 1 && seen.every(([failure]) => failure === code), `${code}: ${JSON.stringify(seen)}`);
+      assert.deepEqual(seen[0][1], billed ? { promptTokens: 900, completionTokens: 300, costUsd: 0.002 } : null, code);
+    }
+  });
+
+  it("says no_key, network and timeout", async () => {
+    const seen: string[] = [];
+    const record = (failure: string) => { seen.push(failure); };
+    await createImageDescriber({ apiKey: "", fetchImpl: async () => { throw new Error("must not be called"); }, onFailure: record })(image);
+    await createImageDescriber({ apiKey: "k", fetchImpl: async () => { throw new Error("down"); }, onFailure: record })(image);
+    await createImageDescriber({
+      apiKey: "k",
+      timeoutMs: 20,
+      onFailure: record,
+      fetchImpl: (_url, init) => new Promise<Response>((_resolve, reject) => {
+        (init as RequestInit).signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+    })(image);
+    assert.deepEqual([seen[0], seen[seen.length - 1]], ["no_key", "timeout"]);
+    assert.ok(seen.slice(1, -1).every((failure) => failure === "network"), JSON.stringify(seen));
+  });
+
+  it("tries once more after a failure that may pass, and not after one that will not", async () => {
+    let calls = 0;
+    const seen: string[] = [];
+    const flaky = createImageDescriber({
+      apiKey: "k",
+      onFailure: (failure) => { seen.push(failure); },
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1
+          ? jsonResponse({ choices: [{ finish_reason: "stop", message: { content: "" } }] })
+          : jsonResponse(okBody("Пейзаж: море и холм."));
+      },
+    });
+    const result = await flaky(image);
+    assert.equal(result?.description, "Пейзаж: море и холм.");
+    assert.equal(calls, 2);
+    assert.deepEqual(seen, ["empty"], "the failed first try is still reported");
+
+    for (const [response, expectedCalls] of [
+      [jsonResponse({ error: "bad request" }, 400), 1],
+      [jsonResponse({ choices: [{ finish_reason: "content_filter", message: { content: "" } }] }), 1],
+      [jsonResponse({ error: "busy" }, 503), 2],
+    ] as const) {
+      let made = 0;
+      const describe = createImageDescriber({ apiKey: "k", fetchImpl: async () => { made += 1; return response.clone(); } });
+      assert.equal(await describe(image), null);
+      assert.equal(made, expectedCalls);
+    }
+  });
+
+  it("does not let a failing report break the description", async () => {
+    const describe = createImageDescriber({
+      apiKey: "k",
+      fetchImpl: async () => jsonResponse({ error: "x" }, 400),
+      onFailure: () => { throw new Error("report failed"); },
+    });
+    assert.equal(await describe(image), null);
+  });
+});
+
 describe("describeImages", () => {
   const done = (description: string) => ({ description, usage: { promptTokens: 1, completionTokens: 1, costUsd: 0.001 } });
 
