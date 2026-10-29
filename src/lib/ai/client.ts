@@ -78,7 +78,22 @@ export interface SendMessageOptions {
   provider?: string;
   model?: string;
   timeGap?: TimeGapMeta;
+  /** Up to three small JPEGs (base64) shown to the model with this message. */
+  images?: ReadonlyArray<{ mime: string; data: string }>;
   signal?: AbortSignal;
+}
+
+const IMAGE_ERROR_MESSAGES: Record<string, string> = {
+  images_disabled: 'Картинки пока недоступны.',
+  image_unreadable: 'Не получилось прочитать картинку. Попробуй другую или опиши словами.',
+  images_daily_limit: 'На сегодня лимит картинок исчерпан. Опиши словами или попробуй завтра.',
+  images_invalid: 'Картинка не подошла. Попробуй другую.',
+  images_unavailable: 'Сейчас не получается принять картинку. Попробуй чуть позже.',
+};
+const IMAGE_ERROR_FALLBACK = 'Не получилось отправить картинку. Попробуй другую или опиши словами.';
+
+export function imageErrorMessage(code: unknown): string {
+  return (typeof code === 'string' && IMAGE_ERROR_MESSAGES[code]) || IMAGE_ERROR_FALLBACK;
 }
 
 /**
@@ -112,6 +127,7 @@ export async function sendAiMessage(
     if (options.provider) body.provider = options.provider;
     if (options.model) body.model = options.model;
     if (options.timeGap) body.timeGap = options.timeGap;
+    if (options.images && options.images.length > 0) body.images = options.images;
 
     let response: Response;
     try {
@@ -145,6 +161,11 @@ export async function sendAiMessage(
       };
     }
 
+    if (response.status === 422 || (response.status === 413 && options.images && options.images.length > 0)) {
+      const data = response.status === 422 ? await response.json().catch(() => ({})) : {};
+      return { status: 'images_error', userMessage: imageErrorMessage((data as { error?: unknown }).error) };
+    }
+
     if (!response.ok) {
       return {
         status: 'http_error',
@@ -169,7 +190,11 @@ export async function sendAiMessage(
       };
     }
 
-    return { status: 'success', content: classified.content! };
+    return {
+      status: 'success',
+      content: classified.content!,
+      ...(typeof data.userText === 'string' && data.userText.trim() ? { userText: data.userText } : {}),
+    };
   } catch (err) {
     if (isAiRequestAborted(err) || signal?.aborted) throw new AiRequestAborted();
     return {

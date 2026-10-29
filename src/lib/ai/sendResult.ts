@@ -7,11 +7,14 @@ export type AiSendStatus =
   | 'rate_limit'
   | 'network_error'
   | 'http_error'
-  | 'empty_response';
+  | 'empty_response'
+  | 'images_error';
 
 export interface AiSendResult {
   status: AiSendStatus;
   content?: string;
+  /** The person's message as the server used it, with the picture description lines (only with pictures). */
+  userText?: string;
   userMessage?: string;
 }
 
