@@ -23,7 +23,7 @@ describe("the message length limit reaches the input box", () => {
     const start = screen.indexOf("async function handleSend()");
     assert.ok(start > 0);
     assert.match(screen.slice(start, start + 700), /lengthState\.tooLong/);
-    assert.match(screen, /disabled=\{!inputValue\.trim\(\) \|\| lengthState\.tooLong( \|\| fileReading)?\}/);
+    assert.match(screen, /disabled=\{\(!inputValue\.trim\(\) && attachedImages\.length === 0\) \|\| lengthState\.tooLong( \|\| fileReading)?( \|\| imagePreparing)?\}/);
   });
 
   it("reports the length (never the text) once each time the box goes over the maximum", () => {

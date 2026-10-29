@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Paperclip } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Paperclip, Image as ImageIcon } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -75,6 +75,17 @@ import {
 import { messageLengthHint, messageLengthState } from '../../lib/messageLimits';
 import { reportOverLimit, shouldReportOverLimit } from '../../lib/overLimitReport';
 import { FileTextError, fileProblemMessage, messageFromFileText, readFileAsText } from '../../lib/fileText';
+import {
+  checkImageBeforeReading,
+  IMAGE_MAX_COUNT,
+  ImageAttachmentError,
+  imageProblemMessage,
+  isImageFile,
+  prepareImageFile,
+  type PreparedImage,
+} from '../../lib/imageAttachment';
+import { imagesEnabledForUser, readImageBeta } from '../../lib/imageFeature';
+import { splitPhotoBlocks } from '../../lib/photoBlocks';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -210,6 +221,20 @@ export function ChatScreen() {
   const pendingDraftRef = useRef('');
   /** Stable turn id for submit + retry until success or Stop. */
   const pendingTurnRef = useRef<PendingTurn | null>(null);
+  // Pictures: who may attach them, what is attached, what is on its way (to give back if sending is stopped).
+  const imagesEnabled = imagesEnabledForUser(
+    user?.id,
+    import.meta.env.VITE_IMAGE_ATTACHMENTS_USER_IDS as string | undefined,
+    readImageBeta(typeof window === 'undefined' ? null : window.localStorage),
+  );
+  const [attachedImages, setAttachedImages] = useState<PreparedImage[]>([]);
+  const [imagePreparing, setImagePreparing] = useState(false);
+  const pendingImagesRef = useRef<PreparedImage[]>([]);
+  // Small previews kept for this visit only, by message id; after a reload the chat shows the description card.
+  const photoPreviewsRef = useRef(new Map<string, string[]>());
+  function removeImage(id: string) {
+    setAttachedImages((current) => current.filter((image) => image.id !== id));
+  }
   /** DB ids for the in-flight turn — rolled back on Stop after persist. */
   const persistedTurnRef = useRef<{ userId?: string; aiId?: string } | null>(null);
   const activeConvIdRef = useRef<string | null>(null);
@@ -615,6 +640,8 @@ export function ChatScreen() {
       );
     });
     if (draft) restoreDraftToInput(draft);
+    if (pendingImagesRef.current.length > 0) setAttachedImages(pendingImagesRef.current);
+    pendingImagesRef.current = [];
     pendingDraftRef.current = '';
     pendingTurnRef.current = null;
     setSendError(null);
@@ -683,13 +710,16 @@ export function ChatScreen() {
       voice.stop();
       return;
     }
-    if (!inputValue.trim() || lengthState.tooLong || fileReading || sending || sendLockRef.current || !user || !currentConversation) {
+    if ((!inputValue.trim() && attachedImages.length === 0) || lengthState.tooLong || fileReading || imagePreparing || sending || sendLockRef.current || !user || !currentConversation) {
       return;
     }
     const convId = currentConversation.id;
     const content = inputValue.trim();
-    const turnId = resolveTurnId(pendingTurnRef.current, content);
-    pendingTurnRef.current = { turnId, content };
+    const sentImages = attachedImages;
+    // A retry reuses the turn id only for the same text with the same pictures.
+    const turnKey = `${content}|img:${sentImages.map((image) => image.data.length).join(',')}`;
+    const turnId = resolveTurnId(pendingTurnRef.current, turnKey);
+    pendingTurnRef.current = { turnId, content: turnKey };
     const epoch = ++generationEpochRef.current;
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -698,6 +728,8 @@ export function ChatScreen() {
     setSendError(null);
     setCaptureNudge(null);
     setInputValue('');
+    pendingImagesRef.current = sentImages;
+    setAttachedImages([]);
     setSending(true);
     sendLockRef.current = true;
     setGuidedOpen(false);
@@ -712,6 +744,7 @@ export function ChatScreen() {
       created_at: new Date().toISOString(),
       client_message_id: turnId,
     };
+    if (sentImages.length > 0) photoPreviewsRef.current.set(tempId, sentImages.map((image) => image.previewUrl));
     scrollFollowRef.current = true;
     patchMessages((prev) => [...prev.filter((m) => m.id !== 'greeting'), tempMsg]);
     followTailAfterPaint();
@@ -721,6 +754,7 @@ export function ChatScreen() {
       setSendError(userMessage);
       patchMessages((prev) => prev.filter((m) => m.id !== tempId));
       restoreDraftToInput(content);
+      setAttachedImages(sentImages);
     };
 
     const userCapture = detectUserCaptureIntent(content);
@@ -759,6 +793,8 @@ export function ChatScreen() {
       if (epoch !== generationEpochRef.current) return;
 
       let aiText: string;
+      // What is saved as the person's message: the typed text, plus the picture description lines the server used.
+      let userContent = content;
 
       if (persistedTurn.ai?.content?.trim()) {
         aiText = prepareAiDisplayText(persistedTurn.ai.content);
@@ -771,6 +807,7 @@ export function ChatScreen() {
           userId: user.id,
           requestId: turnId,
           timeGap,
+          images: sentImages.map((image) => ({ mime: image.mime, data: image.data })),
           signal: abortController.signal,
         });
 
@@ -785,6 +822,7 @@ export function ChatScreen() {
         }
 
         aiText = prepareAiDisplayText(aiResult.content);
+        userContent = aiResult.userText ?? content;
       }
 
       if (!notesNudgeFromUser && detectAiNotesNudge(aiText)) {
@@ -809,7 +847,7 @@ export function ChatScreen() {
       const { message: savedUserRow, error: userSaveErr } = await insertChatMessage(
         convId,
         'user',
-        content,
+        userContent,
         turnOpts,
       );
       if (userSaveErr) {
@@ -830,6 +868,9 @@ export function ChatScreen() {
         userId: savedUserRow?.id,
         aiId: aiSavedRow?.id,
       };
+      if (savedUserRow && sentImages.length > 0) {
+        photoPreviewsRef.current.set(savedUserRow.id, sentImages.map((image) => image.previewUrl));
+      }
 
       if (rememberBefore !== null) {
         const snippet = rememberSnippet;
@@ -857,6 +898,7 @@ export function ChatScreen() {
         .eq('id', convId);
 
       pendingDraftRef.current = '';
+      pendingImagesRef.current = [];
       pendingTurnRef.current = null;
       setSendError(null);
       abortControllerRef.current = null;
@@ -936,13 +978,45 @@ export function ChatScreen() {
     openConversationRef.current = openConversationId;
     fileOperationRef.current += 1;
     setFileReading(false);
+    setImagePreparing(false);
+    setAttachedImages([]);
   }, [openConversationId]);
 
   async function handleFilePicked(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = ''; // so the same file can be picked again
-    if (!file) return;
+    if (files.length === 0) return;
     setSendError(null);
+
+    if (imagesEnabled && isImageFile(files[0])) {
+      const operation = ++fileOperationRef.current;
+      setImagePreparing(true);
+      try {
+        const pictures = files.filter((candidate) => isImageFile(candidate));
+        let attached = attachedImages.length;
+        const prepared: PreparedImage[] = [];
+        for (const file of pictures) {
+          const problem = checkImageBeforeReading(file, attached);
+          if (problem) {
+            setSendError(imageProblemMessage(problem));
+            break;
+          }
+          const image = await prepareImageFile(file);
+          if (operation !== fileOperationRef.current) return;
+          prepared.push(image);
+          attached += 1;
+        }
+        if (prepared.length > 0) setAttachedImages((current) => [...current, ...prepared].slice(0, IMAGE_MAX_COUNT));
+      } catch (error) {
+        if (operation !== fileOperationRef.current) return;
+        setSendError(imageProblemMessage(error instanceof ImageAttachmentError ? error.problem : 'unreadable'));
+      } finally {
+        if (operation === fileOperationRef.current) setImagePreparing(false);
+      }
+      return;
+    }
+
+    const file = files[0];
     setFileReading(true);
     const operation = ++fileOperationRef.current;
     try {
@@ -1256,6 +1330,7 @@ ${built.message}` : built.message));
               searchQuery={trimmedSearch || undefined}
               isSearchMatch={trimmedSearch ? matchingMessageIds.includes(msg.id) : false}
               isActiveSearchMatch={msg.id === activeMatchId}
+              photoPreviews={photoPreviewsRef.current.get(msg.id)}
             />
           ))}
 
@@ -1425,6 +1500,27 @@ ${built.message}` : built.message));
               </p>
             )}
 
+            {imagesEnabled && attachedImages.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-1" aria-label="Прикреплённые картинки">
+                {attachedImages.map((image) => (
+                  <div key={image.id} className={`relative h-16 w-16 overflow-hidden rounded-lg border ${theme.border}`}>
+                    <img src={image.previewUrl} alt="Прикреплённая картинка" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(image.id)}
+                      aria-label="Убрать картинку"
+                      className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white"
+                    >
+                      <X className="h-3 w-3" strokeWidth={2} />
+                    </button>
+                  </div>
+                ))}
+                {imagePreparing && (
+                  <p className={`self-center text-xs font-light ${theme.textMuted}`} role="status">Готовлю картинку…</p>
+                )}
+              </div>
+            )}
+
             {/* Input field */}
             <div className={`flex items-end gap-3 rounded-xl px-4 py-3 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
               {voiceComposer === 'preparing' ? (
@@ -1470,16 +1566,17 @@ ${built.message}` : built.message));
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".txt,.md,.docx,.pdf"
+                        accept={imagesEnabled ? '.txt,.md,.docx,.pdf,image/*' : '.txt,.md,.docx,.pdf'}
+                        multiple={imagesEnabled}
                         className="hidden"
                         onChange={handleFilePicked}
                       />
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={fileReading}
+                        disabled={fileReading || imagePreparing}
                         aria-label="Прикрепить файл"
-                        title="Прикрепить файл (.txt, .md, .docx, .pdf с текстом)"
+                        title={imagesEnabled ? 'Прикрепить файл или картинку' : 'Прикрепить файл (.txt, .md, .docx, .pdf с текстом)'}
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
                       >
                         <Paperclip className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
@@ -1490,7 +1587,7 @@ ${built.message}` : built.message));
                     <button
                       type="button"
                       onClick={handleVoicePress}
-                      disabled={fileReading || voiceConsentOpen || !canStartVoiceDictation({
+                      disabled={fileReading || imagePreparing || voiceConsentOpen || !canStartVoiceDictation({
                         sending,
                         phase: voice.snapshot.phase,
                       })}
@@ -1521,7 +1618,7 @@ ${built.message}` : built.message));
                     <button
                       type="button"
                       onClick={handleSend}
-                      disabled={!inputValue.trim() || lengthState.tooLong || fileReading}
+                      disabled={(!inputValue.trim() && attachedImages.length === 0) || lengthState.tooLong || fileReading || imagePreparing}
                       aria-label="Отправить"
                       className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
                     >
@@ -1581,6 +1678,7 @@ function MessageRow({
   searchQuery,
   isSearchMatch = false,
   isActiveSearchMatch = false,
+  photoPreviews,
 }: {
   msg: Message;
   theme: ReturnType<typeof useTheme>['theme'];
@@ -1589,12 +1687,16 @@ function MessageRow({
   searchQuery?: string;
   isSearchMatch?: boolean;
   isActiveSearchMatch?: boolean;
+  /** Small previews of the pictures sent in this visit (not saved; after a reload only the description shows). */
+  photoPreviews?: string[];
 }) {
   if (!msg.content) return null;
   const isUser = msg.sender === 'user';
   const delay = Math.min(index * 12, 100);
   const enterClass = animateEnter ? 'animate-msg-in' : '';
   const timestamp = formatMessageTime(msg.created_at);
+  // A message with pictures is its typed text plus one description line per picture (photoBlocks.ts).
+  const { text, photos } = isUser ? splitPhotoBlocks(msg.content) : { text: msg.content, photos: [] as string[] };
   const highlightClass =
     isActiveSearchMatch
       ? 'ring-1 ring-[#c9a96e]/55 rounded-2xl'
@@ -1610,11 +1712,24 @@ function MessageRow({
         style={animateEnter ? { animationDelay: `${delay}ms` } : undefined}
       >
         <div className={`max-w-[70%] px-5 py-3 rounded-2xl rounded-tr-sm ${theme.msgUserBg}`}>
-          <p className={`${theme.msgUserText} font-light text-[15px] leading-[1.8] whitespace-pre-wrap break-words`}>
-            {searchQuery && isSearchMatch
-              ? highlightSearchInText(msg.content, searchQuery)
-              : msg.content}
-          </p>
+          {text && (
+            <p className={`${theme.msgUserText} font-light text-[15px] leading-[1.8] whitespace-pre-wrap break-words`}>
+              {searchQuery && isSearchMatch ? highlightSearchInText(text, searchQuery) : text}
+            </p>
+          )}
+          {photos.map((description, photoIndex) => (
+            <div key={photoIndex} className={`${text || photoIndex > 0 ? 'mt-3' : ''} flex items-start gap-3`}>
+              {photoPreviews?.[photoIndex] ? (
+                <img src={photoPreviews[photoIndex]} alt={`Фото ${photoIndex + 1}`} className="h-16 w-16 shrink-0 rounded-lg object-cover" />
+              ) : (
+                <ImageIcon className={`mt-1 h-4 w-4 shrink-0 ${theme.msgUserText} opacity-60`} strokeWidth={1.5} />
+              )}
+              <div>
+                <p className={`${theme.msgUserText} text-[11px] font-light opacity-60`}>Фото {photoIndex + 1}</p>
+                <p className={`${theme.msgUserText} text-[13px] font-light leading-[1.6] opacity-85`}>{description}</p>
+              </div>
+            </div>
+          ))}
         </div>
         {timestamp && (
           <p className={`mt-1 px-1 text-[10px] font-light tabular-nums opacity-45 ${theme.textMuted}`}>
