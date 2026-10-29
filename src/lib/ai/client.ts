@@ -5,6 +5,7 @@ import {
   type ChatTransportDeps,
 } from './clientTransport';
 import type { AiSendResult } from './sendResult';
+import { imagesAllowedCached } from './imageCapability';
 export type { AiSendResult, AiSendStatus } from './sendResult';
 export { isAiSendSuccess } from './sendResult';
 export { isServerCalmFallback, classifyHttp200Content } from './calmFallback';
@@ -81,6 +82,11 @@ export interface SendMessageOptions {
   /** Up to three small JPEGs (base64) shown to the model with this message. */
   images?: ReadonlyArray<{ mime: string; data: string }>;
   signal?: AbortSignal;
+}
+
+/** Whether the server lets this person attach pictures (asked once per visit); false when it cannot be asked. */
+export function getImagesAllowed(userId: string, deps: ChatTransportDeps = defaultChatTransportDeps): Promise<boolean> {
+  return imagesAllowedCached(userId, deps);
 }
 
 const IMAGE_ERROR_MESSAGES: Record<string, string> = {

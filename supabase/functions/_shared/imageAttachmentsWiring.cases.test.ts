@@ -17,6 +17,20 @@ describe("pictures are wired into the chat function", () => {
     assert.match(chat.slice(required - 500, required), /hasImages/);
   });
 
+  it("answers the site's question 'may this person attach pictures' with the same rule the server enforces", () => {
+    assert.match(chat, /capabilities\?: unknown;/);
+    assert.match(chat, /const isImagesCapabilityCheck = body\.capabilities === "images";/);
+    // No message is needed for the question, and nothing else (no limit, no model) runs for it.
+    const required = chat.indexOf('error: "message is required"');
+    assert.match(chat.slice(required - 600, required), /!isImagesCapabilityCheck/);
+    const verified = chat.indexOf("const userId = verifiedUser.userId;");
+    const answer = chat.indexOf("if (isImagesCapabilityCheck) {");
+    const dedup = chat.indexOf("const dedupKey = requestId");
+    assert.ok(verified > 0 && verified < answer && answer < dedup, "answered after sign-in and before the duplicate and rate checks");
+    assert.match(chat.slice(answer, answer + 700), /imagesAllowedForUser\(\s*resolveImagesMode\(Deno\.env\.get\("STAYSEE_IMAGE_ATTACHMENTS"\)\)/);
+    assert.match(chat.slice(answer, answer + 700), /JSON\.stringify\(\{\s*images:/);
+  });
+
   it("does the picture step after the rate limit and before every safety check, as the first thing", () => {
     const rate = chat.indexOf("const rateLimitResult = await checkRateLimit");
     const disabled = chat.indexOf('unprocessable("images_disabled")');

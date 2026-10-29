@@ -315,6 +315,8 @@ interface RequestBody {
   timeGap?: TimeGapMeta;
   /** Up to three small JPEGs (base64) sent with the message; see imageAttachments.ts */
   images?: unknown;
+  /** "images": the site asks whether this person may attach pictures (see the answer below); no message needed. */
+  capabilities?: unknown;
 }
 
 type MemoryV3LifecycleReadDiagnostic =
@@ -579,12 +581,13 @@ Deno.serve(async (req: Request) => {
 
     // The text the whole turn works on. Pictures add their description lines to it (see the picture step below).
     let message = typedMessage;
+    const isImagesCapabilityCheck = body.capabilities === "images";
     const hasImages =
       body.images !== undefined &&
       body.images !== null &&
       !(Array.isArray(body.images) && body.images.length === 0);
 
-    if (typeof message !== "string" || (message.trim() === "" && !hasImages)) {
+    if (!isImagesCapabilityCheck && (typeof message !== "string" || (message.trim() === "" && !hasImages))) {
       return new Response(
         JSON.stringify({ error: "message is required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -669,6 +672,22 @@ Deno.serve(async (req: Request) => {
 
     const userId = verifiedUser.userId;
     const authToken = verifiedUser.authToken;
+
+    // The site asks once per visit whether this person may attach pictures, so the button is shown to exactly the
+    // people the picture step below would accept. Nothing else runs for this request: no limit, no model.
+    if (isImagesCapabilityCheck) {
+      return new Response(
+        JSON.stringify({
+          images: imagesAllowedForUser(
+            resolveImagesMode(Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS")),
+            userId,
+            Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS_USER_IDS"),
+          ),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     // Legacy rolling summary ("ПАМЯТЬ БЕСЕДЫ") and its phrase-catcher corrections.
     // ON unless STAYSEE_LEGACY_SUMMARY_OFF says otherwise (see legacySummaryMode.ts).
     const legacySummaryOff = isLegacySummaryDisabled(
