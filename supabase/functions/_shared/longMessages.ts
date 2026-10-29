@@ -144,7 +144,7 @@ function cutBackToLastSentence(text: string): string {
   return end >= 12 ? text.slice(0, end + 1) : text;
 }
 
-function readUsage(value: unknown): LongMessageSummaryResult["usage"] {
+export function readUsage(value: unknown): LongMessageSummaryResult["usage"] {
   if (typeof value !== "object" || value === null) return null;
   const usage = value as Record<string, unknown>;
   const prompt = usage.prompt_tokens;

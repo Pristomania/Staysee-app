@@ -1,5 +1,5 @@
 import { cleanDescription, IMAGE_CALL_KIND, type ImageInput } from "./imageAttachments.ts";
-import { parseLongMessageSummaryResponse } from "./longMessages.ts";
+import { parseLongMessageSummaryResponse, readUsage } from "./longMessages.ts";
 
 export const IMAGE_DESCRIBE_MODEL = "google/gemini-3.7-flash";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -47,19 +47,48 @@ export function buildImageDescriptionRequest(image: ImageInput, model: string = 
   };
 }
 
+type Usage = NonNullable<ImageDescription["usage"]>;
+
+/** Why an answer that arrived could not be used, as a short code (never the answer itself). */
+function unusableCode(body: unknown): string {
+  const choices = (body as { choices?: unknown } | null)?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return "unusable";
+  const choice = choices[0] as { finish_reason?: unknown; message?: { content?: unknown } } | null;
+  const reason = choice?.finish_reason;
+  if (reason === "length") return "cut_off";
+  if (typeof reason === "string" && reason !== "stop" && /^[a-z_]{1,24}$/.test(reason)) return `finish_${reason}`;
+  const content = choice?.message?.content;
+  if (typeof content === "string" && content.trim() === "") return "empty";
+  return "unusable";
+}
+
+/** A failure that may pass on a second try; a bad request, a refusal or a timeout will not. */
+const MAY_PASS = /^(empty|unusable|cut_off|bad_json|network|http_429|http_5\d\d)$/;
+const MAX_ATTEMPTS = 2;
+
 /**
- * Describes one picture with one cheap vision-model call. It never throws and never waits longer than the
- * time limit: any failure returns null. Nothing about the picture or the answer is logged.
+ * Describes one picture with one cheap vision-model call, once more after a failure that may pass. It never
+ * throws and never waits longer than the time limit per try: any failure returns null. `onFailure` gets a short
+ * code for each failed try (and the usage, when the provider billed it); nothing about the picture or the
+ * answer is logged.
  */
 export function createImageDescriber(options: {
   apiKey: string | null | undefined;
   fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
   model?: string;
   timeoutMs?: number;
+  onFailure?: (code: string, usage: Usage | null) => void;
 }): (image: ImageInput) => Promise<ImageDescription | null> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  return async (image) => {
-    if (typeof options.apiKey !== "string" || options.apiKey.trim() === "") return null;
+  const report = (code: string, usage: Usage | null) => {
+    try {
+      options.onFailure?.(code, usage);
+    } catch {
+      // a failing report must not break the description
+    }
+  };
+
+  async function attempt(image: ImageInput): Promise<ImageDescription | { code: string; usage: Usage | null }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -69,17 +98,37 @@ export function createImageDescriber(options: {
         body: JSON.stringify(buildImageDescriptionRequest(image, options.model)),
         signal: controller.signal,
       });
-      if (!response.ok) return null;
+      if (!response.ok) return { code: `http_${response.status}`, usage: null };
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return { code: "bad_json", usage: null };
+      }
       // The answer has the same shape as a short version of a long message: one text, cut-off answers refused.
-      const parsed = parseLongMessageSummaryResponse(await response.json());
-      if (!parsed) return null;
-      const description = cleanDescription(parsed.summary);
-      return description === "" ? null : { description, usage: parsed.usage ?? null };
+      const parsed = parseLongMessageSummaryResponse(body);
+      const description = parsed ? cleanDescription(parsed.summary) : "";
+      if (parsed && description !== "") return { description, usage: parsed.usage ?? null };
+      return { code: parsed ? "empty" : unusableCode(body), usage: readUsage((body as { usage?: unknown } | null)?.usage) ?? null };
     } catch {
-      return null;
+      return { code: controller.signal.aborted ? "timeout" : "network", usage: null };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  return async (image) => {
+    if (typeof options.apiKey !== "string" || options.apiKey.trim() === "") {
+      report("no_key", null);
+      return null;
+    }
+    for (let tries = 1; tries <= MAX_ATTEMPTS; tries++) {
+      const outcome = await attempt(image);
+      if ("description" in outcome) return outcome;
+      report(outcome.code, outcome.usage);
+      if (!MAY_PASS.test(outcome.code)) return null;
+    }
+    return null;
   };
 }
 

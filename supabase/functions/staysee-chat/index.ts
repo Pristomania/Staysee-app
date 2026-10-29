@@ -755,30 +755,40 @@ Deno.serve(async (req: Request) => {
       if (describedToday + turnImages.length > MAX_IMAGES_PER_DAY) return unprocessable("images_daily_limit");
 
       const imageModel = Deno.env.get("STAYSEE_IMAGE_DESCRIBE_MODEL")?.trim() || IMAGE_DESCRIBE_MODEL;
+      // Short codes of why a try failed (never the answer or the picture) and the usage of failed tries the
+      // provider billed anyway.
+      const failureCodes: string[] = [];
+      const billedFailures: Array<{ promptTokens: number; completionTokens: number; costUsd: number }> = [];
       const described = await describeImages(
         turnImages,
         createImageDescriber({
           apiKey: Deno.env.get("OPENROUTER_API_KEY"),
           fetchImpl: globalThis.fetch.bind(globalThis),
           model: imageModel,
+          onFailure: (code, usage) => {
+            failureCodes.push(code);
+            if (usage) billedFailures.push(usage);
+          },
         }),
       );
-      for (const paid of described.paid) {
+      // Every call the provider billed is recorded (and so counted against the daily limit), a failed try too.
+      const usages = [...described.paid.map((entry) => entry.usage), ...billedFailures];
+      for (const usage of usages) {
         EdgeRuntime.waitUntil(logOpenRouterUsage(imageClient, buildUsageLogRow({
           userId,
           conversationId,
           model: imageModel,
-          promptTokens: paid.usage?.promptTokens ?? 0,
-          completionTokens: paid.usage?.completionTokens ?? 0,
-          usage: { cost: paid.usage?.costUsd ?? 0 },
+          promptTokens: usage?.promptTokens ?? 0,
+          completionTokens: usage?.completionTokens ?? 0,
+          usage: { cost: usage?.costUsd ?? 0 },
           memoryTokens: 0,
           summaryTokens: 0,
           callKind: IMAGE_CALL_KIND,
         })));
       }
       if (!described.descriptions) {
-        console.warn("[staysee-chat] image description failed");
-        return unprocessable("image_unreadable");
+        console.warn(`[staysee-chat] image description failed: ${failureCodes.join(",")}`);
+        return unprocessable("image_unreadable", { reasons: failureCodes });
       }
       message = appendPhotoBlocks(typedMessage, described.descriptions.map((entry) => entry.description));
     }

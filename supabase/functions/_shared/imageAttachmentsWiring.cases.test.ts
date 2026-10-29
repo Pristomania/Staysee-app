@@ -33,15 +33,21 @@ describe("pictures are wired into the chat function", () => {
   it("refuses when the switch is off, the count cannot be read, or a description fails", () => {
     assert.match(chat, /imagesAllowedForUser\(\s*resolveImagesMode\(Deno\.env\.get\("STAYSEE_IMAGE_ATTACHMENTS"\)\)/);
     assert.match(chat, /unprocessable\("images_unavailable"\)/);
-    assert.match(chat, /unprocessable\("image_unreadable"\)/);
+    assert.match(chat, /unprocessable\("image_unreadable"/);
     assert.match(chat, /status: 422/);
   });
 
-  it("records every paid description call, under its own kind, even when the batch failed", () => {
-    const logging = chat.indexOf("for (const paid of described.paid)");
-    assert.ok(logging > 0 && logging < chat.indexOf('unprocessable("image_unreadable")'));
+  it("records every paid description call (also a failed try the provider billed), under its own kind", () => {
+    const logging = chat.indexOf("for (const usage of usages)");
+    assert.ok(logging > 0 && logging < chat.indexOf('unprocessable("image_unreadable"'));
     assert.match(chat.slice(logging, logging + 700), /callKind: IMAGE_CALL_KIND/);
+    assert.match(chat, /onFailure: \(code, usage\) =>/);
     assert.match(usage, /\| "image_description"/);
+  });
+
+  it("says why a description failed, by short codes only, in the refusal and the log", () => {
+    assert.match(chat, /unprocessable\("image_unreadable", \{ reasons: failureCodes \}\)/);
+    assert.match(chat, /image description failed: \$\{failureCodes\.join\(","\)\}/);
   });
 
   it("gives the pictures to the main call only, and sends back the text that was used", () => {
