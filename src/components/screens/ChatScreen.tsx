@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
+import { getImagesAllowed, isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
 import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Paperclip, Image as ImageIcon } from 'lucide-react';
@@ -84,7 +84,6 @@ import {
   prepareImageFile,
   type PreparedImage,
 } from '../../lib/imageAttachment';
-import { imagesEnabledForUser, readImageBeta } from '../../lib/imageFeature';
 import { splitPhotoBlocks } from '../../lib/photoBlocks';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
@@ -222,11 +221,21 @@ export function ChatScreen() {
   /** Stable turn id for submit + retry until success or Stop. */
   const pendingTurnRef = useRef<PendingTurn | null>(null);
   // Pictures: who may attach them, what is attached, what is on its way (to give back if sending is stopped).
-  const imagesEnabled = imagesEnabledForUser(
-    user?.id,
-    import.meta.env.VITE_IMAGE_ATTACHMENTS_USER_IDS as string | undefined,
-    readImageBeta(typeof window === 'undefined' ? null : window.localStorage),
-  );
+  // Whether the server lets this person attach pictures (asked once per visit); until it answers, no button.
+  const [imagesEnabled, setImagesEnabled] = useState(false);
+  useEffect(() => {
+    if (!user?.id) {
+      setImagesEnabled(false);
+      return;
+    }
+    let cancelled = false;
+    void getImagesAllowed(user.id).then((allowed) => {
+      if (!cancelled) setImagesEnabled(allowed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
   const [attachedImages, setAttachedImages] = useState<PreparedImage[]>([]);
   const [imagePreparing, setImagePreparing] = useState(false);
   const pendingImagesRef = useRef<PreparedImage[]>([]);

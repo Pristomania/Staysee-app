@@ -20,10 +20,13 @@ describe("pictures in the chat screen", () => {
   const send = bodyOf(screen, "async function handleSend()");
   const row = screen.slice(screen.indexOf("function MessageRow({"), screen.indexOf("function aiMessageStyle("));
 
-  it("lets the file picker take pictures only for people who may see the button", () => {
+  it("lets the file picker take pictures only for people the server says may attach them", () => {
     assert.match(screen, /accept=\{imagesEnabled \? '\.txt,\.md,\.docx,\.pdf,image\/\*' : '\.txt,\.md,\.docx,\.pdf'\}/);
     assert.match(screen, /multiple=\{imagesEnabled\}/);
-    assert.match(screen, /imagesEnabledForUser\(\s*user\?\.id,/);
+    assert.match(screen, /const \[imagesEnabled, setImagesEnabled\] = useState\(false\);/);
+    assert.match(screen, /getImagesAllowed\(user\.id\)\.then\(/);
+    // No special link or build setting any more: the answer comes from the server.
+    assert.doesNotMatch(screen, /readImageBeta|imagesEnabledForUser|VITE_IMAGE_ATTACHMENTS/);
   });
 
   it("shrinks a picked picture, and drops the result if a newer pick or another conversation came meanwhile", () => {
