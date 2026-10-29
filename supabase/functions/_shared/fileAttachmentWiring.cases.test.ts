@@ -23,7 +23,7 @@ describe("attaching a file in the chat screen", () => {
 
   it("has a paperclip that opens a file picker limited to the readable kinds", () => {
     assert.match(screen, /<input[\s\S]{0,200}type="file"/);
-    assert.match(screen, /accept="\.txt,\.md,\.docx,\.pdf"/);
+    assert.match(screen, /'\.txt,\.md,\.docx,\.pdf'/); // pictures are added to the list only for people who may attach them
     assert.match(screen, /aria-label="Прикрепить файл"/);
     assert.match(screen, /Paperclip/);
   });
@@ -51,13 +51,13 @@ describe("attaching a file in the chat screen", () => {
     const check = picked.indexOf("operation !== fileOperationRef.current");
     assert.ok(check > 0, "the stale-result check is missing");
     assert.ok(check < picked.indexOf("setInputValue("), "the check must come before the box is changed");
-    assert.match(screen, /fileOperationRef\.current \+= 1;\s*setFileReading\(false\);\s*\}, \[openConversationId\]\)/);
+    assert.match(screen, /fileOperationRef\.current \+= 1;\s*setFileReading\(false\);[\s\S]{0,120}\}, \[openConversationId\]\)/);
   });
 
   it("does not let a question go out while the file is still being read", () => {
     assert.match(send, /fileReading/);
-    assert.match(screen, /disabled=\{!inputValue\.trim\(\) \|\| lengthState\.tooLong \|\| fileReading\}/);
-    assert.match(screen, /disabled=\{fileReading \|\| voiceConsentOpen/);
+    assert.match(screen, /disabled=\{\(!inputValue\.trim\(\) && attachedImages\.length === 0\) \|\| lengthState\.tooLong \|\| fileReading \|\| imagePreparing\}/);
+    assert.match(screen, /disabled=\{fileReading \|\| imagePreparing \|\| voiceConsentOpen/);
   });
 
   it("tells the person in plain words why a file was not taken", () => {
