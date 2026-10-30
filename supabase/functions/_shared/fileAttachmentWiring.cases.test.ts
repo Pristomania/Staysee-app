@@ -51,7 +51,7 @@ describe("attaching a file in the chat screen", () => {
     const check = picked.indexOf("operation !== fileOperationRef.current");
     assert.ok(check > 0, "the stale-result check is missing");
     assert.ok(check < picked.indexOf("setInputValue("), "the check must come before the box is changed");
-    assert.match(screen, /fileOperationRef\.current \+= 1;\s*setFileReading\(false\);[\s\S]{0,120}\}, \[openConversationId\]\)/);
+    assert.match(screen, /fileOperationRef\.current \+= 1;\s*setFileReading\(false\);[\s\S]{0,220}\}, \[openConversationId\]\)/);
   });
 
   it("does not let a question go out while the file is still being read", () => {

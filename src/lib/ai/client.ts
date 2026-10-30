@@ -5,7 +5,7 @@ import {
   type ChatTransportDeps,
 } from './clientTransport';
 import type { AiSendResult } from './sendResult';
-import { imagesAllowedCached } from './imageCapability';
+import { imagesCapabilityCached, type ImagesCapability } from './imageCapability';
 export type { AiSendResult, AiSendStatus } from './sendResult';
 export { isAiSendSuccess } from './sendResult';
 export { isServerCalmFallback, classifyHttp200Content } from './calmFallback';
@@ -84,9 +84,9 @@ export interface SendMessageOptions {
   signal?: AbortSignal;
 }
 
-/** Whether the server lets this person attach pictures (asked once per visit); false when it cannot be asked. */
-export function getImagesAllowed(userId: string, deps: ChatTransportDeps = defaultChatTransportDeps): Promise<boolean> {
-  return imagesAllowedCached(userId, deps);
+/** Whether the server lets this person attach pictures and whether they gave the consent (asked once per visit). */
+export function getImagesCapability(userId: string, deps: ChatTransportDeps = defaultChatTransportDeps): Promise<ImagesCapability> {
+  return imagesCapabilityCached(userId, deps);
 }
 
 const IMAGE_ERROR_MESSAGES: Record<string, string> = {
@@ -95,6 +95,7 @@ const IMAGE_ERROR_MESSAGES: Record<string, string> = {
   images_daily_limit: 'На сегодня лимит картинок исчерпан. Опиши словами или попробуй завтра.',
   images_invalid: 'Картинка не подошла. Попробуй другую.',
   images_unavailable: 'Сейчас не получается принять картинку. Попробуй чуть позже.',
+  images_consent_required: 'Нужно согласие на обработку картинок. Прикрепи картинку ещё раз и подтверди его.',
 };
 const IMAGE_ERROR_FALLBACK = 'Не получилось отправить картинку. Попробуй другую или опиши словами.';
 

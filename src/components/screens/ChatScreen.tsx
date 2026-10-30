@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { getImagesAllowed, isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
+import { getImagesCapability, isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
 import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Plus, Image as ImageIcon } from 'lucide-react';
@@ -85,6 +85,9 @@ import {
   type PreparedImage,
 } from '../../lib/imageAttachment';
 import { splitPhotoBlocks } from '../../lib/photoBlocks';
+import { IMAGES_NOTICE_TEXT, recordImagesConsent } from '../../lib/imagesConsent';
+import { markImagesConsentGiven } from '../../lib/ai/imageCapability';
+import { ImagesConsentCard } from '../chat/ImagesConsentCard';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -223,14 +226,20 @@ export function ChatScreen() {
   // Pictures: who may attach them, what is attached, what is on its way (to give back if sending is stopped).
   // Whether the server lets this person attach pictures (asked once per visit); until it answers, no button.
   const [imagesEnabled, setImagesEnabled] = useState(false);
+  // Whether the person already gave the picture consent; the notice is shown before the first picture only.
+  const [imagesConsent, setImagesConsent] = useState(true);
+  const [imagesConsentOpen, setImagesConsentOpen] = useState(false);
+  const pendingImageFilesRef = useRef<File[] | null>(null);
   useEffect(() => {
     if (!user?.id) {
       setImagesEnabled(false);
       return;
     }
     let cancelled = false;
-    void getImagesAllowed(user.id).then((allowed) => {
-      if (!cancelled) setImagesEnabled(allowed);
+    void getImagesCapability(user.id).then((capability) => {
+      if (cancelled) return;
+      setImagesEnabled(capability.allowed);
+      setImagesConsent(capability.consent);
     });
     return () => {
       cancelled = true;
@@ -989,7 +998,57 @@ export function ChatScreen() {
     setFileReading(false);
     setImagePreparing(false);
     setAttachedImages([]);
+    setImagesConsentOpen(false);
+    pendingImageFilesRef.current = null;
   }, [openConversationId]);
+
+  // Opens the chosen pictures, shrinks them and puts the previews under the box. A result is used only if no newer pick
+  // started and the conversation did not change meanwhile.
+  async function attachImageFiles(pictures: File[]) {
+    const operation = ++fileOperationRef.current;
+    setImagePreparing(true);
+    try {
+      let attached = attachedImages.length;
+      const prepared: PreparedImage[] = [];
+      for (const file of pictures) {
+        const problem = checkImageBeforeReading(file, attached);
+        if (problem) {
+          setSendError(imageProblemMessage(problem));
+          break;
+        }
+        const image = await prepareImageFile(file);
+        if (operation !== fileOperationRef.current) return;
+        prepared.push(image);
+        attached += 1;
+      }
+      if (prepared.length > 0) setAttachedImages((current) => [...current, ...prepared].slice(0, IMAGE_MAX_COUNT));
+    } catch (error) {
+      if (operation !== fileOperationRef.current) return;
+      setSendError(imageProblemMessage(error instanceof ImageAttachmentError ? error.problem : 'unreadable'));
+    } finally {
+      if (operation === fileOperationRef.current) setImagePreparing(false);
+    }
+  }
+
+  async function acceptImagesConsent() {
+    if (!user) return;
+    const saved = await recordImagesConsent((fn, args) => Promise.resolve(supabase.rpc(fn, args)), navigator.userAgent);
+    setImagesConsentOpen(false);
+    const files = pendingImageFilesRef.current;
+    pendingImageFilesRef.current = null;
+    if (!saved) {
+      setSendError('Не получилось сохранить согласие. Попробуйте ещё раз.');
+      return;
+    }
+    markImagesConsentGiven(user.id);
+    setImagesConsent(true);
+    if (files && files.length > 0) await attachImageFiles(files);
+  }
+
+  function declineImagesConsent() {
+    setImagesConsentOpen(false);
+    pendingImageFilesRef.current = null;
+  }
 
   async function handleFilePicked(e: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -998,30 +1057,14 @@ export function ChatScreen() {
     setSendError(null);
 
     if (imagesEnabled && isImageFile(files[0])) {
-      const operation = ++fileOperationRef.current;
-      setImagePreparing(true);
-      try {
-        const pictures = files.filter((candidate) => isImageFile(candidate));
-        let attached = attachedImages.length;
-        const prepared: PreparedImage[] = [];
-        for (const file of pictures) {
-          const problem = checkImageBeforeReading(file, attached);
-          if (problem) {
-            setSendError(imageProblemMessage(problem));
-            break;
-          }
-          const image = await prepareImageFile(file);
-          if (operation !== fileOperationRef.current) return;
-          prepared.push(image);
-          attached += 1;
-        }
-        if (prepared.length > 0) setAttachedImages((current) => [...current, ...prepared].slice(0, IMAGE_MAX_COUNT));
-      } catch (error) {
-        if (operation !== fileOperationRef.current) return;
-        setSendError(imageProblemMessage(error instanceof ImageAttachmentError ? error.problem : 'unreadable'));
-      } finally {
-        if (operation === fileOperationRef.current) setImagePreparing(false);
+      const pictures = files.filter((candidate) => isImageFile(candidate));
+      if (!imagesConsent) {
+        // The picture consent is asked once, before the first picture; the chosen files wait for the answer.
+        pendingImageFilesRef.current = pictures;
+        setImagesConsentOpen(true);
+        return;
       }
+      await attachImageFiles(pictures);
       return;
     }
 
@@ -1493,6 +1536,18 @@ ${built.message}` : built.message));
                 sizeLabel={formatVoicePackageSize(VOICE_MODEL_TOTAL_BYTES)}
                 onAccept={handleVoiceConsentAccept}
                 onCancel={handleVoiceConsentCancel}
+                borderClass={theme.border}
+                surfaceClass={theme.surface}
+                textClass={theme.textSecondary}
+                mutedClass={theme.textMuted}
+              />
+            )}
+
+            {imagesConsentOpen && (
+              <ImagesConsentCard
+                text={IMAGES_NOTICE_TEXT}
+                onAccept={() => void acceptImagesConsent()}
+                onCancel={declineImagesConsent}
                 borderClass={theme.border}
                 surfaceClass={theme.surface}
                 textClass={theme.textSecondary}
