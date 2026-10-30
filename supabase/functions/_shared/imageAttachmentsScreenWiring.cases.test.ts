@@ -91,3 +91,27 @@ describe("pictures in the chat screen", () => {
     assert.match(screen, /photoPreviews=\{photoPreviewsRef\.current\.get\(msg\.id\)\}/);
   });
 });
+
+describe("the buttons of the message box", () => {
+  const box = screen.slice(screen.indexOf("{/* Input field */}"), screen.indexOf("// ── Sub-components"));
+  const SAME_SIZE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg";
+
+  it("puts attaching on the left as a plus, before the text field, and no longer as a paperclip", () => {
+    const plus = box.indexOf('aria-label="Прикрепить файл"');
+    const field = box.indexOf("onChange={handleInputChange}");
+    assert.ok(plus > 0 && field > 0 && plus < field, "the plus comes before the text field");
+    assert.match(box.slice(plus, plus + 700), /<Plus /);
+    assert.doesNotMatch(screen, /Paperclip/);
+  });
+
+  it("makes the plus, the microphone, send and stop the same size, so the row is even", () => {
+    assert.ok(box.split(SAME_SIZE).length - 1 >= 4, "plus, microphone, send and stop share one size");
+    assert.doesNotMatch(box, /shrink-0 p-1\.5/);
+  });
+
+  it("keeps the text in line with the buttons, and the buttons close together", () => {
+    const field = box.slice(box.indexOf("onChange={handleInputChange}") - 400, box.indexOf("onChange={handleInputChange}") + 400);
+    assert.match(field, /py-2/);
+    assert.match(box, /flex items-end gap-2 rounded-xl/);
+  });
+});
