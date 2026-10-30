@@ -1689,6 +1689,19 @@ Deno.serve(async (req: Request) => {
             shadowResult.model,
             shadowResult.rawContent
           );
+          // The audit call is a second full model call and is paid for like any other: record it, so the
+          // cost records match the OpenRouter log line by line.
+          EdgeRuntime.waitUntil(logOpenRouterUsage(quotaServiceClient, buildUsageLogRow({
+            userId,
+            conversationId,
+            model: shadowResult.model,
+            promptTokens: shadowResult.promptTokens,
+            completionTokens: shadowResult.completionTokens,
+            usage: shadowResult.usage,
+            memoryTokens: 0,
+            summaryTokens: 0,
+            callKind: "structured_turn_shadow",
+          })));
         }
       } catch (shadowErr) {
         console.error("[staysee-chat] structured shadow call error:", shadowErr);

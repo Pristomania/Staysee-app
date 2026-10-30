@@ -43,7 +43,8 @@ export type UsageCallKind =
   | "memory_lifecycle_extractor"
   | "memory_lifecycle_reconciler"
   | "long_message_summary"
-  | "image_description";
+  | "image_description"
+  | "structured_turn_shadow";
 
 export type UsageCostCategory = "automatic" | "technical";
 
