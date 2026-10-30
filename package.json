@@ -10,6 +10,7 @@
     "test:offline": "node scripts/run-offline-tests.mjs",
     "test:db": "node scripts/run-db-tests.mjs",
     "smoke:bundle": "node scripts/smoke-built-site.mjs",
+    "build:legal": "node scripts/build-legal-content.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "backfill:memory": "node scripts/backfill-memory.mjs",
