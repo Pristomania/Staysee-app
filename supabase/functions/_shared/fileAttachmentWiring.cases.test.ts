@@ -25,7 +25,7 @@ describe("attaching a file in the chat screen", () => {
     assert.match(screen, /<input[\s\S]{0,200}type="file"/);
     assert.match(screen, /'\.txt,\.md,\.docx,\.pdf'/); // pictures are added to the list only for people who may attach them
     assert.match(screen, /aria-label="Прикрепить файл"/);
-    assert.match(screen, /Paperclip/);
+    assert.match(screen, /<Plus /); // the attach button is a plus on the left of the message box
   });
 
   it("shows the paperclip only while no reply is coming", () => {

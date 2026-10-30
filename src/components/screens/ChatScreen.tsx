@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { getImagesAllowed, isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Plus, Image as ImageIcon } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -1531,7 +1531,7 @@ ${built.message}` : built.message));
             )}
 
             {/* Input field */}
-            <div className={`flex items-end gap-3 rounded-xl px-4 py-3 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
+            <div className={`flex items-end gap-2 rounded-xl px-3 py-2.5 border transition-colors duration-200 ${theme.inputBg} ${theme.inputBorder}`}>
               {voiceComposer === 'preparing' ? (
                 <VoicePreparingBar
                   progress={voice.snapshot.prepareProgress}
@@ -1560,16 +1560,6 @@ ${built.message}` : built.message));
                 </div>
               ) : (
                 <>
-                  <textarea
-                    ref={inputRef}
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    placeholder="Напишите как есть…"
-                    rows={1}
-                    enterKeyHint="enter"
-                    className={`chat-compose-input flex-1 bg-transparent outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
-                    style={{ maxHeight: '120px' }}
-                  />
                   {!sending && (
                     <>
                       <input
@@ -1588,10 +1578,20 @@ ${built.message}` : built.message));
                         title={imagesEnabled ? 'Прикрепить файл или картинку' : 'Прикрепить файл (.txt, .md, .docx, .pdf с текстом)'}
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
                       >
-                        <Paperclip className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                        <Plus className={`h-5 w-5 ${theme.textSecondary}`} strokeWidth={1.5} />
                       </button>
                     </>
                   )}
+                  <textarea
+                    ref={inputRef}
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    placeholder="Напишите как есть…"
+                    rows={1}
+                    enterKeyHint="enter"
+                    className={`chat-compose-input flex-1 bg-transparent py-2 outline-none resize-none font-light text-[15px] leading-relaxed ${theme.inputText} ${theme.inputPlaceholder}`}
+                    style={{ maxHeight: '120px' }}
+                  />
                   {!sending && (
                     <button
                       type="button"
@@ -1615,7 +1615,7 @@ ${built.message}` : built.message));
                       type="button"
                       onClick={handleStop}
                       aria-label="Остановить ответ"
-                      className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 border border-[#c9a96e]/25 bg-[#c9a96e]/8 hover:bg-[#c9a96e]/14`}
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 border border-[#c9a96e]/25 bg-[#c9a96e]/8 hover:bg-[#c9a96e]/14`}
                     >
                       <Square
                         className="w-3.5 h-3.5 text-[#c9a96e]/85"
@@ -1629,7 +1629,7 @@ ${built.message}` : built.message));
                       onClick={handleSend}
                       disabled={(!inputValue.trim() && attachedImages.length === 0) || lengthState.tooLong || fileReading || imagePreparing}
                       aria-label="Отправить"
-                      className={`shrink-0 p-1.5 rounded-lg transition-all duration-200 disabled:opacity-20 ${theme.surface} ${theme.surfaceHover}`}
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
                     >
                       <Send className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
                     </button>
