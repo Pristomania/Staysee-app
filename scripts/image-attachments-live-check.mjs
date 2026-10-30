@@ -7,6 +7,8 @@
 //
 // Needs the picture switch to include the test user (STAYSEE_IMAGE_ATTACHMENTS=list and
 // STAYSEE_IMAGE_ATTACHMENTS_USER_IDS). Use synthetic pictures only: descriptions are printed.
+// The server takes pictures only from people who gave the picture consent (user_consents, kind images); the script
+// records it for the technical test user (never for anybody else), as the app does for a person.
 // Sends: one picture with a question, all pictures with a question, a picture with no text, and four pictures
 // (which must be refused). Then prints the recorded cost of every call in the window, to be compared with the
 // OpenRouter dashboard (Activity) for the same minutes. The conversation is kept for an hour like other tests.
@@ -46,6 +48,18 @@ async function chat({ message, conversationId, images, tag }) {
 const oneLine = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
 
 await withTestConversation({ url, serviceKey, testUserId }, `image-live-check ${Date.now()}`, async ({ conversationId, headers }) => {
+  // The technical test user's picture consent (a test row: the hash is not a real document's).
+  await restJson(url, headers, "user_consents?on_conflict=user_id,consent_type,document_version", {
+    method: "POST",
+    prefer: "resolution=ignore-duplicates,return=minimal",
+    body: JSON.stringify({
+      user_id: testUserId,
+      consent_type: "images",
+      document_version: "images_v1",
+      document_sha256: "0".repeat(64),
+      user_agent: "image-attachments-live-check",
+    }),
+  });
   const steps = [
     { tag: "one", label: "one picture with a question", message: "Посмотри, пожалуйста, что ты видишь на этой картинке?", images: pictures.slice(0, 1) },
     ...(pictures.length > 1

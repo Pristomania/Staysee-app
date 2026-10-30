@@ -11,3 +11,5 @@ export { ConversationDynamicsScreen } from './ConversationDynamicsScreen';
 export { ConversationNotesScreen } from './ConversationNotesScreen';
 export { PrivacyScreen } from './PrivacyScreen';
 export { TermsScreen } from './TermsScreen';
+export { PrivacyPolicyScreen } from './PrivacyPolicyScreen';
+export { ConsentScreen } from './ConsentScreen';

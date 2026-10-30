@@ -56,6 +56,7 @@ import {
   validateImages,
   withImageParts,
 } from "../_shared/imageAttachments.ts";
+import { hasImagesConsent } from "../_shared/imageConsent.ts";
 import {
   countImagesDescribedSince,
   createImageDescriber,
@@ -676,14 +677,22 @@ Deno.serve(async (req: Request) => {
     // The site asks once per visit whether this person may attach pictures, so the button is shown to exactly the
     // people the picture step below would accept. Nothing else runs for this request: no limit, no model.
     if (isImagesCapabilityCheck) {
+      const imagesAllowed = imagesAllowedForUser(
+        resolveImagesMode(Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS")),
+        userId,
+        Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS_USER_IDS"),
+      );
+      // Whether the person has already given the picture consent (asked in the app before the first picture).
+      let imagesConsent = false;
+      if (imagesAllowed) {
+        try {
+          imagesConsent = await hasImagesConsent(makeServiceClient(), userId);
+        } catch {
+          console.error("[staysee-chat] images consent unavailable");
+        }
+      }
       return new Response(
-        JSON.stringify({
-          images: imagesAllowedForUser(
-            resolveImagesMode(Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS")),
-            userId,
-            Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS_USER_IDS"),
-          ),
-        }),
+        JSON.stringify({ images: imagesAllowed, imagesConsent }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -760,6 +769,14 @@ Deno.serve(async (req: Request) => {
       turnImages = checkedImages.images;
 
       const imageClient = makeServiceClient();
+      // The picture consent is given in the app, once, before the first picture. Without it (or when it cannot
+      // be read) the pictures are refused, never assumed.
+      try {
+        if (!(await hasImagesConsent(imageClient, userId))) return unprocessable("images_consent_required");
+      } catch {
+        console.error("[staysee-chat] images consent unavailable");
+        return unprocessable("images_unavailable");
+      }
       let describedToday: number;
       try {
         describedToday = await countImagesDescribedSince(

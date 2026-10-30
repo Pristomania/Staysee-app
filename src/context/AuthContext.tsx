@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { signUpConsentMetadata, type SignUpConsents } from '../lib/consents';
 import { supabase } from '../lib/supabase';
 import { ensureUserProfile } from '../lib/ensureProfile';
 import {
@@ -30,7 +31,7 @@ interface AuthContextType {
   /** User opened a password-reset link and must set a new password before using the app. */
   passwordRecoveryPending: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string) => Promise<SignUpResult>;
+  signUp: (email: string, password: string, consents?: SignUpConsents) => Promise<SignUpResult>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   completePasswordRecovery: () => void;
@@ -250,10 +251,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: null };
   }
 
-  async function signUp(email: string, password: string): Promise<SignUpResult> {
+  async function signUp(email: string, password: string, consents?: SignUpConsents): Promise<SignUpResult> {
     try {
+      // The agreements go in the new account's metadata; the database records them with its own time.
+      const metadata = consents
+        ? signUpConsentMetadata(consents, typeof navigator === 'undefined' ? '' : navigator.userAgent)
+        : undefined;
       const { data, error } = await withAuthTimeout(
-        supabase.auth.signUp({ email: email.trim(), password }),
+        supabase.auth.signUp({ email: email.trim(), password, ...(metadata ? { options: { data: metadata } } : {}) }),
       );
       if (error) {
         return { error, status: 'error' };

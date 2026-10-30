@@ -250,6 +250,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         break;
       case 'terms':
       case 'privacy':
+      case 'policy':
+      case 'consent':
       case 'disclaimer':
         replaceNavigation(legalReturn);
         break;

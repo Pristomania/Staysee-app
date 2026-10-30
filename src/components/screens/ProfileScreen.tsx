@@ -217,6 +217,8 @@ export function ProfileScreen() {
             {[
               { title: 'Публичная оферта', screen: 'terms' as const, icon: FileText },
               { title: 'Конфиденциальность', screen: 'privacy' as const, icon: Shield },
+              { title: 'Политика обработки данных', screen: 'policy' as const, icon: FileText },
+              { title: 'Согласие на обработку данных', screen: 'consent' as const, icon: FileText },
               { title: 'Дисклеймер', screen: 'disclaimer' as const, icon: FileText },
             ].map(({ title, screen, icon }) => (
               <CabinetRow

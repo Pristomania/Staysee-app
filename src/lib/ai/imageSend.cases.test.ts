@@ -49,6 +49,7 @@ async function main(): Promise<void> {
     ['images_daily_limit', 'лимит'],
     ['images_invalid', 'не подошла'],
     ['images_unavailable', 'позже'],
+    ['images_consent_required', 'согласи'],
   ] as const) {
     const result = await sendAiMessage({ message: 'x', userId: 'u1', requestId: `e-${error}`, images }, depsReturning(json({ error }, 422)));
     assert(result.status === 'images_error', `${error} is an images_error`);

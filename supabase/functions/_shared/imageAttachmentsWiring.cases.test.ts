@@ -31,6 +31,19 @@ describe("pictures are wired into the chat function", () => {
     assert.match(chat.slice(answer, answer + 700), /JSON\.stringify\(\{\s*images:/);
   });
 
+  it("tells the site whether the person has given the picture consent, and takes pictures only from people who have", () => {
+    const answer = chat.indexOf("if (isImagesCapabilityCheck) {");
+    assert.match(chat.slice(answer, answer + 1400), /hasImagesConsent\(/);
+    assert.match(chat.slice(answer, answer + 1400), /JSON\.stringify\(\{ images: imagesAllowed, imagesConsent \}\)/);
+    const disabled = chat.indexOf('unprocessable("images_disabled")');
+    const validate = chat.indexOf("validateImages(body.images)");
+    const consent = chat.indexOf('unprocessable("images_consent_required")');
+    const daily = chat.indexOf('unprocessable("images_daily_limit")');
+    assert.ok(disabled < validate && validate < consent && consent < daily, "consent is checked after the switch and the shape, before the daily count");
+    // A consent that cannot be read refuses; it is never assumed.
+    assert.match(chat.slice(validate, daily), /unprocessable\("images_unavailable"\)/);
+  });
+
   it("does the picture step after the rate limit and before every safety check, as the first thing", () => {
     const rate = chat.indexOf("const rateLimitResult = await checkRateLimit");
     const disabled = chat.indexOf('unprocessable("images_disabled")');

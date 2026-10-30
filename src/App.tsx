@@ -17,11 +17,13 @@ import {
   PrivacyScreen,
   DisclaimerScreen,
   TermsScreen,
+  PrivacyPolicyScreen,
+  ConsentScreen,
 } from './components/screens';
 
 const LOADING_RESET_MS = 8000;
 
-const PUBLIC_SCREENS = ['welcome', 'login', 'register', 'terms', 'privacy', 'disclaimer'] as const;
+const PUBLIC_SCREENS = ['welcome', 'login', 'register', 'terms', 'privacy', 'policy', 'consent', 'disclaimer'] as const;
 const AUTH_ENTRY_SCREENS = ['welcome', 'login', 'register'] as const;
 
 function AppContent() {
@@ -161,6 +163,8 @@ function AppContent() {
       case 'privacy':     return <PrivacyScreen />;
       case 'disclaimer':  return <DisclaimerScreen />;
       case 'terms':       return <TermsScreen />;
+      case 'policy':      return <PrivacyPolicyScreen />;
+      case 'consent':     return <ConsentScreen />;
       default:            return <WelcomeScreen />;
     }
   };

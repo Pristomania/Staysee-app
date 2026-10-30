@@ -24,17 +24,36 @@ describe("pictures in the chat screen", () => {
     assert.match(screen, /accept=\{imagesEnabled \? '\.txt,\.md,\.docx,\.pdf,image\/\*' : '\.txt,\.md,\.docx,\.pdf'\}/);
     assert.match(screen, /multiple=\{imagesEnabled\}/);
     assert.match(screen, /const \[imagesEnabled, setImagesEnabled\] = useState\(false\);/);
-    assert.match(screen, /getImagesAllowed\(user\.id\)\.then\(/);
+    assert.match(screen, /getImagesCapability\(user\.id\)\.then\(/);
     // No special link or build setting any more: the answer comes from the server.
     assert.doesNotMatch(screen, /readImageBeta|imagesEnabledForUser|VITE_IMAGE_ATTACHMENTS/);
   });
 
+  it("asks for the picture consent before the first picture, and goes on with the same files once it is saved", () => {
+    const gate = picked.indexOf("!imagesConsent");
+    assert.ok(gate > 0 && gate < picked.indexOf("attachImageFiles("), "the gate comes before the pictures are taken");
+    assert.match(picked.slice(gate, gate + 300), /setImagesConsentOpen\(true\)/);
+    assert.match(picked.slice(gate, gate + 300), /pendingImageFilesRef\.current = /);
+    const accept = bodyOf(screen, "async function acceptImagesConsent()");
+    assert.match(accept, /recordImagesConsent\(/);
+    assert.match(accept, /markImagesConsentGiven\(user\.id\)/);
+    assert.match(accept, /setImagesConsent\(true\)/);
+    assert.match(accept, /await attachImageFiles\(/);
+    // A consent that could not be saved lets nothing through.
+    assert.ok(accept.indexOf("if (!saved)") < accept.indexOf("setImagesConsent(true)"));
+    assert.match(screen, /\{imagesConsentOpen && \(\s*<ImagesConsentCard/);
+    assert.match(screen, /setImagesConsentOpen\(false\);\s*setImagePreparing\(false\);|setImagePreparing\(false\);\s*setAttachedImages\(\[\]\);[\s\S]{0,120}setImagesConsentOpen\(false\)/);
+  });
+
   it("shrinks a picked picture, and drops the result if a newer pick or another conversation came meanwhile", () => {
+    const attach = bodyOf(screen, "async function attachImageFiles(");
     assert.match(picked, /imagesEnabled && isImageFile\(files\[0\]\)/);
-    assert.match(picked, /await prepareImageFile\(file\)/);
-    const afterPrepare = picked.slice(picked.indexOf("await prepareImageFile(file)"));
+    assert.match(picked, /await attachImageFiles\(pictures\)/);
+    assert.match(attach, /const operation = \+\+fileOperationRef\.current/);
+    assert.match(attach, /await prepareImageFile\(file\)/);
+    const afterPrepare = attach.slice(attach.indexOf("await prepareImageFile(file)"));
     assert.match(afterPrepare.slice(0, 200), /operation !== fileOperationRef\.current/);
-    assert.match(picked, /setImagePreparing\(false\)/);
+    assert.match(attach, /setImagePreparing\(false\)/);
     assert.doesNotMatch(picked.slice(0, picked.indexOf("const file = files[0];")), /handleSend\(|sendAiMessage\(/);
   });
 
@@ -81,7 +100,7 @@ describe("pictures in the chat screen", () => {
   });
 
   it("clears the strip when another conversation is opened", () => {
-    assert.match(screen, /setImagePreparing\(false\);\s*setAttachedImages\(\[\]\);\s*\}, \[openConversationId\]\)/);
+    assert.match(screen, /setImagePreparing\(false\);\s*setAttachedImages\(\[\]\);\s*setImagesConsentOpen\(false\);\s*pendingImageFilesRef\.current = null;\s*\}, \[openConversationId\]\)/);
   });
 
   it("shows the description lines of a saved message as photo cards, searching only the text part", () => {
