@@ -5,6 +5,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { mapSignUpError } from '../../lib/authErrors';
 import { ROOM_COPY } from '../../lib/roomCopy';
+import { OFFER_META } from '../../content/legal/offer';
+import { CONSENT_META } from '../../content/legal/consent';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
 export function RegisterScreen() {
@@ -21,15 +23,20 @@ export function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [confirmedAge18, setConfirmedAge18] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPd, setAcceptedPd] = useState(false);
 
-  const canSubmit = confirmedAge18 && acceptedTerms && !loading;
+  const canSubmit = confirmedAge18 && acceptedTerms && acceptedPd && !loading;
 
   const openTerms = () => {
     navigateTo('terms', { legalReturnScreen: 'register' });
   };
 
-  const openPrivacy = () => {
-    navigateTo('privacy', { legalReturnScreen: 'register' });
+  const openPolicy = () => {
+    navigateTo('policy', { legalReturnScreen: 'register' });
+  };
+
+  const openConsent = () => {
+    navigateTo('consent', { legalReturnScreen: 'register' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,11 +51,19 @@ export function RegisterScreen() {
       setError('Нужно принять публичную оферту');
       return;
     }
+    if (!acceptedPd) {
+      setError('Нужно дать согласие на обработку персональных данных');
+      return;
+    }
     if (password !== confirmPassword) { setError('Пароли не совпадают'); return; }
     if (password.length < 6) { setError('Пароль — минимум 6 символов'); return; }
     setLoading(true);
     try {
-      const result = await signUp(email, password);
+      // What the person agreed to: the version and the hash of the exact texts the app shows.
+      const result = await signUp(email, password, {
+        terms: { version: OFFER_META.version, sha256: OFFER_META.sha256 },
+        pd_processing: { version: CONSENT_META.version, sha256: CONSENT_META.sha256 },
+      });
       if (result.error) {
         setError(mapSignUpError(result.error.message));
         return;
@@ -197,13 +212,36 @@ export function RegisterScreen() {
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
-                  openPrivacy();
+                  openPolicy();
                 }}
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
-                политикой конфиденциальности
+                политикой обработки персональных данных
               </button>
               .
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={acceptedPd}
+              onChange={(e) => setAcceptedPd(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border border-white/20 bg-transparent accent-[#c9a96e] flex-shrink-0"
+            />
+            <span className={`${theme.textMuted} text-xs font-light leading-[1.65] group-hover:opacity-90`}>
+              Даю{' '}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openConsent();
+                }}
+                className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
+              >
+                согласие на обработку персональных данных
+              </button>
+              , в том числе сведений о моём психологическом состоянии, которые я могу сообщить в беседах.
             </span>
           </label>
 

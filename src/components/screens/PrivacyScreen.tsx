@@ -31,7 +31,7 @@ const sections = [
   {
     icon: Lock,
     title: 'Что мы храним',
-    body: 'Только ваши сообщения в беседах и email для входа. Мы не собираем поведенческую аналитику, не передаём данные третьим лицам и не используем ваши разговоры для обучения моделей.',
+    body: 'Ваши сообщения, память, которую Стейси формирует из бесед, и email для входа. Картинки мы не храним: в беседе остаётся только их текстовое описание. Для ответа сообщения и картинки обрабатывают поставщики языковых моделей ИИ (их список есть в политике); они получают данные только на время запроса. Мы не используем ваши разговоры для обучения моделей и не продаём данные.',
   },
   {
     icon: Eye,
@@ -117,7 +117,7 @@ function DeleteAction({
 }
 
 export function PrivacyScreen() {
-  const { navigateBack, setConversations, setMessages, setCurrentConversation } =
+  const { navigateBack, navigateTo, setConversations, setMessages, setCurrentConversation } =
     useApp();
   const { user, profile } = useAuth();
   const { theme } = useTheme();
@@ -305,6 +305,26 @@ export function PrivacyScreen() {
             </div>
           ))}
         </div>
+
+        <section className="mb-8">
+          <p className={sectionLabel}>Документы</p>
+
+          <div className="space-y-2.5">
+            {[
+              { title: 'Политика обработки персональных данных', screen: 'policy' as const },
+              { title: 'Согласие на обработку персональных данных', screen: 'consent' as const },
+            ].map(({ title, screen }) => (
+              <button
+                key={screen}
+                type="button"
+                onClick={() => navigateTo(screen)}
+                className={`w-full text-left rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5 ${theme.textPrimary} text-sm font-light transition-colors duration-200`}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="mb-8">
           <p className={sectionLabel}>Управление данными</p>

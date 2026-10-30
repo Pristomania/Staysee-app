@@ -63,4 +63,6 @@ export type Screen =
   | 'conversation-notes'
   | 'privacy'
   | 'disclaimer'
-  | 'terms';
+  | 'terms'
+  | 'policy'
+  | 'consent';
