@@ -3,6 +3,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import {
   buildConversationSummary,
   finalizeMemoryUpdate,
@@ -94,6 +95,7 @@ export async function runConversationSummaryRefresh(
       max_tokens: 700,
       temperature: 0.25,
       usage: { include: true },
+      provider: OPENROUTER_PRIVATE_ROUTE,
     }),
   });
 

@@ -3,6 +3,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import { makeServiceClient } from "./cost.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 
@@ -320,6 +321,7 @@ export async function generateWeeklyReflectionText(
         // 498 of 520 tokens went to reasoning, and the real text came back
         // cut off mid-sentence while still passing the length check below.
         reasoning: { effort: "low" },
+        provider: OPENROUTER_PRIVATE_ROUTE,
       }),
     });
 

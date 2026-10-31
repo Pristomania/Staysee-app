@@ -2,6 +2,8 @@
  * OpenRouter embeddings (server-side only).
  */
 
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+
 export const EMBEDDING_MODEL =
   Deno.env.get("STAYSEE_EMBEDDING_MODEL")?.trim() ||
   "openai/text-embedding-3-small";
@@ -40,6 +42,7 @@ export async function createEmbeddings(
     body: JSON.stringify({
       model: EMBEDDING_MODEL,
       input: texts.map(normalizeInput),
+      ...(baseUrl.includes("openrouter.ai") ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
     }),
   });
 

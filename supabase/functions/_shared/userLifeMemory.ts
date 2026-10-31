@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import {
   fetchConversationCrossMemoryEnabled,
   fetchCrossMemoryEnabled,
@@ -333,6 +334,7 @@ export async function refreshUserLifeMemory(
           max_tokens: 400,
           temperature: 0.2,
           usage: { include: true },
+          provider: OPENROUTER_PRIVATE_ROUTE,
         }),
       });
       if (res.ok) {

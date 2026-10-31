@@ -3,6 +3,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import { memoryItemsSimilar } from "./memory.ts";
 import {
   filterCrossMemoryCandidates,
@@ -98,6 +99,7 @@ async function callConsolidationModel(
       messages: [{ role: "user", content: prompt }],
       max_tokens: 700,
       temperature: 0.2,
+      provider: OPENROUTER_PRIVATE_ROUTE,
     }),
   });
   if (!res.ok) {

@@ -2,6 +2,7 @@
  * Structured model call abstraction — json_schema completion for shadow audit.
  */
 
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import { parseOpenRouterUsage } from "./usageAnalytics.ts";
 import { buildStructuredTurnJsonSchema } from "./structuredTurnSchema.ts";
 
@@ -85,6 +86,7 @@ export async function callModelStructured(
         max_tokens: input.maxTokens,
         temperature: input.temperature,
         usage: { include: true },
+        ...(input.primaryProvider === "openrouter" ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
         response_format: {
           type: "json_schema",
           json_schema: jsonSchema,
