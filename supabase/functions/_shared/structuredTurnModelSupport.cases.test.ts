@@ -13,10 +13,11 @@ function assert(condition: boolean, message: string): void {
 }
 
 const allowlist = getStructuredTurnModelAllowlist();
-assert(allowlist.length === 4, "allowlist v1 has 4 models");
+assert(allowlist.length === 5, "allowlist v1 has 5 models");
 console.log("Allowlist v1:", allowlist.join(", "));
 
 assert(supportsStructuredTurn("openai/gpt-4o") === true, "openai/gpt-4o");
+assert(supportsStructuredTurn("openai/gpt-4o-2024-08-06") === true, "the dated gpt-4o the replies use");
 assert(supportsStructuredTurn("openai/gpt-4o-mini") === true, "openai/gpt-4o-mini");
 assert(supportsStructuredTurn("openai/gpt-4.1") === true, "openai/gpt-4.1");
 assert(supportsStructuredTurn("openai/gpt-4.1-mini") === true, "openai/gpt-4.1-mini");

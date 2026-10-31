@@ -125,7 +125,7 @@ describe("vision parts", () => {
   });
 
   it("names the models that can look at pictures", () => {
-    for (const model of ["openai/gpt-4o", "anthropic/claude-sonnet-4-5", "google/gemini-3.7-flash"]) {
+    for (const model of ["openai/gpt-4o", "openai/gpt-4o-2024-08-06", "anthropic/claude-sonnet-4-5", "google/gemini-3.7-flash"]) {
       assert.equal(modelAcceptsImages(model), true, model);
     }
     for (const model of ["deepseek-chat", "mistral-large-latest", "gemini-1.5-pro", ""]) {
