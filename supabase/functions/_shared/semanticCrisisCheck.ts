@@ -12,6 +12,7 @@
  */
 
 import { resolveApprovedUtilityModel } from "./approvedModels.ts";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 
 const CLASSIFIER_SYSTEM_PROMPT = `Ты классификатор безопасности. Прочти сообщение пользователя и ответь ТОЛЬКО словом "да" или "нет".
 
@@ -55,6 +56,7 @@ export async function semanticCrisisCheck(message: string): Promise<SemanticCris
         model: classifierModel,
         max_tokens: 3,
         temperature: 0,
+        provider: OPENROUTER_PRIVATE_ROUTE,
         messages: [
           { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
           { role: "user", content: message.slice(0, 400) },

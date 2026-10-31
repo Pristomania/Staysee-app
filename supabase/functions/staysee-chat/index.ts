@@ -181,6 +181,7 @@ import {
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
 import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { OPENROUTER_PRIVATE_ROUTE } from "../_shared/openRouterPrivateRoute.ts";
 import {
   ensurePublishableReply,
   isPublishableReply,
@@ -472,6 +473,7 @@ async function callModel(
           max_tokens: maxTokens,
           temperature,
           usage: { include: true },
+          ...(provider === "openrouter" ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
         }),
       });
     } catch (fetchErr) {

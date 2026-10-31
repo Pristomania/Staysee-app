@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import {
   buildConversationSummary,
@@ -265,6 +266,7 @@ export async function callSummaryModel(
         messages: [{ role: "user", content: prompt }],
         max_tokens: maxTokens,
         temperature: 0.25,
+        provider: OPENROUTER_PRIVATE_ROUTE,
       }),
     });
     if (!res.ok) {
