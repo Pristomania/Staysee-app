@@ -5,6 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { mapSignUpError } from '../../lib/authErrors';
 import { ROOM_COPY } from '../../lib/roomCopy';
+import { saveRegisterDraft, takeRegisterDraft } from '../../lib/registerDraft';
 import { OFFER_META } from '../../content/legal/offer';
 import { CONSENT_META } from '../../content/legal/consent';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
@@ -13,29 +14,37 @@ export function RegisterScreen() {
   const { signUp } = useAuth();
   const { navigateTo } = useApp();
   const { theme } = useTheme();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  // What was typed before a document was opened (see lib/registerDraft.ts).
+  const [draft] = useState(() => takeRegisterDraft());
+  const [email, setEmail] = useState(draft?.email ?? '');
+  const [password, setPassword] = useState(draft?.password ?? '');
+  const [confirmPassword, setConfirmPassword] = useState(draft?.confirmPassword ?? '');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [confirmedAge18, setConfirmedAge18] = useState(false);
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [acceptedPd, setAcceptedPd] = useState(false);
+  const [confirmedAge18, setConfirmedAge18] = useState(draft?.confirmedAge18 ?? false);
+  const [acceptedTerms, setAcceptedTerms] = useState(draft?.acceptedTerms ?? false);
+  const [acceptedPd, setAcceptedPd] = useState(draft?.acceptedPd ?? false);
 
   const canSubmit = confirmedAge18 && acceptedTerms && acceptedPd && !loading;
 
+  const rememberTyped = () =>
+    saveRegisterDraft({ email, password, confirmPassword, confirmedAge18, acceptedTerms, acceptedPd });
+
   const openTerms = () => {
+    rememberTyped();
     navigateTo('terms', { legalReturnScreen: 'register' });
   };
 
   const openPolicy = () => {
+    rememberTyped();
     navigateTo('policy', { legalReturnScreen: 'register' });
   };
 
   const openConsent = () => {
+    rememberTyped();
     navigateTo('consent', { legalReturnScreen: 'register' });
   };
 
