@@ -12,6 +12,7 @@ import {
   assertApprovedRuntimeModel,
   buildOpenRouterUtilityModelConfig,
   isApprovedRuntimeModel,
+  normalizeApprovedModelId,
   resolveApprovedUtilityModel,
 } from "./approvedModels.ts";
 
@@ -59,6 +60,14 @@ function collectSharedRuntimeFiles(dir: string, out: string[]): void {
 
 console.log("=== approved model constants ===\n");
 assert(isApprovedRuntimeModel(APPROVED_MODEL_GPT4O), "gpt-4o approved");
+// The reply model is the dated GPT-4o version. On the private route (Azure) OpenRouter charges the repeated part of
+// a request at half price only for the dated name, not for the plain one (measured 31.10: $0.0073 against $0.0139 for
+// the same repeated request). Azure answers both names with the same server fingerprint, so it is the same model.
+assert(APPROVED_MODEL_GPT4O === "openai/gpt-4o-2024-08-06", "the reply model is the dated gpt-4o");
+assert(isApprovedRuntimeModel("openai/gpt-4o"), "the plain name is still accepted (an old secret may use it)");
+assert(isApprovedRuntimeModel("gpt-4o"), "the short name is still accepted");
+assert(normalizeApprovedModelId("openai/gpt-4o") === APPROVED_MODEL_GPT4O, "the plain name becomes the dated one");
+assert(normalizeApprovedModelId("gpt-4o") === APPROVED_MODEL_GPT4O, "the short name becomes the dated one");
 assert(isApprovedRuntimeModel(APPROVED_MODEL_SONNET), "sonnet approved");
 assert(!isApprovedRuntimeModel("openai/gpt-4.1"), "gpt-4.1 not approved");
 assert(!isApprovedRuntimeModel("anthropic/claude-3.5-haiku"), "haiku not approved");

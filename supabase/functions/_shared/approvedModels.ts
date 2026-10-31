@@ -3,7 +3,14 @@
  * Policy: gpt-4o (primary) and claude-sonnet-4-5 (fallback / deep).
  */
 
-export const APPROVED_MODEL_GPT4O = "openai/gpt-4o";
+/**
+ * The dated GPT-4o, not the plain "openai/gpt-4o": on the private route (Azure, see openRouterPrivateRoute.ts)
+ * OpenRouter gives the half-price for the cached, repeated part of a request (the ~4,000 tokens of fixed
+ * instructions) only under the dated name. Measured 31.10: the same repeated request cost $0.0073 under the dated name
+ * and $0.0139 under the plain one. Azure answers both with the same server fingerprint, so it is the same model; the
+ * plain name stays accepted below, so an old secret that uses it keeps working.
+ */
+export const APPROVED_MODEL_GPT4O = "openai/gpt-4o-2024-08-06";
 export const APPROVED_MODEL_SONNET = "anthropic/claude-sonnet-4-5";
 
 /** OpenRouter slugs allowed for runtime API calls. */
@@ -20,6 +27,7 @@ export const BANNED_RUNTIME_MODEL_SUBSTRINGS = [
 
 const MODEL_ALIASES: Record<string, string> = {
   "gpt-4o": APPROVED_MODEL_GPT4O,
+  "openai/gpt-4o": APPROVED_MODEL_GPT4O,
   "claude-sonnet-4-5": APPROVED_MODEL_SONNET,
 };
 

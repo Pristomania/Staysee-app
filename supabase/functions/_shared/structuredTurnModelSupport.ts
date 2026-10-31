@@ -5,6 +5,7 @@
 
 const STRUCTURED_TURN_MODEL_ALLOWLIST = new Set([
   "openai/gpt-4o",
+  "openai/gpt-4o-2024-08-06",
   "openai/gpt-4o-mini",
   "openai/gpt-4.1",
   "openai/gpt-4.1-mini",
