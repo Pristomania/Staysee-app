@@ -48,7 +48,7 @@ describe("the policy and the consent are screens of the app, shown from the publ
 
 describe("registration asks for the consent separately from the offer", () => {
   it("has a second checkbox for the processing of personal data, linked to the consent and the policy", () => {
-    assert.match(register, /const \[acceptedPd, setAcceptedPd\] = useState\(false\);/);
+    assert.match(register, /const \[acceptedPd, setAcceptedPd\] = useState\(draft\?\.acceptedPd \?\? false\);/);
     assert.match(register, /const canSubmit = confirmedAge18 && acceptedTerms && acceptedPd && !loading;/);
     assert.match(register, /navigateTo\('consent', \{ legalReturnScreen: 'register' \}\)/);
     assert.match(register, /navigateTo\('policy', \{ legalReturnScreen: 'register' \}\)/);
@@ -57,5 +57,21 @@ describe("registration asks for the consent separately from the offer", () => {
 
   it("hands both agreements, with the version and the hash of the text shown, to the sign-up", () => {
     assert.match(register, /signUp\(email, password, \{[\s\S]{0,400}OFFER_META[\s\S]{0,400}CONSENT_META/);
+  });
+
+  // Found by the browser check of 31.10: reading a document from the registration and coming back emptied the whole
+  // form (the address, both passwords and the three checkboxes), because the screen is closed while a document is open.
+  it("keeps what was typed while a document is read, and takes it back when the person returns", () => {
+    assert.match(register, /import \{ saveRegisterDraft, takeRegisterDraft \} from '\.\.\/\.\.\/lib\/registerDraft';/);
+    assert.match(register, /const \[draft\] = useState\(\(\) => takeRegisterDraft\(\)\);/);
+    assert.match(register, /useState\(draft\?\.email \?\? ''\)/);
+    assert.match(register, /useState\(draft\?\.acceptedPd \?\? false\)/);
+    for (const screen of ["terms", "policy", "consent"]) {
+      assert.match(
+        register,
+        new RegExp(`rememberTyped\\(\\);\\s+navigateTo\\('${screen}', \\{ legalReturnScreen: 'register' \\}\\)`),
+        screen,
+      );
+    }
   });
 });
