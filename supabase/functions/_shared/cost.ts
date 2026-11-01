@@ -16,7 +16,7 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { APPROVED_MODEL_GPT4O } from "./approvedModels.ts";
-import { PLANS } from "./plans.ts";
+import { PLANS, monthsPhrase } from "./plans.ts";
 import { buildUsageLogRow, logOpenRouterUsage } from "./usageAnalytics.ts";
 
 // ── Tier definitions ──────────────────────────────────────────────────────────
@@ -190,7 +190,8 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   const { data, error } = await supabase
     .from("user_usage_tiers")
-    .select("tier, daily_request_limit, daily_requests_used, month_reset_at, day_reset_at, is_suspended")
+    // The row is read whole: naming a column that an older database lacks would fail the check for everybody.
+    .select("*")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -201,6 +202,11 @@ export async function checkRateLimit(
 
   if (data.is_suspended) {
     return { allowed: false, tier, reason: "suspended" };
+  }
+
+  // Marked as unlimited (migration 088): no daily guard either, as in reserve_ai_request.
+  if (data.unlimited_usage === true) {
+    return { allowed: true, tier };
   }
 
   // Check if day has rolled over
@@ -410,7 +416,7 @@ export const CALM_ERRORS = {
   rateLimit: "Ты уже много работаешь со мной сегодня. Дай себе немного пространства — завтра я снова здесь.",
   suspended: "Доступ временно ограничен. Если это ошибка, напиши нам.",
   /** Message limit or hidden spending ceiling reached on the free plan. The numbers live in usage_tier_limits (migration 086: 3 months). */
-  freeUsedUp: "Бесплатные сообщения закончились. Новые появятся через 3 месяца после последнего сообщения. Чтобы продолжить раньше, нужен тариф.",
+  freeUsedUp: `Бесплатные сообщения закончились. Новые появятся через ${monthsPhrase(PLANS.free.renewAfterIdleMonths ?? 3)} после последнего сообщения. Чтобы продолжить раньше, нужен тариф.`,
   /** The same for a paid plan: the month's messages are used up. */
   monthUsedUp: "Сообщения на этот месяц закончились. Они вернутся с началом нового периода.",
   duplicate: "Похоже, запрос уже отправляется. Подожди секунду.",

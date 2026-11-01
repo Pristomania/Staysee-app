@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { fetchUsageRow } from '../lib/usageTier';
 import { messageCounter, type MessageCounter, type UsageRow } from '../lib/messageCounter';
+import { getMaxRooms } from '../lib/roomLimits';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
 
 interface PlanContextType {
@@ -15,6 +16,8 @@ interface PlanContextType {
   has: (feature: PlanFeature) => boolean;
   /** The messages left, worked out from the person's usage row; null while it is not known. */
   counter: MessageCounter | null;
+  /** How many conversations the person may have: the plan's number, or the one given by hand. */
+  maxConversations: number;
   /** Reads the plan and the counter again (after every answered message, and when the person comes back). */
   refresh: () => Promise<void>;
 }
@@ -31,11 +34,15 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       setRow(null);
       return;
     }
-    // A missing row means the plan is not known, not that it is free: the app stays unlocked and the server decides.
-    setRow(await fetchUsageRow(userId));
+    const next = await fetchUsageRow(userId);
+    // A failed read must not wipe what is known: a network blip would unlock everything and hide the counter until the
+    // next read. Only a successful read replaces the row.
+    if (next) setRow(next);
   }, [userId]);
 
   useEffect(() => {
+    // Another person (or nobody): forget the previous person's row before reading.
+    setRow(null);
     void refresh();
   }, [refresh]);
 
@@ -48,6 +55,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       loaded,
       has: (feature) => !loaded || isFeatureAvailable(tier, feature),
       counter: messageCounter(row),
+      maxConversations: getMaxRooms(tier, row?.max_conversations_override),
       refresh,
     };
   }, [row, refresh]);

@@ -45,13 +45,20 @@
     .details{display:grid;grid-template-columns:180px 1fr;margin:28px 0;border-top:1px solid var(--line)}
     .details div{padding:14px 0;border-bottom:1px solid var(--line)}
     .details div:nth-child(odd){color:var(--gold);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-    .plans{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:34px 0 26px}
+    .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:34px 0 26px}
     .plan{margin:0;padding:26px 24px 20px;border:1px solid var(--line);border-radius:20px;background:var(--panel)}
     .plan--main{border-color:rgba(201,169,110,.55)}
     .plan-name{margin:0 0 6px;color:var(--gold);font-size:11px;font-weight:650;letter-spacing:.18em;text-transform:uppercase}
-    .price{margin:0 0 14px;color:var(--light);font:350 40px/1.1 "Segoe UI Variable Display","Segoe UI",Arial,sans-serif;letter-spacing:-.03em}
+    .price{margin:0 0 14px;color:var(--light);font:350 32px/1.1 "Segoe UI Variable Display","Segoe UI",Arial,sans-serif;letter-spacing:-.03em}
     .price span{color:var(--muted);font-size:15px;letter-spacing:0}
     .plan ul{margin:0;padding-left:20px}
+    .plan .rows{list-style:none;margin:0;padding:0}
+    .rows li{display:flex;gap:10px;margin:9px 0;font-size:15px;line-height:1.45}
+    .rows li::before{flex:none;width:14px;color:var(--gold)}
+    .rows .on::before{content:"✓"}
+    .rows .off{color:var(--muted);opacity:.7}
+    .rows .off::before{content:"—";color:var(--muted)}
+    .plan-note{margin:16px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
     .btn{display:inline-block;padding:14px 26px;border:1px solid rgba(201,169,110,.55);border-radius:999px;color:var(--gold);font-size:15px;text-decoration:none;transition:background .2s}
     .btn:hover{background:rgba(201,169,110,.1)}
     footer{padding:34px 0 40px;border-top:1px solid var(--line);color:#788493;font-size:13px;line-height:1.6}
@@ -77,23 +84,44 @@
     <p class="lead">StaySee AI - приложение для спокойного разговора с ИИ-собеседником Стэйси. Объём тарифа измеряется в сообщениях: одно ваше сообщение вместе с ответом Стэйси считается за одно.</p>
 
     <div class="plans">
-      <section class="plan">
+      <section class="plan" data-plan="free">
         <p class="plan-name">Бесплатный</p>
         <p class="price">0&nbsp;₽</p>
-        <ul>
-          <li>50 сообщений</li>
-          <li>новые 50 сообщений появляются через 3 месяца после вашего последнего сообщения</li>
-          <li>банковская карта не нужна</li>
+        <ul class="rows">
+          <li class="on">50 сообщений, новые через 3 месяца после последнего</li>
+          <li class="on">1 беседа</li>
+          <li class="off">Сквозная память</li>
+          <li class="off">Динамика бесед</li>
+          <li class="off">Прикрепление файлов</li>
+          <li class="off">Голосовой ввод</li>
         </ul>
+        <p class="plan-note">банковская карта не нужна</p>
       </section>
-      <section class="plan plan--main">
+      <section class="plan plan--main" data-plan="basic">
         <p class="plan-name">Базовый</p>
         <p class="price">1 990&nbsp;₽ <span>за 30 дней</span></p>
-        <ul>
-          <li>400 сообщений на 30 дней</li>
-          <li>неиспользованные сообщения не переносятся на следующий период</li>
-          <li>каждый период оплачивается отдельно, автоматических списаний нет</li>
+        <ul class="rows">
+          <li class="on">400 сообщений на 30 дней</li>
+          <li class="on">3 беседы</li>
+          <li class="on">Сквозная память</li>
+          <li class="on">Динамика бесед</li>
+          <li class="on">Прикрепление файлов</li>
+          <li class="on">Голосовой ввод</li>
         </ul>
+        <p class="plan-note">неиспользованные сообщения не переносятся, автоматических списаний нет</p>
+      </section>
+      <section class="plan" data-plan="premium">
+        <p class="plan-name">Премиум</p>
+        <p class="price">4 900&nbsp;₽ <span>за 30 дней</span></p>
+        <ul class="rows">
+          <li class="on">1 000 сообщений на 30 дней</li>
+          <li class="on">6 бесед</li>
+          <li class="on">Сквозная память</li>
+          <li class="on">Динамика бесед</li>
+          <li class="on">Прикрепление файлов</li>
+          <li class="on">Голосовой ввод</li>
+        </ul>
+        <p class="plan-note">неиспользованные сообщения не переносятся, автоматических списаний нет</p>
       </section>
     </div>
     <p><a class="btn" href="https://staysee.ru/">Открыть приложение</a></p>
@@ -102,7 +130,7 @@
     <ol>
       <li>Создайте учётную запись в приложении по адресу электронной почты и подтвердите её по ссылке из письма.</li>
       <li>Используйте 50 бесплатных сообщений. Платить для этого не нужно.</li>
-      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый». Или подождите: бесплатные сообщения возвращаются через 3 месяца после вашего последнего сообщения.</li>
+      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый» или «Премиум». Или подождите: бесплатные сообщения возвращаются через 3 месяца после вашего последнего сообщения.</li>
     </ol>
 
     <h2>Оплата и получение доступа</h2>

@@ -13,7 +13,6 @@ import { filterVisibleConversations } from '../../lib/conversationFilters';
 import {
   canCreateRoom,
   getConversationFetchLimit,
-  hasUnlimitedRooms,
   roomLimitNotice,
 } from '../../lib/roomLimits';
 
@@ -24,7 +23,7 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
-  const { tier, loaded: planLoaded } = usePlan();
+  const { tier, loaded: planLoaded, maxConversations } = usePlan();
   const { navigateTo, setMessages, conversations, setConversations } = useApp();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
@@ -43,10 +42,10 @@ export function MainScreen() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('last_message_at', { ascending: false })
-      .limit(getConversationFetchLimit(user.id));
+      .limit(getConversationFetchLimit(maxConversations));
     setConversations(filterVisibleConversations(data || []));
     setLoading(false);
-  }, [setConversations, user]);
+  }, [maxConversations, setConversations, user]);
 
   useEffect(() => {
     void fetchConversations();
@@ -97,7 +96,7 @@ export function MainScreen() {
 
   async function createNewRoom() {
     // Until the plan is read the server decides: it refuses a place above the number of the plan.
-    if (planLoaded && !canCreateRoom(user?.id, conversations.length, tier)) {
+    if (planLoaded && !canCreateRoom(conversations.length, maxConversations)) {
       setLimitReached(true);
       setTimeout(() => setLimitReached(false), 8000);
       return;
@@ -179,7 +178,7 @@ export function MainScreen() {
         </div>
 
       {/* Limit notice */}
-      {limitReached && !hasUnlimitedRooms(user?.id) && (
+      {limitReached && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
             {roomLimitNotice(tier)}

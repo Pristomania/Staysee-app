@@ -172,6 +172,54 @@ const recentDayReset = new Date().toISOString();
   console.log("✓ daily limit exhausted → allowed:false, reason:daily_limit");
 }
 
+// ── 4b. Unlimited accounts are not stopped by the daily guard (migration 088) ─────────────────────
+
+{
+  const result = await checkRateLimit(
+    makeFakeClient({
+      data: {
+        tier: "premium",
+        daily_request_limit: 50,
+        daily_requests_used: 80,
+        month_reset_at: recentDayReset,
+        day_reset_at: recentDayReset,
+        is_suspended: false,
+        unlimited_usage: true,
+      },
+      error: null,
+    }) as never,
+    USER_ID,
+  );
+  assert(result.allowed === true && result.tier === "premium", "4b.unlimited: passes the daily guard");
+  const suspended = await checkRateLimit(
+    makeFakeClient({
+      data: {
+        tier: "premium",
+        daily_request_limit: 50,
+        daily_requests_used: 0,
+        month_reset_at: recentDayReset,
+        day_reset_at: recentDayReset,
+        is_suspended: true,
+        unlimited_usage: true,
+      },
+      error: null,
+    }) as never,
+    USER_ID,
+  );
+  assert(suspended.allowed === false && suspended.reason === "suspended", "4b.unlimited: suspension still stops");
+  console.log("✓ unlimited account passes the daily guard, suspension still stops it");
+}
+
+// The row is read whole: naming the new column in the query would fail on a database that has not got it yet.
+{
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("./cost.ts", import.meta.url), "utf8");
+  const fn = source.slice(source.indexOf("export async function checkRateLimit"), source.indexOf("// ── Usage counter increment"));
+  assert(fn.includes('.select("*")'), "4c: checkRateLimit reads the whole row");
+  assert(!fn.includes("unlimited_usage") || !/select\([^)]*unlimited_usage/.test(fn), "4c: the new column is not named in the query");
+  console.log("✓ checkRateLimit does not name columns that an older database lacks");
+}
+
 // ── 5. Within limit ───────────────────────────────────────────────────────────
 
 {

@@ -1,4 +1,4 @@
-import { AI_VOICE_BUILT, voiceInputFor, type Plan } from './plans';
+import { AI_VOICE_BUILT, monthsPhrase, voiceInputFor, type Plan } from './plans';
 import { pluralMessages } from './messageCounter';
 
 /** What stands on every closed thing. No extra words. */
@@ -35,7 +35,7 @@ export interface PlanRow {
 export function planRows(plan: Plan): PlanRow[] {
   const messages =
     plan.periodDays === null
-      ? `${group(plan.messages)} ${pluralMessages(plan.messages)}, новые через ${plan.renewAfterIdleMonths ?? 3} месяца после последнего`
+      ? `${group(plan.messages)} ${pluralMessages(plan.messages)}, новые через ${monthsPhrase(plan.renewAfterIdleMonths ?? 3)} после последнего`
       : `${group(plan.messages)} ${pluralMessages(plan.messages)} на ${plan.periodDays} дней`;
   // The good voice input is mentioned only once it exists.
   const voiceLevel = voiceInputFor(plan.id);

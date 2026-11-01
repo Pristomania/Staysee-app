@@ -34,7 +34,8 @@ assert(/v_count\s*>=\s*v_limit/i.test(fn), "refuses when the places are taken");
 assert(/MESSAGE\s*=\s*'conversation_limit_reached'/i.test(fn), "the agreed message");
 
 assert(/REVOKE ALL ON FUNCTION public\.enforce_conversation_limit\(\) FROM PUBLIC, anon, authenticated/i.test(sql), "closed to people");
-assert(/CREATE TRIGGER enforce_conversation_limit\s+BEFORE INSERT ON public\.conversations/i.test(sql), "fires before an insert");
+assert(/CREATE TRIGGER enforce_conversation_limit\s+BEFORE INSERT OR UPDATE OF is_active ON public\.conversations/i.test(sql), "fires before an insert and when a conversation becomes active again");
+assert(/TG_OP\s*=\s*'UPDATE'\s+AND\s+OLD\.is_active IS TRUE/i.test(fn), "a conversation that was already active takes no new place");
 assert(!/DELETE FROM public\.conversations/i.test(sql), "the migration deletes no conversation");
 assert(!/UPDATE public\.conversations/i.test(sql), "and changes none");
 

@@ -57,6 +57,12 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- A conversation that was already active takes no new place. One that becomes active again does: otherwise a person
+  -- could park a conversation as inactive, start another and switch the parked one back on.
+  IF TG_OP = 'UPDATE' AND OLD.is_active IS TRUE THEN
+    RETURN NEW;
+  END IF;
+
   -- The row of the person is locked, so two conversations created at the same moment cannot both slip under the limit.
   SELECT coalesce(u.max_conversations_override, l.max_conversations)
   INTO v_limit
@@ -87,6 +93,6 @@ REVOKE ALL ON FUNCTION public.enforce_conversation_limit() FROM PUBLIC, anon, au
 DROP TRIGGER IF EXISTS enforce_conversation_limit ON public.conversations;
 
 CREATE TRIGGER enforce_conversation_limit
-BEFORE INSERT ON public.conversations
+BEFORE INSERT OR UPDATE OF is_active ON public.conversations
 FOR EACH ROW
 EXECUTE FUNCTION public.enforce_conversation_limit();

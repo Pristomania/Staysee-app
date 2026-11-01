@@ -76,6 +76,38 @@ describe("the cabinet", () => {
   });
 });
 
+describe("what the audit found", () => {
+  it("a failed read of the plan keeps what is known instead of unlocking everything", () => {
+    const context = src("context/PlanContext.tsx");
+    assert.match(context, /if \(next\) setRow\(next\);/);
+    assert.doesNotMatch(context, /setRow\(await fetchUsageRow/);
+  });
+
+  it("the number of conversations comes from the database (the plan or a number given by hand), not from a list in the app", () => {
+    const rooms = src("lib/roomLimits.ts");
+    assert.doesNotMatch(rooms, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, "no person's id in the app");
+    assert.match(src("context/PlanContext.tsx"), /getMaxRooms\(tier, row\?\.max_conversations_override\)/);
+    const main = src("components/screens/MainScreen.tsx");
+    assert.match(main, /canCreateRoom\(conversations\.length, maxConversations\)/);
+    assert.doesNotMatch(main, /hasUnlimitedRooms/);
+  });
+
+  it("the pay button cannot silently become a dead one: it stays closed while no payment is connected", () => {
+    const payments = src("lib/payments.ts");
+    assert.match(payments, /PAYMENT_AVAILABLE = false/, "flip this only together with a real handler on the button");
+    const tariffs = src("components/screens/TariffsScreen.tsx");
+    assert.match(tariffs, /<button\s+type="button"\s+disabled\s+className/);
+    assert.doesNotMatch(tariffs, /PAYMENT_AVAILABLE \? 'Оплатить'/, "no label that promises a payment the button cannot take");
+  });
+
+  it("the free refusal and the card say the months correctly (from the one helper)", () => {
+    for (const file of ["lib/planCopy.ts", "lib/messageCounter.ts"]) {
+      assert.match(src(file), /monthsPhrase\(/, file);
+      assert.doesNotMatch(src(file), /renewAfterIdleMonths[^\n]*месяца/, `${file}: no hand-written plural`);
+    }
+  });
+});
+
 describe("the words", () => {
   it("the label of a closed thing is written once, in planCopy, and used everywhere", () => {
     const planCopy = src("lib/planCopy.ts");

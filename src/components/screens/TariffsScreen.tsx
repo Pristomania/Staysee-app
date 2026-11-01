@@ -76,12 +76,14 @@ export function TariffsScreen() {
               </ul>
 
               {id !== 'free' && !isCurrent && (
+                // No payment is connected yet, so the button cannot take money and says so. When the payment service is
+                // connected, this becomes the real button together with PAYMENT_AVAILABLE (a test keeps the two together).
                 <button
                   type="button"
-                  disabled={!PAYMENT_AVAILABLE}
+                  disabled
                   className={`w-full rounded-xl border py-3 text-sm font-light transition-all duration-200 disabled:opacity-50 ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover} ${theme.btnText}`}
                 >
-                  {PAYMENT_AVAILABLE ? 'Оплатить' : 'Оплата скоро'}
+                  Оплата скоро
                 </button>
               )}
             </section>

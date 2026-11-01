@@ -1,10 +1,14 @@
 -- 086_free_tariff_renewal
--- The free messages come back: 3 months after the person's last answered message the count starts again.
+-- The free messages come back: 3 months after the person's last message the count starts again.
 --
--- Rule (agreed 01.11.2026): the 3 months are counted from the LAST message the person was answered, not from
+-- Rule (agreed 01.11.2026): the 3 months are counted from the LAST message that took a place, not from
 -- registration. A refused message (limit reached) does not move the clock, otherwise a person who keeps trying
 -- would never get the messages back. When the 3 months pass, the next message finds a fresh count, and the
 -- hidden spending ceiling starts from zero together with it (it is counted from the period start).
+--
+-- Known limit, the same as the daily counter has always had: the place is taken when the message arrives, before the
+-- model answers. A message that then fails (the provider is down, the person stops it) still took its place and
+-- moved the clock. Giving the place back on a failed answer is a separate piece of work in the chat function.
 --
 -- Additive: one nullable column per table, one UPDATE of the free plan's row, and reserve_ai_request keeps its
 -- signature and all its checks. Paid plans are untouched: they renew by their own 30-day period.
@@ -13,9 +17,9 @@ ALTER TABLE public.usage_tier_limits
   ADD COLUMN IF NOT EXISTS renew_after_idle_months int CHECK (renew_after_idle_months > 0);
 
 COMMENT ON COLUMN public.usage_tier_limits.renew_after_idle_months IS
-  'NULL = the count never restarts by idleness. N = N calendar months after the last answered message the count restarts.';
+  'NULL = the count never restarts by idleness. N = N calendar months after the last message the count restarts.';
 
--- The time of the last answered message. NULL until the first one: such a person counts from the period start.
+-- The time of the last message that took a place. NULL until the first one: such a person counts from the period start.
 ALTER TABLE public.user_usage_tiers
   ADD COLUMN IF NOT EXISTS last_request_at timestamptz;
 
@@ -76,8 +80,8 @@ BEGIN
     v_period_start := v_now;
   END IF;
 
-  -- A plan that renews by idleness (the free one): N calendar months after the last answered message the count
-  -- and the money start again. A person who has not been answered yet counts from the period start.
+  -- A plan that renews by idleness (the free one): N calendar months after the last message the count
+  -- and the money start again. A person with no message yet counts from the period start.
   IF v_has_limits
      AND v_limits.renew_after_idle_months IS NOT NULL
      AND v_now >= coalesce(v_row.last_request_at, v_row.period_started_at)

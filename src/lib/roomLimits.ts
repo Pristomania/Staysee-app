@@ -1,36 +1,24 @@
 import { planFor } from './plans';
 
 /**
- * How many conversations a person may have at the same time comes from the plan (src/lib/plans.ts): one on the
- * free plan, three on Basic, six on Premium. The database enforces the same number (migration 087); this is the
- * convenience that tells the person before they try. Deleting a conversation opens a place for a new one.
+ * How many conversations a person may have at the same time: the number of their plan (src/lib/plans.ts: one on the
+ * free plan, three on Basic, six on Premium), or the number the database gives them by hand
+ * (user_usage_tiers.max_conversations_override: the owner's accounts and the technical user). The database enforces the
+ * same number (migration 087); this is the convenience that tells the person before they try. Deleting a conversation
+ * opens a place for a new one. The app keeps no list of people: the one place is the database.
  */
-
-/** Internal override — unlimited rooms for confirmed founder accounts (the database has the same override). */
-const UNLIMITED_ROOM_USER_IDS = new Set<string>([
-  'cff5913e-10d2-4168-82de-ec0c0ff48929',
-  'ad52b415-875a-45e9-9f6b-be4d25a2c0e0',
-  '0acde6d0-2741-4992-b876-d77eab0f6d15',
-]);
-
-const UNLIMITED_FETCH_LIMIT = 100;
-
-export function hasUnlimitedRooms(userId: string | undefined | null): boolean {
-  return !!userId && UNLIMITED_ROOM_USER_IDS.has(userId);
+export function getMaxRooms(tier: unknown, override?: number | null): number {
+  const given = Math.floor(Number(override));
+  return Number.isFinite(given) && given > 0 ? given : planFor(tier).maxConversations;
 }
 
-export function getMaxRooms(userId: string | undefined | null, tier?: unknown): number {
-  return hasUnlimitedRooms(userId) ? Infinity : planFor(tier).maxConversations;
+/** Supabase list limit when loading active conversations: room for the most any plan gives, or the person's own number. */
+export function getConversationFetchLimit(maxRooms: number): number {
+  return Math.max(planFor('premium').maxConversations + 4, maxRooms + 1);
 }
 
-/** Supabase list limit when loading active conversations on MainScreen: room for the most any plan gives. */
-export function getConversationFetchLimit(userId: string | undefined | null): number {
-  return hasUnlimitedRooms(userId) ? UNLIMITED_FETCH_LIMIT : planFor('premium').maxConversations + 4;
-}
-
-export function canCreateRoom(userId: string | undefined | null, activeCount: number, tier?: unknown): boolean {
-  if (hasUnlimitedRooms(userId)) return true;
-  return activeCount < getMaxRooms(userId, tier);
+export function canCreateRoom(activeCount: number, maxRooms: number): boolean {
+  return activeCount < maxRooms;
 }
 
 const ROOMS_IN_WORDS: Record<number, string> = { 1: 'одна беседа', 3: 'три беседы', 6: 'шесть бесед' };

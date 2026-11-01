@@ -1,4 +1,4 @@
-import { planFor } from './plans';
+import { monthsPhrase, planFor } from './plans';
 
 /**
  * The counter of messages the person sees in the cabinet and the warning before the end. It repeats the rules the
@@ -19,6 +19,8 @@ export interface UsageRow {
   period_started_at?: string | null;
   last_request_at?: string | null;
   unlimited_usage?: boolean | null;
+  /** A number of conversations given by hand instead of the plan's (migration 087). */
+  max_conversations_override?: number | null;
 }
 
 export interface MessageCounter {
@@ -114,7 +116,7 @@ export function renewalLine(counter: MessageCounter, tier: unknown): string {
   if (counter.unlimited) return '';
   const plan = planFor(tier);
   if (plan.renewAfterIdleMonths !== null) {
-    return `Новые ${plan.messages} ${pluralMessages(plan.messages)} появятся через ${plan.renewAfterIdleMonths} месяца после последнего сообщения`;
+    return `Новые ${plan.messages} ${pluralMessages(plan.messages)} появятся через ${monthsPhrase(plan.renewAfterIdleMonths)} после последнего сообщения`;
   }
   if (!counter.renewsAt) return '';
   const date = counter.renewsAt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });

@@ -17,8 +17,29 @@ export const SELLER = {
 
 /** The numbers must match supabase/migrations/*_085_usage_limits.sql (a test compares them). Premium is not sold yet. */
 export const TARIFFS = {
-  free: { messages: 50, renewMonths: 3 },
-  basic: { priceRub: 1990, periodDays: 30, messages: 400 },
+  free: {
+    label: "Бесплатный",
+    messages: 50,
+    renewMonths: 3,
+    conversations: 1,
+    features: { crossMemory: false, conversationDynamics: false, fileAttachments: false, voiceInput: false },
+  },
+  basic: {
+    label: "Базовый",
+    priceRub: 1990,
+    periodDays: 30,
+    messages: 400,
+    conversations: 3,
+    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true, voiceInput: true },
+  },
+  premium: {
+    label: "Премиум",
+    priceRub: 4900,
+    periodDays: 30,
+    messages: 1000,
+    conversations: 6,
+    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true, voiceInput: true },
+  },
 };
 
 export const PAGES = [
@@ -173,13 +194,20 @@ const CSS = `
     .details{display:grid;grid-template-columns:180px 1fr;margin:28px 0;border-top:1px solid var(--line)}
     .details div{padding:14px 0;border-bottom:1px solid var(--line)}
     .details div:nth-child(odd){color:var(--gold);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-    .plans{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:34px 0 26px}
+    .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:34px 0 26px}
     .plan{margin:0;padding:26px 24px 20px;border:1px solid var(--line);border-radius:20px;background:var(--panel)}
     .plan--main{border-color:rgba(201,169,110,.55)}
     .plan-name{margin:0 0 6px;color:var(--gold);font-size:11px;font-weight:650;letter-spacing:.18em;text-transform:uppercase}
-    .price{margin:0 0 14px;color:var(--light);font:350 40px/1.1 "Segoe UI Variable Display","Segoe UI",Arial,sans-serif;letter-spacing:-.03em}
+    .price{margin:0 0 14px;color:var(--light);font:350 32px/1.1 "Segoe UI Variable Display","Segoe UI",Arial,sans-serif;letter-spacing:-.03em}
     .price span{color:var(--muted);font-size:15px;letter-spacing:0}
     .plan ul{margin:0;padding-left:20px}
+    .plan .rows{list-style:none;margin:0;padding:0}
+    .rows li{display:flex;gap:10px;margin:9px 0;font-size:15px;line-height:1.45}
+    .rows li::before{flex:none;width:14px;color:var(--gold)}
+    .rows .on::before{content:"✓"}
+    .rows .off{color:var(--muted);opacity:.7}
+    .rows .off::before{content:"—";color:var(--muted)}
+    .plan-note{margin:16px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
     .btn{display:inline-block;padding:14px 26px;border:1px solid rgba(201,169,110,.55);border-radius:999px;color:var(--gold);font-size:15px;text-decoration:none;transition:background .2s}
     .btn:hover{background:rgba(201,169,110,.1)}
     footer{padding:34px 0 40px;border-top:1px solid var(--line);color:#788493;font-size:13px;line-height:1.6}
@@ -253,30 +281,49 @@ function layout({ file, title, description, eyebrow, body }) {
 
 // ── Authored pages ──────────────────────────────────────────────────────────────────────────────────────────────
 
+const plural = (n, one, few, many) => {
+  const last = n % 10;
+  if (n % 100 >= 11 && n % 100 <= 14) return many;
+  if (last === 1) return one;
+  return last >= 2 && last <= 4 ? few : many;
+};
+
+/** One card: the name, the price, what the plan gives and, shown as closed, what it does not. */
+function planCard(plan, id) {
+  const price = plan.priceRub ? `${formatRub(plan.priceRub)}&nbsp;₽ <span>за ${plan.periodDays} дней</span>` : "0&nbsp;₽";
+  const messages = plan.periodDays
+    ? `${formatRub(plan.messages)} ${plural(plan.messages, "сообщение", "сообщения", "сообщений")} на ${plan.periodDays} дней`
+    : `${plan.messages} сообщений, новые через ${formatMonths(plan.renewMonths)} после последнего`;
+  const rows = [
+    [messages, true],
+    [`${plan.conversations} ${plural(plan.conversations, "беседа", "беседы", "бесед")}`, true],
+    ["Сквозная память", plan.features.crossMemory],
+    ["Динамика бесед", plan.features.conversationDynamics],
+    ["Прикрепление файлов", plan.features.fileAttachments],
+    ["Голосовой ввод", plan.features.voiceInput],
+  ];
+  const note = plan.periodDays
+    ? "неиспользованные сообщения не переносятся, автоматических списаний нет"
+    : "банковская карта не нужна";
+  return `<section class="plan${id === "basic" ? " plan--main" : ""}" data-plan="${id}">
+        <p class="plan-name">${plan.label}</p>
+        <p class="price">${price}</p>
+        <ul class="rows">
+          ${rows.map(([label, included]) => `<li class="${included ? "on" : "off"}">${label}</li>`).join("\n          ")}
+        </ul>
+        <p class="plan-note">${note}</p>
+      </section>`;
+}
+
 function pricingBody() {
-  const { free, basic } = TARIFFS;
+  const { free, basic, premium } = TARIFFS;
   return `<h1>Тарифы StaySee AI</h1>
     <p class="lead">StaySee AI - приложение для спокойного разговора с ИИ-собеседником Стэйси. Объём тарифа измеряется в сообщениях: одно ваше сообщение вместе с ответом Стэйси считается за одно.</p>
 
     <div class="plans">
-      <section class="plan">
-        <p class="plan-name">Бесплатный</p>
-        <p class="price">0&nbsp;₽</p>
-        <ul>
-          <li>${free.messages} сообщений</li>
-          <li>новые ${free.messages} сообщений появляются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения</li>
-          <li>банковская карта не нужна</li>
-        </ul>
-      </section>
-      <section class="plan plan--main">
-        <p class="plan-name">Базовый</p>
-        <p class="price">${formatRub(basic.priceRub)}&nbsp;₽ <span>за ${basic.periodDays} дней</span></p>
-        <ul>
-          <li>${basic.messages} сообщений на ${basic.periodDays} дней</li>
-          <li>неиспользованные сообщения не переносятся на следующий период</li>
-          <li>каждый период оплачивается отдельно, автоматических списаний нет</li>
-        </ul>
-      </section>
+      ${planCard(free, "free")}
+      ${planCard(basic, "basic")}
+      ${planCard(premium, "premium")}
     </div>
     <p><a class="btn" href="${APP_URL}">Открыть приложение</a></p>
 
@@ -284,7 +331,7 @@ function pricingBody() {
     <ol>
       <li>Создайте учётную запись в приложении по адресу электронной почты и подтвердите её по ссылке из письма.</li>
       <li>Используйте ${free.messages} бесплатных сообщений. Платить для этого не нужно.</li>
-      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый». Или подождите: бесплатные сообщения возвращаются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения.</li>
+      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый» или «Премиум». Или подождите: бесплатные сообщения возвращаются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения.</li>
     </ol>
 
     <h2>Оплата и получение доступа</h2>

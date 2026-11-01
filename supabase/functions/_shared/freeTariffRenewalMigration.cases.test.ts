@@ -59,8 +59,7 @@ assert(/GRANT EXECUTE ON FUNCTION public\.reserve_ai_request\(uuid\) TO service_
 // ── What the person reads says the same as the database does ───────────────────────────────────────
 
 const cost = readFileSync(resolve("supabase/functions/_shared/cost.ts"), "utf8");
-const freeText = /freeUsedUp:\s*"([^"]+)"/.exec(cost)?.[1] ?? "";
-assert(/3 месяца/.test(freeText), "the free refusal tells when the messages come back");
-assert(/последнего сообщения/.test(freeText), "...counted from the last message");
+// The text of the free refusal is built from the plans table and checked against it in plans.cases.test.ts.
+assert(/freeUsedUp:\s*`[^`]*monthsPhrase\(PLANS\.free\.renewAfterIdleMonths/.test(cost), "the free refusal takes the months from the plans table");
 
 console.log("=== freeTariffRenewalMigration.cases.test.ts OK ===");

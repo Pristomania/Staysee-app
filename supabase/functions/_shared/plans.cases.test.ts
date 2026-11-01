@@ -31,7 +31,8 @@ const client = await import("../../../src/lib/plans.ts");
 const { TIER_CONFIG } = await import("./cost.ts");
 const { TARIFFS } = await import("../../../scripts/lib/site-pages.mjs");
 
-const { PLANS, planFor, isFeatureAvailable, normalizePlanId, PLAN_FEATURES, VOICE_LEVELS, voiceInputFor } = server;
+const { PLANS, planFor, isFeatureAvailable, normalizePlanId, PLAN_FEATURES, VOICE_LEVELS, voiceInputFor, monthsPhrase } = server;
+const { CALM_ERRORS } = await import("./cost.ts");
 
 describe("what each plan includes", () => {
   it("free: one conversation, 1200-token replies, typing only, no cross-conversation memory, no dynamics, no file attachments", () => {
@@ -106,6 +107,19 @@ describe("what each plan includes", () => {
   });
 });
 
+describe("months are written correctly", () => {
+  it("1 месяц, 2 to 4 месяца, the rest месяцев", () => {
+    const expected: Record<number, string> = { 1: "1 месяц", 2: "2 месяца", 3: "3 месяца", 4: "4 месяца", 5: "5 месяцев", 6: "6 месяцев", 11: "11 месяцев", 12: "12 месяцев", 21: "21 месяц", 22: "22 месяца" };
+    for (const [count, text] of Object.entries(expected)) assert.equal(monthsPhrase(Number(count)), text, count);
+  });
+
+  it("the refusal of the free plan says when the messages come back, from the plans table", () => {
+    const months = PLANS.free.renewAfterIdleMonths!;
+    assert.ok(CALM_ERRORS.freeUsedUp.includes(`через ${monthsPhrase(months)} после последнего сообщения`), CALM_ERRORS.freeUsedUp);
+    assert.ok(CALM_ERRORS.freeUsedUp.startsWith("Бесплатные сообщения закончились."));
+  });
+});
+
 describe("the chat uses these numbers", () => {
   it("the reply ceilings the chat applies are the plans' ceilings", () => {
     for (const id of ["free", "basic", "premium"] as const) {
@@ -165,5 +179,22 @@ describe("the database and the site say the same", () => {
     assert.equal(TARIFFS.basic.messages, PLANS.basic.messages);
     assert.equal(TARIFFS.basic.priceRub, PLANS.basic.priceRub);
     assert.equal(TARIFFS.basic.periodDays, PLANS.basic.periodDays);
+    assert.equal(TARIFFS.premium.messages, PLANS.premium.messages);
+    assert.equal(TARIFFS.premium.priceRub, PLANS.premium.priceRub);
+    assert.equal(TARIFFS.premium.periodDays, PLANS.premium.periodDays);
+  });
+
+  it("the site and the app agree on every plan's conversations, labels and what is open or closed", () => {
+    for (const id of ["free", "basic", "premium"] as const) {
+      const site = TARIFFS[id];
+      const plan = PLANS[id];
+      assert.equal(site.label, plan.label, `${id}: name`);
+      assert.equal(site.conversations, plan.maxConversations, `${id}: conversations`);
+      assert.deepEqual(
+        site.features,
+        { ...plan.features, voiceInput: plan.voiceInput !== "none" },
+        `${id}: what is open and what is closed`,
+      );
+    }
   });
 });

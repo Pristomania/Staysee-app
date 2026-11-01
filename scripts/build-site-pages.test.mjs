@@ -68,8 +68,29 @@ describe("every page carries what a buyer and the payment service must see", () 
     assert.ok(pages["offer.html"].includes('id="sec-6"'), "the refund section the tariffs page links to exists");
   });
 
-  it("the tariffs page sells nothing that is not defined yet", () => {
-    assert.doesNotMatch(pages["pricing.html"], /4\s?900|Премиум|Premium/i);
+  it("the tariffs page shows the premium plan and promises nothing that does not exist yet", () => {
+    const html = pages["pricing.html"];
+    assert.match(html, /Премиум/);
+    assert.ok(html.includes("4 900"), "premium price");
+    assert.match(html, /1 000 сообщений на 30 дней/);
+    assert.match(html, /6 бесед/);
+    // the AI voice input of premium is not built: the site must not promise it
+    assert.doesNotMatch(html, /ввод[а-я]* с ИИ|распознавани[а-я]* с ИИ|ИИ-ввод/i);
+    // the top-up pack is not built either
+    assert.doesNotMatch(html, /докуп|пакет/i);
+  });
+
+  it("each card shows what the plan gives and, marked closed, what it does not", () => {
+    const card = (id) => new RegExp(`<section class="plan[^"]*" data-plan="${id}">[^]*?</section>`).exec(pages["pricing.html"])?.[0] ?? "";
+    const free = card("free");
+    for (const closed of ["Сквозная память", "Динамика бесед", "Прикрепление файлов", "Голосовой ввод"]) {
+      assert.match(free, new RegExp(`<li class="off">${closed}</li>`), `free: ${closed} is shown closed`);
+      assert.match(card("basic"), new RegExp(`<li class="on">${closed}</li>`), `basic: ${closed}`);
+      assert.match(card("premium"), new RegExp(`<li class="on">${closed}</li>`), `premium: ${closed}`);
+    }
+    assert.match(free, /<li class="on">1 беседа<\/li>/);
+    assert.match(card("basic"), /<li class="on">3 беседы<\/li>/);
+    assert.match(card("premium"), /<li class="on">6 бесед<\/li>/);
   });
 
   it("the authored pages use no long dash (the site's rule)", () => {
@@ -105,7 +126,8 @@ describe("the site and the app agree on the numbers", () => {
     const sql = readFileSync(new URL(file, dir), "utf8");
     const months = /SET renew_after_idle_months\s*=\s*(\d+)\s+WHERE tier\s*=\s*'free'/i.exec(sql);
     assert.equal(Number(months?.[1]), TARIFFS.free.renewMonths, "months in the database and on the page");
-    assert.match(pages["pricing.html"], /появляются через 3 месяца после вашего последнего сообщения/);
+    assert.match(pages["pricing.html"], /бесплатные сообщения возвращаются через 3 месяца после вашего последнего сообщения/);
+    assert.match(pages["pricing.html"], /новые через 3 месяца после последнего/);
     assert.match(pages["pricing.html"], /Бесплатный/);
     assert.doesNotMatch(pages["pricing.html"], /один раз на учётную запись/, "the old one-time promise is gone");
     assert.match(pages["offer.html"], /возобновляются через 3 \(три\) месяца после последнего сообщения Пользователя/);

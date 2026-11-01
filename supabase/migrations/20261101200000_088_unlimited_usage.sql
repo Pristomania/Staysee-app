@@ -86,8 +86,8 @@ BEGIN
     v_period_start := v_now;
   END IF;
 
-  -- A plan that renews by idleness (the free one): N calendar months after the last answered message the count
-  -- and the money start again. A person who has not been answered yet counts from the period start.
+  -- A plan that renews by idleness (the free one): N calendar months after the last message the count
+  -- and the money start again. A person with no message yet counts from the period start.
   IF v_has_limits
      AND v_limits.renew_after_idle_months IS NOT NULL
      AND v_now >= coalesce(v_row.last_request_at, v_row.period_started_at)

@@ -104,6 +104,14 @@ export function planFor(tier: unknown): Plan {
   return PLANS[normalizePlanId(tier)];
 }
 
+/** "1 месяц", "3 месяца", "6 месяцев": a number of months written the way it is read. */
+export function monthsPhrase(count: number): string {
+  const n = Math.abs(Math.floor(count));
+  const last = n % 10;
+  const word = n % 100 >= 11 && n % 100 <= 14 ? "месяцев" : last === 1 ? "месяц" : last >= 2 && last <= 4 ? "месяца" : "месяцев";
+  return `${n} ${word}`;
+}
+
 export function isFeatureAvailable(tier: unknown, feature: PlanFeature): boolean {
   const plan = planFor(tier);
   return feature === "voiceInput" ? plan.voiceInput !== "none" : plan.features[feature];
