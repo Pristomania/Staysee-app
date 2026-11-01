@@ -762,8 +762,8 @@ Deno.serve(async (req: Request) => {
           status: 422,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      // Pictures belong to the paid plans; the app shows the button and offers payment, the server is the guard.
-      if (!isFeatureAvailable(userTier, "imageAttachments")) {
+      // Attaching files belongs to the paid plans; the app shows the button and offers payment, the server is the guard for pictures.
+      if (!isFeatureAvailable(userTier, "fileAttachments")) {
         return unprocessable("images_not_in_plan");
       }
       if (!imagesAllowedForUser(

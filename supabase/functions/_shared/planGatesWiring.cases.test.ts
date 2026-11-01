@@ -45,7 +45,7 @@ describe("the chat", () => {
     const switchGate = chat.indexOf('unprocessable("images_disabled")');
     const consentGate = chat.indexOf('unprocessable("images_consent_required")');
     assert.ok(planGate > 0, "the refusal exists");
-    assert.match(chat, /!isFeatureAvailable\(userTier, "imageAttachments"\)/);
+    assert.match(chat, /!isFeatureAvailable\(userTier, "fileAttachments"\)/);
     assert.ok(planGate < switchGate && planGate < consentGate, "the plan is checked first");
   });
 });

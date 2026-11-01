@@ -13,8 +13,12 @@
 
 export type PlanId = "free" | "basic" | "premium";
 
-/** Things a plan can switch on. A locked feature stays visible in the app and offers to go to payment. */
-export const PLAN_FEATURES = ["crossMemory", "conversationDynamics", "voiceInput", "imageAttachments"] as const;
+/**
+ * Things a plan can switch on. A locked feature stays visible in the app and offers to go to payment.
+ * fileAttachments is the whole attach button: documents (read into text by the browser, so only the app can lock
+ * them) and pictures (the server refuses those too).
+ */
+export const PLAN_FEATURES = ["crossMemory", "conversationDynamics", "voiceInput", "fileAttachments"] as const;
 export type PlanFeature = (typeof PLAN_FEATURES)[number];
 
 /**
@@ -58,7 +62,7 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTokensOutput: 1200,
     // Only the memory of the conversation itself works, and it is not shown. No memory between conversations,
     // no dynamics, typing only, no pictures.
-    features: { crossMemory: false, conversationDynamics: false, imageAttachments: false },
+    features: { crossMemory: false, conversationDynamics: false, fileAttachments: false },
     voiceInput: "none",
   },
   basic: {
@@ -69,7 +73,7 @@ export const PLANS: Record<PlanId, Plan> = {
     messages: 400,
     maxConversations: 3,
     maxTokensOutput: 1600,
-    features: { crossMemory: true, conversationDynamics: true, imageAttachments: true },
+    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true },
     voiceInput: "device",
   },
   premium: {
@@ -80,7 +84,7 @@ export const PLANS: Record<PlanId, Plan> = {
     messages: 1000,
     maxConversations: 6,
     maxTokensOutput: 2000,
-    features: { crossMemory: true, conversationDynamics: true, imageAttachments: true },
+    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true },
     voiceInput: "ai",
   },
 };

@@ -34,21 +34,21 @@ const { TARIFFS } = await import("../../../scripts/lib/site-pages.mjs");
 const { PLANS, planFor, isFeatureAvailable, normalizePlanId, PLAN_FEATURES, VOICE_LEVELS, voiceInputFor } = server;
 
 describe("what each plan includes", () => {
-  it("free: one conversation, 1200-token replies, typing only, no cross-conversation memory, no dynamics, no pictures", () => {
+  it("free: one conversation, 1200-token replies, typing only, no cross-conversation memory, no dynamics, no file attachments", () => {
     const free = PLANS.free;
     assert.equal(free.maxConversations, 1);
     assert.equal(free.maxTokensOutput, 1200);
-    assert.deepEqual(free.features, { crossMemory: false, conversationDynamics: false, imageAttachments: false });
+    assert.deepEqual(free.features, { crossMemory: false, conversationDynamics: false, fileAttachments: false });
     assert.equal(free.voiceInput, "none");
     assert.equal(free.messages, 50);
     assert.equal(free.priceRub, 0);
   });
 
-  it("basic: three conversations, 1600-token replies, memory, dynamics, voice and pictures", () => {
+  it("basic: three conversations, 1600-token replies, memory, dynamics, voice and file attachments", () => {
     const basic = PLANS.basic;
     assert.equal(basic.maxConversations, 3);
     assert.equal(basic.maxTokensOutput, 1600);
-    assert.deepEqual(basic.features, { crossMemory: true, conversationDynamics: true, imageAttachments: true });
+    assert.deepEqual(basic.features, { crossMemory: true, conversationDynamics: true, fileAttachments: true });
     assert.equal(basic.voiceInput, "device", "the cheap voice input that works on the device today");
     assert.deepEqual([basic.priceRub, basic.periodDays, basic.messages], [1990, 30, 400]);
   });
@@ -87,9 +87,9 @@ describe("what each plan includes", () => {
   });
 
   it("every feature has a name the app can show, and a locked one can be told apart", () => {
-    assert.deepEqual([...PLAN_FEATURES].sort(), ["conversationDynamics", "crossMemory", "imageAttachments", "voiceInput"]);
-    assert.equal(isFeatureAvailable("free", "imageAttachments"), false);
-    assert.equal(isFeatureAvailable("basic", "imageAttachments"), true);
+    assert.deepEqual([...PLAN_FEATURES].sort(), ["conversationDynamics", "crossMemory", "fileAttachments", "voiceInput"]);
+    assert.equal(isFeatureAvailable("free", "fileAttachments"), false);
+    assert.equal(isFeatureAvailable("basic", "fileAttachments"), true);
     assert.equal(isFeatureAvailable("free", "voiceInput"), false, "typing only on the free plan");
     assert.equal(isFeatureAvailable("basic", "voiceInput"), true);
     assert.equal(isFeatureAvailable("premium", "voiceInput"), true);
