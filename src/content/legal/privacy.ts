@@ -6,9 +6,9 @@ import type { LegalSection } from './offer';
 export const PRIVACY_POLICY_META = {
   "title": "Политика обработки персональных данных",
   "subtitle": "Сервис StaySee AI",
-  "version": "1.3",
-  "effectiveDate": "31 октября 2026 г.",
-  "sha256": "c4e0ea888ea6470f8a6a1c849ae05a8ab87a1fd41b147d9ce1d5914cd17da33b"
+  "version": "1.4",
+  "effectiveDate": "1 ноября 2026 г.",
+  "sha256": "92a804415408095d29af80c8743249cf9d81ab51192b8cb69c98abd79bd8e784"
 };
 
 export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
@@ -54,7 +54,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
   },
   {
     "title": "11. Изменения в Политике",
-    "body": "11.1. Оператор вправе вносить изменения в настоящую Политику. Новая редакция публикуется на сайте https://staysee.ru/privacy с указанием даты вступления в силу.\n\n11.2. При существенных изменениях Оператор уведомляет Пользователей по электронной почте не менее чем за 10 дней."
+    "body": "11.1. Оператор вправе вносить изменения в настоящую Политику. Новая редакция публикуется на сайте https://stayseeai.online/app-privacy.html с указанием даты вступления в силу.\n\n11.2. При существенных изменениях Оператор уведомляет Пользователей по электронной почте не менее чем за 10 дней."
   },
   {
     "title": "12. Реквизиты и контакты",
