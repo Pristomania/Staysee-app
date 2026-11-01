@@ -252,7 +252,7 @@ for (const tier of ["free", "basic", "premium"] as const) {
 
 // ── 7–9. reserve deny reasons ─────────────────────────────────────────────────
 
-for (const reason of ["suspended", "daily_limit", "missing_tier"] as const) {
+for (const reason of ["suspended", "daily_limit", "missing_tier", "period_limit", "cost_cap"] as const) {
   const fake = makeFakeRpcClient({
     reserve: { data: { allowed: false, tier: "free", reason }, error: null },
   });
