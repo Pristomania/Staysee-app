@@ -48,4 +48,25 @@ for (const role of ["PUBLIC", "anon", "authenticated"]) {
 }
 assert(/GRANT EXECUTE ON FUNCTION public\.set_user_plan\(uuid, text\) TO service_role/i.test(sql), "only the service");
 
+// ── The unlimited mark is switched through a function too: switching it OFF starts a fresh period ───────────────
+
+const unlimited = sql.match(/CREATE OR REPLACE FUNCTION public\.set_unlimited_usage\s*\([\s\S]*?\$\$;/i);
+assert(unlimited !== null, "set_unlimited_usage block");
+const mark = unlimited![0];
+assert(/set_unlimited_usage\s*\(\s*p_user_id\s+uuid\s*,\s*p_on\s+boolean\s*\)/i.test(mark), "signature");
+assert(/SECURITY DEFINER/i.test(mark) && /SET search_path\s*=\s*''/i.test(mark), "hardened");
+assert(/p_on IS NULL/i.test(mark) && /MESSAGE\s*=\s*'unknown_value'/i.test(mark), "refuses a missing value");
+assert(/unlimited_usage\s*=\s*p_on/i.test(mark), "sets the mark");
+// Off: the counters and the money window of the unlimited time must not count against the person.
+assert(/period_requests_used\s*=\s*CASE WHEN p_on THEN period_requests_used ELSE 0 END/i.test(mark), "off: the count starts again");
+assert(/period_started_at\s*=\s*CASE WHEN p_on THEN period_started_at ELSE v_now END/i.test(mark), "off: the period (and the ceiling's window) starts again");
+assert(/MESSAGE\s*=\s*'missing_tier'/i.test(mark), "an unknown person is refused");
+for (const column of ["tier", "is_suspended", "max_conversations_override", "last_request_at"]) {
+  assert(!new RegExp(`\\b${column}\\s*=`, "i").test(mark), `does not touch ${column}`);
+}
+for (const role of ["PUBLIC", "anon", "authenticated"]) {
+  assert(new RegExp(`REVOKE ALL ON FUNCTION public\\.set_unlimited_usage\\(uuid, boolean\\) FROM ${role}`, "i").test(sql), `revoke ${role}`);
+}
+assert(/GRANT EXECUTE ON FUNCTION public\.set_unlimited_usage\(uuid, boolean\) TO service_role/i.test(sql), "only the service");
+
 console.log("=== planChangeMigration.cases.test.ts OK ===");

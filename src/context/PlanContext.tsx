@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { fetchUsageRow } from '../lib/usageTier';
@@ -28,6 +28,11 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id;
   const [row, setRow] = useState<UsageRow | null>(null);
+  const currentUserRef = useRef(userId);
+
+  useEffect(() => {
+    currentUserRef.current = userId;
+  }, [userId]);
 
   const refresh = useCallback(async () => {
     if (!userId) {
@@ -35,6 +40,8 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       return;
     }
     const next = await fetchUsageRow(userId);
+    // Somebody else signed in while this was being read: their plan is not this answer.
+    if (currentUserRef.current !== userId) return;
     // A failed read must not wipe what is known: a network blip would unlock everything and hide the counter until the
     // next read. Only a successful read replaces the row.
     if (next) setRow(next);
@@ -44,6 +51,16 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     // Another person (or nobody): forget the previous person's row before reading.
     setRow(null);
     void refresh();
+  }, [refresh]);
+
+  // The plan and the counter change outside this tab too (another tab, a renewed period): read them again when the
+  // person comes back to this one.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
   const value = useMemo<PlanContextType>(() => {

@@ -834,6 +834,9 @@ export function ChatScreen() {
           signal: abortController.signal,
         });
 
+        // Whatever the result (an answer, "the messages are used up", a failure), the counter is read again.
+        void refreshPlan();
+
         if (epoch !== generationEpochRef.current) return;
 
         if (!isAiSendSuccess(aiResult)) {

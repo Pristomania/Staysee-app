@@ -15,7 +15,7 @@ export const SELLER = {
   email: "support.stayseeai@gmail.com",
 };
 
-/** The numbers must match supabase/migrations/*_085_usage_limits.sql (a test compares them). Premium is not sold yet. */
+/** The same facts as the app's plans table (src/lib/plans.ts) and the limits migrations 085 to 087; plans.cases.test.ts compares them. */
 export const TARIFFS = {
   free: {
     label: "Бесплатный",

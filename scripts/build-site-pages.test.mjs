@@ -133,6 +133,14 @@ describe("the site and the app agree on the numbers", () => {
     assert.match(pages["offer.html"], /возобновляются через 3 \(три\) месяца после последнего сообщения Пользователя/);
   });
 
+  it("the offer sends the person to the policy where it really is, on the site and in the app", () => {
+    const clause = /<strong>11\.1\.<\/strong>[^]*?<\/p>/.exec(pages["offer.html"])?.[0] ?? "";
+    assert.match(clause, /href="https:\/\/stayseeai\.online\/app-privacy\.html"/);
+    for (const [file, html] of Object.entries(pages)) {
+      assert.doesNotMatch(html, /staysee\.ru\/privacy/, `${file} points to a page that never existed`);
+    }
+  });
+
   it("the offer names the site and the app, in the first clause and in the requisites", () => {
     const html = pages["offer.html"];
     const clause11 = /<strong>1\.1\.<\/strong>[^]*?<\/p>/.exec(html)?.[0] ?? "";

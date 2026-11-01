@@ -47,6 +47,46 @@ BEGIN
 END;
 $$;
 
+-- The unlimited mark (migration 088) is switched through a function too. While it is on, the counters keep running
+-- (the usage stays visible) but nothing refuses, so they may be far past any plan's numbers and the money spent since the
+-- start of the period may be large. Switching it OFF therefore starts a fresh period, as a change of plan does; switching it
+-- on leaves everything as it is.
+CREATE OR REPLACE FUNCTION public.set_unlimited_usage(p_user_id uuid, p_on boolean)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_now timestamptz := now();
+BEGIN
+  IF p_on IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'unknown_value';
+  END IF;
+
+  UPDATE public.user_usage_tiers
+  SET
+    unlimited_usage = p_on,
+    period_requests_used = CASE WHEN p_on THEN period_requests_used ELSE 0 END,
+    period_started_at = CASE WHEN p_on THEN period_started_at ELSE v_now END,
+    daily_requests_used = CASE WHEN p_on THEN daily_requests_used ELSE 0 END,
+    day_reset_at = CASE WHEN p_on THEN day_reset_at ELSE v_now END,
+    updated_at = v_now
+  WHERE user_id = p_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'missing_tier';
+  END IF;
+
+  RETURN jsonb_build_object('unlimited_usage', p_on);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_unlimited_usage(uuid, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.set_unlimited_usage(uuid, boolean) FROM anon;
+REVOKE ALL ON FUNCTION public.set_unlimited_usage(uuid, boolean) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.set_unlimited_usage(uuid, boolean) TO service_role;
+
 REVOKE ALL ON FUNCTION public.set_user_plan(uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.set_user_plan(uuid, text) FROM anon;
 REVOKE ALL ON FUNCTION public.set_user_plan(uuid, text) FROM authenticated;

@@ -100,6 +100,30 @@ describe("what the audit found", () => {
     assert.doesNotMatch(tariffs, /PAYMENT_AVAILABLE \? 'Оплатить'/, "no label that promises a payment the button cannot take");
   });
 
+  it("a late answer of the previous person never becomes the next person's plan, and the plan is read again when the person returns", () => {
+    const context = src("context/PlanContext.tsx");
+    assert.match(context, /if \(currentUserRef\.current !== userId\) return;/);
+    assert.match(context, /visibilitychange/);
+  });
+
+  it("the counter is read again after every send, whatever the result, and the limit notice has one managed timer", () => {
+    const chatScreen = src("components/screens/ChatScreen.tsx");
+    const sent = chatScreen.indexOf("const aiResult = await sendAiMessage(");
+    const refresh = chatScreen.indexOf("void refreshPlan();", sent);
+    const verdict = chatScreen.indexOf("if (!isAiSendSuccess(aiResult))", sent);
+    assert.ok(sent > 0 && refresh > sent && refresh < verdict, "the counter is read before the result is judged, so a refusal or a failure refreshes it too");
+    const main = src("components/screens/MainScreen.tsx");
+    assert.match(main, /limitTimerRef/);
+    assert.match(main, /window\.clearTimeout\(limitTimerRef\.current\)/);
+    assert.equal((main.match(/setTimeout\(/g) ?? []).length, 1, "one timer, not one per tap");
+  });
+
+  it("no document or text sends anybody to the policy address that never existed", () => {
+    for (const file of ["content/legal/offer.ts", "content/legal/privacy.ts"]) {
+      assert.doesNotMatch(src(file), /staysee\.ru\/privacy/, file);
+    }
+  });
+
   it("the free refusal and the card say the months correctly (from the one helper)", () => {
     for (const file of ["lib/planCopy.ts", "lib/messageCounter.ts"]) {
       assert.match(src(file), /monthsPhrase\(/, file);

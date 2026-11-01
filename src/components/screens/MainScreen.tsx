@@ -33,6 +33,7 @@ export function MainScreen() {
   const [modal, setModal] = useState<Modal | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const limitTimerRef = useRef<number | undefined>(undefined);
 
   const fetchConversations = useCallback(async () => {
     if (!user) return;
@@ -94,11 +95,18 @@ export function MainScreen() {
     navigateTo('chat', { conversation: conv });
   }
 
+  useEffect(() => () => window.clearTimeout(limitTimerRef.current), []);
+
+  function showLimitNotice() {
+    setLimitReached(true);
+    window.clearTimeout(limitTimerRef.current);
+    limitTimerRef.current = window.setTimeout(() => setLimitReached(false), 8000);
+  }
+
   async function createNewRoom() {
     // Until the plan is read the server decides: it refuses a place above the number of the plan.
     if (planLoaded && !canCreateRoom(conversations.length, maxConversations)) {
-      setLimitReached(true);
-      setTimeout(() => setLimitReached(false), 8000);
+      showLimitNotice();
       return;
     }
     const { data, error } = await supabase
@@ -107,8 +115,7 @@ export function MainScreen() {
       .select()
       .maybeSingle();
     if (error && /conversation_limit_reached/.test(error.message)) {
-      setLimitReached(true);
-      setTimeout(() => setLimitReached(false), 8000);
+      showLimitNotice();
       return;
     }
     if (data) {
