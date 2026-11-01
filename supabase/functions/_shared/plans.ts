@@ -17,6 +17,16 @@ export type PlanId = "free" | "basic" | "premium";
 export const PLAN_FEATURES = ["crossMemory", "conversationDynamics", "voiceInput", "imageAttachments"] as const;
 export type PlanFeature = (typeof PLAN_FEATURES)[number];
 
+/**
+ * How good the voice input is, from nothing to the best. "device": the free dictation that runs on the person's own
+ * device (works today, not the best quality). "ai": dictation recognised by an AI model (premium; not built yet).
+ */
+export const VOICE_LEVELS = ["none", "device", "ai"] as const;
+export type VoiceInputLevel = (typeof VOICE_LEVELS)[number];
+
+/** Flip to true when the AI voice input exists. Until then the app and the site must not promise it. */
+export const AI_VOICE_BUILT = false;
+
 export interface Plan {
   id: PlanId;
   /** What the person sees. */
@@ -31,7 +41,10 @@ export interface Plan {
   maxConversations: number;
   /** The most tokens one reply may have. */
   maxTokensOutput: number;
-  features: Record<PlanFeature, boolean>;
+  /** The yes-or-no features (voice has levels and is separate). */
+  features: Record<Exclude<PlanFeature, "voiceInput">, boolean>;
+  /** What the plan gives for voice input; see voiceInputFor for what the person really gets today. */
+  voiceInput: VoiceInputLevel;
 }
 
 export const PLANS: Record<PlanId, Plan> = {
@@ -45,7 +58,8 @@ export const PLANS: Record<PlanId, Plan> = {
     maxTokensOutput: 1200,
     // Only the memory of the conversation itself works, and it is not shown. No memory between conversations,
     // no dynamics, typing only, no pictures.
-    features: { crossMemory: false, conversationDynamics: false, voiceInput: false, imageAttachments: false },
+    features: { crossMemory: false, conversationDynamics: false, imageAttachments: false },
+    voiceInput: "none",
   },
   basic: {
     id: "basic",
@@ -55,7 +69,8 @@ export const PLANS: Record<PlanId, Plan> = {
     messages: 400,
     maxConversations: 3,
     maxTokensOutput: 1600,
-    features: { crossMemory: true, conversationDynamics: true, voiceInput: true, imageAttachments: true },
+    features: { crossMemory: true, conversationDynamics: true, imageAttachments: true },
+    voiceInput: "device",
   },
   premium: {
     id: "premium",
@@ -65,7 +80,8 @@ export const PLANS: Record<PlanId, Plan> = {
     messages: 1000,
     maxConversations: 6,
     maxTokensOutput: 2000,
-    features: { crossMemory: true, conversationDynamics: true, voiceInput: true, imageAttachments: true },
+    features: { crossMemory: true, conversationDynamics: true, imageAttachments: true },
+    voiceInput: "ai",
   },
 };
 
@@ -79,5 +95,15 @@ export function planFor(tier: unknown): Plan {
 }
 
 export function isFeatureAvailable(tier: unknown, feature: PlanFeature): boolean {
-  return planFor(tier).features[feature];
+  const plan = planFor(tier);
+  return feature === "voiceInput" ? plan.voiceInput !== "none" : plan.features[feature];
+}
+
+/**
+ * The voice input the person really gets: the plan's level, except that the AI input is given only once it is built
+ * (premium has the device one until then) and never to a lower plan.
+ */
+export function voiceInputFor(tier: unknown, aiBuilt: boolean = AI_VOICE_BUILT): VoiceInputLevel {
+  const level = planFor(tier).voiceInput;
+  return level === "ai" && !aiBuilt ? "device" : level;
 }

@@ -31,14 +31,15 @@ const client = await import("../../../src/lib/plans.ts");
 const { TIER_CONFIG } = await import("./cost.ts");
 const { TARIFFS } = await import("../../../scripts/lib/site-pages.mjs");
 
-const { PLANS, planFor, isFeatureAvailable, normalizePlanId, PLAN_FEATURES } = server;
+const { PLANS, planFor, isFeatureAvailable, normalizePlanId, PLAN_FEATURES, VOICE_LEVELS, voiceInputFor } = server;
 
 describe("what each plan includes", () => {
   it("free: one conversation, 1200-token replies, typing only, no cross-conversation memory, no dynamics, no pictures", () => {
     const free = PLANS.free;
     assert.equal(free.maxConversations, 1);
     assert.equal(free.maxTokensOutput, 1200);
-    assert.deepEqual(free.features, { crossMemory: false, conversationDynamics: false, voiceInput: false, imageAttachments: false });
+    assert.deepEqual(free.features, { crossMemory: false, conversationDynamics: false, imageAttachments: false });
+    assert.equal(free.voiceInput, "none");
     assert.equal(free.messages, 50);
     assert.equal(free.priceRub, 0);
   });
@@ -47,15 +48,17 @@ describe("what each plan includes", () => {
     const basic = PLANS.basic;
     assert.equal(basic.maxConversations, 3);
     assert.equal(basic.maxTokensOutput, 1600);
-    assert.deepEqual(basic.features, { crossMemory: true, conversationDynamics: true, voiceInput: true, imageAttachments: true });
+    assert.deepEqual(basic.features, { crossMemory: true, conversationDynamics: true, imageAttachments: true });
+    assert.equal(basic.voiceInput, "device", "the cheap voice input that works on the device today");
     assert.deepEqual([basic.priceRub, basic.periodDays, basic.messages], [1990, 30, 400]);
   });
 
-  it("premium: six conversations, 2000-token replies, everything of basic", () => {
+  it("premium: six conversations, 2000-token replies, everything of basic and the good voice input with AI", () => {
     const premium = PLANS.premium;
     assert.equal(premium.maxConversations, 6);
     assert.equal(premium.maxTokensOutput, 2000);
     assert.deepEqual(premium.features, PLANS.basic.features);
+    assert.equal(premium.voiceInput, "ai");
     assert.deepEqual([premium.priceRub, premium.periodDays, premium.messages], [4900, 30, 1000]);
   });
 
@@ -67,9 +70,10 @@ describe("what each plan includes", () => {
       assert.ok(higher.maxConversations >= lower.maxConversations, `${order[i]}: conversations`);
       assert.ok(higher.maxTokensOutput >= lower.maxTokensOutput, `${order[i]}: reply ceiling`);
       assert.ok(higher.messages >= lower.messages, `${order[i]}: messages`);
-      for (const feature of PLAN_FEATURES) {
+      for (const feature of Object.keys(lower.features) as Array<keyof typeof lower.features>) {
         assert.ok(!lower.features[feature] || higher.features[feature], `${order[i]}: ${feature}`);
       }
+      assert.ok(VOICE_LEVELS.indexOf(higher.voiceInput) >= VOICE_LEVELS.indexOf(lower.voiceInput), `${order[i]}: voice input`);
     }
   });
 
@@ -86,6 +90,19 @@ describe("what each plan includes", () => {
     assert.deepEqual([...PLAN_FEATURES].sort(), ["conversationDynamics", "crossMemory", "imageAttachments", "voiceInput"]);
     assert.equal(isFeatureAvailable("free", "imageAttachments"), false);
     assert.equal(isFeatureAvailable("basic", "imageAttachments"), true);
+    assert.equal(isFeatureAvailable("free", "voiceInput"), false, "typing only on the free plan");
+    assert.equal(isFeatureAvailable("basic", "voiceInput"), true);
+    assert.equal(isFeatureAvailable("premium", "voiceInput"), true);
+  });
+
+  it("the good voice input is promised only once it is built: until then premium gets the device one", () => {
+    assert.equal(voiceInputFor("free"), "none");
+    assert.equal(voiceInputFor("basic"), "device");
+    assert.equal(voiceInputFor("premium", true), "ai", "when the AI input exists, premium gets it");
+    assert.equal(voiceInputFor("premium", false), "device", "when it does not, premium still has voice");
+    assert.equal(voiceInputFor("basic", true), "device", "the AI input is never given to a lower plan");
+    assert.equal(voiceInputFor(undefined, true), "none", "an unknown plan is the free one");
+    assert.equal(voiceInputFor("premium"), "device", "the AI input is not built yet");
   });
 });
 
@@ -101,6 +118,8 @@ describe("the app's copy of the table is the server's", () => {
   it("is identical", () => {
     assert.deepEqual(client.PLANS, PLANS);
     assert.deepEqual([...client.PLAN_FEATURES], [...PLAN_FEATURES]);
+    assert.deepEqual([...client.VOICE_LEVELS], [...VOICE_LEVELS]);
+    assert.equal(client.AI_VOICE_BUILT, server.AI_VOICE_BUILT, "the flag that says the AI voice exists is the same on both sides");
     for (const value of [undefined, "free", "basic", "premium", "x"]) {
       assert.equal(client.planFor(value as never).id, planFor(value as never).id);
     }
