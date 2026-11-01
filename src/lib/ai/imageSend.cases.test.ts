@@ -45,6 +45,7 @@ async function main(): Promise<void> {
   // Picture errors become a plain line, not a generic failure.
   for (const [error, fragment] of [
     ['images_disabled', 'пока'],
+    ['images_not_in_plan', 'оплат'],
     ['image_unreadable', 'прочитать'],
     ['images_daily_limit', 'лимит'],
     ['images_invalid', 'не подошла'],

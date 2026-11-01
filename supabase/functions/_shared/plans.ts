@@ -100,6 +100,15 @@ export function isFeatureAvailable(tier: unknown, feature: PlanFeature): boolean
 }
 
 /**
+ * Memory that follows the person between conversations (profile facts and the lifecycle memory) works only when the
+ * plan has it AND the person has not switched it off. The memory of the conversation itself is not affected: it works
+ * on every plan.
+ */
+export function crossMemoryActive(tier: unknown, preferenceOn: boolean): boolean {
+  return preferenceOn && isFeatureAvailable(tier, "crossMemory");
+}
+
+/**
  * The voice input the person really gets: the plan's level, except that the AI input is given only once it is built
  * (premium has the device one until then) and never to a lower plan.
  */

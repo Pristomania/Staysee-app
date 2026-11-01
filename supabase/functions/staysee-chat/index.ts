@@ -153,6 +153,7 @@ import {
 } from "../_shared/cost.ts";
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
+import { crossMemoryActive, isFeatureAvailable } from "../_shared/plans.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
@@ -761,6 +762,10 @@ Deno.serve(async (req: Request) => {
           status: 422,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      // Pictures belong to the paid plans; the app shows the button and offers payment, the server is the guard.
+      if (!isFeatureAvailable(userTier, "imageAttachments")) {
+        return unprocessable("images_not_in_plan");
+      }
       if (!imagesAllowedForUser(
         resolveImagesMode(Deno.env.get("STAYSEE_IMAGE_ATTACHMENTS")),
         userId,
@@ -1201,7 +1206,8 @@ Deno.serve(async (req: Request) => {
         // L7: Trim messages and memory to tier limits
         const trimmed = trimContextForTier(
           packet.recentMessages.map((m) => ({ role: m.role, content: m.content })),
-          packet.memoryItems,
+          // The profile facts follow the person between conversations: a plan without that memory gets none.
+          crossMemoryActive(userTier, true) ? packet.memoryItems : [],
           userTier
         );
 
@@ -1255,7 +1261,7 @@ Deno.serve(async (req: Request) => {
             lifecycleReadEligibility.userId,
             conversationId
           );
-          if (crossMemoryOnForRead) {
+          if (crossMemoryActive(userTier, crossMemoryOnForRead)) {
             try {
               const loaded = await createMemoryV3LifecycleReadStore(
                 makeServiceClient(),
@@ -1946,10 +1952,14 @@ Deno.serve(async (req: Request) => {
               text: message,
               sinceMs: startMs - 5_000,
             });
-            const crossMemoryOnForWrite = await fetchConversationCrossMemoryEnabled(
-              svc,
-              userId,
-              conversationId
+            // A plan without memory between conversations writes none (the memory of the conversation itself goes on).
+            const crossMemoryOnForWrite = crossMemoryActive(
+              userTier,
+              await fetchConversationCrossMemoryEnabled(
+                svc,
+                userId,
+                conversationId
+              ),
             );
             const dialogueEligibility = resolveMemoryV3DialogueEligibility({
               rawMode: Deno.env.get("STAYSEE_MEMORY_V3_DIALOGUE_MODE"),

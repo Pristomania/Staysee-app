@@ -91,6 +91,7 @@ export function getImagesCapability(userId: string, deps: ChatTransportDeps = de
 
 const IMAGE_ERROR_MESSAGES: Record<string, string> = {
   images_disabled: 'Картинки пока недоступны.',
+  images_not_in_plan: 'Картинки доступны после оплаты тарифа.',
   image_unreadable: 'Не получилось прочитать картинку. Попробуй другую или опиши словами.',
   images_daily_limit: 'На сегодня лимит картинок исчерпан. Опиши словами или попробуй завтра.',
   images_invalid: 'Картинка не подошла. Попробуй другую.',
