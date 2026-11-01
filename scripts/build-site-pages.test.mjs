@@ -98,6 +98,19 @@ describe("the site and the app agree on the numbers", () => {
     assert.match(sql, /interval\s+'30 days'/);
   });
 
+  it("the free messages come back after the same number of months in the page, the offer and the database (migration 086)", () => {
+    const dir = new URL("../supabase/migrations/", import.meta.url);
+    const file = readdirSync(dir).find((name) => name.endsWith("_086_free_tariff_renewal.sql"));
+    assert.ok(file, "migration 086 exists");
+    const sql = readFileSync(new URL(file, dir), "utf8");
+    const months = /SET renew_after_idle_months\s*=\s*(\d+)\s+WHERE tier\s*=\s*'free'/i.exec(sql);
+    assert.equal(Number(months?.[1]), TARIFFS.free.renewMonths, "months in the database and on the page");
+    assert.match(pages["pricing.html"], /появляются через 3 месяца после вашего последнего сообщения/);
+    assert.match(pages["pricing.html"], /Бесплатный/);
+    assert.doesNotMatch(pages["pricing.html"], /один раз на учётную запись/, "the old one-time promise is gone");
+    assert.match(pages["offer.html"], /возобновляются через 3 \(три\) месяца после последнего сообщения Пользователя/);
+  });
+
   it("the offer names the site and the app, in the first clause and in the requisites", () => {
     const html = pages["offer.html"];
     const clause11 = /<strong>1\.1\.<\/strong>[^]*?<\/p>/.exec(html)?.[0] ?? "";

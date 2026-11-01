@@ -408,8 +408,8 @@ export const CALM_ERRORS = {
     "Сейчас ответ не собрался достаточно надёжно. Давай попробуем ещё раз с этого места.",
   rateLimit: "Ты уже много работаешь со мной сегодня. Дай себе немного пространства — завтра я снова здесь.",
   suspended: "Доступ временно ограничен. Если это ошибка, напиши нам.",
-  /** Message limit or hidden spending ceiling reached on the free plan (the number lives in usage_tier_limits). */
-  freeUsedUp: "Бесплатные сообщения закончились. Чтобы продолжить, нужен тариф.",
+  /** Message limit or hidden spending ceiling reached on the free plan. The numbers live in usage_tier_limits (migration 086: 3 months). */
+  freeUsedUp: "Бесплатные сообщения закончились. Новые появятся через 3 месяца после последнего сообщения. Чтобы продолжить раньше, нужен тариф.",
   /** The same for a paid plan: the month's messages are used up. */
   monthUsedUp: "Сообщения на этот месяц закончились. Они вернутся с началом нового периода.",
   duplicate: "Похоже, запрос уже отправляется. Подожди секунду.",

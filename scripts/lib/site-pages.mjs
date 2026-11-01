@@ -17,7 +17,7 @@ export const SELLER = {
 
 /** The numbers must match supabase/migrations/*_085_usage_limits.sql (a test compares them). Premium is not sold yet. */
 export const TARIFFS = {
-  free: { messages: 50 },
+  free: { messages: 50, renewMonths: 3 },
   basic: { priceRub: 1990, periodDays: 30, messages: 400 },
 };
 
@@ -30,6 +30,12 @@ export const PAGES = [
 ];
 
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** "1 месяц", "3 месяца", "6 месяцев". */
+const formatMonths = (count) => {
+  const last = count % 10;
+  const word = count % 100 >= 11 && count % 100 <= 14 ? "месяцев" : last === 1 ? "месяц" : last >= 2 && last <= 4 ? "месяца" : "месяцев";
+  return `${count} ${word}`;
+};
 const formatRub = (value) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
 // ── Markdown (the subset docs/legal uses) to HTML ───────────────────────────────────────────────────────────
@@ -254,11 +260,11 @@ function pricingBody() {
 
     <div class="plans">
       <section class="plan">
-        <p class="plan-name">Пробный</p>
+        <p class="plan-name">Бесплатный</p>
         <p class="price">0&nbsp;₽</p>
         <ul>
           <li>${free.messages} сообщений</li>
-          <li>даются один раз на учётную запись</li>
+          <li>новые ${free.messages} сообщений появляются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения</li>
           <li>банковская карта не нужна</li>
         </ul>
       </section>
@@ -277,8 +283,8 @@ function pricingBody() {
     <h2>Как это работает</h2>
     <ol>
       <li>Создайте учётную запись в приложении по адресу электронной почты и подтвердите её по ссылке из письма.</li>
-      <li>Используйте ${free.messages} пробных сообщений. Платить для этого не нужно.</li>
-      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить, оплатите тариф «Базовый».</li>
+      <li>Используйте ${free.messages} бесплатных сообщений. Платить для этого не нужно.</li>
+      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый». Или подождите: бесплатные сообщения возвращаются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения.</li>
     </ol>
 
     <h2>Оплата и получение доступа</h2>
@@ -329,7 +335,7 @@ function documentBody(md) {
 /** All pages as { file: html }. `docs` carries the markdown of the three legal documents. */
 export function buildSitePages(docs) {
   const description = {
-    "pricing.html": "Тарифы StaySee AI: пробный на 50 сообщений и тариф «Базовый». Стоимость, состав, оплата и возврат.",
+    "pricing.html": "Тарифы StaySee AI: бесплатный на 50 сообщений и тариф «Базовый». Стоимость, состав, оплата и возврат.",
     "offer.html": "Договор-оферта сервиса StaySee AI.",
     "app-privacy.html": "Политика обработки персональных данных приложения StaySee AI.",
     "consent.html": "Согласие на обработку персональных данных при использовании приложения StaySee AI.",
