@@ -30,6 +30,7 @@ export default tseslint.config(
             'useApp',
             'useAuth',
             'useTheme',
+            'usePlan',
           ],
         },
       ],

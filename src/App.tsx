@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider, useApp } from './context/AppContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { PlanProvider } from './context/PlanContext';
 import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
 import {
   WelcomeScreen,
@@ -175,11 +176,13 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppProvider>
-        <ThemeProvider>
-          <AppContent />
-        </ThemeProvider>
-      </AppProvider>
+      <PlanProvider>
+        <AppProvider>
+          <ThemeProvider>
+            <AppContent />
+          </ThemeProvider>
+        </AppProvider>
+      </PlanProvider>
     </AuthProvider>
   );
 }

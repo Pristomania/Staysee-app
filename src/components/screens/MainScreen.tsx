@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { usePlan } from '../../context/PlanContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -12,8 +13,8 @@ import { filterVisibleConversations } from '../../lib/conversationFilters';
 import {
   canCreateRoom,
   getConversationFetchLimit,
-  getMaxRooms,
   hasUnlimitedRooms,
+  roomLimitNotice,
 } from '../../lib/roomLimits';
 
 interface Modal {
@@ -23,6 +24,7 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
+  const { tier, loaded: planLoaded } = usePlan();
   const { navigateTo, setMessages, conversations, setConversations } = useApp();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
@@ -94,16 +96,22 @@ export function MainScreen() {
   }
 
   async function createNewRoom() {
-    if (!canCreateRoom(user?.id, conversations.length)) {
+    // Until the plan is read the server decides: it refuses a place above the number of the plan.
+    if (planLoaded && !canCreateRoom(user?.id, conversations.length, tier)) {
       setLimitReached(true);
-      setTimeout(() => setLimitReached(false), 4000);
+      setTimeout(() => setLimitReached(false), 8000);
       return;
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
       .insert({ user_id: user!.id, title: '' })
       .select()
       .maybeSingle();
+    if (error && /conversation_limit_reached/.test(error.message)) {
+      setLimitReached(true);
+      setTimeout(() => setLimitReached(false), 8000);
+      return;
+    }
     if (data) {
       setMessages([greetingFor(data.id)]);
       navigateTo('chat', { conversation: data });
@@ -174,7 +182,7 @@ export function MainScreen() {
       {limitReached && !hasUnlimitedRooms(user?.id) && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
-            Пока можно открыть до пяти бесед. Можно вернуться в одну из уже начатых.
+            {roomLimitNotice(tier)}
           </p>
         </div>
       )}
@@ -269,7 +277,7 @@ export function MainScreen() {
               );
             })}
 
-            {conversations.length < getMaxRooms(user?.id) && (
+            {(
               <button
                 type="button"
                 onClick={createNewRoom}

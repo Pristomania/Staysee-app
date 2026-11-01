@@ -1,0 +1,83 @@
+/**
+ * The tariff constructor: one table of what each plan includes.
+ *
+ * Nothing about a plan is decided anywhere else in the code. The chat reads the reply ceiling from here (cost.ts
+ * builds TIER_CONFIG from it), the features decide what the server builds into an answer and what the app shows
+ * unlocked, the app mirrors this file as src/lib/plans.ts (a test keeps the two identical), and the same numbers are
+ * enforced in the database (usage_tier_limits, migrations 085 to 087; a test compares them) and shown on the
+ * tariffs page of the site. To change a plan, change it here, in the mirror and in the migration, and the tests say
+ * if one of the places was forgotten.
+ *
+ * No imports: this file is shared with the app.
+ */
+
+export type PlanId = "free" | "basic" | "premium";
+
+/** Things a plan can switch on. A locked feature stays visible in the app and offers to go to payment. */
+export const PLAN_FEATURES = ["crossMemory", "conversationDynamics", "voiceInput", "imageAttachments"] as const;
+export type PlanFeature = (typeof PLAN_FEATURES)[number];
+
+export interface Plan {
+  id: PlanId;
+  /** What the person sees. */
+  label: string;
+  /** Rubles per period; 0 is free. */
+  priceRub: number;
+  /** Length of a paid period; null for the free plan, whose messages come back after idleness instead. */
+  periodDays: number | null;
+  /** Messages per period (free: per renewal). Enforced by the database (usage_tier_limits). */
+  messages: number;
+  /** Active conversations at the same time. Deleting one frees its place. Enforced by the database. */
+  maxConversations: number;
+  /** The most tokens one reply may have. */
+  maxTokensOutput: number;
+  features: Record<PlanFeature, boolean>;
+}
+
+export const PLANS: Record<PlanId, Plan> = {
+  free: {
+    id: "free",
+    label: "Бесплатный",
+    priceRub: 0,
+    periodDays: null,
+    messages: 50,
+    maxConversations: 1,
+    maxTokensOutput: 1200,
+    // Only the memory of the conversation itself works, and it is not shown. No memory between conversations,
+    // no dynamics, typing only, no pictures.
+    features: { crossMemory: false, conversationDynamics: false, voiceInput: false, imageAttachments: false },
+  },
+  basic: {
+    id: "basic",
+    label: "Базовый",
+    priceRub: 1990,
+    periodDays: 30,
+    messages: 400,
+    maxConversations: 3,
+    maxTokensOutput: 1600,
+    features: { crossMemory: true, conversationDynamics: true, voiceInput: true, imageAttachments: true },
+  },
+  premium: {
+    id: "premium",
+    label: "Премиум",
+    priceRub: 4900,
+    periodDays: 30,
+    messages: 1000,
+    maxConversations: 6,
+    maxTokensOutput: 2000,
+    features: { crossMemory: true, conversationDynamics: true, voiceInput: true, imageAttachments: true },
+  },
+};
+
+export function normalizePlanId(value: unknown): PlanId {
+  return value === "basic" || value === "premium" ? value : "free";
+}
+
+/** The plan of a person by the tier stored for them; anything unknown is the free plan, never a paid one. */
+export function planFor(tier: unknown): Plan {
+  return PLANS[normalizePlanId(tier)];
+}
+
+export function isFeatureAvailable(tier: unknown, feature: PlanFeature): boolean {
+  return planFor(tier).features[feature];
+}

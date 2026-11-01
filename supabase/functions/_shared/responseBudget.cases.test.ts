@@ -10,7 +10,7 @@ import {
   type SafetyCategory,
 } from "./responseDepthTrajectory.ts";
 
-const TIER_CEILING = { free: 1600, basic: 1200, premium: 1800 } as const;
+const TIER_CEILING = { free: 1200, basic: 1600, premium: 2000 } as const;
 const DEPTH_TOKEN_TARGET = { brief: 380, medium: 900, deep: 1600 } as const;
 const OUTPUT_TOKEN_CEILING_GUIDANCE =
   "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
@@ -277,7 +277,7 @@ for (const [depthLabel, msg] of [
   const analysis = analyzeResponseDepth(msg, "normal", []);
   const legacy = legacyBudgetMaxTokens(analysis.depth, "free");
   const flat = flatBudgetMaxTokens("free");
-  flatAssert(flat === 1600, `flat ${depthLabel} free → 1600 ceiling`);
+  flatAssert(flat === 1200, `flat ${depthLabel} free → 1200 ceiling`);
   flatAssert(
     flat !== legacy || depthLabel === "deep",
     `flat ${depthLabel} ≠ legacy depth target when not deep`,
@@ -290,8 +290,8 @@ flatAssert(
   OUTPUT_TOKEN_CEILING_GUIDANCE.includes("ceiling is a boundary, not a requested response length"),
   "OUTPUT_TOKEN_CEILING_GUIDANCE unchanged",
 );
-flatAssert(TIER_CEILING.premium === 1800, "premium ceiling configured");
-flatAssert(flatBudgetMaxTokens("premium") === 1800, "flat premium uses tier ceiling");
+flatAssert(TIER_CEILING.premium === 2000, "premium ceiling configured");
+flatAssert(flatBudgetMaxTokens("premium") === 2000, "flat premium uses tier ceiling");
 flatAssert(
   flatBudgetMaxTokens("basic") === TIER_CEILING.basic,
   "flat basic uses tier ceiling",

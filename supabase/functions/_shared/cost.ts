@@ -16,6 +16,7 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { APPROVED_MODEL_GPT4O } from "./approvedModels.ts";
+import { PLANS } from "./plans.ts";
 import { buildUsageLogRow, logOpenRouterUsage } from "./usageAnalytics.ts";
 
 // ── Tier definitions ──────────────────────────────────────────────────────────
@@ -33,8 +34,8 @@ interface TierConfig {
 
 export const TIER_CONFIG: Record<UsageTier, TierConfig> = {
   free: {
-    // Tier ceiling — deep replies use full budget; auto-continue if still cut.
-    maxTokensOutput: 1600,
+    // Tier ceiling — deep replies use full budget; auto-continue if still cut. Ceilings come from plans.ts.
+    maxTokensOutput: PLANS.free.maxTokensOutput,
     maxContextMessages: 18,
     maxMemoryItems: 6,
     dailyRequestLimit: 50,
@@ -42,7 +43,7 @@ export const TIER_CONFIG: Record<UsageTier, TierConfig> = {
     temperature: 0.85,
   },
   basic: {
-    maxTokensOutput: 1200,
+    maxTokensOutput: PLANS.basic.maxTokensOutput,
     maxContextMessages: 24,
     maxMemoryItems: 8,
     dailyRequestLimit: 200,
@@ -50,7 +51,7 @@ export const TIER_CONFIG: Record<UsageTier, TierConfig> = {
     temperature: 0.85,
   },
   premium: {
-    maxTokensOutput: 1800,
+    maxTokensOutput: PLANS.premium.maxTokensOutput,
     maxContextMessages: 32,
     maxMemoryItems: 10,
     dailyRequestLimit: 1000,
