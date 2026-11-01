@@ -29,7 +29,7 @@ function assertExactBody(
   }
 }
 
-const calm = { suspended: "S", rateLimit: "R" };
+const calm = { suspended: "S", rateLimit: "R", freeUsedUp: "F", monthUsedUp: "M" };
 
 {
   const r = mapQuotaDenyResponse("suspended", calm);
@@ -75,6 +75,27 @@ const calm = { suspended: "S", rateLimit: "R" };
   assert(r.status === 503, "6.undefined: status");
   assertExactBody(r.body, { error: "service_unavailable" }, "6.undefined");
   console.log("✓ undefined → 503 { error: service_unavailable }");
+}
+
+// The message limit and the hidden spending ceiling look exactly the same to the person: one text per plan.
+for (const reason of ["period_limit", "cost_cap"]) {
+  {
+    const r = mapQuotaDenyResponse(reason, calm, "free");
+    assert(r.status === 429, `7.${reason}.free: status`);
+    assertExactBody(r.body, { content: "F" }, `7.${reason}.free`);
+  }
+  for (const tier of ["basic", "premium"]) {
+    const r = mapQuotaDenyResponse(reason, calm, tier);
+    assert(r.status === 429, `7.${reason}.${tier}: status`);
+    assertExactBody(r.body, { content: "M" }, `7.${reason}.${tier}`);
+  }
+  {
+    // no tier known: still a calm text, never a technical error
+    const r = mapQuotaDenyResponse(reason, calm);
+    assert(r.status === 429, `7.${reason}.no_tier: status`);
+    assertExactBody(r.body, { content: "M" }, `7.${reason}.no_tier`);
+  }
+  console.log(`✓ ${reason} → 429, free text for free, month text for paid`);
 }
 
 console.log("=== quotaDenyResponse.cases.test.ts OK ===");

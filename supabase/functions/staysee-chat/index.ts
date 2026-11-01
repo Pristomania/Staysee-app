@@ -738,7 +738,9 @@ Deno.serve(async (req: Request) => {
       const mapped = mapQuotaDenyResponse(rateLimitResult.reason, {
         suspended: CALM_ERRORS.suspended,
         rateLimit: CALM_ERRORS.rateLimit,
-      });
+        freeUsedUp: CALM_ERRORS.freeUsedUp,
+        monthUsedUp: CALM_ERRORS.monthUsedUp,
+      }, rateLimitResult.tier);
       console.warn(
         `[staysee-chat] preliminary rate limit for user ${userId}: ${rateLimitResult.reason}`,
       );
@@ -897,7 +899,9 @@ Deno.serve(async (req: Request) => {
       const mapped = mapQuotaDenyResponse(reserveResult.reason, {
         suspended: CALM_ERRORS.suspended,
         rateLimit: CALM_ERRORS.rateLimit,
-      });
+        freeUsedUp: CALM_ERRORS.freeUsedUp,
+        monthUsedUp: CALM_ERRORS.monthUsedUp,
+      }, reserveResult.tier);
       console.warn(
         `[staysee-chat] atomic reserve deny for user ${userId}: ${reserveResult.reason}`,
       );
