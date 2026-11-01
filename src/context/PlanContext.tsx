@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from './AuthContext';
-import { fetchUsageTier } from '../lib/usageTier';
+import { fetchUsageRow } from '../lib/usageTier';
+import { messageCounter, type MessageCounter, type UsageRow } from '../lib/messageCounter';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
 
 interface PlanContextType {
@@ -12,6 +13,9 @@ interface PlanContextType {
   loaded: boolean;
   /** True when the plan includes the feature; also true while the plan is not known yet (see `loaded`). */
   has: (feature: PlanFeature) => boolean;
+  /** The messages left, worked out from the person's usage row; null while it is not known. */
+  counter: MessageCounter | null;
+  /** Reads the plan and the counter again (after every answered message, and when the person comes back). */
   refresh: () => Promise<void>;
 }
 
@@ -20,35 +24,33 @@ const PlanContext = createContext<PlanContextType | null>(null);
 export function PlanProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id;
-  const [tier, setTier] = useState<PlanId>('free');
-  const [loaded, setLoaded] = useState(false);
+  const [row, setRow] = useState<UsageRow | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) {
-      setTier('free');
-      setLoaded(false);
+      setRow(null);
       return;
     }
-    const { row } = await fetchUsageTier(userId);
-    // A missing row means the plan is not known, not that it is free: leave the app unlocked and let the server decide.
-    setTier(normalizePlanId(row?.tier));
-    setLoaded(row !== null);
+    // A missing row means the plan is not known, not that it is free: the app stays unlocked and the server decides.
+    setRow(await fetchUsageRow(userId));
   }, [userId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const value = useMemo<PlanContextType>(
-    () => ({
+  const value = useMemo<PlanContextType>(() => {
+    const loaded = row !== null;
+    const tier = normalizePlanId(row?.tier);
+    return {
       tier,
       plan: planFor(tier),
       loaded,
       has: (feature) => !loaded || isFeatureAvailable(tier, feature),
+      counter: messageCounter(row),
       refresh,
-    }),
-    [tier, loaded, refresh],
-  );
+    };
+  }, [row, refresh]);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

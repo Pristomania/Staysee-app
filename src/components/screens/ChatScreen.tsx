@@ -14,7 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { getImagesCapability, isAiRequestAborted, isAiSendSuccess, sendAiMessage } from '../../lib/ai/client';
 import { resolveTurnId, type PendingTurn } from '../../lib/chatTurn';
 import { buildClientTimeGap } from '../../lib/timeGap';
-import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Plus, Image as ImageIcon } from 'lucide-react';
+import { Send, Square, X, Brain, Feather, Activity, Search, ChevronUp, ChevronDown, Shield, Mic, Plus, Lock, Image as ImageIcon } from 'lucide-react';
 import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
@@ -61,6 +61,9 @@ import { useVoiceDictation } from '../../hooks/useVoiceDictation';
 import { VoiceDictationBar } from '../chat/VoiceDictationBar';
 import { VoiceDownloadConsent } from '../chat/VoiceDownloadConsent';
 import { VoicePreparingBar } from '../chat/VoicePreparingBar';
+import { usePlan } from '../../context/PlanContext';
+import { usePaywall } from '../../context/PaywallContext';
+import { LowMessagesNotice } from '../LowMessagesNotice';
 import {
   formatVoicePackageSize,
   voiceDictationErrorCopy,
@@ -151,6 +154,8 @@ export function ChatScreen() {
     setNotesCaptureLaunch,
   } = useApp();
   const { theme } = useTheme();
+  const { has, counter, refresh: refreshPlan } = usePlan();
+  const { openPaywall } = usePaywall();
 
   const [inputValue, setInputValue] = useState('');
   // One message is at most 10,000 characters: the count shows near the limit, and a longer text is not sent.
@@ -915,6 +920,9 @@ export function ChatScreen() {
         .update({ last_message_at: now })
         .eq('id', convId);
 
+      // The counter and the warning follow every answered message.
+      void refreshPlan();
+
       pendingDraftRef.current = '';
       pendingImagesRef.current = [];
       pendingTurnRef.current = null;
@@ -1519,6 +1527,9 @@ ${built.message}` : built.message));
               </div>
             )}
 
+            {counter && counter.warn && !counter.unlimited && (
+              <LowMessagesNotice counter={counter} />
+            )}
             {sendError && (
               <p className={`text-xs font-light mb-2 px-1 ${theme.textMuted}`} role="status">
                 {sendError}
@@ -1627,13 +1638,18 @@ ${built.message}` : built.message));
                       />
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => (has('fileAttachments') ? fileInputRef.current?.click() : openPaywall())}
                         disabled={fileReading || imagePreparing}
                         aria-label="Прикрепить файл"
                         title={imagesEnabled ? 'Прикрепить файл или картинку' : 'Прикрепить файл (.txt, .md, .docx, .pdf с текстом)'}
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
                       >
-                        <Plus className={`h-5 w-5 ${theme.textSecondary}`} strokeWidth={1.5} />
+                        <span className="relative">
+                          <Plus className={`h-5 w-5 ${theme.textSecondary}`} strokeWidth={1.5} />
+                          {!has('fileAttachments') && (
+                            <Lock className="absolute -right-2 -top-2 h-2.5 w-2.5 text-[#c9a96e]" strokeWidth={2} />
+                          )}
+                        </span>
                       </button>
                     </>
                   )}
@@ -1650,7 +1666,7 @@ ${built.message}` : built.message));
                   {!sending && (
                     <button
                       type="button"
-                      onClick={handleVoicePress}
+                      onClick={() => (has('voiceInput') ? handleVoicePress() : openPaywall())}
                       disabled={fileReading || imagePreparing || voiceConsentOpen || !canStartVoiceDictation({
                         sending,
                         phase: voice.snapshot.phase,
@@ -1662,7 +1678,12 @@ ${built.message}` : built.message));
                         : 'В этом браузере голосовой ввод пока недоступен'}
                       className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-all duration-200 disabled:opacity-30 ${theme.surface} ${theme.surfaceHover}`}
                     >
-                      <Mic className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                      <span className="relative">
+                        <Mic className={`h-4 w-4 ${theme.textSecondary}`} strokeWidth={1.5} />
+                        {!has('voiceInput') && (
+                          <Lock className="absolute -right-2 -top-2 h-2.5 w-2.5 text-[#c9a96e]" strokeWidth={2} />
+                        )}
+                      </span>
                     </button>
                   )}
                   {sending ? (

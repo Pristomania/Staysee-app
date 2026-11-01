@@ -73,6 +73,7 @@ const AUTHENTICATED_SCREENS: Screen[] = [
   'memory',
   'conversation-dynamics',
   'conversation-notes',
+  'tariffs',
   'reset-password',
 ];
 
@@ -247,6 +248,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         } else {
           replaceNavigation('main');
         }
+        break;
+      case 'tariffs':
+        replaceNavigation('main');
         break;
       case 'terms':
       case 'privacy':

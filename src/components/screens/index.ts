@@ -13,3 +13,4 @@ export { PrivacyScreen } from './PrivacyScreen';
 export { TermsScreen } from './TermsScreen';
 export { PrivacyPolicyScreen } from './PrivacyPolicyScreen';
 export { ConsentScreen } from './ConsentScreen';
+export { TariffsScreen } from './TariffsScreen';

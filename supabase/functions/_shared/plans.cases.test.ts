@@ -151,6 +151,15 @@ describe("the database and the site say the same", () => {
     assert.equal(Number(/\(\s*'basic'\s*,\s*'month'\s*,\s*(\d+)\s*,/i.exec(m085)?.[1]), PLANS.basic.messages);
   });
 
+  it("the free messages come back after the same number of months in the plans table and in migration 086", () => {
+    const text = sql("_086_free_tariff_renewal.sql");
+    const months = /SET renew_after_idle_months\s*=\s*(\d+)\s+WHERE tier\s*=\s*'free'/i.exec(text);
+    assert.equal(Number(months?.[1]), PLANS.free.renewAfterIdleMonths);
+    assert.equal(PLANS.basic.renewAfterIdleMonths, null, "a paid plan renews by its own period, not by idleness");
+    assert.equal(PLANS.premium.renewAfterIdleMonths, null);
+    assert.equal(TARIFFS.free.renewMonths, PLANS.free.renewAfterIdleMonths, "the site says the same");
+  });
+
   it("the tariffs page of the site shows the same numbers", () => {
     assert.equal(TARIFFS.free.messages, PLANS.free.messages);
     assert.equal(TARIFFS.basic.messages, PLANS.basic.messages);

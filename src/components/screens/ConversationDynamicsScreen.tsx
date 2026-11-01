@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Pencil, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
+import { LockedFeaturePanel } from '../LockedPanels';
+import { usePlan } from '../../context/PlanContext';
 import { ConversationScopePicker } from '../ConversationScopePicker';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -295,6 +297,7 @@ export function ConversationDynamicsScreen() {
     dynamicsReturnScreen,
   } = useApp();
   const { theme } = useTheme();
+  const { has: planHas } = usePlan();
   const sectionLabel = useSectionLabelClass();
 
   const fromProfile = dynamicsReturnScreen === 'profile';
@@ -479,6 +482,26 @@ export function ConversationDynamicsScreen() {
 
   const weeklyDisabled = weeklyBusy || (cooldown !== null && !cooldown.canCreate);
   const backLabel = dynamicsReturnScreen === 'chat' ? 'К беседе' : 'В контекст';
+
+  // A plan without the dynamics sees the section's name and the "after payment" button, nothing else.
+  if (!planHas('conversationDynamics')) {
+    return (
+      <StickyScreenLayout
+        header={(
+          <ScreenBackHeader
+            pinned
+            onBack={() => navigateBack()}
+            title={DYNAMICS_COPY.title}
+            subtitle={DYNAMICS_COPY.subtitle}
+            backLabel={backLabel}
+          />
+        )}
+      >
+        <ConversationHubNav active="dynamics" show={showHub} />
+        <LockedFeaturePanel title={DYNAMICS_COPY.title} hint={DYNAMICS_COPY.subtitle} />
+      </StickyScreenLayout>
+    );
+  }
 
   return (
     <StickyScreenLayout

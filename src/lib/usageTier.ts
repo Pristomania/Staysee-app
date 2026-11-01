@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import type { UsageRow } from './messageCounter';
 
 export interface UsageTierRow {
   tier: string;
@@ -16,6 +17,16 @@ const TIER_LABELS: Record<string, string> = {
 
 export function tierLabel(tier: string): string {
   return TIER_LABELS[tier] ?? tier;
+}
+
+/**
+ * The person's whole usage row, whatever columns the database has (an older one lacks the newer columns, which then
+ * simply read as missing). The counter and the plan are worked out from it in the app.
+ */
+export async function fetchUsageRow(userId: string): Promise<UsageRow | null> {
+  const { data, error } = await supabase.from('user_usage_tiers').select('*').eq('user_id', userId).maybeSingle();
+  if (error || !data) return null;
+  return data as UsageRow;
 }
 
 export async function fetchUsageTier(userId: string): Promise<{

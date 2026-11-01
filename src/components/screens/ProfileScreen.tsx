@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -17,7 +17,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ThemePicker } from '../ThemePicker';
-import { fetchUsageTier, tierLabel } from '../../lib/usageTier';
+import { usePlan } from '../../context/PlanContext';
+import { counterLine, renewalLine } from '../../lib/messageCounter';
 import { ROOM_COPY } from '../../lib/roomCopy';
 import { DeleteRoomSection } from '../DeleteRoomSection';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
@@ -84,7 +85,7 @@ function CabinetRow({
 }
 
 export function ProfileScreen() {
-  const { signOut, user } = useAuth();
+  const { signOut } = useAuth();
   const {
     navigateTo,
     navigateBack,
@@ -94,18 +95,10 @@ export function ProfileScreen() {
     setCurrentConversation,
   } = useApp();
   const { theme } = useTheme();
-  const [usageText, setUsageText] = useState<string | null>(null);
+  const { tier, plan: currentPlan, counter } = usePlan();
   const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
   const sectionLabel = useSectionLabelClass();
-
-  useEffect(() => {
-    if (!user) return;
-    void fetchUsageTier(user.id).then(({ row, remaining, limit }) => {
-      const tier = row ? tierLabel(row.tier) : 'Free';
-      setUsageText(`${tier} · сегодня ${remaining} из ${limit}`);
-    });
-  }, [user]);
 
   const card = `rounded-xl border ${theme.surface} ${theme.border}`;
 
@@ -129,10 +122,24 @@ export function ProfileScreen() {
         />
       )}
     >
-      {usageText && (
-        <div className={`${card} flex items-center gap-3 px-4 py-3 mb-6`}>
-          <Gauge className={`w-4 h-4 ${theme.textSecondary} opacity-75`} strokeWidth={1.5} />
-          <p className={`${theme.textSecondary} text-sm font-light`}>{usageText}</p>
+      {counter && (
+        <div className={`${card} px-4 py-3 mb-6`}>
+          <div className="flex items-center gap-3">
+            <Gauge className={`w-4 h-4 shrink-0 ${theme.textSecondary} opacity-75`} strokeWidth={1.5} />
+            <p className={`flex-1 ${theme.textSecondary} text-sm font-light`}>
+              {currentPlan.label} · {counterLine(counter)}
+            </p>
+            <button
+              type="button"
+              onClick={() => navigateTo('tariffs')}
+              className={`shrink-0 text-xs font-light underline decoration-dotted underline-offset-4 ${theme.btnText}`}
+            >
+              Тарифы
+            </button>
+          </div>
+          {renewalLine(counter, tier) && (
+            <p className={`${theme.textMuted} mt-1.5 pl-7 text-xs font-light opacity-85`}>{renewalLine(counter, tier)}</p>
+          )}
         </div>
       )}
 

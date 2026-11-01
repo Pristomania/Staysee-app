@@ -40,6 +40,8 @@ export interface Plan {
   priceRub: number;
   /** Length of a paid period; null for the free plan, whose messages come back after idleness instead. */
   periodDays: number | null;
+  /** Free plan: calendar months after the last answered message when the messages come back; null for paid plans. */
+  renewAfterIdleMonths: number | null;
   /** Messages per period (free: per renewal). Enforced by the database (usage_tier_limits). */
   messages: number;
   /** Active conversations at the same time. Deleting one frees its place. Enforced by the database. */
@@ -58,6 +60,7 @@ export const PLANS: Record<PlanId, Plan> = {
     label: "Бесплатный",
     priceRub: 0,
     periodDays: null,
+    renewAfterIdleMonths: 3,
     messages: 50,
     maxConversations: 1,
     maxTokensOutput: 1200,
@@ -71,6 +74,7 @@ export const PLANS: Record<PlanId, Plan> = {
     label: "Базовый",
     priceRub: 1990,
     periodDays: 30,
+    renewAfterIdleMonths: null,
     messages: 400,
     maxConversations: 3,
     maxTokensOutput: 1600,
@@ -82,6 +86,7 @@ export const PLANS: Record<PlanId, Plan> = {
     label: "Премиум",
     priceRub: 4900,
     periodDays: 30,
+    renewAfterIdleMonths: null,
     messages: 1000,
     maxConversations: 6,
     maxTokensOutput: 2000,

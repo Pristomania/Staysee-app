@@ -31,6 +31,7 @@ export default tseslint.config(
             'useAuth',
             'useTheme',
             'usePlan',
+            'usePaywall',
           ],
         },
       ],
