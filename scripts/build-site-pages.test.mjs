@@ -98,9 +98,14 @@ describe("the site and the app agree on the numbers", () => {
     assert.match(sql, /interval\s+'30 days'/);
   });
 
-  it("the offer names the site and the app separately", () => {
-    assert.match(pages["offer.html"], /<td>Сайт<\/td><td>stayseeai\.online<\/td>/);
-    assert.match(pages["offer.html"], /<td>Приложение<\/td><td>staysee\.ru<\/td>/);
+  it("the offer names the site and the app, in the first clause and in the requisites", () => {
+    const html = pages["offer.html"];
+    const clause11 = /<strong>1\.1\.<\/strong>[^]*?<\/p>/.exec(html)?.[0] ?? "";
+    assert.match(clause11, /href="https:\/\/staysee\.ru">https:\/\/staysee\.ru<\/a>[^]*«Приложение»/, "the app address in 1.1");
+    assert.match(clause11, /href="https:\/\/stayseeai\.online">https:\/\/stayseeai\.online<\/a>[^]*«Сайт»/, "the site address in 1.1");
+    assert.match(html, /<td>Сайт<\/td><td><a href="https:\/\/stayseeai\.online">/);
+    assert.match(html, /<td>Приложение<\/td><td><a href="https:\/\/staysee\.ru">/);
+    assert.match(html, /href="https:\/\/stayseeai\.online\/pricing\.html"/, "5.1 names the tariff page");
   });
 });
 
