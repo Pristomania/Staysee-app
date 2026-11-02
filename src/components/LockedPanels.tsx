@@ -1,5 +1,10 @@
 import { Link2 } from 'lucide-react';
+import { ConfirmedDelete } from './ConfirmedDelete';
 import { LockedBadge } from './LockedBadge';
+import { useAuth } from '../context/AuthContext';
+import { deleteAllMemory } from '../lib/deleteAccountData';
+import { supabaseAccountDataDeps } from '../lib/deleteAccountDataDeps';
+import { ROOM_COPY } from '../lib/roomCopy';
 import { useTheme } from '../context/ThemeContext';
 import { usePaywall } from '../context/PaywallContext';
 import { useSectionLabelClass } from './layout';
@@ -13,6 +18,7 @@ const MEMORY_HINT = 'Факты будут видны после оплаты.';
 export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
   const { theme } = useTheme();
   const { openPaywall } = usePaywall();
+  const { user } = useAuth();
   const sectionLabel = useSectionLabelClass();
 
   return (
@@ -20,6 +26,13 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
       <section className="mb-8">
         <p className={sectionLabel}>Память этой беседы</p>
         <p className={`${theme.textSecondary} mb-3 text-xs font-light leading-relaxed`}>{MEMORY_HINT}</p>
+        {/* The memory is not shown on this plan, but the person can always wipe all of it. */}
+        <ConfirmedDelete
+          hint={ROOM_COPY.deleteMemoryHint}
+          buttonLabel={ROOM_COPY.deleteMemoryButton}
+          doneText={ROOM_COPY.deleteMemoryDone}
+          onRun={async () => (user ? deleteAllMemory(user.id, supabaseAccountDataDeps) : false)}
+        />
       </section>
 
       <section>

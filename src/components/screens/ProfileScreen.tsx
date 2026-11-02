@@ -20,6 +20,7 @@ import { ThemePicker } from '../ThemePicker';
 import { usePlan } from '../../context/PlanContext';
 import { counterLine, renewalLine } from '../../lib/messageCounter';
 import { ROOM_COPY } from '../../lib/roomCopy';
+import { DeleteAccountDataSection } from '../DeleteAccountDataSection';
 import { DeleteRoomSection } from '../DeleteRoomSection';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
 
@@ -95,7 +96,7 @@ export function ProfileScreen() {
     setCurrentConversation,
   } = useApp();
   const { theme } = useTheme();
-  const { tier, plan: currentPlan, counter } = usePlan();
+  const { tier, plan: currentPlan, counter, loaded: planLoaded } = usePlan();
   const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
   const sectionLabel = useSectionLabelClass();
@@ -252,6 +253,12 @@ export function ProfileScreen() {
         <span className={`${theme.textSecondary} text-sm font-light`}>{ROOM_COPY.leaveRoom}</span>
       </button>
 
+      {/* Two different things: the data of the account (free plan only, the account stays) and the room itself. */}
+      {planLoaded && tier === 'free' && (
+        <div className="mb-3">
+          <DeleteAccountDataSection />
+        </div>
+      )}
       <DeleteRoomSection cardClass={card} onDeleted={handleRoomDeleted} />
 
       <p className={`mt-6 ${theme.textMuted} text-[11px] font-light leading-relaxed opacity-50 text-center`}>

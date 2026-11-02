@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
+import { usePlan } from '../../context/PlanContext';
+import { DeleteAccountDataSection } from '../DeleteAccountDataSection';
 import { supabase } from '../../lib/supabase';
 import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
 import { isLegacyMemoryCompatibilityEnabled } from '../../lib/memoryScreenMode';
@@ -121,7 +123,10 @@ export function PrivacyScreen() {
     useApp();
   const { user, profile } = useAuth();
   const { theme } = useTheme();
+  const { loaded: planLoaded, tier } = usePlan();
   const sectionLabel = useSectionLabelClass();
+  // The free plan does not see its memory, so it cannot delete it piece by piece: one button wipes the data of the account.
+  const freePlan = planLoaded && tier === 'free';
   const showLegacyMemoryDelete = isLegacyMemoryCompatibilityEnabled(profile);
   const [deleteAllState, setDeleteAllState] = useState<DeleteState>('idle');
   const [deleteMemoryState, setDeleteMemoryState] = useState<DeleteState>('idle');
@@ -330,57 +335,63 @@ export function PrivacyScreen() {
           <p className={sectionLabel}>Управление данными</p>
 
           <div className="space-y-2.5">
-            <DeleteAction
-              title="Удалить все беседы"
-              description="Все сообщения и беседы будут удалены навсегда. Это действие нельзя отменить."
-              doneText="Беседы удалены."
-              state={deleteAllState}
-              onStart={handleDeleteAllConversations}
-              onCancel={() => setDeleteAllState('idle')}
-              onConfirm={handleDeleteAllConversations}
-            />
-
-            {showLegacyMemoryDelete && (
+            {freePlan ? (
+              <DeleteAccountDataSection />
+            ) : (
+              <>
               <DeleteAction
-                title="Удалить старую память"
-                description="Удалит сохранённые AI-заметки о ваших предпочтениях и темах. Беседы останутся."
-                doneText="Память удалена."
-                state={deleteMemoryState}
-                onStart={handleDeleteMemory}
-                onCancel={() => setDeleteMemoryState('idle')}
-                onConfirm={handleDeleteMemory}
+                title="Удалить все беседы"
+                description="Все сообщения и беседы будут удалены навсегда. Это действие нельзя отменить."
+                doneText="Беседы удалены."
+                state={deleteAllState}
+                onStart={handleDeleteAllConversations}
+                onCancel={() => setDeleteAllState('idle')}
+                onConfirm={handleDeleteAllConversations}
               />
+
+              {showLegacyMemoryDelete && (
+                <DeleteAction
+                  title="Удалить старую память"
+                  description="Удалит сохранённые AI-заметки о ваших предпочтениях и темах. Беседы останутся."
+                  doneText="Память удалена."
+                  state={deleteMemoryState}
+                  onStart={handleDeleteMemory}
+                  onCancel={() => setDeleteMemoryState('idle')}
+                  onConfirm={handleDeleteMemory}
+                />
+              )}
+
+              <DeleteAction
+                title="Удалить сквозную память"
+                description="Удалит устойчивые факты профиля, накопленные из всех бесед. Сами беседы останутся."
+                doneText="Сквозная память удалена."
+                state={deleteLifecycleState}
+                onStart={handleDeleteLifecycle}
+                onCancel={() => setDeleteLifecycleState('idle')}
+                onConfirm={handleDeleteLifecycle}
+              />
+
+              <DeleteAction
+                title="Удалить память бесед"
+                description="Удалит устойчивые факты, накопленные внутри отдельных бесед. Сами беседы останутся."
+                doneText="Память бесед удалена."
+                state={deleteDialogueState}
+                onStart={handleDeleteDialogue}
+                onCancel={() => setDeleteDialogueState('idle')}
+                onConfirm={handleDeleteDialogue}
+              />
+
+              <DeleteAction
+                title="Удалить всю память"
+                description="Удалит и сквозную память, и память бесед одновременно. Сами беседы останутся."
+                doneText="Вся память удалена."
+                state={deleteMemoryV3State}
+                onStart={handleDeleteMemoryV3}
+                onCancel={() => setDeleteMemoryV3State('idle')}
+                onConfirm={handleDeleteMemoryV3}
+              />
+              </>
             )}
-
-            <DeleteAction
-              title="Удалить сквозную память"
-              description="Удалит устойчивые факты профиля, накопленные из всех бесед. Сами беседы останутся."
-              doneText="Сквозная память удалена."
-              state={deleteLifecycleState}
-              onStart={handleDeleteLifecycle}
-              onCancel={() => setDeleteLifecycleState('idle')}
-              onConfirm={handleDeleteLifecycle}
-            />
-
-            <DeleteAction
-              title="Удалить память бесед"
-              description="Удалит устойчивые факты, накопленные внутри отдельных бесед. Сами беседы останутся."
-              doneText="Память бесед удалена."
-              state={deleteDialogueState}
-              onStart={handleDeleteDialogue}
-              onCancel={() => setDeleteDialogueState('idle')}
-              onConfirm={handleDeleteDialogue}
-            />
-
-            <DeleteAction
-              title="Удалить всю память"
-              description="Удалит и сквозную память, и память бесед одновременно. Сами беседы останутся."
-              doneText="Вся память удалена."
-              state={deleteMemoryV3State}
-              onStart={handleDeleteMemoryV3}
-              onCancel={() => setDeleteMemoryV3State('idle')}
-              onConfirm={handleDeleteMemoryV3}
-            />
           </div>
         </section>
 
