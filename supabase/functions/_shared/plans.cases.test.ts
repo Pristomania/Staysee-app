@@ -131,6 +131,7 @@ describe("the chat uses these numbers", () => {
 describe("the app's copy of the table is the server's", () => {
   it("is identical", () => {
     assert.deepEqual(client.PLANS, PLANS);
+    assert.deepEqual(client.PACK, server.PACK, "the bought messages are the same on both sides");
     assert.deepEqual([...client.PLAN_FEATURES], [...PLAN_FEATURES]);
     assert.deepEqual([...client.VOICE_LEVELS], [...VOICE_LEVELS]);
     assert.equal(client.AI_VOICE_BUILT, server.AI_VOICE_BUILT, "the flag that says the AI voice exists is the same on both sides");
@@ -163,6 +164,14 @@ describe("the database and the site say the same", () => {
     const m085 = sql("_085_usage_limits.sql");
     assert.equal(Number(/\(\s*'free'\s*,\s*'lifetime'\s*,\s*(\d+)\s*,/i.exec(m085)?.[1]), PLANS.free.messages);
     assert.equal(Number(/\(\s*'basic'\s*,\s*'month'\s*,\s*(\d+)\s*,/i.exec(m085)?.[1]), PLANS.basic.messages);
+  });
+
+  it("the bought messages match migration 090: 100 messages, 12 months, the quiet allowance per message", () => {
+    const text = sql("_090_message_packs.sql");
+    assert.equal(Number(/p_messages\s+int\s+DEFAULT\s+(\d+)/i.exec(text)?.[1]), server.PACK.messages, "default size of a pack");
+    assert.equal(Number(/p_messages\s*\*\s*([\d.]+)/i.exec(text)?.[1]), server.PACK.costAllowancePerMessageUsd, "allowance per message");
+    assert.equal(Number(/interval\s+'(\d+) months'/i.exec(text.slice(text.indexOf("grant_message_pack")))?.[1]), server.PACK.validMonths, "validity");
+    assert.equal(server.PACK.priceRub, 590);
   });
 
   it("the free messages come back after the same number of months in the plans table and in migration 086", () => {

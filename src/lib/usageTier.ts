@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { UsageRow } from './messageCounter';
+import type { PackRow, UsageRow } from './messageCounter';
 
 export interface UsageTierRow {
   tier: string;
@@ -27,6 +27,20 @@ export async function fetchUsageRow(userId: string): Promise<UsageRow | null> {
   const { data, error } = await supabase.from('user_usage_tiers').select('*').eq('user_id', userId).maybeSingle();
   if (error || !data) return null;
   return data as UsageRow;
+}
+
+/**
+ * The person's bought messages that still have something left (migration 090). null when they could not be read,
+ * which is not the same as none: the caller keeps what it knew before.
+ */
+export async function fetchPackRows(userId: string): Promise<PackRow[] | null> {
+  const { data, error } = await supabase
+    .from('message_packs')
+    .select('messages_left, expires_at, voided_at')
+    .eq('user_id', userId)
+    .gt('messages_left', 0);
+  if (error || !data) return null;
+  return data as PackRow[];
 }
 
 export async function fetchUsageTier(userId: string): Promise<{
