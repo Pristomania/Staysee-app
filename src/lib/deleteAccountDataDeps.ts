@@ -16,12 +16,8 @@ export const supabaseAccountDataDeps: AccountDataDeps = {
     const { error } = await supabase.rpc('delete_my_memory_corrections');
     return { error };
   },
-  deleteProgress: async (userId) => {
-    const { error } = await supabase.from('progress_entries').delete().eq('user_id', userId);
-    return { error };
-  },
-  deleteConversations: async (userId) => {
-    const { error } = await supabase.from('conversations').delete().eq('user_id', userId);
+  deleteAccountContent: async () => {
+    const { error } = await supabase.rpc('delete_my_account_data');
     return { error };
   },
 };

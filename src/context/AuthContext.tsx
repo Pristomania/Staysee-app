@@ -257,8 +257,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const metadata = consents
         ? signUpConsentMetadata(consents, typeof navigator === 'undefined' ? '' : navigator.userAgent)
         : undefined;
+      // The confirmation link must lead back to the site the person is on. Without this the link uses the project's
+      // "Site URL" setting, which sent the first real tester to localhost (02.11.2026). The address also has to be
+      // in the project's list of allowed redirect addresses (Authentication, URL Configuration).
+      const emailRedirectTo = typeof window === 'undefined' ? undefined : window.location.origin;
       const { data, error } = await withAuthTimeout(
-        supabase.auth.signUp({ email: email.trim(), password, ...(metadata ? { options: { data: metadata } } : {}) }),
+        supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { ...(metadata ? { data: metadata } : {}), ...(emailRedirectTo ? { emailRedirectTo } : {}) },
+        }),
       );
       if (error) {
         return { error, status: 'error' };

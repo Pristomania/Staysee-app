@@ -7,15 +7,17 @@
  * safe to repeat: a failed run is simply run again.
  */
 export interface AccountDataDeps {
-  /** The memory built from conversations (migration of Memory V3): the one between conversations and the one inside them. */
+  /** The memory built from conversations: the one between conversations ('account_wide') and the one inside them ('dialogue'). */
   deleteMemoryV3(scope: 'account_wide' | 'dialogue'): Promise<{ error: unknown }>;
   /** The old memory table, which an older account may still hold. */
   deleteLegacyMemory(userId: string): Promise<{ error: unknown }>;
   /** The durable corrections ("lives with X"). A person has no right to delete these rows directly: a server function does it. */
   deleteCorrections(): Promise<{ error: unknown }>;
-  /** Notes and the weekly pictures. They stay when a conversation is deleted (the link only becomes empty). */
-  deleteProgress(userId: string): Promise<{ error: unknown }>;
-  deleteConversations(userId: string): Promise<{ error: unknown }>;
+  /**
+   * Everything a person has written or that was built from it (conversations, notes, every kind of memory, corrections),
+   * deleted by the server in one transaction (migration 092), so that nothing is forgotten and nothing is half done.
+   */
+  deleteAccountContent(): Promise<{ error: unknown }>;
 }
 
 /** All memory: between conversations, inside them, the corrections and the old table. True when every part was deleted. */
@@ -29,10 +31,7 @@ export async function deleteAllMemory(userId: string, deps: AccountDataDeps): Pr
   return results.every((result) => !result.error);
 }
 
-/** Memory first (the part the person cannot see), then notes, then the conversations. True when everything went. */
-export async function deleteAccountData(userId: string, deps: AccountDataDeps): Promise<boolean> {
-  if (!(await deleteAllMemory(userId, deps))) return false;
-  if ((await deps.deleteProgress(userId)).error) return false;
-  if ((await deps.deleteConversations(userId)).error) return false;
-  return true;
+/** The data of the account: one server call that deletes all of the person's content and nothing of the plan. */
+export async function deleteAccountData(deps: AccountDataDeps): Promise<boolean> {
+  return !(await deps.deleteAccountContent()).error;
 }
