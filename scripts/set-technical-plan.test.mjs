@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { describe, it } from "node:test";
+
+const source = readFileSync(new URL("./set-technical-plan.mjs", import.meta.url), "utf8");
+
+describe("the switch of the technical test user's plan", () => {
+  it("cannot touch anybody but a technical account", () => {
+    assert.match(source, /assertProdTestAllowed\(\)/, "production tests must be allowed explicitly");
+    assert.match(source, /\\\.invalid\$/, "the address of the account must end in .invalid (a technical account)");
+    assert.match(source, /refusing/, "it says why it refuses");
+    // the guard comes before any write
+    assert.ok(source.indexOf("refusing:") < source.indexOf('rpc("set_user_plan"'), "the check is made before the plan is changed");
+    assert.doesNotMatch(source, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i, "no person's id is written into the script");
+  });
+
+  it("knows only two states: free (a real free account) and premium (the normal state of the technical user)", () => {
+    assert.match(source, /\["free", "premium"\]/);
+    assert.match(source, /set_user_plan/);
+    assert.match(source, /set_unlimited_usage/);
+    assert.match(source, /max_conversations_override: plan === "premium" \? 50 : null/);
+    assert.match(source, /p_on: plan === "premium"/);
+  });
+
+  it("changes only the one row of that user", () => {
+    assert.match(source, /user_usage_tiers\?user_id=eq\.\$\{testUserId\}/);
+    assert.doesNotMatch(source, /method:\s*"DELETE"/);
+  });
+});
