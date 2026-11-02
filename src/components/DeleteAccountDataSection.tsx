@@ -24,7 +24,7 @@ export function DeleteAccountDataSection() {
       confirmStays={ROOM_COPY.deleteDataConfirmStays}
       onRun={async () => {
         if (!user) return false;
-        const ok = await deleteAccountData(user.id, supabaseAccountDataDeps);
+        const ok = await deleteAccountData(supabaseAccountDataDeps);
         if (ok) {
           setConversations([]);
           setMessages([]);

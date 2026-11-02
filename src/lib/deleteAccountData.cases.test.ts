@@ -1,7 +1,7 @@
 /**
  * Run: npx tsx src/lib/deleteAccountData.cases.test.ts
- * "Delete the data of the account" (free plan): memory first, then notes, then conversations; the account, the plan,
- * the counter and the bought messages are not touched; a failed step stops the rest and says so.
+ * "Delete the data of the account" (free plan) and "delete all memory" are each one server call; the first deletes the
+ * person's content, the second only the memory, and neither touches the plan. A failed call says so.
  */
 
 import { type AccountDataDeps, deleteAccountData, deleteAllMemory } from './deleteAccountData.ts';
@@ -17,59 +17,38 @@ function fakeDeps(failing: string[] = []) {
     return { error: failing.includes(name) ? new Error(name) : null };
   };
   const deps: AccountDataDeps = {
-    deleteMemoryV3: async (scope) => step(`memory:${scope}`)(),
-    deleteLegacyMemory: step('legacy-memory'),
-    deleteCorrections: step('corrections'),
-    deleteProgress: step('notes'),
-    deleteConversations: step('conversations'),
+    deleteMemoryContent: step('memory'),
+    deleteAccountContent: step('content'),
   };
   return { deps, calls };
 }
 
-// All memory: between conversations, inside them, and the old table.
+// All memory: one call, and it leaves the conversations and the notes.
 {
   const { deps, calls } = fakeDeps();
-  assert((await deleteAllMemory('u1', deps)) === true, 'all memory goes');
-  assert(calls.length === 4 && calls.includes('memory:account_wide') && calls.includes('memory:dialogue') && calls.includes('legacy-memory') && calls.includes('corrections'), `all four memories: ${calls.join(',')}`);
-  assert(!calls.includes('conversations') && !calls.includes('notes'), 'deleting memory leaves the conversations and the notes');
+  assert((await deleteAllMemory(deps)) === true, 'all memory goes');
+  assert(calls.length === 1 && calls[0] === 'memory', `one server call for the memory only: ${calls.join(',')}`);
 }
 {
-  const { deps } = fakeDeps(['memory:dialogue']);
-  assert((await deleteAllMemory('u1', deps)) === false, 'one memory step failing is a failure');
-}
-{
-  // the corrections are part of "all memory": without them the screen would say the memory is gone while they still shape answers
-  const { deps } = fakeDeps(['corrections']);
-  assert((await deleteAllMemory('u1', deps)) === false, 'the corrections failing is a failure');
+  const { deps } = fakeDeps(['memory']);
+  assert((await deleteAllMemory(deps)) === false, 'a failed memory deletion says so (it is safe to run again)');
 }
 
-// The data of the account: memory, then notes, then conversations, in this order.
+// The data of the account: one call, and it is all.
 {
   const { deps, calls } = fakeDeps();
-  assert((await deleteAccountData('u1', deps)) === true, 'everything goes');
-  assert(calls.slice(0, 4).sort().join() === ['corrections', 'legacy-memory', 'memory:account_wide', 'memory:dialogue'].sort().join(), 'memory first');
-  assert(calls[4] === 'notes' && calls[5] === 'conversations' && calls.length === 6, `then notes, then conversations: ${calls.join(',')}`);
+  assert((await deleteAccountData(deps)) === true, 'everything goes');
+  assert(calls.length === 1 && calls[0] === 'content', `one server call, nothing piecemeal: ${calls.join(',')}`);
+}
+{
+  const { deps } = fakeDeps(['content']);
+  assert((await deleteAccountData(deps)) === false, 'a failed deletion says so (it is safe to run again)');
 }
 
-// A failed step stops what comes after it, and the whole thing reports failure (it is safe to run again).
-{
-  const { deps, calls } = fakeDeps(['legacy-memory']);
-  assert((await deleteAccountData('u1', deps)) === false, 'memory failing is a failure');
-  assert(!calls.includes('notes') && !calls.includes('conversations'), 'nothing after a failed memory step');
-}
-{
-  const { deps, calls } = fakeDeps(['notes']);
-  assert((await deleteAccountData('u1', deps)) === false && !calls.includes('conversations'), 'notes failing stops before the conversations');
-}
-{
-  const { deps } = fakeDeps(['conversations']);
-  assert((await deleteAccountData('u1', deps)) === false, 'conversations failing is a failure');
-}
-
-// The steps a person's data deletion may take are exactly these four: no plan, counter, pack or consent step exists.
+// The only steps there are are data steps: no plan, counter, pack or consent step exists.
 {
   const { deps } = fakeDeps();
-  assert(Object.keys(deps).sort().join() === ['deleteConversations', 'deleteCorrections', 'deleteLegacyMemory', 'deleteMemoryV3', 'deleteProgress'].join(), 'only data steps exist');
+  assert(Object.keys(deps).sort().join() === ['deleteAccountContent', 'deleteMemoryContent'].join(), 'only data steps exist');
 }
 
 console.log('All deleteAccountData cases passed.');
