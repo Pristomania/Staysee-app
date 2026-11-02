@@ -11,17 +11,20 @@ export interface AccountDataDeps {
   deleteMemoryV3(scope: 'account_wide' | 'dialogue'): Promise<{ error: unknown }>;
   /** The old memory table, which an older account may still hold. */
   deleteLegacyMemory(userId: string): Promise<{ error: unknown }>;
+  /** The durable corrections ("lives with X"). A person has no right to delete these rows directly: a server function does it. */
+  deleteCorrections(): Promise<{ error: unknown }>;
   /** Notes and the weekly pictures. They stay when a conversation is deleted (the link only becomes empty). */
   deleteProgress(userId: string): Promise<{ error: unknown }>;
   deleteConversations(userId: string): Promise<{ error: unknown }>;
 }
 
-/** All memory: between conversations, inside them, and the old table. True when every part was deleted. */
+/** All memory: between conversations, inside them, the corrections and the old table. True when every part was deleted. */
 export async function deleteAllMemory(userId: string, deps: AccountDataDeps): Promise<boolean> {
   const results = await Promise.all([
     deps.deleteMemoryV3('account_wide'),
     deps.deleteMemoryV3('dialogue'),
     deps.deleteLegacyMemory(userId),
+    deps.deleteCorrections(),
   ]);
   return results.every((result) => !result.error);
 }

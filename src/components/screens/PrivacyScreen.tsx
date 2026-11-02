@@ -8,6 +8,8 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlan } from '../../context/PlanContext';
 import { DeleteAccountDataSection } from '../DeleteAccountDataSection';
+import { deleteAllMemory } from '../../lib/deleteAccountData';
+import { supabaseAccountDataDeps } from '../../lib/deleteAccountDataDeps';
 import { supabase } from '../../lib/supabase';
 import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
 import { isLegacyMemoryCompatibilityEnabled } from '../../lib/memoryScreenMode';
@@ -127,6 +129,9 @@ export function PrivacyScreen() {
   const sectionLabel = useSectionLabelClass();
   // The free plan does not see its memory, so it cannot delete it piece by piece: one button wipes the data of the account.
   const freePlan = planLoaded && tier === 'free';
+  // A signed-in person's plan is read a moment after the screen opens: until then no deletion is offered, so a free person
+  // never sees the paid set of buttons for a moment and a half-started confirmation is never thrown away.
+  const plansDeleteKnown = !user || planLoaded;
   const showLegacyMemoryDelete = isLegacyMemoryCompatibilityEnabled(profile);
   const [deleteAllState, setDeleteAllState] = useState<DeleteState>('idle');
   const [deleteMemoryState, setDeleteMemoryState] = useState<DeleteState>('idle');
@@ -232,11 +237,8 @@ export function PrivacyScreen() {
     if (deleteMemoryV3State !== 'confirming') return;
     setDeleteMemoryV3State('loading');
     try {
-      const [lifecycleResult, dialogueResult] = await Promise.all([
-        deleteAllMemoryV3Data('account_wide'),
-        deleteAllMemoryV3Data('dialogue'),
-      ]);
-      if (lifecycleResult.error || dialogueResult.error) throw new Error('delete_all_failed');
+      // The same "all memory" as on the free plan: between conversations, inside them, the corrections, the old table.
+      if (!(await deleteAllMemory(user.id, supabaseAccountDataDeps))) throw new Error('delete_all_failed');
       setDeleteMemoryV3State('done');
     } catch {
       setDeleteMemoryV3State('error');
@@ -335,7 +337,7 @@ export function PrivacyScreen() {
           <p className={sectionLabel}>Управление данными</p>
 
           <div className="space-y-2.5">
-            {freePlan ? (
+            {!plansDeleteKnown ? null : freePlan ? (
               <DeleteAccountDataSection />
             ) : (
               <>

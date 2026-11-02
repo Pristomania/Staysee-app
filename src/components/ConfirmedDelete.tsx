@@ -43,7 +43,7 @@ export function ConfirmedDelete({
           <p className="text-xs font-light text-red-400/80">Не всё получилось удалить. Попробуйте ещё раз.</p>
           <button
             type="button"
-            onClick={() => setState('idle')}
+            onClick={() => setState('confirming')}
             className="rounded-lg border border-red-400/20 bg-red-400/5 px-4 py-2 text-xs font-light text-red-400/80"
           >
             Ещё раз

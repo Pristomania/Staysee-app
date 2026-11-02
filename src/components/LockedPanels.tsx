@@ -26,13 +26,6 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
       <section className="mb-8">
         <p className={sectionLabel}>Память этой беседы</p>
         <p className={`${theme.textSecondary} mb-3 text-xs font-light leading-relaxed`}>{MEMORY_HINT}</p>
-        {/* The memory is not shown on this plan, but the person can always wipe all of it. */}
-        <ConfirmedDelete
-          hint={ROOM_COPY.deleteMemoryHint}
-          buttonLabel={ROOM_COPY.deleteMemoryButton}
-          doneText={ROOM_COPY.deleteMemoryDone}
-          onRun={async () => (user ? deleteAllMemory(user.id, supabaseAccountDataDeps) : false)}
-        />
       </section>
 
       <section>
@@ -60,6 +53,17 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
             </button>
           </div>
         </div>
+      </section>
+
+      {/* The memory is not shown on this plan, but the person can always wipe all of it. */}
+      <section className="mt-8">
+        <p className={sectionLabel}>Удаление памяти</p>
+        <ConfirmedDelete
+          hint={ROOM_COPY.deleteMemoryHint}
+          buttonLabel={ROOM_COPY.deleteMemoryButton}
+          doneText={ROOM_COPY.deleteMemoryDone}
+          onRun={async () => (user ? deleteAllMemory(user.id, supabaseAccountDataDeps) : false)}
+        />
       </section>
     </>
   );

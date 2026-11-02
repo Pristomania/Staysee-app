@@ -19,6 +19,7 @@ function fakeDeps(failing: string[] = []) {
   const deps: AccountDataDeps = {
     deleteMemoryV3: async (scope) => step(`memory:${scope}`)(),
     deleteLegacyMemory: step('legacy-memory'),
+    deleteCorrections: step('corrections'),
     deleteProgress: step('notes'),
     deleteConversations: step('conversations'),
   };
@@ -29,20 +30,25 @@ function fakeDeps(failing: string[] = []) {
 {
   const { deps, calls } = fakeDeps();
   assert((await deleteAllMemory('u1', deps)) === true, 'all memory goes');
-  assert(calls.length === 3 && calls.includes('memory:account_wide') && calls.includes('memory:dialogue') && calls.includes('legacy-memory'), `all three memories: ${calls.join(',')}`);
+  assert(calls.length === 4 && calls.includes('memory:account_wide') && calls.includes('memory:dialogue') && calls.includes('legacy-memory') && calls.includes('corrections'), `all four memories: ${calls.join(',')}`);
   assert(!calls.includes('conversations') && !calls.includes('notes'), 'deleting memory leaves the conversations and the notes');
 }
 {
   const { deps } = fakeDeps(['memory:dialogue']);
   assert((await deleteAllMemory('u1', deps)) === false, 'one memory step failing is a failure');
 }
+{
+  // the corrections are part of "all memory": without them the screen would say the memory is gone while they still shape answers
+  const { deps } = fakeDeps(['corrections']);
+  assert((await deleteAllMemory('u1', deps)) === false, 'the corrections failing is a failure');
+}
 
 // The data of the account: memory, then notes, then conversations, in this order.
 {
   const { deps, calls } = fakeDeps();
   assert((await deleteAccountData('u1', deps)) === true, 'everything goes');
-  assert(calls.slice(0, 3).sort().join() === ['legacy-memory', 'memory:account_wide', 'memory:dialogue'].sort().join(), 'memory first');
-  assert(calls[3] === 'notes' && calls[4] === 'conversations' && calls.length === 5, `then notes, then conversations: ${calls.join(',')}`);
+  assert(calls.slice(0, 4).sort().join() === ['corrections', 'legacy-memory', 'memory:account_wide', 'memory:dialogue'].sort().join(), 'memory first');
+  assert(calls[4] === 'notes' && calls[5] === 'conversations' && calls.length === 6, `then notes, then conversations: ${calls.join(',')}`);
 }
 
 // A failed step stops what comes after it, and the whole thing reports failure (it is safe to run again).
@@ -63,7 +69,7 @@ function fakeDeps(failing: string[] = []) {
 // The steps a person's data deletion may take are exactly these four: no plan, counter, pack or consent step exists.
 {
   const { deps } = fakeDeps();
-  assert(Object.keys(deps).sort().join() === ['deleteConversations', 'deleteLegacyMemory', 'deleteMemoryV3', 'deleteProgress'].join(), 'only data steps exist');
+  assert(Object.keys(deps).sort().join() === ['deleteConversations', 'deleteCorrections', 'deleteLegacyMemory', 'deleteMemoryV3', 'deleteProgress'].join(), 'only data steps exist');
 }
 
 console.log('All deleteAccountData cases passed.');
