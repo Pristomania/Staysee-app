@@ -22,6 +22,15 @@ describe("the switch of the technical test user's plan", () => {
     assert.match(source, /p_on: plan === "premium"/);
   });
 
+  it("can set how many messages are already used, only on the free plan, within the plan's 50", () => {
+    assert.match(source, /--used=/);
+    assert.match(source, /plan !== "free"/, "the used count is a thing of the free plan only");
+    assert.match(source, /Number\.isInteger\(used\) && used >= 0 && used <= 50/, "a whole number from 0 to 50");
+    assert.match(source, /period_requests_used: used/);
+    // it never reaches past the plan's own number
+    assert.ok(source.indexOf("--used=") < source.indexOf('rpc("set_user_plan"'), "the value is checked before anything is written");
+  });
+
   it("changes only the one row of that user", () => {
     assert.match(source, /user_usage_tiers\?user_id=eq\.\$\{testUserId\}/);
     assert.doesNotMatch(source, /method:\s*"DELETE"/);
