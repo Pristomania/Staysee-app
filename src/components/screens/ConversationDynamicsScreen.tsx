@@ -498,7 +498,7 @@ export function ConversationDynamicsScreen() {
         )}
       >
         <ConversationHubNav active="dynamics" show={showHub} />
-        <LockedFeaturePanel title={DYNAMICS_COPY.title} hint={DYNAMICS_COPY.subtitle} />
+        <LockedFeaturePanel hint={DYNAMICS_COPY.intro} />
       </StickyScreenLayout>
     );
   }
