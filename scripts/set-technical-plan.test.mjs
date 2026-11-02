@@ -42,7 +42,7 @@ describe("the switch of the technical test user's plan", () => {
     assert.match(source, /grant_message_pack/, "a new one is granted on request");
     assert.ok(source.indexOf("void_message_pack") < source.indexOf("grant_message_pack"), "clear first, then add");
     assert.match(source, /p_messages: 100/);
-    assert.match(source, /if \(wantPack\) throw error/, "only a request for a pack is an error on an older database");
+    assert.match(source, /wantPack \|\| !noPacksTable/, "only a missing packs table is passed over, any other failure stops the script");
     assert.ok(source.indexOf("refusing:") < source.indexOf("void_message_pack"), "the technical-account check comes before any pack is touched");
   });
 });

@@ -21,7 +21,8 @@ const sql = readFileSync(resolve(dir, file!), "utf8");
 // The table: tied to the person, deleted with them, one payment never twice, can never be over-spent.
 assert(/CREATE TABLE IF NOT EXISTS public\.message_packs/i.test(sql), "the table");
 assert(/user_id\s+uuid\s+NOT NULL REFERENCES auth\.users\(id\) ON DELETE CASCADE/i.test(sql), "removed with the person");
-assert(/payment_ref\s+text\s+UNIQUE/i.test(sql), "the same payment is never granted twice");
+assert(/payment_ref\s+text\s+NOT NULL UNIQUE/i.test(sql), "the same payment is never granted twice, and a reference is always there");
+assert(sql.includes("payment_ref_required") && sql.includes("payment_ref_taken"), "no grant without a reference, none on somebody else's reference");
 assert(/messages_left\s+int\s+NOT NULL CHECK \(messages_left >= 0 AND messages_left <= messages_total\)/i.test(sql), "never negative, never above what was bought");
 
 // A person only reads: row security on, a read policy for the owner, no write rights, no write policy.
@@ -62,5 +63,10 @@ assert(/sum\(cost_allowance_usd\)/i.test(fn) && /v_limits\.cost_cap_usd \+ v_all
 assert(/interval\s+'24 hours'/i.test(fn) && /interval\s+'30 days'/i.test(fn) && /make_interval/i.test(fn), "the rules of 088 are kept");
 // The refusal reason of a person with no pack is the same as before: the visible limit first, then the ceiling.
 assert(/CASE WHEN v_limit_hit THEN 'period_limit' ELSE 'cost_cap' END/i.test(fn), "no pack: period_limit first, else cost_cap");
+// A pack is spent only when the plan's own messages are out: with messages left the ceiling is passed as a plan message.
+const iHit = fn.search(/IF v_limit_hit THEN\s+SELECT id\s+INTO v_pack_id/i);
+const iUse = fn.search(/v_use_pack := true/i);
+assert(iHit > 0 && iUse > iHit, "the pack is chosen and marked for use only inside the plan-is-out branch");
+assert((fn.match(/v_use_pack := true/gi) ?? []).length === 1, "there is no other way into a pack");
 
 console.log("=== messagePacksMigration.cases.test.ts OK ===");

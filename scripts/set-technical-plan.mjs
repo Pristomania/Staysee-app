@@ -69,8 +69,10 @@ async function main() {
     for (const pack of open) await rpc("void_message_pack", { p_pack_id: pack.id });
     if (wantPack) await rpc("grant_message_pack", { p_user_id: testUserId, p_messages: 100, p_payment_ref: `technical-test-${Date.now()}` });
   } catch (error) {
-    // An older database has no packs; only a request for one is an error.
-    if (wantPack) throw error;
+    // An older database has no packs table yet: that alone is not an error unless a pack was asked for. Anything else
+    // (a refused call, a broken connection) must not be passed over: the state would not be what was asked.
+    const noPacksTable = /PGRST205|message_packs/i.test(String(error?.message)) && /404|does not exist|schema cache/i.test(String(error?.message));
+    if (wantPack || !noPacksTable) throw error;
   }
 
   const row = (await restJson(url, headers, `user_usage_tiers?user_id=eq.${testUserId}&select=tier,unlimited_usage,max_conversations_override,period_requests_used`))?.[0];

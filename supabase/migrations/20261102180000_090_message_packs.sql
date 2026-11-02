@@ -1,15 +1,17 @@
 -- 090_message_packs
 -- Bought messages: a pack of messages that a person adds to any plan, the free one included.
 --
--- A pack is spent only after the messages of the plan are used up (or, rarely, when the quiet money ceiling of the plan
--- stops a person who still has plan messages left). A pack lives 12 months from the purchase and is spent in the order
--- it ends: the oldest first. Each pack also carries a small allowance of money that is added to the quiet ceiling
--- while the pack still has messages, so that a person who paid for messages is not stopped by the ceiling of a plan
--- they have already used up. The person sees messages only, never money.
+-- A pack is spent only after the messages of the plan are used up. A pack lives 12 months from the purchase and is
+-- spent in the order it ends: the oldest first. Each pack also carries a small allowance of money that is added to the
+-- quiet ceiling while the pack still has messages, so that a person who paid for messages is not stopped by the ceiling
+-- of a plan they have already used up (and, with the plan's messages still left, a person who hit the ceiling goes on
+-- as a plan message, the pack untouched). The person sees messages only, never money. The free plan's idle renewal
+-- clock (last_request_at) moves with every answered message, a bought one too: "three months after the last message".
 --
 -- Nothing here takes payment: a pack is added by the service (grant_message_pack), which the payment code will call
--- when there is a payment. The same payment reference is never granted twice. A pack that is refunded is voided by the
--- service (void_message_pack). The visible numbers of a pack are in supabase/functions/_shared/plans.ts (PACK).
+-- when there is a payment. A payment reference is required and never granted twice (and never for another person).
+-- A pack that is refunded is voided by the service (void_message_pack). The visible numbers of a pack are in
+-- supabase/functions/_shared/plans.ts (PACK).
 --
 -- Additive: one table, two service-only functions, and reserve_ai_request with the same signature and every check of
 -- 088; the only new thing is the pack taking over when the plan has nothing left to give.
@@ -22,7 +24,7 @@ CREATE TABLE IF NOT EXISTS public.message_packs (
   cost_allowance_usd numeric(10,4) NOT NULL CHECK (cost_allowance_usd >= 0),
   purchased_at       timestamptz   NOT NULL DEFAULT now(),
   expires_at         timestamptz   NOT NULL,
-  payment_ref        text          UNIQUE,
+  payment_ref        text          NOT NULL UNIQUE,
   voided_at          timestamptz
 );
 
@@ -49,7 +51,9 @@ REVOKE ALL ON public.message_packs FROM authenticated;
 GRANT SELECT ON public.message_packs TO authenticated;
 
 -- Adds a pack to a person. 100 messages by default, valid 12 months, with 0.035 USD of quiet allowance per message.
--- A payment reference that was already granted returns the first pack and grants nothing.
+-- The payment reference is required (a manual grant names itself, for example 'manual-<reason>'): without one a retried
+-- payment notice could not be told from a new payment. A reference that was already granted to the same person returns
+-- the first pack and grants nothing; one that belongs to somebody else is an error.
 CREATE OR REPLACE FUNCTION public.grant_message_pack(
   p_user_id     uuid,
   p_messages    int  DEFAULT 100,
@@ -63,9 +67,14 @@ AS $$
 DECLARE
   v_now     timestamptz := now();
   v_pack_id uuid;
+  v_owner   uuid;
 BEGIN
   IF p_messages IS NULL OR p_messages < 1 OR p_messages > 1000 THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'invalid_pack_size';
+  END IF;
+
+  IF p_payment_ref IS NULL OR btrim(p_payment_ref) = '' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'payment_ref_required';
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM public.user_usage_tiers WHERE user_id = p_user_id) THEN
@@ -78,7 +87,10 @@ BEGIN
   RETURNING id INTO v_pack_id;
 
   IF v_pack_id IS NULL THEN
-    SELECT id INTO v_pack_id FROM public.message_packs WHERE payment_ref = p_payment_ref;
+    SELECT id, user_id INTO v_pack_id, v_owner FROM public.message_packs WHERE payment_ref = p_payment_ref;
+    IF v_owner <> p_user_id THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'payment_ref_taken';
+    END IF;
     RETURN jsonb_build_object('granted', false, 'duplicate', true, 'pack_id', v_pack_id);
   END IF;
 
@@ -142,6 +154,7 @@ DECLARE
   v_cap_hit      boolean := false;
   v_pack_id      uuid;
   v_use_pack     boolean := false;
+  v_open_packs   int;
   v_allowance    numeric;
 BEGIN
   SELECT *
@@ -225,19 +238,16 @@ BEGIN
     END IF;
 
     IF v_limit_hit OR v_cap_hit THEN
-      -- The plan has nothing more to give: a bought pack goes on, the one that ends first goes first.
-      SELECT id
-      INTO v_pack_id
+      -- The plan has nothing more to give, or the quiet ceiling is reached: only bought messages can go on.
+      SELECT count(*), coalesce(sum(cost_allowance_usd), 0)
+      INTO v_open_packs, v_allowance
       FROM public.message_packs
       WHERE user_id = p_user_id
         AND voided_at IS NULL
         AND messages_left > 0
-        AND expires_at > v_now
-      ORDER BY expires_at, purchased_at
-      LIMIT 1
-      FOR UPDATE;
+        AND expires_at > v_now;
 
-      IF v_pack_id IS NULL THEN
+      IF v_open_packs = 0 THEN
         RETURN jsonb_build_object(
           'allowed', false,
           'tier', v_row.tier,
@@ -245,25 +255,38 @@ BEGIN
         );
       END IF;
 
-      v_use_pack := true;
-
       -- The bought messages raise the quiet ceiling by their allowance.
-      IF v_limits.cost_cap_usd IS NOT NULL THEN
-        SELECT coalesce(sum(cost_allowance_usd), 0)
-        INTO v_allowance
+      IF v_limits.cost_cap_usd IS NOT NULL AND v_spent >= v_limits.cost_cap_usd + v_allowance THEN
+        RETURN jsonb_build_object(
+          'allowed', false,
+          'tier', v_row.tier,
+          'reason', 'cost_cap'
+        );
+      END IF;
+
+      -- A pack is spent only when the plan's own messages are out, the one that ends first goes first. With plan
+      -- messages left (only the ceiling was reached) this message is a plan message and the pack stays whole.
+      IF v_limit_hit THEN
+        SELECT id
+        INTO v_pack_id
         FROM public.message_packs
         WHERE user_id = p_user_id
           AND voided_at IS NULL
           AND messages_left > 0
-          AND expires_at > v_now;
+          AND expires_at > v_now
+        ORDER BY expires_at, purchased_at
+        LIMIT 1
+        FOR UPDATE;
 
-        IF v_spent >= v_limits.cost_cap_usd + v_allowance THEN
+        IF v_pack_id IS NULL THEN
           RETURN jsonb_build_object(
             'allowed', false,
             'tier', v_row.tier,
-            'reason', 'cost_cap'
+            'reason', 'period_limit'
           );
         END IF;
+
+        v_use_pack := true;
       END IF;
     END IF;
   END IF;
