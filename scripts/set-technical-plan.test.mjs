@@ -35,4 +35,14 @@ describe("the switch of the technical test user's plan", () => {
     assert.match(source, /user_usage_tiers\?user_id=eq\.\$\{testUserId\}/);
     assert.doesNotMatch(source, /method:\s*"DELETE"/);
   });
+
+  it("can add one pack of bought messages, and always clears the old test packs first", () => {
+    assert.match(source, /"--pack"/);
+    assert.match(source, /void_message_pack/, "old test packs are voided");
+    assert.match(source, /grant_message_pack/, "a new one is granted on request");
+    assert.ok(source.indexOf("void_message_pack") < source.indexOf("grant_message_pack"), "clear first, then add");
+    assert.match(source, /p_messages: 100/);
+    assert.match(source, /wantPack \|\| !noPacksTable/, "only a missing packs table is passed over, any other failure stops the script");
+    assert.ok(source.indexOf("refusing:") < source.indexOf("void_message_pack"), "the technical-account check comes before any pack is touched");
+  });
 });

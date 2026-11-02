@@ -95,6 +95,19 @@ export const PLANS: Record<PlanId, Plan> = {
   },
 };
 
+/**
+ * Bought messages: a pack the person adds to any plan, the free one too. It is spent after the plan's own messages,
+ * the pack that ends first goes first, and it lives validMonths from the purchase. Enforced by the database
+ * (message_packs, migration 090; a test compares the numbers). Payment for it is not connected yet.
+ */
+export const PACK = {
+  messages: 100,
+  priceRub: 590,
+  validMonths: 12,
+  /** The quiet money added to the hidden ceiling per bought message, in dollars. The person never sees it. */
+  costAllowancePerMessageUsd: 0.035,
+} as const;
+
 export function normalizePlanId(value: unknown): PlanId {
   return value === "basic" || value === "premium" ? value : "free";
 }

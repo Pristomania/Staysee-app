@@ -1,4 +1,4 @@
-import { AI_VOICE_BUILT, monthsPhrase, voiceInputFor, type Plan } from './plans';
+import { AI_VOICE_BUILT, monthsPhrase, PACK, voiceInputFor, type Plan } from './plans';
 import { pluralMessages } from './messageCounter';
 
 /** What stands on every closed thing. No extra words. */
@@ -47,5 +47,22 @@ export function planRows(plan: Plan): PlanRow[] {
     { text: 'Динамика бесед', included: plan.features.conversationDynamics },
     { text: 'Прикрепление файлов', included: plan.features.fileAttachments },
     { text: voice, included: plan.voiceInput !== 'none' },
+  ];
+}
+
+/** The card of the bought messages on the tariffs page. */
+export const PACK_TITLE = 'Докупить сообщения';
+
+/** "590 ₽ за 100 сообщений". */
+export function packPriceLine(): string {
+  return `${group(PACK.priceRub)} ₽ за ${PACK.messages} ${pluralMessages(PACK.messages)}`;
+}
+
+/** What the person should know before buying: when they are spent, how long they live, for whom. */
+export function packRows(): string[] {
+  return [
+    'Тратятся после сообщений вашего тарифа',
+    `Действуют ${monthsPhrase(PACK.validMonths)}`,
+    'Подходят к любому тарифу, и к бесплатному',
   ];
 }

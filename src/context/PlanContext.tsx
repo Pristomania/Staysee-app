@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from './AuthContext';
-import { fetchUsageRow } from '../lib/usageTier';
-import { messageCounter, type MessageCounter, type UsageRow } from '../lib/messageCounter';
+import { fetchPackRows, fetchUsageRow } from '../lib/usageTier';
+import { messageCounter, type MessageCounter, type PackRow, type UsageRow } from '../lib/messageCounter';
 import { getMaxRooms } from '../lib/roomLimits';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
 
@@ -28,6 +28,7 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id;
   const [row, setRow] = useState<UsageRow | null>(null);
+  const [packs, setPacks] = useState<PackRow[]>([]);
   const currentUserRef = useRef(userId);
 
   useEffect(() => {
@@ -39,17 +40,19 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       setRow(null);
       return;
     }
-    const next = await fetchUsageRow(userId);
+    const [next, nextPacks] = await Promise.all([fetchUsageRow(userId), fetchPackRows(userId)]);
     // Somebody else signed in while this was being read: their plan is not this answer.
     if (currentUserRef.current !== userId) return;
     // A failed read must not wipe what is known: a network blip would unlock everything and hide the counter until the
-    // next read. Only a successful read replaces the row.
+    // next read. Only a successful read replaces the row (and the same for the bought messages).
     if (next) setRow(next);
+    if (nextPacks) setPacks(nextPacks);
   }, [userId]);
 
   useEffect(() => {
     // Another person (or nobody): forget the previous person's row before reading.
     setRow(null);
+    setPacks([]);
     void refresh();
   }, [refresh]);
 
@@ -71,11 +74,11 @@ export function PlanProvider({ children }: { children: ReactNode }) {
       plan: planFor(tier),
       loaded,
       has: (feature) => !loaded || isFeatureAvailable(tier, feature),
-      counter: messageCounter(row),
+      counter: messageCounter(row, new Date(), packs),
       maxConversations: getMaxRooms(tier, row?.max_conversations_override),
       refresh,
     };
-  }, [row, refresh]);
+  }, [row, packs, refresh]);
 
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }

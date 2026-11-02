@@ -3,10 +3,13 @@
 //   STAYSEE_ALLOW_PROD_TESTS=1 STAYSEE_TEST_USER_ID=<the technical user> node scripts/set-technical-plan.mjs free
 //   STAYSEE_ALLOW_PROD_TESTS=1 STAYSEE_TEST_USER_ID=<the technical user> node scripts/set-technical-plan.mjs free --used=41
 //   STAYSEE_ALLOW_PROD_TESTS=1 STAYSEE_TEST_USER_ID=<the technical user> node scripts/set-technical-plan.mjs premium
+//   ... free --used=50 --pack      (free, all 50 used, and one pack of 100 bought messages added)
 //
 // "free" is the real free plan: a fresh count of 50 messages, one conversation, no unlimited mark, so that the closed
 // doors can be seen. "--used=N" (free only, 0 to 50) sets how many of the 50 are already used, so that the counter, the
 // warning from ten messages left and the end of the messages can be looked at without spending real messages.
+// "--pack" (any plan) adds one pack of bought messages (migration 090) so that the counter and the spending order can be
+// looked at. Every run first voids the technical user's open packs, so the state is always exactly what was asked.
 // "premium" is the normal state of the technical user: premium, unlimited, 50 conversations.
 // ALWAYS go back to premium when the check is done.
 //
@@ -18,7 +21,7 @@ import { assertProdTestAllowed, makeServiceHeaders, restJson } from "./lib/prod-
 async function main() {
   const plan = process.argv[2];
   if (!["free", "premium"].includes(plan)) {
-    console.error("Usage: node scripts/set-technical-plan.mjs free|premium [--used=N (free only, 0 to 50)]");
+    console.error("Usage: node scripts/set-technical-plan.mjs free|premium [--used=N (free only, 0 to 50)] [--pack]");
     process.exitCode = 1;
     return;
   }
@@ -34,6 +37,8 @@ async function main() {
       return;
     }
   }
+
+  const wantPack = process.argv.slice(3).includes("--pack");
 
   const { url, serviceKey, testUserId } = assertProdTestAllowed();
   const headers = makeServiceHeaders(serviceKey);
@@ -57,6 +62,18 @@ async function main() {
       ...(used !== undefined ? { period_requests_used: used } : {}),
     }),
   });
+
+  // The technical user's packs are test packs: none left over from before, one new if asked.
+  try {
+    const open = (await restJson(url, headers, `message_packs?user_id=eq.${testUserId}&voided_at=is.null&messages_left=gt.0&select=id`)) ?? [];
+    for (const pack of open) await rpc("void_message_pack", { p_pack_id: pack.id });
+    if (wantPack) await rpc("grant_message_pack", { p_user_id: testUserId, p_messages: 100, p_payment_ref: `technical-test-${Date.now()}` });
+  } catch (error) {
+    // An older database has no packs table yet: that alone is not an error unless a pack was asked for. Anything else
+    // (a refused call, a broken connection) must not be passed over: the state would not be what was asked.
+    const noPacksTable = /PGRST205|message_packs/i.test(String(error?.message)) && /404|does not exist|schema cache/i.test(String(error?.message));
+    if (wantPack || !noPacksTable) throw error;
+  }
 
   const row = (await restJson(url, headers, `user_usage_tiers?user_id=eq.${testUserId}&select=tier,unlimited_usage,max_conversations_override,period_requests_used`))?.[0];
   console.log(`technical user is now: ${JSON.stringify(row)}`);

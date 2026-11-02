@@ -6,6 +6,8 @@ import { monthsPhrase, planFor } from './plans';
  * happen: a paid plan counts a period of its length from the first message; the free plan's messages come back
  * 3 calendar months after the last answered message; an unlimited account has no counter.
  *
+ * Bought messages (migration 090) are added to what is left: they are spent after the plan's own messages.
+ *
  * The hidden spending ceiling is not shown and not counted here: the person sees messages only.
  */
 
@@ -23,14 +25,26 @@ export interface UsageRow {
   max_conversations_override?: number | null;
 }
 
+/** A pack of bought messages as the database stores it; every column may be missing. */
+export interface PackRow {
+  messages_left?: number | null;
+  expires_at?: string | null;
+  voided_at?: string | null;
+}
+
 export interface MessageCounter {
   unlimited: boolean;
   total: number;
   used: number;
+  /** The plan's own messages left. */
   remaining: number;
+  /** Bought messages left (packs that are not expired and not voided). */
+  packRemaining: number;
+  /** Everything the person can still send: the plan's messages and the bought ones. */
+  available: number;
   /** When the messages are renewed or come back; null when nothing is known to renew (a fresh period). */
   renewsAt: Date | null;
-  /** True from WARN_AT_REMAINING messages left until the end. Never for an unlimited account. */
+  /** True from WARN_AT_REMAINING messages available until the end. Never for an unlimited account. */
   warn: boolean;
 }
 
@@ -53,7 +67,22 @@ function parseDate(value: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function messageCounter(row: UsageRow | null | undefined, now: Date = new Date()): MessageCounter | null {
+/** The bought messages that can still be spent: not used up, not voided, not expired. Same as reserve_ai_request. */
+export function packMessagesLeft(packs: PackRow[] | null | undefined, now: Date = new Date()): number {
+  let sum = 0;
+  for (const pack of packs ?? []) {
+    const left = Math.max(0, Math.floor(Number(pack.messages_left ?? 0)) || 0);
+    const expires = parseDate(pack.expires_at);
+    if (left > 0 && !pack.voided_at && expires && expires.getTime() > now.getTime()) sum += left;
+  }
+  return sum;
+}
+
+export function messageCounter(
+  row: UsageRow | null | undefined,
+  now: Date = new Date(),
+  packs: PackRow[] | null | undefined = null,
+): MessageCounter | null {
   if (!row) return null;
   const plan = planFor(row.tier);
   const total = plan.messages;
@@ -62,7 +91,8 @@ export function messageCounter(row: UsageRow | null | undefined, now: Date = new
   const lastRequest = parseDate(row.last_request_at);
 
   if (row.unlimited_usage === true) {
-    return { unlimited: true, total, used: stored, remaining: Math.max(0, total - stored), renewsAt: null, warn: false };
+    const left = Math.max(0, total - stored);
+    return { unlimited: true, total, used: stored, remaining: left, packRemaining: 0, available: left, renewsAt: null, warn: false };
   }
 
   let used = stored;
@@ -84,7 +114,9 @@ export function messageCounter(row: UsageRow | null | undefined, now: Date = new
   }
 
   const remaining = Math.max(0, total - used);
-  return { unlimited: false, total, used: Math.min(used, total), remaining, renewsAt, warn: remaining <= WARN_AT_REMAINING };
+  const packRemaining = packMessagesLeft(packs, now);
+  const available = remaining + packRemaining;
+  return { unlimited: false, total, used: Math.min(used, total), remaining, packRemaining, available, renewsAt, warn: available <= WARN_AT_REMAINING };
 }
 
 /** "сообщение", "сообщения", "сообщений" for the number. */
@@ -100,15 +132,18 @@ export function pluralMessages(count: number): string {
 /** The line of the counter in the cabinet. */
 export function counterLine(counter: MessageCounter): string {
   if (counter.unlimited) return 'Без ограничений';
-  if (counter.remaining === 0) return 'Сообщения закончились';
-  return `Осталось ${counter.remaining} из ${counter.total} ${pluralMessages(counter.total)}`;
+  if (counter.available === 0) return 'Сообщения закончились';
+  // The plan's messages are spent first; the bought ones are named on their own.
+  if (counter.packRemaining === 0) return `Осталось ${counter.remaining} из ${counter.total} ${pluralMessages(counter.total)}`;
+  if (counter.remaining === 0) return `Осталось ${counter.packRemaining} ${pluralMessages(counter.packRemaining)} из докупленных`;
+  return `Осталось ${counter.remaining} из ${counter.total} ${pluralMessages(counter.total)} · докупленных ${counter.packRemaining}`;
 }
 
 /** The warning above the composer, from ten messages left. */
 export function lowMessagesLine(counter: MessageCounter): string {
-  if (counter.remaining === 0) return 'Сообщения закончились';
-  if (counter.remaining === 1) return 'Остаётся 1 сообщение';
-  return `Осталось ${counter.remaining} ${pluralMessages(counter.remaining)}`;
+  if (counter.available === 0) return 'Сообщения закончились';
+  if (counter.available === 1) return 'Остаётся 1 сообщение';
+  return `Осталось ${counter.available} ${pluralMessages(counter.available)}`;
 }
 
 /** When the messages return or renew; an empty line when nothing is known. */

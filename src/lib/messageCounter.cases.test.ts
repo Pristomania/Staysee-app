@@ -10,6 +10,7 @@ import {
   counterLine,
   lowMessagesLine,
   messageCounter,
+  packMessagesLeft,
   pluralMessages,
   renewalLine,
 } from './messageCounter.ts';
@@ -103,6 +104,57 @@ const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).to
   const over = must({ tier: 'free', period_requests_used: 70, last_request_at: daysAgo(1), period_started_at: daysAgo(3) }, NOW);
   assert(over !== null && over.remaining === 0, 'more than the plan gives is zero left, never negative');
 }
+
+// ── bought messages (migration 090): spent after the plan's, counted with it ─────────────────────────────
+{
+  const future = new Date(NOW.getTime() + 100 * 86_400_000).toISOString();
+  const past = daysAgo(1);
+  const free = { tier: 'free', period_requests_used: 30, last_request_at: daysAgo(1), period_started_at: daysAgo(5) };
+
+  // only packs that are not used up, not voided and not expired count
+  assert(packMessagesLeft([{ messages_left: 60, expires_at: future }, { messages_left: 40, expires_at: future }], NOW) === 100, 'packs add up');
+  assert(packMessagesLeft([{ messages_left: 50, expires_at: past }], NOW) === 0, 'an expired pack is nothing');
+  assert(packMessagesLeft([{ messages_left: 50, expires_at: future, voided_at: past }], NOW) === 0, 'a voided pack is nothing');
+  assert(packMessagesLeft([{ messages_left: 0, expires_at: future }], NOW) === 0, 'an empty pack is nothing');
+  assert(packMessagesLeft([{ messages_left: 5 }], NOW) === 0, 'a pack with no end date is not trusted');
+  assert(packMessagesLeft(null, NOW) === 0 && packMessagesLeft(undefined, NOW) === 0 && packMessagesLeft([], NOW) === 0, 'no packs');
+
+  const none = must(free, NOW);
+  assert(none.packRemaining === 0 && none.available === 20 && none.remaining === 20, 'without packs nothing changes');
+  assert(counterLine(none) === 'Осталось 20 из 50 сообщений', counterLine(none));
+
+  const withPack = messageCounter(free, NOW, [{ messages_left: 100, expires_at: future }]);
+  assert(withPack !== null && withPack.remaining === 20 && withPack.packRemaining === 100 && withPack.available === 120, 'plan and bought messages are counted apart and together');
+  assert(counterLine(withPack) === 'Осталось 20 из 50 сообщений · докупленных 100', counterLine(withPack));
+  assert(withPack.warn === false, 'no warning while the bought messages are plenty');
+  assert(lowMessagesLine(withPack) === 'Осталось 120 сообщений', 'the warning line speaks of everything available');
+
+  // the plan is spent, the pack goes on
+  const spent = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 100, expires_at: future }]);
+  assert(spent !== null && spent.remaining === 0 && spent.available === 100, 'plan spent, pack left');
+  assert(counterLine(spent) === 'Осталось 100 сообщений из докупленных', counterLine(spent));
+  const one = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 1, expires_at: future }]);
+  assert(one !== null && one.warn && lowMessagesLine(one) === 'Остаётся 1 сообщение', 'the last bought message warns');
+
+  // the warning starts from ten of everything
+  const low = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 10, expires_at: future }]);
+  assert(low !== null && low.warn && lowMessagesLine(low) === 'Осталось 10 сообщений', 'ten bought messages warn');
+  const enough = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 11, expires_at: future }]);
+  assert(enough !== null && !enough.warn, 'eleven do not');
+
+  // everything gone
+  const gone = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 0, expires_at: future }]);
+  assert(gone !== null && gone.available === 0 && counterLine(gone) === 'Сообщения закончились' && gone.warn, 'nothing left at all is the end');
+
+  // the free messages come back after three idle months, the bought ones are not touched by that
+  const renewed = messageCounter({ tier: 'free', period_requests_used: 50, last_request_at: daysAgo(100), period_started_at: daysAgo(200) }, NOW, [{ messages_left: 100, expires_at: future }]);
+  assert(renewed !== null && renewed.remaining === 50 && renewed.packRemaining === 100, 'a renewal gives the plan back and keeps the pack');
+
+  // an unlimited account has no counter of bought messages
+  const unlimited = messageCounter({ tier: 'premium', unlimited_usage: true, period_requests_used: 5 }, NOW, [{ messages_left: 100, expires_at: future }]);
+  assert(unlimited !== null && unlimited.unlimited && unlimited.packRemaining === 0 && !unlimited.warn, 'unlimited stays unlimited');
+}
+
 
 // ── plural ───────────────────────────────────────────────────────────────────────────────────────────
 assert(pluralMessages(1) === 'сообщение' && pluralMessages(2) === 'сообщения' && pluralMessages(5) === 'сообщений', 'plural 1 2 5');

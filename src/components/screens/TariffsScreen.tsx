@@ -4,7 +4,7 @@ import { usePlan } from '../../context/PlanContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PAYMENT_AVAILABLE } from '../../lib/payments';
 import { counterLine, renewalLine } from '../../lib/messageCounter';
-import { PAYMENT_STATUS_LINE, planRows, priceLine } from '../../lib/planCopy';
+import { PACK_TITLE, PAYMENT_STATUS_LINE, packPriceLine, packRows, planRows, priceLine } from '../../lib/planCopy';
 import { PLANS, type PlanId } from '../../lib/plans';
 import { ScreenBackHeader, StickyScreenLayout } from '../layout';
 
@@ -89,6 +89,26 @@ export function TariffsScreen() {
             </section>
           );
         })}
+        {/* Bought messages: for any plan, spent after the plan's own. Like the plans' buttons, this cannot take money yet. */}
+        <section data-pack className={`${card} px-5 py-5`}>
+          <p className={`${theme.textPrimary} mb-1 text-base font-light`}>{PACK_TITLE}</p>
+          <p className={`${theme.textSecondary} mb-4 text-sm font-light`}>{packPriceLine()}</p>
+          <ul className="mb-4 space-y-2">
+            {packRows().map((text) => (
+              <li key={text} className="flex items-start gap-2.5">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#c9a96e]" strokeWidth={1.8} />
+                <span className={`${theme.textSecondary} text-sm font-light`}>{text}</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            disabled
+            className={`w-full rounded-xl border py-3 text-sm font-light transition-all duration-200 disabled:opacity-50 ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover} ${theme.btnText}`}
+          >
+            Оплата скоро
+          </button>
+        </section>
         {!PAYMENT_AVAILABLE && (
           <p className={`${theme.textSecondary} text-center text-xs font-light`}>{PAYMENT_STATUS_LINE}</p>
         )}

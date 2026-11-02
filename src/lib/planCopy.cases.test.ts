@@ -4,7 +4,7 @@
  */
 
 import { PLANS } from './plans.ts';
-import { LOCKED_LABEL, PAYWALL_GO, PAYWALL_LATER, PAYMENT_STATUS_LINE, priceLine, planRows } from './planCopy.ts';
+import { LOCKED_LABEL, PACK_TITLE, PAYWALL_GO, PAYWALL_LATER, PAYMENT_STATUS_LINE, packPriceLine, packRows, priceLine, planRows } from './planCopy.ts';
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -43,5 +43,14 @@ assert(premium.includes('+ 6 бесед'), 'premium: six conversations');
 assert(premium.includes('+ Голосовой ввод') && !premium.some((row) => /с ИИ/.test(row)), 'premium voice: no promise of the AI input yet');
 
 assert(/Оплата скоро/.test(PAYMENT_STATUS_LINE), PAYMENT_STATUS_LINE);
+
+// The bought messages: what they cost, when they are spent, how long they live, for whom.
+assert(PACK_TITLE === 'Докупить сообщения', PACK_TITLE);
+assert(packPriceLine() === '590 ₽ за 100 сообщений', packPriceLine());
+const pack = packRows();
+assert(pack.includes('Тратятся после сообщений вашего тарифа'), 'pack: spent after the plan');
+assert(pack.includes('Действуют 12 месяцев'), 'pack: twelve months');
+assert(pack.includes('Подходят к любому тарифу, и к бесплатному'), 'pack: any plan');
+assert(![PACK_TITLE, packPriceLine(), ...pack].some((line) => /\$|потол|себестоим/i.test(line)), 'pack: nothing about the hidden money');
 
 console.log('All planCopy cases passed.');
