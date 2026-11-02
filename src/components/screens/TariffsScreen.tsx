@@ -39,7 +39,7 @@ export function TariffsScreen() {
             {current.label} · {counterLine(counter)}
           </p>
           {renewalLine(counter, tier) && (
-            <p className={`${theme.textMuted} mt-1 text-xs font-light opacity-85`}>{renewalLine(counter, tier)}</p>
+            <p className={`${theme.textSecondary} mt-1 text-xs font-light`}>{renewalLine(counter, tier)}</p>
           )}
         </div>
       )}
@@ -68,7 +68,7 @@ export function TariffsScreen() {
                     ) : (
                       <Lock className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${theme.textMuted} opacity-60`} strokeWidth={1.5} />
                     )}
-                    <span className={`${row.included ? theme.textSecondary : `${theme.textMuted} opacity-70`} text-sm font-light`}>
+                    <span className={`${theme.textSecondary} ${row.included ? '' : 'opacity-75'} text-sm font-light`}>
                       {row.text}
                     </span>
                   </li>
@@ -90,7 +90,7 @@ export function TariffsScreen() {
           );
         })}
         {!PAYMENT_AVAILABLE && (
-          <p className={`${theme.textMuted} text-center text-xs font-light opacity-85`}>{PAYMENT_STATUS_LINE}</p>
+          <p className={`${theme.textSecondary} text-center text-xs font-light`}>{PAYMENT_STATUS_LINE}</p>
         )}
       </div>
     </StickyScreenLayout>

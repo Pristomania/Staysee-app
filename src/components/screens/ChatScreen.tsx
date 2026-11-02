@@ -1534,7 +1534,7 @@ ${built.message}` : built.message));
               <LowMessagesNotice counter={counter} />
             )}
             {sendError && (
-              <p className={`text-xs font-light mb-2 px-1 ${theme.textMuted}`} role="status">
+              <p className={`text-xs font-light mb-2 px-1 leading-relaxed ${theme.textSecondary}`} role="status">
                 {sendError}
               </p>
             )}

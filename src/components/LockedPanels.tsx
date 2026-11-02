@@ -19,7 +19,7 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
     <>
       <section className="mb-8">
         <p className={sectionLabel}>Память этой беседы</p>
-        <p className={`${theme.textMuted} mb-3 text-xs font-light leading-relaxed opacity-85`}>{MEMORY_HINT}</p>
+        <p className={`${theme.textSecondary} mb-3 text-xs font-light leading-relaxed`}>{MEMORY_HINT}</p>
       </section>
 
       <section>
@@ -29,7 +29,7 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
             <Link2 className={`mt-0.5 h-4 w-4 shrink-0 ${theme.textMuted}`} strokeWidth={1.5} />
             <div className="min-w-0 flex-1">
               <p className={`${theme.textPrimary} text-sm font-light`}>Сквозная память</p>
-              <p className={`${theme.textMuted} text-xs font-light opacity-85`}>{MEMORY_HINT}</p>
+              <p className={`${theme.textSecondary} text-xs font-light`}>{MEMORY_HINT}</p>
             </div>
           </div>
           {/* The button stands right at the switch it explains. */}
@@ -52,15 +52,18 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
   );
 }
 
-/** A section of a plan that does not have it: its name, what it is, and the "after payment" button. */
-export function LockedFeaturePanel({ title, hint }: { title: string; hint: string }) {
+/**
+ * A section of a plan that does not have it: what it is, and the "after payment" button. The name is given only where
+ * the screen does not already say it in its own header.
+ */
+export function LockedFeaturePanel({ title, hint }: { title?: string; hint: string }) {
   const { theme } = useTheme();
   const { openPaywall } = usePaywall();
   return (
     <div className={`flex items-center gap-3 rounded-xl border px-4 py-4 ${theme.surface} ${theme.border}`}>
       <div className="min-w-0 flex-1">
-        <p className={`${theme.textPrimary} text-sm font-light`}>{title}</p>
-        <p className={`${theme.textMuted} text-xs font-light leading-relaxed opacity-85`}>{hint}</p>
+        {title && <p className={`${theme.textPrimary} text-sm font-light`}>{title}</p>}
+        <p className={`${theme.textSecondary} text-xs font-light leading-relaxed`}>{hint}</p>
       </div>
       <LockedBadge onClick={openPaywall} />
     </div>
