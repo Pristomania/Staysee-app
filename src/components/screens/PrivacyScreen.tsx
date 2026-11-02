@@ -237,8 +237,8 @@ export function PrivacyScreen() {
     if (deleteMemoryV3State !== 'confirming') return;
     setDeleteMemoryV3State('loading');
     try {
-      // The same "all memory" as on the free plan: between conversations, inside them, the corrections, the old table.
-      if (!(await deleteAllMemory(user.id, supabaseAccountDataDeps))) throw new Error('delete_all_failed');
+      // The same "all memory" as on the free plan, one server call: every kind of memory and what was built around it.
+      if (!(await deleteAllMemory(supabaseAccountDataDeps))) throw new Error('delete_all_failed');
       setDeleteMemoryV3State('done');
     } catch {
       setDeleteMemoryV3State('error');

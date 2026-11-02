@@ -64,7 +64,7 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
           doneText={ROOM_COPY.deleteMemoryDone}
           confirmGoes={ROOM_COPY.deleteMemoryConfirmGoes}
           confirmStays={ROOM_COPY.deleteMemoryConfirmStays}
-          onRun={async () => (user ? deleteAllMemory(user.id, supabaseAccountDataDeps) : false)}
+          onRun={async () => (user ? deleteAllMemory(supabaseAccountDataDeps) : false)}
         />
       </section>
     </>
