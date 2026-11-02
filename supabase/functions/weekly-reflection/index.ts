@@ -4,6 +4,7 @@ import { checkRateLimit, CALM_ERRORS } from "../_shared/cost.ts";
 import { resolveApprovedUtilityModel } from "../_shared/approvedModels.ts";
 import { generateWeeklyReflectionText } from "../_shared/weeklyReflection.ts";
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
+import { isFeatureAvailable } from "../_shared/plans.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,6 +88,14 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ error: rate.reason ?? "rate_limit", text: null }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // The weekly reflection is part of the conversation dynamics, which the free plan does not have.
+    if (!isFeatureAvailable(rate.tier, "conversationDynamics")) {
+      return new Response(
+        JSON.stringify({ error: "not_in_plan", feature: "conversationDynamics", text: null }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

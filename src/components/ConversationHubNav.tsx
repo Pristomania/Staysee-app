@@ -1,14 +1,17 @@
+import { Lock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { usePlan } from '../context/PlanContext';
 import { useTheme } from '../context/ThemeContext';
 import { DYNAMICS_COPY } from '../lib/dynamicsCopy';
+import type { PlanFeature } from '../lib/plans';
 import type { Screen } from '../types';
 
 export type ConversationHubTab = 'chat' | 'memory' | 'dynamics' | 'notes';
 
-const TAB_CONFIG: { id: ConversationHubTab; label: string; screen: Screen }[] = [
+const TAB_CONFIG: { id: ConversationHubTab; label: string; screen: Screen; feature?: PlanFeature }[] = [
   { id: 'chat', label: DYNAMICS_COPY.hubChat, screen: 'chat' },
-  { id: 'memory', label: DYNAMICS_COPY.hubMemory, screen: 'memory' },
-  { id: 'dynamics', label: DYNAMICS_COPY.hubDynamics, screen: 'conversation-dynamics' },
+  { id: 'memory', label: DYNAMICS_COPY.hubMemory, screen: 'memory', feature: 'crossMemory' },
+  { id: 'dynamics', label: DYNAMICS_COPY.hubDynamics, screen: 'conversation-dynamics', feature: 'conversationDynamics' },
   { id: 'notes', label: DYNAMICS_COPY.hubNotes, screen: 'conversation-notes' },
 ];
 
@@ -21,6 +24,7 @@ export function ConversationHubNav({
 }) {
   const { theme } = useTheme();
   const { navigateTo, currentConversation } = useApp();
+  const { has } = usePlan();
 
   if (!show || !currentConversation?.id) return null;
 
@@ -31,6 +35,8 @@ export function ConversationHubNav({
     >
       {TAB_CONFIG.map((tab) => {
         const isActive = tab.id === active;
+        // A closed section stays in the row, marked, and opens to the "after payment" view.
+        const locked = tab.feature ? !has(tab.feature) : false;
         return (
           <button
             key={tab.id}
@@ -52,7 +58,10 @@ export function ConversationHubNav({
                 : `${theme.textMuted} hover:opacity-100 opacity-75`}
             `}
           >
-            <span className="block truncate">{tab.label}</span>
+            <span className="block truncate">
+              {tab.label}
+              {locked && <Lock className="ml-1 inline h-2.5 w-2.5 text-[#c9a96e]" strokeWidth={2} />}
+            </span>
           </button>
         );
       })}

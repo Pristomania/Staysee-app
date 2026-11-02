@@ -61,6 +61,7 @@ export type Screen =
   | 'memory'
   | 'conversation-dynamics'
   | 'conversation-notes'
+  | 'tariffs'
   | 'privacy'
   | 'disclaimer'
   | 'terms'

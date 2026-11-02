@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { usePlan } from '../../context/PlanContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -12,8 +13,7 @@ import { filterVisibleConversations } from '../../lib/conversationFilters';
 import {
   canCreateRoom,
   getConversationFetchLimit,
-  getMaxRooms,
-  hasUnlimitedRooms,
+  roomLimitNotice,
 } from '../../lib/roomLimits';
 
 interface Modal {
@@ -23,6 +23,7 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
+  const { tier, loaded: planLoaded, maxConversations } = usePlan();
   const { navigateTo, setMessages, conversations, setConversations } = useApp();
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
@@ -32,6 +33,7 @@ export function MainScreen() {
   const [modal, setModal] = useState<Modal | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const limitTimerRef = useRef<number | undefined>(undefined);
 
   const fetchConversations = useCallback(async () => {
     if (!user) return;
@@ -41,10 +43,10 @@ export function MainScreen() {
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('last_message_at', { ascending: false })
-      .limit(getConversationFetchLimit(user.id));
+      .limit(getConversationFetchLimit(maxConversations));
     setConversations(filterVisibleConversations(data || []));
     setLoading(false);
-  }, [setConversations, user]);
+  }, [maxConversations, setConversations, user]);
 
   useEffect(() => {
     void fetchConversations();
@@ -93,17 +95,29 @@ export function MainScreen() {
     navigateTo('chat', { conversation: conv });
   }
 
+  useEffect(() => () => window.clearTimeout(limitTimerRef.current), []);
+
+  function showLimitNotice() {
+    setLimitReached(true);
+    window.clearTimeout(limitTimerRef.current);
+    limitTimerRef.current = window.setTimeout(() => setLimitReached(false), 8000);
+  }
+
   async function createNewRoom() {
-    if (!canCreateRoom(user?.id, conversations.length)) {
-      setLimitReached(true);
-      setTimeout(() => setLimitReached(false), 4000);
+    // Until the plan is read the server decides: it refuses a place above the number of the plan.
+    if (planLoaded && !canCreateRoom(conversations.length, maxConversations)) {
+      showLimitNotice();
       return;
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('conversations')
       .insert({ user_id: user!.id, title: '' })
       .select()
       .maybeSingle();
+    if (error && /conversation_limit_reached/.test(error.message)) {
+      showLimitNotice();
+      return;
+    }
     if (data) {
       setMessages([greetingFor(data.id)]);
       navigateTo('chat', { conversation: data });
@@ -171,10 +185,10 @@ export function MainScreen() {
         </div>
 
       {/* Limit notice */}
-      {limitReached && !hasUnlimitedRooms(user?.id) && (
+      {limitReached && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
-            Пока можно открыть до пяти бесед. Можно вернуться в одну из уже начатых.
+            {roomLimitNotice(tier)}
           </p>
         </div>
       )}
@@ -269,7 +283,7 @@ export function MainScreen() {
               );
             })}
 
-            {conversations.length < getMaxRooms(user?.id) && (
+            {(
               <button
                 type="button"
                 onClick={createNewRoom}

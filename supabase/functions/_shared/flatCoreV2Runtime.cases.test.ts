@@ -17,7 +17,7 @@ import {
   analyzeResponseDepth,
 } from "./responseDepthTrajectory.ts";
 
-const TIER_CEILING = { free: 1600, basic: 1200, premium: 1800 } as const;
+const TIER_CEILING = { free: 1200, basic: 1600, premium: 2000 } as const;
 const DEPTH_TOKEN_TARGET = { brief: 380, medium: 900, deep: 1600 } as const;
 const OUTPUT_TOKEN_CEILING_GUIDANCE =
   "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
@@ -75,7 +75,7 @@ console.log("\n=== flat budget — tier ceiling, not depth target ===\n");
 
 for (const label of ["brief", "medium", "deep"]) {
   const budget = flatBudgetMaxTokens("free");
-  assert(budget === TIER_CEILING.free, `flat free ${label} → maxTokens=${budget} (ceiling 1600)`);
+  assert(budget === TIER_CEILING.free, `flat free ${label} → maxTokens=${budget} (ceiling 1200)`);
   assert(budget !== 380 && budget !== 900, `flat free ${label} → not depth target 380/900`);
 }
 

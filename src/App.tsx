@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppProvider, useApp } from './context/AppContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { PlanProvider } from './context/PlanContext';
+import { PaywallProvider } from './context/PaywallContext';
 import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
 import {
   WelcomeScreen,
@@ -19,6 +21,7 @@ import {
   TermsScreen,
   PrivacyPolicyScreen,
   ConsentScreen,
+  TariffsScreen,
 } from './components/screens';
 
 const LOADING_RESET_MS = 8000;
@@ -156,6 +159,7 @@ function AppContent() {
       case 'chat':      return user ? <ChatScreen /> : <WelcomeScreen />;
       case 'profile':   return user ? <ProfileScreen /> : <WelcomeScreen />;
       case 'memory':    return user ? <MemoryScreen /> : <WelcomeScreen />;
+      case 'tariffs':   return user ? <TariffsScreen /> : <WelcomeScreen />;
       case 'conversation-dynamics':
         return user ? <ConversationDynamicsScreen /> : <WelcomeScreen />;
       case 'conversation-notes':
@@ -175,11 +179,15 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppProvider>
-        <ThemeProvider>
-          <AppContent />
-        </ThemeProvider>
-      </AppProvider>
+      <PlanProvider>
+        <AppProvider>
+          <ThemeProvider>
+            <PaywallProvider>
+              <AppContent />
+            </PaywallProvider>
+          </ThemeProvider>
+        </AppProvider>
+      </PlanProvider>
     </AuthProvider>
   );
 }

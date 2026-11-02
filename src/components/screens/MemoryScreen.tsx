@@ -10,6 +10,8 @@ import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
 import { CrossMemoryToggle } from '../CrossMemoryToggle';
 import { ConversationCrossMemoryToggle } from '../ConversationCrossMemoryToggle';
+import { LockedMemoryPanel } from '../LockedPanels';
+import { usePlan } from '../../context/PlanContext';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { isCrossMemoryEnabled } from '../../lib/profileSettings';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
@@ -313,6 +315,7 @@ export function MemoryScreen() {
   const capabilities = resolveMemoryScreenCapabilities(memoryReturnScreen);
   const { theme } = useTheme();
   const sectionLabel = useSectionLabelClass();
+  const { has: planHas } = usePlan();
 
   const [convOptions, setConvOptions] = useState<ConvOption[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(
@@ -705,6 +708,10 @@ export function MemoryScreen() {
           </div>
         ) : (
           <>
+            {!planHas('crossMemory') ? (
+              <LockedMemoryPanel cardBase={cardBase} />
+            ) : (
+            <>
             <div className={`${cardBase} px-4 py-3.5 mb-4`}>
               {!exportChoiceOpen ? (
                 <button
@@ -1047,6 +1054,8 @@ export function MemoryScreen() {
                 </details>
               )}
             </section>
+            )}
+            </>
             )}
           </>
         )}
