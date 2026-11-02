@@ -385,7 +385,7 @@ export function PrivacyScreen() {
 
               <DeleteAction
                 title="Удалить всю память"
-                description="Удалит и сквозную память, и память бесед одновременно. Сами беседы останутся."
+                description="Удалит сквозную память, память бесед и сохранённые поправки. Сами беседы останутся."
                 doneText="Вся память удалена."
                 state={deleteMemoryV3State}
                 onStart={handleDeleteMemoryV3}

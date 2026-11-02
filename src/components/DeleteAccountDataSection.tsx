@@ -20,6 +20,8 @@ export function DeleteAccountDataSection() {
       hint={ROOM_COPY.deleteDataHint}
       buttonLabel={ROOM_COPY.deleteDataButton}
       doneText={ROOM_COPY.deleteDataDone}
+      confirmGoes={ROOM_COPY.deleteDataConfirmGoes}
+      confirmStays={ROOM_COPY.deleteDataConfirmStays}
       onRun={async () => {
         if (!user) return false;
         const ok = await deleteAccountData(user.id, supabaseAccountDataDeps);

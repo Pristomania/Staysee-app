@@ -1,5 +1,5 @@
 /**
- * Run: npx tsx src/lib/deleteAccountDataDeps.cases.test.ts
+ * Run: npx tsx supabase/functions/_shared/deleteAccountDataDeps.cases.test.ts
  * What the real steps of "delete the data of the account" touch: the person's memory, notes and conversations, and
  * nothing that is the plan's: no plan, counter, bought messages or consents. Read from the source, because the steps
  * need a database to run.
@@ -11,7 +11,7 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
 }
 
-const source = readFileSync(new URL('./deleteAccountDataDeps.ts', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../../../src/lib/deleteAccountDataDeps.ts', import.meta.url), 'utf8');
 
 // Every part of the memory and the data is reached, each in its own way.
 for (const part of [
@@ -25,7 +25,7 @@ for (const part of [
 }
 
 // ... and the caller asks for both memory scopes.
-const rules = readFileSync(new URL('./deleteAccountData.ts', import.meta.url), 'utf8');
+const rules = readFileSync(new URL('../../../src/lib/deleteAccountData.ts', import.meta.url), 'utf8');
 assert(rules.includes("deps.deleteMemoryV3('account_wide')") && rules.includes("deps.deleteMemoryV3('dialogue')"), 'both memory scopes are deleted');
 
 // Nothing that belongs to the plan or to the money.
