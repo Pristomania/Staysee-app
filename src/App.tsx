@@ -6,6 +6,7 @@ import { PlanProvider } from './context/PlanContext';
 import { PaywallProvider } from './context/PaywallContext';
 import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
 import { hasAuthCallbackNotice } from './lib/authCallbackNotice';
+import { hasRoomDeletedNotice } from './lib/roomDeletedNotice';
 import {
   WelcomeScreen,
   LoginScreen,
@@ -92,8 +93,9 @@ function AppContent() {
     if (passwordRecoveryPending || currentScreen === 'reset-password') return;
 
     if (!user) {
-      // Came from the link in the confirmation email and was not let in: the sign-in screen, with a line saying why.
-      if (currentScreen === 'welcome' && hasAuthCallbackNotice()) {
+      // Came from the link in the confirmation email and was not let in, or signed in to a deleted room: the sign-in
+      // screen, with a line saying why.
+      if (currentScreen === 'welcome' && (hasAuthCallbackNotice() || hasRoomDeletedNotice())) {
         replaceNavigation('login');
         return;
       }

@@ -29,6 +29,6 @@ assert(/!user[\s\S]{0,300}hasAuthCallbackNotice\(\)/.test(app), 'only when nobod
 // The sign-in screen shows it once.
 assert(/peekAuthCallbackNotice\(\)/.test(login) && /AUTH_NOTICE_COPY/.test(login), 'the sign-in screen shows the notice');
 // StrictMode builds a screen twice, so the notice is read without being used up and forgotten after the screen is up.
-assert(/useEffect\(\(\) => \{\s*forgetAuthCallbackNotice\(\);\s*\}, \[\]\)/.test(login), 'and forgets it once the screen is up, so it is shown once');
+assert(/useEffect\(\(\) => \{\s*forgetAuthCallbackNotice\(\);[\s\S]{0,80}\}, \[\]\)/.test(login), 'and forgets it once the screen is up, so it is shown once');
 
 console.log('All authCallbackNoticeWiring cases passed.');
