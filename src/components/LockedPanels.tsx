@@ -15,7 +15,7 @@ const MEMORY_HINT = 'Факты будут видны после оплаты.';
  * The memory screen of a plan without memory between conversations. The person sees the sections and the switch, and
  * understands that they open after payment: the switch itself carries the "after payment" button.
  */
-export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
+export function LockedMemoryPanel({ cardBase, onMemoryDeleted }: { cardBase: string; onMemoryDeleted?: () => void }) {
   const { theme } = useTheme();
   const { openPaywall } = usePaywall();
   const { user } = useAuth();
@@ -64,7 +64,12 @@ export function LockedMemoryPanel({ cardBase }: { cardBase: string }) {
           doneText={ROOM_COPY.deleteMemoryDone}
           confirmGoes={ROOM_COPY.deleteMemoryConfirmGoes}
           confirmStays={ROOM_COPY.deleteMemoryConfirmStays}
-          onRun={async () => (user ? deleteAllMemory(supabaseAccountDataDeps) : false)}
+          onRun={async () => {
+            const done = user ? await deleteAllMemory(supabaseAccountDataDeps) : false;
+            // The counters on the screen drop to zero at once, not after a refresh.
+            if (done) onMemoryDeleted?.();
+            return done;
+          }}
         />
       </section>
     </>

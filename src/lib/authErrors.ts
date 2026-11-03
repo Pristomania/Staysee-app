@@ -1,3 +1,5 @@
+import { ROOM_COPY } from './roomCopy';
+
 const AUTH_REQUEST_TIMEOUT_MS = 25_000;
 
 /** Reject if Supabase Auth does not respond (stuck spinner on forms). */
@@ -29,7 +31,7 @@ export function mapSignUpError(message: string): string {
     return 'Слишком много попыток. Подождите несколько минут.';
   }
   if (m.includes('already registered') || m.includes('already been registered')) {
-    return 'Комната с этим email уже есть. Войдите или восстановите пароль.';
+    return ROOM_COPY.roomExistsEmail;
   }
   if (m.includes('password') && (m.includes('weak') || m.includes('short'))) {
     return 'Пароль слишком простой. Используйте не менее 6 символов.';

@@ -5,7 +5,9 @@ export const ROOM_COPY = {
   createRoom: 'Создать комнату',
   alreadyHaveRoom: 'У меня уже есть комната',
   leaveRoom: 'Выйти из комнаты',
-  roomExistsEmail: 'Комната с этим email уже есть. Войдите или на экране входа — «Забыли пароль?».',
+  // Also true for a room deleted in the last 14 days: its sign-in record is erased by the daily clean-up after that.
+  roomExistsEmail:
+    'С этим email уже связана комната: действующая или удалённая меньше 14 дней назад. Действующую можно открыть через вход или «Забыли пароль?». Адрес удалённой освободится через 14 дней после удаления.',
   resetEmailHint: 'Если комната с этим email есть — на почту придёт письмо StaySee AI со ссылкой для нового пароля.',
   contextTitle: 'Контекст',
   contextSubtitle: 'Оформление, память и ваше пространство',
@@ -41,5 +43,6 @@ export const ROOM_COPY = {
   deleteRoomSubmit: 'Удалить без восстановления',
   deleteRoomCancel: 'Отмена',
   deleteRoomDone: 'Комната удалена. Через 14 дней исчезнет и запись для входа.',
-  roomDeletedLogin: 'Эта комната удалена. Восстановление невозможно.',
+  roomDeletedLogin:
+    'Эта комната удалена, восстановить её нельзя. Новую комнату на этот email можно будет создать через 14 дней после удаления.',
 } as const;

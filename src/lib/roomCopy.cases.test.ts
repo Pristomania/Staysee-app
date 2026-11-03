@@ -4,6 +4,7 @@
  * the plan, the messages left and the bought messages stay. No money, no numbers.
  */
 
+import { mapSignUpError } from './authErrors.ts';
 import { ROOM_COPY } from './roomCopy.ts';
 
 function assert(cond: unknown, msg: string): asserts cond {
@@ -28,5 +29,17 @@ assert(memoryStays.includes('беседы') && memoryStays.includes('запис�
 for (const text of [goes, stays, memory, memoryStays]) {
   assert(!/₽|\$|руб|потол|себестоим/i.test(text), 'no money in these texts');
 }
+
+// A deleted room keeps its sign-in record for 14 days, so the same address is "taken" for that long. The hint must not
+// send someone who deleted the room to sign in or reset the password (that cannot bring it back).
+const taken = ROOM_COPY.roomExistsEmail.toLowerCase();
+assert(taken.includes('удал') && taken.includes('14'), 'the "address is taken" text covers a room deleted within 14 days');
+assert(taken.includes('забыли пароль'), 'it still helps whoever has a live room');
+assert(mapSignUpError('User already registered') === ROOM_COPY.roomExistsEmail, 'the sign-up error uses the same text');
+assert(mapSignUpError('Email address has already been registered') === ROOM_COPY.roomExistsEmail, 'also the other wording of the same error');
+
+const deletedLogin = ROOM_COPY.roomDeletedLogin.toLowerCase();
+assert(deletedLogin.includes('удалена') && deletedLogin.includes('нельзя'), 'signing in to a deleted room says it is gone for good');
+assert(deletedLogin.includes('14'), 'and when the address becomes free again');
 
 console.log('All roomCopy cases passed.');
