@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { DATA_TABLES, KEPT_TABLES, isFreshAccount, maskEmail, rangeTotal, summarize } from "./check-test-account-data.mjs";
+import { DATA_TABLES, KEPT_TABLES, freshHours, isFreshAccount, maskEmail, rangeTotal, summarize } from "./check-test-account-data.mjs";
 
 const source = readFileSync(new URL("./check-test-account-data.mjs", import.meta.url), "utf8");
 
@@ -27,8 +27,26 @@ describe("the check of a test account's data", () => {
     assert.equal(isFreshAccount("2026-10-18T15:24:21Z", now), false, "an old account");
     assert.equal(isFreshAccount("2026-11-03T00:00:00Z", now), false, "a date in the future");
     assert.equal(isFreshAccount("not a date", now), false);
-    assert.ok(source.indexOf("isFreshAccount(account.created_at)") < source.indexOf("await report("), "the freshness check comes before anything is read");
+    assert.ok(source.indexOf("isFreshAccount(account.created_at,") < source.indexOf("await report("), "the freshness check comes before anything is read");
     assert.match(source, /STAYSEE_ALLOW_PROD_TESTS/, "production checks must be allowed explicitly");
+  });
+
+  it("can be told on purpose to look at a test account up to 72 hours old, never further", () => {
+    assert.equal(freshHours(undefined), 24, "by default a day");
+    assert.equal(freshHours(""), 24);
+    assert.equal(freshHours("48"), 48);
+    assert.equal(freshHours("72"), 72);
+    assert.throws(() => freshHours("73"), /72/, "more than three days is refused");
+    assert.throws(() => freshHours("0"));
+    assert.throws(() => freshHours("-5"));
+    assert.throws(() => freshHours("many"));
+    assert.throws(() => freshHours("24.5"));
+    const now = new Date("2026-11-03T20:30:00Z");
+    assert.equal(isFreshAccount("2026-11-02T19:42:31Z", now), false, "a day and a bit: refused by default");
+    assert.equal(isFreshAccount("2026-11-02T19:42:31Z", now, 48), true, "allowed with the explicit window");
+    assert.equal(isFreshAccount("2026-10-30T19:00:00Z", now, 72), false, "four days old stays refused even with the largest window");
+    assert.match(source, /STAYSEE_CHECK_MAX_AGE_HOURS/, "the window comes from an explicit variable");
+    assert.ok(source.indexOf("freshHours(process.env") < source.indexOf("isFreshAccount(account.created_at"), "the window is read before the check");
   });
 
   it("reads the counts from a content-range header", () => {

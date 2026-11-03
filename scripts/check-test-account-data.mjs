@@ -5,6 +5,7 @@
 //   STAYSEE_ALLOW_PROD_TESTS=1 STAYSEE_CHECK_EMAIL=<the mailbox the test account was made with> node scripts/check-test-account-data.mjs
 //
 // It looks only at an account created in the last 24 hours, so a wrong address can never show the data of a real person.
+// A journey that runs over midnight can say so: STAYSEE_CHECK_MAX_AGE_HOURS=48 (a whole number, at most 72).
 // The address is shown masked. It writes nothing.
 import { pathToFileURL } from "node:url";
 import { getServiceKey, getSupabaseUrl, isProdSupabaseUrl, loadEnvFile, makeServiceHeaders } from "./lib/prod-test-env.mjs";
@@ -42,17 +43,28 @@ export const DATA_TABLES = [
 export const KEPT_TABLES = ["user_usage_tiers", "message_packs", "user_consents", "ai_usage_log", "ai_usage_logs"];
 
 const FRESH_HOURS = 24;
+const FRESH_HOURS_LIMIT = 72;
+
+/** A day by default. A longer window (up to 72 hours) only when it is asked for on purpose, for a journey that runs over midnight. */
+export function freshHours(value) {
+  if (value === undefined || String(value).trim() === "") return FRESH_HOURS;
+  const hours = Number(value);
+  if (!Number.isInteger(hours) || hours < 1 || hours > FRESH_HOURS_LIMIT) {
+    throw new Error(`STAYSEE_CHECK_MAX_AGE_HOURS must be a whole number from 1 to ${FRESH_HOURS_LIMIT}`);
+  }
+  return hours;
+}
 
 export function maskEmail(email) {
   const [name = "", domain = ""] = String(email).split("@");
   return `${name.slice(0, 1)}***@${domain}`;
 }
 
-export function isFreshAccount(createdAt, now = new Date()) {
+export function isFreshAccount(createdAt, now = new Date(), hours = FRESH_HOURS) {
   const created = new Date(createdAt);
   if (Number.isNaN(created.getTime())) return false;
   const age = now.getTime() - created.getTime();
-  return age >= 0 && age <= FRESH_HOURS * 3_600_000;
+  return age >= 0 && age <= hours * 3_600_000;
 }
 
 /** "2/5" or "*\/0" of a content-range header becomes the number after the slash. */
@@ -96,8 +108,9 @@ async function main() {
     console.log("auth user: NOT FOUND (never made, or already removed for good)");
     return;
   }
-  if (!isFreshAccount(account.created_at)) {
-    console.log(`refusing: this account was not made in the last ${FRESH_HOURS} hours, so it is not looked at. Nothing was read.`);
+  const hours = freshHours(process.env.STAYSEE_CHECK_MAX_AGE_HOURS);
+  if (!isFreshAccount(account.created_at, new Date(), hours)) {
+    console.log(`refusing: this account was not made in the last ${hours} hours, so it is not looked at. Nothing was read.`);
     process.exitCode = 1;
     return;
   }
