@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { mapResetPasswordError } from '../../lib/authErrors';
-import { ROOM_COPY } from '../../lib/roomCopy';
+import { ROOM_COPY, roomDeletedLoginText } from '../../lib/roomCopy';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
@@ -30,7 +30,7 @@ export function LoginScreen() {
       if (error) {
         setError(
           error.message === 'room_deleted'
-            ? ROOM_COPY.roomDeletedLogin
+            ? roomDeletedLoginText((error as Error & { availableFrom?: string | null }).availableFrom)
             : 'Не удалось войти. Проверьте email и пароль.',
         );
       }

@@ -5,7 +5,7 @@
  */
 
 import { mapSignUpError } from './authErrors.ts';
-import { ROOM_COPY } from './roomCopy.ts';
+import { ROOM_COPY, roomDeletedLoginText } from './roomCopy.ts';
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -30,16 +30,32 @@ for (const text of [goes, stays, memory, memoryStays]) {
   assert(!/₽|\$|руб|потол|себестоим/i.test(text), 'no money in these texts');
 }
 
-// A deleted room keeps its sign-in record for 14 days, so the same address is "taken" for that long. The hint must not
-// send someone who deleted the room to sign in or reset the password (that cannot bring it back).
+// A deleted room keeps its sign-in record for 3 months (so the 50 free messages cannot be had again by signing up anew),
+// so the same address is "taken" for that long. The hint must not send someone who deleted the room to sign in or
+// reset the password as if that could bring it back.
 const taken = ROOM_COPY.roomExistsEmail.toLowerCase();
-assert(taken.includes('удал') && taken.includes('14'), 'the "address is taken" text covers a room deleted within 14 days');
+assert(taken.includes('удал') && taken.includes('3 месяц'), 'the "address is taken" text covers a room deleted within 3 months');
 assert(taken.includes('забыли пароль'), 'it still helps whoever has a live room');
+assert(taken.includes('точную дату покажет вход'), 'it says where to see the exact date');
 assert(mapSignUpError('User already registered') === ROOM_COPY.roomExistsEmail, 'the sign-up error uses the same text');
 assert(mapSignUpError('Email address has already been registered') === ROOM_COPY.roomExistsEmail, 'also the other wording of the same error');
 
 const deletedLogin = ROOM_COPY.roomDeletedLogin.toLowerCase();
 assert(deletedLogin.includes('удалена') && deletedLogin.includes('нельзя'), 'signing in to a deleted room says it is gone for good');
-assert(deletedLogin.includes('14'), 'and when the address becomes free again');
+assert(deletedLogin.includes('3 месяц'), 'and when the address becomes free again, in months if the date is not known');
+
+// With the date the database holds, the person sees the day, not "in 3 months": they may come back and look in a month.
+const now = new Date('2026-11-04T10:00:00Z');
+assert(/Новую комнату на этот email можно будет создать с (3|4) февраля 2027\.$/.test(roomDeletedLoginText('2027-02-04T00:00:00Z', now)), roomDeletedLoginText('2027-02-04T00:00:00Z', now));
+assert(roomDeletedLoginText('2027-02-04T00:00:00Z', now).startsWith('Эта комната удалена, восстановить её нельзя.'), 'it still says it cannot be restored');
+assert(/ноября$|ноября\./.test(roomDeletedLoginText('2026-11-20T00:00:00Z', now)) && !/2026/.test(roomDeletedLoginText('2026-11-20T00:00:00Z', now)), 'the year is written only when it is not the current one');
+assert(roomDeletedLoginText(null, now) === ROOM_COPY.roomDeletedLogin, 'no date: the plain text');
+assert(roomDeletedLoginText('not a date', now) === ROOM_COPY.roomDeletedLogin, 'a broken date: the plain text');
+
+// What the person is told before deleting the room: the sign-in record stays 3 months, and why.
+const hint = ROOM_COPY.deleteRoomHint.toLowerCase();
+assert(hint.includes('3 месяц') && !hint.includes('14 дней'), 'the hint names the 3 months, not 14 days');
+assert(hint.includes('бесплатные сообщения'), 'it says why the record stays');
+assert(ROOM_COPY.deleteRoomDone.includes('3 месяц') && !ROOM_COPY.deleteRoomDone.includes('14'), 'the done text names 3 months');
 
 console.log('All roomCopy cases passed.');

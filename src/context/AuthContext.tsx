@@ -234,14 +234,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (signedIn) {
       const { data: prof } = await supabase
         .from('profiles')
-        .select('room_deletion_requested_at')
+        .select('room_deletion_requested_at, room_purge_after')
         .eq('id', signedIn.id)
         .maybeSingle();
       if (prof?.room_deletion_requested_at) {
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
-        return { error: new Error('room_deleted') };
+        // The day the address opens again goes with the error, so the sign-in screen can show it.
+        return { error: Object.assign(new Error('room_deleted'), { availableFrom: prof.room_purge_after ?? null }) };
       }
     }
 

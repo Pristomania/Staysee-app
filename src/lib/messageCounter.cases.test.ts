@@ -8,6 +8,7 @@ import {
   type MessageCounter,
   WARN_AT_REMAINING,
   counterLine,
+  exhaustedReply,
   lowMessagesLine,
   messageCounter,
   packMessagesLeft,
@@ -48,11 +49,21 @@ const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).to
 {
   const c = must({ tier: 'free', period_requests_used: 50, period_started_at: daysAgo(30), last_request_at: daysAgo(1) }, NOW);
   assert(c.remaining === 0 && c.warn, 'none left');
-  assert(lowMessagesLine(c) === 'Сообщения закончились', lowMessagesLine(c));
   assert(counterLine(c) === 'Сообщения закончились', counterLine(c));
   // they return 3 calendar months after the last answered message
   assert(c.renewsAt?.toISOString().slice(0, 10) === '2027-02-01' || c.renewsAt?.toISOString().slice(0, 10) === '2027-01-31', `renews ${c.renewsAt?.toISOString()}`);
-  assert(/через 3 месяца после последнего сообщения/.test(renewalLine(c, 'free')), renewalLine(c, 'free'));
+  // When they are gone, the person is told the day they come back, not "in three months" (they may look again in a month).
+  assert(/^Сообщения закончились\. Новые будут доступны (31 января|1 февраля) 2027$/.test(lowMessagesLine(c, NOW)), lowMessagesLine(c, NOW));
+  assert(/^Новые 50 сообщений будут доступны (31 января|1 февраля) 2027$/.test(renewalLine(c, 'free', NOW)), renewalLine(c, 'free', NOW));
+  const reply = exhaustedReply(c, 'free', NOW);
+  assert(reply !== null && /^Бесплатные сообщения закончились\. Новые 50 сообщений будут доступны (31 января|1 февраля) 2027\. Чтобы продолжить раньше, нужен тариф\.$/.test(reply), String(reply));
+  assert(!/₽|\$|руб|потол/i.test(String(reply)), 'the refusal says nothing about money');
+}
+{
+  // Messages left: the general phrase stays (the date moves with every message, so it would be a wrong promise).
+  const c = must({ tier: 'free', period_requests_used: 13, period_started_at: daysAgo(5), last_request_at: daysAgo(1) }, NOW);
+  assert(/через 3 месяца после последнего сообщения/.test(renewalLine(c, 'free', NOW)), renewalLine(c, 'free', NOW));
+  assert(exhaustedReply(c, 'free', NOW) === null, 'no refusal text while there are messages');
 }
 {
   // 3 months of silence: the count starts again, as the database does at the next message
@@ -72,6 +83,14 @@ const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).to
   assert(c.total === 400 && c.remaining === 300 && !c.warn, 'basic: 300 of 400 left');
   assert(c.renewsAt?.toISOString().slice(0, 10) === '2026-11-21', `renews on day 30 of the period: ${c.renewsAt?.toISOString()}`);
   assert(/^Обновится 21 ноября/.test(renewalLine(c, 'basic')), renewalLine(c, 'basic'));
+}
+{
+  // a paid plan with nothing left: the day the new limit opens (same year: no year written)
+  const c = must({ tier: 'basic', period_requests_used: 400, period_started_at: daysAgo(10), last_request_at: daysAgo(1) }, NOW);
+  assert(c.remaining === 0 && c.available === 0, 'basic: nothing left');
+  assert(renewalLine(c, 'basic', NOW) === 'Новые 400 сообщений будут доступны 21 ноября', renewalLine(c, 'basic', NOW));
+  assert(lowMessagesLine(c, NOW) === 'Сообщения закончились. Новые будут доступны 21 ноября', lowMessagesLine(c, NOW));
+  assert(exhaustedReply(c, 'basic', NOW) === 'Сообщения на этот месяц закончились. Новые 400 сообщений будут доступны 21 ноября.', String(exhaustedReply(c, 'basic', NOW)));
 }
 {
   // the period is over: a new one starts with the next message
@@ -145,6 +164,12 @@ const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).to
   // everything gone
   const gone = messageCounter({ ...free, period_requests_used: 50 }, NOW, [{ messages_left: 0, expires_at: future }]);
   assert(gone !== null && gone.available === 0 && counterLine(gone) === 'Сообщения закончились' && gone.warn, 'nothing left at all is the end');
+  // the plan's own messages are out but the bought ones remain: no refusal, and the date of the plan's return is still shown
+  assert(exhaustedReply(spent, 'free', NOW) === null, 'bought messages left: nothing is refused');
+  assert(/^Новые 50 сообщений будут доступны /.test(renewalLine(spent, 'free', NOW)), renewalLine(spent, 'free', NOW));
+  // no date known (a fresh period): only the plain words
+  const noDate = must({ tier: 'basic', period_requests_used: 400 }, NOW);
+  assert(lowMessagesLine(noDate, NOW) === 'Сообщения закончились' && exhaustedReply(noDate, 'basic', NOW) === null, 'without a known date nothing is promised');
 
   // the free messages come back after three idle months, the bought ones are not touched by that
   const renewed = messageCounter({ tier: 'free', period_requests_used: 50, last_request_at: daysAgo(100), period_started_at: daysAgo(200) }, NOW, [{ messages_left: 100, expires_at: future }]);
