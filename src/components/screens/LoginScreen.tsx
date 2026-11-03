@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { mapResetPasswordError } from '../../lib/authErrors';
 import { ROOM_COPY, roomDeletedLoginText } from '../../lib/roomCopy';
 import { AUTH_NOTICE_COPY, forgetAuthCallbackNotice, peekAuthCallbackNotice } from '../../lib/authCallbackNotice';
+import { forgetRoomDeletedNotice, peekRoomDeletedNotice } from '../../lib/roomDeletedNotice';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
@@ -16,7 +17,11 @@ export function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Signed in to a deleted room a moment ago and brought back here: the message with the day the address opens again.
+  const [error, setError] = useState<string | null>(() => {
+    const deleted = peekRoomDeletedNotice();
+    return deleted ? roomDeletedLoginText(deleted.availableFrom) : null;
+  });
   // After the link in the confirmation email: one line saying the address is confirmed (or the link is used up).
   const [info, setInfo] = useState<string | null>(() => {
     const notice = peekAuthCallbackNotice();
@@ -25,6 +30,7 @@ export function LoginScreen() {
   // Shown once: forgotten as soon as the screen is up, so a later visit to this screen does not repeat it.
   useEffect(() => {
     forgetAuthCallbackNotice();
+    forgetRoomDeletedNotice();
   }, []);
   const [loading, setLoading] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
@@ -42,6 +48,8 @@ export function LoginScreen() {
             ? roomDeletedLoginText((error as Error & { availableFrom?: string | null }).availableFrom)
             : 'Не удалось войти. Проверьте email и пароль.',
         );
+        // Shown right here: the copy noted for a return trip is not needed.
+        forgetRoomDeletedNotice();
       }
     } finally {
       setLoading(false);

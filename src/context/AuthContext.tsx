@@ -12,6 +12,7 @@ import {
   shouldStartInPasswordRecovery,
 } from '../lib/passwordRecovery';
 import { forgetAuthCallbackNotice, rememberAuthCallbackNotice } from '../lib/authCallbackNotice';
+import { rememberRoomDeletedNotice } from '../lib/roomDeletedNotice';
 import { withAuthTimeout } from '../lib/authErrors';
 import type { Profile } from '../types';
 import type { User } from '@supabase/supabase-js';
@@ -128,6 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) throw error;
         if (data) {
           if (data.room_deletion_requested_at) {
+            // Note the message first: by now the sign-in screen is usually gone, and the person must be told why.
+            rememberRoomDeletedNotice(data.room_purge_after);
             await safeLocalSignOut();
             if (!cancelled) {
               setUser(null);
@@ -245,6 +248,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', signedIn.id)
         .maybeSingle();
       if (prof?.room_deletion_requested_at) {
+        // The listener has already let the person in, so the app may have left the sign-in screen: note the message too.
+        rememberRoomDeletedNotice(prof.room_purge_after);
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
