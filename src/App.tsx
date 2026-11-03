@@ -5,6 +5,7 @@ import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { PlanProvider } from './context/PlanContext';
 import { PaywallProvider } from './context/PaywallContext';
 import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
+import { hasAuthCallbackNotice } from './lib/authCallbackNotice';
 import {
   WelcomeScreen,
   LoginScreen,
@@ -91,6 +92,11 @@ function AppContent() {
     if (passwordRecoveryPending || currentScreen === 'reset-password') return;
 
     if (!user) {
+      // Came from the link in the confirmation email and was not let in: the sign-in screen, with a line saying why.
+      if (currentScreen === 'welcome' && hasAuthCallbackNotice()) {
+        replaceNavigation('login');
+        return;
+      }
       if (PUBLIC_SCREENS.includes(currentScreen as (typeof PUBLIC_SCREENS)[number])) return;
       replaceNavigation('welcome');
       return;

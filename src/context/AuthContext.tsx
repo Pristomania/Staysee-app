@@ -11,6 +11,7 @@ import {
   markPasswordRecoveryPending,
   shouldStartInPasswordRecovery,
 } from '../lib/passwordRecovery';
+import { forgetAuthCallbackNotice, rememberAuthCallbackNotice } from '../lib/authCallbackNotice';
 import { withAuthTimeout } from '../lib/authErrors';
 import type { Profile } from '../types';
 import type { User } from '@supabase/supabase-js';
@@ -55,6 +56,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Must run before getSession() finishes — PASSWORD_RECOVERY is easy to miss otherwise.
   useEffect(() => {
+    // Note what the link was before anything cleans the address bar: if nobody ends up signed in, the sign-in screen
+    // tells the person their address is confirmed (or that the link is used up).
+    rememberAuthCallbackNotice(window.location.hash, window.location.search);
+
     const callbackType = getAuthCallbackTypeFromUrl();
     if (callbackType === 'recovery') {
       markPasswordRecoveryPending();
@@ -72,6 +77,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (event === 'SIGNED_IN') {
+        // Let in: nothing more to tell the person about the link.
+        forgetAuthCallbackNotice();
         const urlType = getAuthCallbackTypeFromUrl();
         if (urlType !== 'recovery') {
           clearPasswordRecoveryPending();

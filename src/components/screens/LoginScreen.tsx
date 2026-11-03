@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { mapResetPasswordError } from '../../lib/authErrors';
 import { ROOM_COPY, roomDeletedLoginText } from '../../lib/roomCopy';
+import { AUTH_NOTICE_COPY, forgetAuthCallbackNotice, peekAuthCallbackNotice } from '../../lib/authCallbackNotice';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
@@ -16,7 +17,15 @@ export function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
+  // After the link in the confirmation email: one line saying the address is confirmed (or the link is used up).
+  const [info, setInfo] = useState<string | null>(() => {
+    const notice = peekAuthCallbackNotice();
+    return notice ? AUTH_NOTICE_COPY[notice] : null;
+  });
+  // Shown once: forgotten as soon as the screen is up, so a later visit to this screen does not repeat it.
+  useEffect(() => {
+    forgetAuthCallbackNotice();
+  }, []);
   const [loading, setLoading] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
 
