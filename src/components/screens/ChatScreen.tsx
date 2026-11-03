@@ -64,6 +64,7 @@ import { VoicePreparingBar } from '../chat/VoicePreparingBar';
 import { usePlan } from '../../context/PlanContext';
 import { usePaywall } from '../../context/PaywallContext';
 import { LowMessagesNotice } from '../LowMessagesNotice';
+import { exhaustedReply } from '../../lib/messageCounter';
 import {
   formatVoicePackageSize,
   voiceDictationErrorCopy,
@@ -154,7 +155,7 @@ export function ChatScreen() {
     setNotesCaptureLaunch,
   } = useApp();
   const { theme } = useTheme();
-  const { has, counter, refresh: refreshPlan } = usePlan();
+  const { has, tier, counter, refresh: refreshPlan } = usePlan();
   const { openPaywall } = usePaywall();
 
   const [inputValue, setInputValue] = useState('');
@@ -840,8 +841,11 @@ export function ChatScreen() {
         if (epoch !== generationEpochRef.current) return;
 
         if (!isAiSendSuccess(aiResult)) {
+          // A refusal because the messages are spent says the day they come back (the server's own text is the fallback).
+          const dated = aiResult.status === 'rate_limit' && counter ? exhaustedReply(counter, tier) : null;
           failSend(
-            aiResult.userMessage ??
+            dated ??
+              aiResult.userMessage ??
               'Сейчас не могу ответить. Попробуй ещё раз.',
           );
           return;

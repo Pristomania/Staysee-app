@@ -1,3 +1,4 @@
+import { formatDateRu } from './dateRu';
 import { monthsPhrase, planFor } from './plans';
 
 /**
@@ -139,21 +140,47 @@ export function counterLine(counter: MessageCounter): string {
   return `Осталось ${counter.remaining} из ${counter.total} ${pluralMessages(counter.total)} · докупленных ${counter.packRemaining}`;
 }
 
-/** The warning above the composer, from ten messages left. */
-export function lowMessagesLine(counter: MessageCounter): string {
-  if (counter.available === 0) return 'Сообщения закончились';
+/**
+ * The warning above the composer, from ten messages left. When nothing is left the day the new ones come is named, so
+ * that the person can look again in a month and see the same day.
+ */
+export function lowMessagesLine(counter: MessageCounter, now: Date = new Date()): string {
+  if (counter.available === 0) {
+    return counter.renewsAt
+      ? `Сообщения закончились. Новые будут доступны ${formatDateRu(counter.renewsAt, now)}`
+      : 'Сообщения закончились';
+  }
   if (counter.available === 1) return 'Остаётся 1 сообщение';
   return `Осталось ${counter.available} ${pluralMessages(counter.available)}`;
 }
 
-/** When the messages return or renew; an empty line when nothing is known. */
-export function renewalLine(counter: MessageCounter, tier: unknown): string {
+/**
+ * When the messages return or renew; an empty line when nothing is known. Once the plan's own messages are spent it is
+ * the exact day. While some are left the free plan keeps the general words: its day moves with every answered message,
+ * so a date would be a promise that changes.
+ */
+export function renewalLine(counter: MessageCounter, tier: unknown, now: Date = new Date()): string {
   if (counter.unlimited) return '';
   const plan = planFor(tier);
+  if (counter.remaining === 0 && counter.renewsAt) {
+    return `Новые ${plan.messages} ${pluralMessages(plan.messages)} будут доступны ${formatDateRu(counter.renewsAt, now)}`;
+  }
   if (plan.renewAfterIdleMonths !== null) {
     return `Новые ${plan.messages} ${pluralMessages(plan.messages)} появятся через ${monthsPhrase(plan.renewAfterIdleMonths)} после последнего сообщения`;
   }
   if (!counter.renewsAt) return '';
-  const date = counter.renewsAt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
-  return `Обновится ${date}`;
+  return `Обновится ${formatDateRu(counter.renewsAt, now)}`;
+}
+
+/**
+ * What a refused message is answered with when nothing is left and the day the messages come back is known; null
+ * otherwise (the server's own calm text is shown). Calm: no money, no numbers except the day.
+ */
+export function exhaustedReply(counter: MessageCounter, tier: unknown, now: Date = new Date()): string | null {
+  if (counter.unlimited || counter.available > 0 || !counter.renewsAt) return null;
+  const plan = planFor(tier);
+  const fresh = `Новые ${plan.messages} ${pluralMessages(plan.messages)} будут доступны ${formatDateRu(counter.renewsAt, now)}.`;
+  return plan.renewAfterIdleMonths !== null
+    ? `Бесплатные сообщения закончились. ${fresh} Чтобы продолжить раньше, нужен тариф.`
+    : `Сообщения на этот месяц закончились. ${fresh}`;
 }
