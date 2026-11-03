@@ -709,7 +709,13 @@ export function MemoryScreen() {
         ) : (
           <>
             {!planHas('crossMemory') ? (
-              <LockedMemoryPanel cardBase={cardBase} />
+              <LockedMemoryPanel
+                cardBase={cardBase}
+                onMemoryDeleted={() => {
+                  setMemoryV3Dialogue([]);
+                  setMemoryV3AccountWide([]);
+                }}
+              />
             ) : (
             <>
             <div className={`${cardBase} px-4 py-3.5 mb-4`}>

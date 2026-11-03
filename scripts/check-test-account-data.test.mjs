@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { DATA_TABLES, KEPT_TABLES, freshHours, isFreshAccount, maskEmail, rangeTotal, summarize } from "./check-test-account-data.mjs";
+import { DATA_TABLES, KEPT_TABLES, SQL_ONLY_TABLES, freshHours, isFreshAccount, maskEmail, rangeTotal, summarize } from "./check-test-account-data.mjs";
 
 const source = readFileSync(new URL("./check-test-account-data.mjs", import.meta.url), "utf8");
 
@@ -47,6 +47,20 @@ describe("the check of a test account's data", () => {
     assert.equal(isFreshAccount("2026-10-30T19:00:00Z", now, 72), false, "four days old stays refused even with the largest window");
     assert.match(source, /STAYSEE_CHECK_MAX_AGE_HOURS/, "the window comes from an explicit variable");
     assert.ok(source.indexOf("freshHours(process.env") < source.indexOf("isFreshAccount(account.created_at"), "the window is read before the check");
+  });
+
+  it("asks only for columns the production profiles table has, and says so when a read fails", () => {
+    // 03.11.2026: the profile read asked for onboarding_completed, which production does not have, so every run printed
+    // "profile: no row" and the room-deletion dates were never seen.
+    assert.doesNotMatch(source, /onboarding_completed/, "no column that production lacks");
+    assert.match(source, /room_deletion_requested_at,room_purge_after/, "the deletion dates are read");
+    assert.match(source, /query failed/, "a failed read is reported, not turned into an empty answer");
+    assert.match(source, /UNREADABLE/, "a count that could not be read is called out, not shown as 0");
+    assert.match(source, /process\.exitCode = 1/, "and the run fails");
+    // memory_v3_stale_alerts has all access revoked, even for the service key: it can only be counted with SQL.
+    assert.ok(SQL_ONLY_TABLES.includes("memory_v3_stale_alerts"), "the table nobody can read through the API is named");
+    for (const table of SQL_ONLY_TABLES) assert.ok(DATA_TABLES.includes(table), `${table} is still content that must disappear`);
+    assert.match(source, /count it with SQL/, "the script prints the SQL to run for it");
   });
 
   it("reads the counts from a content-range header", () => {

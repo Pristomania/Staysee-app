@@ -39,6 +39,9 @@ export const DATA_TABLES = [
   "memory_v3_stale_alerts",
 ];
 
+/** Tables nobody can read through the API (all access is revoked, even for the service key): count them with SQL. */
+export const SQL_ONLY_TABLES = ["memory_v3_stale_alerts"];
+
 /** What stays when the data is deleted: the plan and the counter, the bought messages, the consents, the usage log. */
 export const KEPT_TABLES = ["user_usage_tiers", "message_packs", "user_consents", "ai_usage_log", "ai_usage_logs"];
 
@@ -123,26 +126,48 @@ export async function report(url, headers, account) {
   const id = account.id;
   console.log(`auth user: present, made ${account.created_at}, email confirmed: ${account.email_confirmed_at ? "yes" : "no"}`);
 
+  // A table this database does not have is listed as missing. Any other failed read is listed as unreadable and makes the
+  // run fail: a zero that came from a failed read must never pass for "nothing left".
+  const missing = [];
+  const unreadable = [];
   const count = async (table, filter = `user_id=eq.${id}`) => {
     const response = await get(`/rest/v1/${table}?select=*&${filter}`, { method: "HEAD", prefer: "count=exact" });
-    if (response.status === 404) return null;
-    if (!response.ok) return null;
-    return rangeTotal(response.headers.get("content-range"));
+    if (response.status === 404) {
+      missing.push(table);
+      return null;
+    }
+    const total = response.ok ? rangeTotal(response.headers.get("content-range")) : null;
+    if (total === null) unreadable.push(`${table} (HTTP ${response.status})`);
+    return total;
   };
 
-  const profile = (await (await get(`/rest/v1/profiles?select=room_deletion_requested_at,room_purge_after,onboarding_completed&id=eq.${id}`)).json().catch(() => []))?.[0];
-  console.log(`profile: ${profile ? `room deletion requested: ${profile.room_deletion_requested_at ?? "no"}, purge after: ${profile.room_purge_after ?? "-"}, onboarding done: ${profile.onboarding_completed}` : "no row"}`);
+  // Only columns the production table has (asking for one it lacks made every read fail and the line say "no row").
+  // A read that fails is said so; it is never shown as an empty answer.
+  const rows = async (path) => {
+    const response = await get(path);
+    if (!response.ok) return { failed: response.status };
+    const body = await response.json().catch(() => null);
+    return { rows: Array.isArray(body) ? body : [] };
+  };
 
-  const plan = (await (await get(`/rest/v1/user_usage_tiers?select=tier,period_requests_used,unlimited_usage,max_conversations_override&user_id=eq.${id}`)).json().catch(() => []))?.[0];
-  const packs = (await (await get(`/rest/v1/message_packs?select=messages_left&user_id=eq.${id}&voided_at=is.null&messages_left=gt.0`)).json().catch(() => [])) ?? [];
+  const profileRead = await rows(`/rest/v1/profiles?select=room_deletion_requested_at,room_purge_after&id=eq.${id}`);
+  const profile = profileRead.rows?.[0];
   console.log(
-    `plan: ${plan ? `tier=${plan.tier}, messages used=${plan.period_requests_used}, unlimited=${plan.unlimited_usage}, rooms override=${plan.max_conversations_override}` : "no row"}; bought messages left: ${Array.isArray(packs) ? packs.reduce((sum, pack) => sum + (pack.messages_left ?? 0), 0) : "?"}`,
+    `profile: ${profileRead.failed ? `query failed (HTTP ${profileRead.failed})` : profile ? `room deletion requested: ${profile.room_deletion_requested_at ?? "no"}, purge after: ${profile.room_purge_after ?? "-"}` : "no row"}`,
+  );
+
+  const planRead = await rows(`/rest/v1/user_usage_tiers?select=tier,period_requests_used,unlimited_usage,max_conversations_override&user_id=eq.${id}`);
+  const plan = planRead.rows?.[0];
+  const packsRead = await rows(`/rest/v1/message_packs?select=messages_left&user_id=eq.${id}&voided_at=is.null&messages_left=gt.0`);
+  console.log(
+    `plan: ${planRead.failed ? `query failed (HTTP ${planRead.failed})` : plan ? `tier=${plan.tier}, messages used=${plan.period_requests_used}, unlimited=${plan.unlimited_usage}, rooms override=${plan.max_conversations_override}` : "no row"}; bought messages left: ${packsRead.failed ? `query failed (HTTP ${packsRead.failed})` : packsRead.rows.reduce((sum, pack) => sum + (pack.messages_left ?? 0), 0)}`,
   );
 
   const dataCounts = {};
-  for (const table of DATA_TABLES) dataCounts[table] = (await count(table)) ?? 0;
-  const conversationRows = (await (await get(`/rest/v1/conversations?select=id&user_id=eq.${id}&limit=1000`)).json().catch(() => [])) ?? [];
-  const conversationIds = Array.isArray(conversationRows) ? conversationRows.map((row) => row.id) : [];
+  for (const table of DATA_TABLES.filter((name) => !SQL_ONLY_TABLES.includes(name))) dataCounts[table] = (await count(table)) ?? 0;
+  const conversationRead = await rows(`/rest/v1/conversations?select=id&user_id=eq.${id}&limit=1000`);
+  if (conversationRead.failed) unreadable.push(`conversations list (HTTP ${conversationRead.failed})`);
+  const conversationIds = (conversationRead.rows ?? []).map((row) => row.id);
   dataCounts.messages = conversationIds.length ? ((await count("messages", `conversation_id=in.(${conversationIds.join(",")})`)) ?? 0) : 0;
   const data = summarize(dataCounts);
   console.log(`\nDATA (the person's own content; must be 0 after "delete the data of the account"):`);
@@ -152,6 +177,15 @@ export async function report(url, headers, account) {
   for (const table of KEPT_TABLES) keptCounts[table] = (await count(table)) ?? 0;
   console.log(`\nKEPT BY DESIGN (plan and counter, bought messages, consents, usage log):`);
   console.log(`  ${Object.entries(keptCounts).map(([table, n]) => `${table} ${n}`).join(", ")}`);
+
+  for (const table of SQL_ONLY_TABLES) {
+    console.log(`\nNot readable through the API, count it with SQL: select count(*) from public.${table} where user_id = '${id}';`);
+  }
+  if (missing.length) console.log(`\nNot in this database (counted as 0): ${[...new Set(missing)].join(", ")}`);
+  if (unreadable.length) {
+    console.log(`\nUNREADABLE, do not trust the zeros above: ${unreadable.join(", ")}`);
+    process.exitCode = 1;
+  }
 }
 
 // Run only when started from the command line, so the tests can import the helpers.

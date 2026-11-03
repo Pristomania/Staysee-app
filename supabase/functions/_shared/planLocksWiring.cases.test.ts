@@ -53,7 +53,7 @@ describe("the chat", () => {
 
 describe("the sections", () => {
   it("memory: the whole content is replaced by the closed panel on a plan without memory (the export too)", () => {
-    assert.match(memory, /!planHas\('crossMemory'\) \? \(\s*<LockedMemoryPanel cardBase=\{cardBase\} \/>/);
+    assert.match(memory, /!planHas\('crossMemory'\) \? \(\s*<LockedMemoryPanel\s+cardBase=\{cardBase\}/);
   });
 
   it("dynamics: a plan without it sees the section's name and the button, nothing else", () => {
