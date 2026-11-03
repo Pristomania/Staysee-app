@@ -65,6 +65,7 @@ import { usePlan } from '../../context/PlanContext';
 import { usePaywall } from '../../context/PaywallContext';
 import { LowMessagesNotice } from '../LowMessagesNotice';
 import { exhaustedReply } from '../../lib/messageCounter';
+import { setAppBusy } from '../../lib/appBusy';
 import {
   formatVoicePackageSize,
   voiceDictationErrorCopy,
@@ -726,6 +727,12 @@ export function ChatScreen() {
     const waitMs = steps.length <= 1 ? 400 : computeInitialDelay(displayText);
     streamTimerRef.current = setTimeout(() => runStep(0), waitMs);
   }
+
+  // A message on its way or a voice being recorded must not be cut off by an automatic update of the page.
+  useEffect(() => {
+    setAppBusy('chat', sending || shouldStopVoiceDictation(voice.snapshot.phase));
+    return () => setAppBusy('chat', false);
+  }, [sending, voice.snapshot.phase]);
 
   // ── Send handler ───────────────────────────────────────────────────────────────
 
