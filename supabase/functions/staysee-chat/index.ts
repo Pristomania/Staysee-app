@@ -182,6 +182,7 @@ import {
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
 import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
 import { OPENROUTER_PRIVATE_ROUTE } from "../_shared/openRouterPrivateRoute.ts";
 import {
   ensurePublishableReply,
@@ -472,9 +473,9 @@ async function callModel(
             ...(images.length > 0 && modelAcceptsImages(model) ? withImageParts(messages, images) : messages),
           ],
           max_tokens: maxTokens,
-          temperature,
+          ...buildChatModelParameters(model, temperature),
           usage: { include: true },
-          ...(provider === "openrouter" ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
+          ...(provider === "openrouter" ? { provider: buildChatModelProviderRoute(model) } : {}),
         }),
       });
     } catch (fetchErr) {

@@ -1,6 +1,6 @@
 /**
  * Approved OpenRouter runtime models for StaySee.
- * Policy: gpt-4o (primary) and claude-sonnet-4-5 (fallback / deep).
+ * Policy: Sol (configured primary), GPT-4o (legacy default), Sonnet (fallback / deep).
  */
 
 /**
@@ -11,11 +11,13 @@
  * plain name stays accepted below, so an old secret that uses it keeps working.
  */
 export const APPROVED_MODEL_GPT4O = "openai/gpt-4o-2024-08-06";
+export const APPROVED_MODEL_SOL = "openai/gpt-6.1-sol";
 export const APPROVED_MODEL_SONNET = "anthropic/claude-sonnet-4-5";
 
 /** OpenRouter slugs allowed for runtime API calls. */
 export const APPROVED_RUNTIME_MODELS = new Set<string>([
   APPROVED_MODEL_GPT4O,
+  APPROVED_MODEL_SOL,
   APPROVED_MODEL_SONNET,
 ]);
 

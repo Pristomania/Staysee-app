@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+import { buildChatModelProviderRoute } from "./chatModelParameters.ts";
 
 // Found on 31.10: only some model calls asked OpenRouter for a route that keeps nothing. The main reply, the
 // conversation summary, the embeddings, the weekly reflection and the older memory jobs carried what a person wrote
@@ -49,7 +50,12 @@ describe("the private route for model requests", () => {
 
   it("goes only to OpenRouter in the calls that may also reach another provider", () => {
     const chat = read("staysee-chat/index.ts");
-    assert.match(chat, /provider === "openrouter" \? \{ provider: OPENROUTER_PRIVATE_ROUTE \} : \{\}/);
+    assert.match(chat, /provider === "openrouter" \? \{ provider: buildChatModelProviderRoute\(model\) \} : \{\}/);
+    for (const model of ["openai/gpt-6.1-sol", "openai/gpt-4o-2024-08-06", "anthropic/claude-sonnet-4-5"]) {
+      const route = buildChatModelProviderRoute(model);
+      assert.equal(route.data_collection, "deny");
+      assert.equal(route.zdr, true);
+    }
     const structured = read("_shared/structuredModelCall.ts");
     assert.match(structured, /input\.primaryProvider === "openrouter" \? \{ provider: OPENROUTER_PRIVATE_ROUTE \} : \{\}/);
     const embeddings = read("_shared/embeddings.ts");
