@@ -33,10 +33,9 @@ jobs:
           set -euo pipefail
           domain=staysee.online
           conf=/etc/nginx/conf.d/staysee-online-probe.conf
-          certdir=/etc/letsencrypt/live/staysee.online
-          sudo -n true
-          command -v certbot >/dev/null
-          sudo -n test -d /var/www/certbot
+          if ! sudo -n true; then echo "SUDO_UNAVAILABLE"; exit 1; fi
+          if sudo -n test -d /var/www/certbot; then echo "ACME_WEBROOT_EXISTS"; else echo "ACME_WEBROOT_ABSENT"; fi
+          if command -v certbot >/dev/null || sudo -n sh -c 'command -v certbot' >/dev/null; then echo "CERTBOT_PRESENT"; else echo "CERTBOT_ABSENT"; fi
           if sudo -n test -e "$conf"; then echo "probe config exists; refusing overwrite"; exit 1; fi
           if sudo -n nginx -T 2>/dev/null | grep -E '^[[:space:]]*server_name[[:space:]].*staysee[.]online([[:space:];]|$)' >/dev/null; then echo "online vhost already exists"; exit 1; fi
           if ! sudo -n nginx -t >/dev/null 2>&1; then echo "baseline nginx -t failed"; exit 1; fi
@@ -63,6 +62,8 @@ jobs:
           apply
           curl --noproxy '*' -fsS --max-time 5 --resolve "$domain:80:127.0.0.1" "http://$domain/healthz"
           echo
+          if ! sudo -n sh -c 'command -v certbot' >/dev/null; then echo "CERTBOT_ABSENT; stopped before issuance"; exit 0; fi
+          if ! sudo -n test -d /var/www/certbot; then echo "ACME_WEBROOT_ABSENT; stopped before issuance"; exit 0; fi
           for dns in ns1.reg.ru ns2.reg.ru; do
             if [ "$(dig +short +time=3 +tries=1 @"$dns" "$domain" A)" != "78.17.147.119" ]; then
               echo "DNS_PENDING on $dns; no certificate request made"
