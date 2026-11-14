@@ -30,21 +30,61 @@ jobs:
           printf '%s\n' "$VPS_KEY" > "$temp/identity"
           unset VPS_KEY
           ssh -F /dev/null -p "$VPS_PORT" -i "$temp/identity" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp/known_hosts" -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=8 -o ClearAllForwardings=yes -l "$VPS_USER" "$host" 'bash -s' <<'REMOTE'
-          set -o pipefail
-          export LC_ALL=C
-          sudo -n true || exit 1
-          echo "capture_start_utc=$(date -u +%FT%TZ)"
-          sudo -n timeout --signal=INT 100 tcpdump -l -tt -ni ens3 -Q in -s 96 -c 1000 '(udp dst port 39238 or udp dst port 39484 or tcp dst port 443)' 2>&1 |
-            awk '/^[0-9]+[.][0-9]+ / {
-              port=($0 ~ /[.]39238:/ ? "39238/udp" : ($0 ~ /[.]39484:/ ? "39484/udp" : "443/tcp"));
-              sub(/[.].*/, "", $1); key=$1 " " port; hits[key]++; total++;
-              next
-            }
-            /listening on|packets captured|packets received by filter|packets dropped by kernel/ {print; next}
-            /command not found|No such device|Permission denied/ {print}
-            END {for (key in hits) print "counts_by_epoch_second",key,hits[key]; print "total_packets",total+0}'
-          status=${PIPESTATUS[0]}
-          echo "capture_end_utc=$(date -u +%FT%TZ)"
-          echo "capture_exit=$status"
-          [ "$status" -eq 0 ] || [ "$status" -eq 124 ]
+          set -euo pipefail
+          domain=staysee.online
+          conf=/etc/nginx/conf.d/staysee-online-probe.conf
+          certdir=/etc/letsencrypt/live/staysee.online
+          sudo -n true
+          command -v certbot >/dev/null
+          sudo -n test -d /var/www/certbot
+          if sudo -n test -e "$conf"; then echo "probe config exists; refusing overwrite"; exit 1; fi
+          if sudo -n nginx -T 2>/dev/null | grep -E '^[[:space:]]*server_name[[:space:]].*staysee[.]online([[:space:];]|$)' >/dev/null; then echo "online vhost already exists"; exit 1; fi
+          if ! sudo -n nginx -t >/dev/null 2>&1; then echo "baseline nginx -t failed"; exit 1; fi
+          tmp=$(mktemp)
+          trap 'rm -f -- "$tmp"' EXIT
+          cat > "$tmp" <<'CONF'
+          server {
+            listen 80;
+            listen [::]:80;
+            server_name staysee.online;
+            location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; }
+            location = /healthz { default_type text/plain; return 200 "Reachability OK"; }
+            location / { return 404; }
+          }
+          CONF
+          apply() {
+            sudo -n install -m 0644 "$tmp" "$conf"
+            if ! sudo -n nginx -t || ! sudo -n systemctl reload nginx; then
+              sudo -n unlink "$conf"
+              sudo -n nginx -t && sudo -n systemctl reload nginx
+              return 1
+            fi
+          }
+          apply
+          curl --noproxy '*' -fsS --max-time 5 --resolve "$domain:80:127.0.0.1" "http://$domain/healthz"
+          echo
+          for dns in ns1.reg.ru ns2.reg.ru; do
+            if [ "$(dig +short +time=3 +tries=1 @"$dns" "$domain" A)" != "78.17.147.119" ]; then
+              echo "DNS_PENDING on $dns; no certificate request made"
+              exit 0
+            fi
+          done
+          if ! sudo -n certbot certonly --webroot -w /var/www/certbot --cert-name "$domain" -d "$domain" --non-interactive --keep-until-expiring; then
+            echo "CERTIFICATE_NOT_ISSUED; HTTP probe remains, old vhost unchanged"
+            exit 1
+          fi
+          cat >> "$tmp" <<'CONF'
+          server {
+            listen 443 ssl;
+            listen [::]:443 ssl;
+            server_name staysee.online;
+            ssl_certificate /etc/letsencrypt/live/staysee.online/fullchain.pem;
+            ssl_certificate_key /etc/letsencrypt/live/staysee.online/privkey.pem;
+            location = /healthz { default_type text/plain; return 200 "Reachability OK"; }
+            location / { return 404; }
+          }
+          CONF
+          apply
+          curl --noproxy '*' -fsS --max-time 5 --resolve "$domain:443:127.0.0.1" "https://$domain/healthz"
+          echo
           REMOTE
