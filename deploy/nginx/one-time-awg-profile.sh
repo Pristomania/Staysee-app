@@ -30,6 +30,11 @@ python3 - "$temp" "$port" <<'PY'
 import ipaddress as ip, pathlib, sys, re
 p = pathlib.Path(sys.argv[1])
 cfg = (p/'server.conf').read_text()
+marker = r'(?m)^# Test phone 39238\n\[Peer\]\nPublicKey = ([A-Za-z0-9+/]{43}=)\nPresharedKey = [A-Za-z0-9+/]{43}=\nAllowedIPs = [0-9.]+/32\n(?=\s*(?:\[|#|\Z))'
+previous = list(re.finditer(marker, cfg))
+assert len(previous) == 1 and cfg.count('# Test phone 39238') == 1, 'Cannot identify the undelivered test peer'
+(p/'undelivered-peer').write_text(previous[0].group(1))
+cfg = re.sub(marker, '', cfg, count=1)
 sections = re.split(r'^\s*\[', cfg, flags=re.M)
 interface, = (s for s in sections if s.startswith('Interface]'))
 fields = dict((k.lower(), v.strip()) for k,v in re.findall(r'^\s*([a-zA-Z0-9]+)\s*=\s*([^#\n]+)', interface, re.M))
@@ -56,7 +61,10 @@ obfs = '\n'.join(f'{k} = {fields[k.lower()]}' for k in obfs_names)
 (p/'address').write_text(str(address))
 PY
 addr=$(<"$temp/address")
+old_pub=$(<"$temp/undelivered-peer")
 [[ "$addr" =~ ^[0-9.]+$ ]]
+[[ "$old_pub" =~ ^[A-Za-z0-9+/]{43}=$ && "$old_pub" != "$pub" ]]
+grep -Fq "$old_pub" "$temp/peers"
 split -b 220 -d "$temp/phone.conf" "$temp/chunk-"
 for file in "$temp"/chunk-*; do
     openssl pkeyutl -encrypt -pubin -inkey "$temp/public.pem" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$file" | base64 -w0
@@ -80,5 +88,7 @@ if ! docker exec -i "$c" sh -ceu '
 fi
 docker exec "$c" "$bin" show "$iface" allowed-ips | awk -v key="$pub" -v subnet="$addr/32" '$1==key && $2==subnet{found=1} END{exit !found}'
 docker exec "$c" grep -Fxq "PublicKey = $pub" "$conf"
+docker exec "$c" "$bin" set "$iface" peer "$old_pub" remove
+if docker exec "$c" "$bin" show "$iface" peers | grep -Fxq "$old_pub"; then exit 1; fi
 while IFS= read -r chunk; do printf 'AWG_SEALED:%s\n' "$chunk"; done < "$temp/sealed"
-echo 'AWG_PEER_VERIFIED: live and persistent; old peers unchanged; no restart'
+echo 'AWG_PEER_VERIFIED: live and persistent; undelivered test peer revoked; other peers unchanged; no restart'
