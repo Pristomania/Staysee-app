@@ -2,6 +2,11 @@ name: Nginx read-only audit
 
 on:
   workflow_dispatch:
+    inputs:
+      preview_password_hash:
+        description: 'Temporary preview password verifier (not the password)'
+        required: false
+        type: string
 
 permissions: {}
 
@@ -9,13 +14,20 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    permissions:
+      contents: read
     steps:
-      - name: Pinned OpenSSH read-only diagnostics
+      - uses: actions/checkout@v4
+        if: ${{ inputs.preview_password_hash != '' }}
+        with:
+          persist-credentials: false
+      - name: Pinned OpenSSH probe or isolated preview
         shell: bash
         env:
           VPS_USER: ${{ secrets.STAYSEE_USER }}
           VPS_PORT: ${{ secrets.STAYSEE_PORT }}
           VPS_KEY: ${{ secrets.STAYSEE_SSH_KEY }}
+          PREVIEW_PASSWORD_HASH: ${{ inputs.preview_password_hash }}
         run: |
           set -euo pipefail
           host=78.17.147.119
@@ -29,6 +41,11 @@ jobs:
           echo 'Pinned ED25519 verified'
           printf '%s\n' "$VPS_KEY" > "$temp/identity"
           unset VPS_KEY
+          if [[ -n "$PREVIEW_PASSWORD_HASH" ]]; then
+            [[ "$PREVIEW_PASSWORD_HASH" =~ ^\{SHA\}[A-Za-z0-9+/]{27}=$ ]]
+            ssh -F /dev/null -p "$VPS_PORT" -i "$temp/identity" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp/known_hosts" -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=8 -o ClearAllForwardings=yes -l "$VPS_USER" "$host" "sudo -n bash -s -- '$PREVIEW_PASSWORD_HASH'" < deploy/nginx/online-preview-spike.sh
+            exit
+          fi
           ssh -F /dev/null -p "$VPS_PORT" -i "$temp/identity" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp/known_hosts" -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=8 -o ClearAllForwardings=yes -l "$VPS_USER" "$host" 'bash -s' <<'REMOTE'
           set -euo pipefail
           domain=staysee.online
