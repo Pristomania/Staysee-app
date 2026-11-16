@@ -7,6 +7,10 @@ on:
         description: 'Temporary preview password verifier (not the password)'
         required: false
         type: string
+      awg_delivery_public:
+        description: 'One-time RSA public key for encrypted delivery of an authorized AWG profile'
+        required: false
+        type: string
 
 permissions: {}
 
@@ -18,7 +22,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        if: ${{ inputs.preview_password_hash != '' }}
+        if: ${{ inputs.preview_password_hash != '' || inputs.awg_delivery_public != '' }}
         with:
           persist-credentials: false
       - name: Pinned OpenSSH probe or isolated preview
@@ -28,6 +32,7 @@ jobs:
           VPS_PORT: ${{ secrets.STAYSEE_PORT }}
           VPS_KEY: ${{ secrets.STAYSEE_SSH_KEY }}
           PREVIEW_PASSWORD_HASH: ${{ inputs.preview_password_hash }}
+          AWG_DELIVERY_PUBLIC: ${{ inputs.awg_delivery_public }}
         run: |
           set -euo pipefail
           host=78.17.147.119
@@ -41,6 +46,11 @@ jobs:
           echo 'Pinned ED25519 verified'
           printf '%s\n' "$VPS_KEY" > "$temp/identity"
           unset VPS_KEY
+          if [[ -n "$AWG_DELIVERY_PUBLIC" ]]; then
+            [[ -z "$PREVIEW_PASSWORD_HASH" && "$AWG_DELIVERY_PUBLIC" =~ ^[A-Za-z0-9+/]{550,570}={0,2}$ ]]
+            ssh -F /dev/null -p "$VPS_PORT" -i "$temp/identity" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp/known_hosts" -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=8 -o ClearAllForwardings=yes -l "$VPS_USER" "$host" "sudo -n bash -s -- '$AWG_DELIVERY_PUBLIC'" < deploy/nginx/one-time-awg-profile.sh
+            exit
+          fi
           if [[ -n "$PREVIEW_PASSWORD_HASH" ]]; then
             [[ "$PREVIEW_PASSWORD_HASH" =~ ^\{SHA\}[A-Za-z0-9+/]{27}=$ ]]
             ssh -F /dev/null -p "$VPS_PORT" -i "$temp/identity" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp/known_hosts" -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=8 -o ClearAllForwardings=yes -l "$VPS_USER" "$host" "sudo -n bash -s -- '$PREVIEW_PASSWORD_HASH'" < deploy/nginx/online-preview-spike.sh
