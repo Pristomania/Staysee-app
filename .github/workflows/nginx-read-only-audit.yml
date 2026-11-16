@@ -3,6 +3,10 @@ name: Nginx read-only audit
 on:
   workflow_dispatch:
     inputs:
+      novosibirsk_probe:
+        description: 'No-credentials reachability check for the Novosibirsk VPS'
+        type: boolean
+        default: false
       preview_password_hash:
         description: 'Temporary preview password verifier (not the password)'
         required: false
@@ -26,6 +30,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Pinned OpenSSH probe or isolated preview
+        if: ${{ !inputs.novosibirsk_probe }}
         shell: bash
         env:
           VPS_USER: ${{ secrets.STAYSEE_USER }}
@@ -124,3 +129,19 @@ jobs:
           curl --noproxy '*' -fsS --max-time 5 --resolve "$domain:443:127.0.0.1" "https://$domain/healthz"
           echo
           REMOTE
+      - name: Read-only Novosibirsk port and SSH identity check
+        if: ${{ inputs.novosibirsk_probe }}
+        shell: bash
+        run: |
+          set -u
+          host=37.139.51.107
+          for scheme in http https; do
+            curl --noproxy '*' --insecure --silent --show-error --connect-timeout 5 --max-time 8 --output /dev/null --write-out "$scheme HTTP=%{http_code} peer=%{remote_ip}\n" "$scheme://$host/" || true
+          done
+          keys=$(ssh-keyscan -T 8 -t ed25519 "$host" 2>&1)
+          if grep -q ' ssh-ed25519 ' <<< "$keys"; then
+            grep ' ssh-ed25519 ' <<< "$keys" | ssh-keygen -lf -
+          else
+            printf 'SSH has not supplied an ED25519 key:\n%s\n' "$keys"
+            exit 1
+          fi
