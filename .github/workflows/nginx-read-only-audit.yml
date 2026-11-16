@@ -138,10 +138,10 @@ jobs:
           for scheme in http https; do
             curl --noproxy '*' --insecure --silent --show-error --connect-timeout 5 --max-time 8 --output /dev/null --write-out "$scheme HTTP=%{http_code} peer=%{remote_ip}\n" "$scheme://$host/" || true
           done
-          keys=$(ssh-keyscan -T 8 -t ed25519 "$host" 2>&1)
-          if grep -q ' ssh-ed25519 ' <<< "$keys"; then
-            grep ' ssh-ed25519 ' <<< "$keys" | ssh-keygen -lf -
+          keys=$(ssh-keyscan -v -T 8 -t ed25519,ecdsa,rsa "$host" 2>&1) || true
+          if grep -Eq ' (ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) ' <<< "$keys"; then
+            grep -E ' (ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) ' <<< "$keys" | ssh-keygen -lf -
           else
-            printf 'SSH has not supplied an ED25519 key:\n%s\n' "$keys"
+            printf 'SSH has not supplied a host key:\n%s\n' "$keys"
             exit 1
           fi
