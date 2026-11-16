@@ -5,13 +5,16 @@ umask 077
 domain=staysee.online
 conf=/etc/nginx/conf.d/staysee-online-probe.conf
 backup=/etc/nginx/conf.d/staysee-online-probe.original
-base=/var/www/staysee-online-preview
+base=/var/www/staysee-online-preview-v2
 verifier=${1:?missing verifier}
 [[ "$EUID" == 0 && "$verifier" =~ ^\{SHA\}[A-Za-z0-9+/]{27}=$ ]]
 exec 9>/run/lock/staysee-online-preview.lock
 flock -n 9
 nginx -t
-[[ -f "$conf" && ! -L "$conf" && ! -e "$backup" && ! -e "$base" ]]
+[[ -f "$conf" && ! -L "$conf" && ! -e "$base" ]]
+if [[ -e "$backup" ]]; then
+    [[ -f "$backup" && ! -L "$backup" ]] && cmp -s "$conf" "$backup"
+fi
 grep -Fq 'server_name staysee.online;' "$conf"
 grep -Fq 'return 200 "Reachability OK"' "$conf"
 grep -Fq 'location / { return 404; }' "$conf"
@@ -125,22 +128,35 @@ server {
     }
 }
 CONF
-sed -i "s/@@SESSION@@/$session/g" "$tmp"
-cp -p -- "$conf" "$backup"
+sed -i "s/@@SESSION@@/$session/g;s|/var/www/staysee-online-preview/|$base/|g" "$tmp"
+if [[ ! -e "$backup" ]]; then cp -p -- "$conf" "$backup"; fi
 
 verify() {
     local url="https://$domain" code
-    [[ $("${online[@]}" --fail "$url/healthz") == 'Reachability OK' ]] || return 1
-    [[ $("${online[@]}" -o /dev/null -w '%{http_code}' "$url/_preview/access") == 401 ]] || return 1
-    [[ $("${online[@]}" -o /dev/null -w '%{http_code}' "$url/") == 302 ]] || return 1
-    [[ $("${online[@]}" -o /dev/null -w '%{http_code}' "$url/supabase/auth/v1/health") == 403 ]] || return 1
-    [[ $("${online[@]}" -b "st_preview=$session" -o /dev/null -w '%{http_code}' "$url/") == 200 ]] || return 1
-    [[ $("${online[@]}" -b "st_preview=$session" -o /dev/null -w '%{http_code}' -X POST "$url/supabase/auth/v1/signup") == 403 ]] || return 1
+    [[ $("${online[@]}" --fail "$url/healthz") == 'Reachability OK' ]] || { echo 'probe body mismatch'; return 1; }
+    check_code gate 401 "$url/_preview/access" || return 1
+    check_code unlocked-redirect 302 "$url/" || return 1
+    check_code locked-api 403 "$url/supabase/auth/v1/health" || return 1
+    check_code unlocked-app 200 -b "st_preview=$session" "$url/" || return 1
+    check_code signup 403 -b "st_preview=$session" -X POST "$url/supabase/auth/v1/signup" || return 1
     code=$("${online[@]}" -b "st_preview=$session" -o /dev/null -w '%{http_code}' "$url/supabase/auth/v1/health") || return 1
-    [[ "$code" == 401 || "$code" == 200 ]] || return 1
-    [[ $("${prod[@]}" --fail 'https://staysee.ru/' | sha256sum | cut -d' ' -f1) == "$prod_before" ]] || return 1
+    [[ "$code" == 401 || "$code" == 200 ]] || { echo "Supabase health HTTP=$code"; return 1; }
+    [[ $("${prod[@]}" --fail 'https://staysee.ru/' | sha256sum | cut -d' ' -f1) == "$prod_before" ]] || { echo 'Production HTML hash changed'; return 1; }
 }
-if ! install -m 0600 "$tmp" "$conf" || ! nginx -t || ! systemctl reload nginx || ! verify; then
+check_code() {
+    local label=$1 expected=$2 code
+    shift 2
+    code=$("${online[@]}" -o /dev/null -w '%{http_code}' "$@") || return 1
+    [[ "$code" == "$expected" ]] || { echo "$label HTTP=$code expected=$expected"; return 1; }
+}
+wait_for_preview() {
+    for attempt in 1 2 3; do
+        sleep 1
+        if verify; then return 0; fi
+    done
+    return 1
+}
+if ! install -m 0600 "$tmp" "$conf" || ! nginx -t || ! systemctl reload nginx || ! wait_for_preview; then
     install -m 0644 "$backup" "$conf"
     nginx -t && systemctl reload nginx
     echo 'Preview verification failed; original vhost restored' >&2
