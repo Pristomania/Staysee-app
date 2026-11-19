@@ -1,0 +1,2 @@
+# These files run inside Linux containers: a Windows line ending (CRLF) in a shell script breaks it ("\r: command not found").
+* text eol=lf
