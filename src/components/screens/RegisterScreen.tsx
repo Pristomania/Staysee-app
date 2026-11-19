@@ -8,6 +8,7 @@ import { ROOM_COPY } from '../../lib/roomCopy';
 import { saveRegisterDraft, takeRegisterDraft } from '../../lib/registerDraft';
 import { OFFER_META } from '../../content/legal/offer';
 import { CONSENT_META } from '../../content/legal/consent';
+import { AGE_18_META } from '../../lib/consents';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
 
 export function RegisterScreen() {
@@ -72,6 +73,8 @@ export function RegisterScreen() {
       const result = await signUp(email, password, {
         terms: { version: OFFER_META.version, sha256: OFFER_META.sha256 },
         pd_processing: { version: CONSENT_META.version, sha256: CONSENT_META.sha256 },
+        // The tick that the person is 18 or older (it is checked above): recorded like the other two.
+        age_18: AGE_18_META,
       });
       if (result.error) {
         setError(mapSignUpError(result.error.message));

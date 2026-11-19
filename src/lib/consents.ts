@@ -6,6 +6,7 @@ export const CONSENT_TYPES = {
   terms: 'terms',
   pdProcessing: 'pd_processing',
   images: 'images',
+  age18: 'age_18',
 } as const;
 
 export interface ConsentProof {
@@ -13,9 +14,19 @@ export interface ConsentProof {
   sha256: string;
 }
 
+/**
+ * The tick "Подтверждаю, что мне исполнилось 18 лет" (ROOM_COPY.age18Confirm) at registration. The hash is that of the
+ * sentence on the form; if the sentence changes, change the hash AND the version (a test compares them).
+ */
+export const AGE_18_META: ConsentProof = {
+  version: '1',
+  sha256: 'cfb652c9624d0c7700943dcff4618267568054c14fdc1816ac9aed830e45c532',
+};
+
 export interface SignUpConsents {
   terms: ConsentProof;
   pd_processing: ConsentProof;
+  age_18: ConsentProof;
 }
 
 const USER_AGENT_MAX = 300;
@@ -29,6 +40,7 @@ export function signUpConsentMetadata(consents: SignUpConsents, userAgent: strin
     consents: {
       terms: consents.terms,
       pd_processing: consents.pd_processing,
+      age_18: consents.age_18,
       user_agent: userAgent.slice(0, USER_AGENT_MAX),
     },
   };
