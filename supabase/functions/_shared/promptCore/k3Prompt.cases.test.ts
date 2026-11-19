@@ -67,8 +67,8 @@ const RULES: Array<[string, RegExp]> = [
   ["no question about the gender, no guessing", /Не спрашивай об этом и не угадывай/],
   ["life comes first", /Если из сообщения следует риск для жизни, всё остальное .* уступает\. Сначала безопасность человека/],
   ["the same on the first and on the hundredth message", /на первом и на сотом сообщении/],
-  ["proportion: a pill or a bad day is not a crisis by itself", /Соразмерность. Упоминание таблеток, лекарств, усталости или плохого самочувствия само по себе не кризис/],
-  ["a warm word is answered warmly, a refusal is warm and short", /Тепло при отказе. Когда человек говорит тебе тёплые слова о вашем общении/],
+  ["proportion: a pill or a bad day is not a crisis by itself", /Соразмерность. Обычный рассказ о самочувствии не кризис, даже если в нём есть лекарства/],
+  ["a warm word is answered warmly, a refusal is warm and short", /Тепло при отказе. Когда человек тепло говорит о вашем общении/],
 ];
 for (const [name, pattern] of RULES) assert(pattern.test(k3), `K3 says: ${name}`);
 
