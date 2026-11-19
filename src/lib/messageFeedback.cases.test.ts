@@ -5,6 +5,7 @@
 
 import {
   FEEDBACK_COMMENT_MAX,
+  FEEDBACK_COPY,
   canMarkMessage,
   loadFeedback,
   normalizeFeedbackComment,
@@ -145,5 +146,16 @@ assert(!canMarkMessage({ id: 'abc', sender: 'user', content: 'вопрос' }), 
 assert(!canMarkMessage({ id: 'stream-1', sender: 'ai', content: 'пишется' }), 'not an answer that is still being written');
 assert(!canMarkMessage({ id: 'temp-1', sender: 'ai', content: 'ещё не сохранено' }), 'not an answer that is not saved yet');
 assert(!canMarkMessage({ id: 'abc', sender: 'ai', content: '' }), 'not an empty one');
+
+// ── the app does not know the gender of the person: no past-tense verb that has one ────────────────────
+// (A thumb down once answered «Спасибо, что сказала»: the person may be a man, and a form that assumes a gender is wrong for them.)
+const GENDERED_PAST = /(^|[^а-яё])[а-яё]+(ла|л)([^а-яё]|$)/iu;
+// «подошёл» agrees with «ответ» (the answer), not with the person: allowed. Any other past-tense word would be a form of the person's gender.
+const ALLOWED_WORDS = new Set(['подошёл']);
+for (const [key, text] of Object.entries(FEEDBACK_COPY)) {
+  const found = text.split(/[^а-яёА-ЯЁ]+/u).filter((word) => /^[а-яё]+(ла|л)$/iu.test(word) && !ALLOWED_WORDS.has(word.toLowerCase()));
+  assert(found.length === 0, `the text "${key}" has no form that assumes the gender of the person (${found.join(', ')})`);
+}
+assert(GENDERED_PAST.test('Спасибо, что сказала.') && !GENDERED_PAST.test(FEEDBACK_COPY.askBad), 'the old wording is caught, the new one passes');
 
 console.log('All messageFeedback cases passed.');
