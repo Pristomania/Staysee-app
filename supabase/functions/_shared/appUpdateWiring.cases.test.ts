@@ -16,7 +16,7 @@ const read = (path: string) => readFileSync(new URL(`../../../${path}`, import.m
 // ── nginx: the page is always asked for again, the build files stay cached for good ─────────────────────
 for (const file of ['deploy/nginx/staysee.ru.conf', 'deploy/nginx/staysee.ru.no-http2.conf']) {
   const conf = read(file);
-  const block = /location = \/index\.html \{([\s\S]*?)\n    \}/.exec(conf);
+  const block = /location = \/index\.html \{([\s\S]*?)\n {4}\}/.exec(conf);
   assert(block, `${file}: the page has its own location`);
   assert(/add_header Cache-Control "no-cache" always;/.test(block[1]), `${file}: the page is never kept without asking`);
   // add_header in a location replaces the ones set for the whole server, so they are written again here.

@@ -18,8 +18,10 @@ const WHITELISTED_TAG_RE =
   /\[STAYSEE_SIGNAL:\s*(crisis_detected|role_attack_detected|boundary_pressure_detected)\s*\]/gi;
 
 /** Any STAYSEE_SIGNAL fragment (whitelist + unknown + partial). */
-const ANY_SIGNAL_FRAGMENT_RE = /\[?\s*STAYSEE_SIGNAL[^\]]*\]?/gi;
-const PARTIAL_STAYSEE_RE = /\[?\s*STAYSEE[^\]]*\]?/gi;
+// A fragment never runs across a line break (a broken tag must not eat the paragraphs after it), and the bare word
+// "StaySee" is ordinary text: only a bracketed "[STAYSEE…" counts as a leaked fragment.
+const ANY_SIGNAL_FRAGMENT_RE = /\[?\s*STAYSEE_SIGNAL[^\]\n]*\]?/gi;
+const PARTIAL_STAYSEE_RE = /\[\s*STAYSEE[^\]\n]*\]?/gi;
 
 const SIGNAL_NAME_ALT = "crisis_detected|role_attack_detected|boundary_pressure_detected";
 
