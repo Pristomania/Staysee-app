@@ -497,6 +497,12 @@ async function callModel(
     const contentInspect = inspectOpenRouterMessageContent(rawMessageContent);
     const content: string = legacyOpenRouterContent(rawMessageContent);
     const finishReason: string | undefined = data.choices?.[0]?.finish_reason;
+    // The provider's content filter (Azure) withheld the answer: what came back is a stub or nothing, never a reply for the person.
+    // It is a failed attempt, so the next model in the chain answers; a person in distress must not get «Слышу тебя.» and nothing else.
+    if (finishReason === "content_filter") {
+      console.error(`[staysee-chat] ${provider} model=${model} content_filter: the answer was withheld by the provider`);
+      return null;
+    }
     if (!content) {
       console.error(`[staysee-chat] ${provider} empty content, raw:`, JSON.stringify(data).slice(0, 200));
       return null;
