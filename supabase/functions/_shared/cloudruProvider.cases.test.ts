@@ -128,7 +128,8 @@ const WIRING: Array<[string, RegExp]> = [
   ["Cloud.ru gets no OpenRouter fields", /\.\.\.\(provider === "cloudru" \? \{\} : \{ usage: \{ include: true \} \}\)/],
   ["no money or a refused key: the founder is told", /provider === "cloudru" && \(res\.status === 402 \|\| res\.status === 401 \|\| res\.status === 403\)[\s\S]*?sendProviderAlertSafely\(res\.status === 402 \? "balance_empty" : "key_rejected"\)/],
   ["foreign providers answer a Cloud.ru model only by the switch", /hostForModel\(primaryModel\) !== "cloudru" \|\| Deno\.env\.get\("STAYSEE_FOREIGN_FALLBACK"\) === "1"/],
-  ["the route of OpenRouter comes from the model", /provider === "openrouter" \? \{ provider: buildChatModelProviderRoute\(model\) \} : \{\}/],
+  ["when both own models fail on OpenRouter, Sonnet answers", /isOwnModelOnOpenRouter\(primaryModel\)[\s\S]*?attempt\("openrouter", PROVIDERS\.openrouter, APPROVED_MODEL_SONNET\)/],
+  ["the route of OpenRouter comes from the model",/provider === "openrouter" \? \{ provider: buildChatModelProviderRoute\(model\) \} : \{\}/],
 ];
 for (const [name, pattern] of WIRING) assert(pattern.test(chat), `chat function: ${name}`);
 

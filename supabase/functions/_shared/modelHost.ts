@@ -7,7 +7,12 @@
  * only the model names in the secrets change. Every other approved model goes through OpenRouter, as before.
  */
 
-import { CLOUDRU_RUNTIME_MODELS, normalizeApprovedModelId } from "./approvedModels.ts";
+import {
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_KIMI_K26,
+  CLOUDRU_RUNTIME_MODELS,
+  normalizeApprovedModelId,
+} from "./approvedModels.ts";
 
 export type ModelHost = "cloudru" | "openrouter";
 
@@ -17,4 +22,10 @@ export const CLOUDRU_API_KEY_ENV = "CLOUDRU_API_KEY";
 
 export function hostForModel(model: string): ModelHost {
   return CLOUDRU_RUNTIME_MODELS.has(normalizeApprovedModelId(model)) ? "cloudru" : "openrouter";
+}
+
+/** DeepSeek V4 Pro or Kimi K2.6 asked through OpenRouter (the models of today). */
+export function isOwnModelOnOpenRouter(model: string): boolean {
+  const id = normalizeApprovedModelId(model);
+  return id === APPROVED_MODEL_DEEPSEEK_V4_PRO || id === APPROVED_MODEL_KIMI_K26;
 }

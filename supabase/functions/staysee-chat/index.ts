@@ -181,8 +181,8 @@ import {
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
-import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
-import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel } from "../_shared/modelHost.ts";
+import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel, isOwnModelOnOpenRouter } from "../_shared/modelHost.ts";
 import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
 import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
 import {
@@ -571,6 +571,14 @@ async function callModel(
     console.log(`[staysee-chat] primary model failed — model fallback: ${fallbackModelOverride}`);
     const modelFallbackResult = await attempt(primaryProvider, primaryConfig, fallbackModelOverride);
     if (modelFallbackResult) return modelFallbackResult;
+  }
+
+  // DeepSeek V4 Pro and Kimi K2.6 on OpenRouter: when both are unavailable the approved Sonnet answers (private route), as the other
+  // models always had a reserve; without it a short failure of the two hosts leaves the person with only «Сейчас не могу ответить».
+  if (isOwnModelOnOpenRouter(primaryModel) && primaryModel !== APPROVED_MODEL_SONNET && fallbackModelOverride !== APPROVED_MODEL_SONNET) {
+    console.log("[staysee-chat] both own models failed — last resort: Sonnet");
+    const lastResort = await attempt("openrouter", PROVIDERS.openrouter, APPROVED_MODEL_SONNET);
+    if (lastResort) return lastResort;
   }
 
   // Fallback chain. With a Cloud.ru model the words of the person do not leave Russia on their own: the foreign providers
