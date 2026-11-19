@@ -17,7 +17,6 @@ import {
   collectMemoryCorrectionHints,
   countMessagesSinceSummary,
   getConversationSummary,
-  getParsedMemory,
   injectSummaryIntoPrompt,
   type ConversationMemoryMeta,
 } from "./memory.ts";
@@ -26,10 +25,6 @@ import {
   loadActiveCorrections,
   memoryCorrectionsEnabled,
 } from "./memoryCorrections.ts";
-import {
-  buildNarrativeContext,
-  formatNarrativeForPrompt,
-} from "./narrativeEngine.ts";
 import {
   formatArchiveExcerptsForPrompt,
   formatUserEvidenceForPrompt,
@@ -386,14 +381,9 @@ export function buildContextPrompt(
     if (crossBlock) parts.push(crossBlock);
   }
 
-  const narrativeBlock = formatNarrativeForPrompt(
-    buildNarrativeContext({
-      summary: getParsedMemory(meta) ?? undefined,
-      crossMemory: injectableCrossMemory,
-      recentMessages: packet.recentMessages,
-    })
-  );
-  if (narrativeBlock) parts.push(narrativeBlock);
+  // The block «ИСТОРИЯ И ДВИЖЕНИЕ ЖИЗНИ» used to be built here by narrativeEngine.ts (word patterns over the person's last lines,
+  // the old chat summary and the weekly dynamics). Removed on 20.11.2026 by the owner's decision: it decided by words, spoke
+  // in the feminine («в её словах») and the new memory does this job. contextNoNarrativeBlock.cases.test.ts keeps it out.
 
   const evidenceBlock = formatUserEvidenceForPrompt(
     packet.userEvidenceQuotes ?? []

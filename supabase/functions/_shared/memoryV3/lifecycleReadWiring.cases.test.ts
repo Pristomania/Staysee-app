@@ -267,7 +267,8 @@ describe("Memory V3 lifecycle read context wiring", () => {
 
     const legacy = buildContextPrompt(input);
     const legacyMentions = legacy.match(/LEGACY_CROSS_MEMORY_SENTINEL/g) ?? [];
-    assert.equal(legacyMentions.length >= 2, true);
+    // Once, in the legacy cross-memory block. It used to be twice: the removed block «ИСТОРИЯ И ДВИЖЕНИЕ ЖИЗНИ» copied it too.
+    assert.equal(legacyMentions.length, 1);
 
     const loaded = buildContextPrompt(input, { lifecycleCrossMemory: context });
     assert.equal(loaded.includes("LEGACY_CROSS_MEMORY_SENTINEL"), false);
