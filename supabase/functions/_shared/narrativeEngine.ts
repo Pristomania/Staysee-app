@@ -38,7 +38,8 @@ const CHANGE_RE =
   /(?:впервые|начал[аиоё]?|переех|съех|опустел|пуст(ой|ая|ое)|появил|изменил|теперь|раньше|после|уже не|новый этап|другой человек|одна\b|один\b|ночует|ночёвк)/i;
 const GROWTH_RE =
   /(?:границ|отдельн|свою комнат|выдерж|сохраня|выбира|без потери себя|не слива|береж|медленн|тихо|не спеш)/i;
-const HEDGE_RE = /^(?:возможно|похоже|вероятно|может быть)\b/i;
+// Not \b: without the "u" flag it knows only Latin letters, so it never matched after a Russian word and every ready hedge got a second one.
+const HEDGE_RE = /^(?:возможно|похоже|вероятно|может быть)(?![\p{L}\p{N}])/iu;
 const DIAGNOSTIC_RE =
   /(?:травм|созависим|нарцисс|диагноз|птср|расстройств|привязанност[ьи]\s+(?:травм|наруш))/i;
 
@@ -106,9 +107,21 @@ function dedupeItems(items: string[], max = MAX_PER_FIELD): string[] {
   return out;
 }
 
+// A source sentence that brings its own hedge after a label: «между неделями: Похоже, начинается новый этап».
+const LABELED_HEDGE_RE = /^([^:]{1,60}):\s*(возможно|похоже|вероятно|может быть),?\s+(.+)$/i;
+
 function hedge(text: string, variant: "possible" | "likely" | "probable" = "likely"): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (!t || HEDGE_RE.test(t)) return t;
+  // Lift the hedge of the source to the front instead of putting a second one before it.
+  const inner = t.match(LABELED_HEDGE_RE);
+  const label = inner?.[1];
+  const word = inner?.[2];
+  const rest = inner?.[3];
+  if (label && word && rest) {
+    const lead = word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    return `${lead}, ${label.charAt(0).toLowerCase() + label.slice(1)}: ${rest}`;
+  }
   const prefix =
     variant === "possible"
       ? "Возможно, "
@@ -119,11 +132,19 @@ function hedge(text: string, variant: "possible" | "likely" | "probable" = "like
   return `${prefix}${lower}`;
 }
 
-function asNarrativePhrase(text: string, factual = false): string {
+/**
+ * How sure a narrative sentence is allowed to sound.
+ * "fact" leaves the text as it is (only for what the person said or what the archive holds);
+ * the other three put a hedge in front: «Возможно» < «Похоже» < «Вероятно».
+ * It used to be a boolean, and a truthy string "probable" switched the hedge OFF for everything taken from the weekly summary.
+ */
+export type NarrativeCertainty = "fact" | "possible" | "likely" | "probable";
+
+export function asNarrativePhrase(text: string, certainty: NarrativeCertainty = "likely"): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (!t || DIAGNOSTIC_RE.test(t)) return "";
-  if (factual) return t;
-  return hedge(t);
+  if (certainty === "fact") return t;
+  return hedge(t, certainty);
 }
 
 function recentUserLines(messages: ChatMessage[] | undefined): string[] {
@@ -184,7 +205,7 @@ function extractCurrentSituation(args: {
 
   for (const line of userLines.slice(-3)) {
     if (CHANGE_RE.test(line) || /(?:сейчас|сегодня|вчера|эта неделя)/i.test(line)) {
-      items.push(asNarrativePhrase(`сейчас в её словах: ${line}`, false));
+      items.push(asNarrativePhrase(`сейчас в её словах: ${line}`));
     }
   }
 

@@ -21,12 +21,19 @@ it("writes the candidate's computed importance on both user_memory insert paths,
   // production has sat at the importance column's default (3) ever since
   // migration 005 added it, which made "order by importance" (context.ts's
   // fetchMemoryItems) a no-op tie-break instead of real prioritization.
+  //
+  // 20.11.2026: this text check stayed green while the value was really `undefined` (the filter had dropped it before the
+  // insert). The real behaviour is now covered by userLifeMemory.deno.test.ts (the real function against a recording fake)
+  // and crossMemoryImportance.cases.test.ts. What remains here: both sites write an explicit, validated importance.
   const insertCalls = source.match(/\.insert\(\{[^}]*\}\)/gs) ?? [];
   const userMemoryInsertCalls = insertCalls.filter((call) => call.includes("memory_type"));
   assert.equal(userMemoryInsertCalls.length, 2, "expected exactly the fact-evolution and generic insert sites");
   for (const call of userMemoryInsertCalls) {
-    assert.match(call, /importance:\s*c\.importance/);
+    assert.match(call, /\bimportance\b/);
+    assert.doesNotMatch(call, /importance:\s*c\.importance/, "the raw candidate value must not go to the column unchecked");
   }
+  const resolved = source.match(/resolveCandidateImportance\(/g) ?? [];
+  assert.equal(resolved.length, 2, "both insert sites go through resolveCandidateImportance");
 });
 
 it("reinforces (not silently skips) a fact that matches an already-stored row, instead of leaving importance write-once forever", () => {

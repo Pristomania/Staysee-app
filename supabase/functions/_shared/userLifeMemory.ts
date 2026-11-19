@@ -31,6 +31,8 @@ import {
 } from "./crossMemoryPolicy.ts";
 import {
   buildCrossMemoryCandidates,
+  CROSS_MEMORY_TYPE_IMPORTANCE,
+  resolveCandidateImportance,
   type CrossMemoryCandidate,
   type CrossMemoryType,
 } from "./crossMemoryBuild.ts";
@@ -53,24 +55,9 @@ export const CROSS_MEMORY_MAX_CHARS = 420;
 export const MAX_CROSS_MEMORY_ROWS = 10;
 export const CROSS_MEMORY_INJECTION_TOKEN_BUDGET = 480;
 
-export type CrossMemoryType =
-  | "preference"
-  | "insight"
-  | "theme"
-  | "emotion"
-  | "communication"
-  | "life_context";
-
-export type { CrossMemoryCandidate } from "./crossMemoryBuild.ts";
-
-const TYPE_IMPORTANCE: Record<CrossMemoryType, number> = {
-  communication: 5,
-  preference: 5,
-  life_context: 4,
-  insight: 4,
-  theme: 3,
-  emotion: 3,
-};
+// One definition of the type and of the importance by type, in crossMemoryBuild.ts. This file used to declare its own
+// six-type copy (with the types that are no longer allowed), which clashed with the import and the table below.
+export type { CrossMemoryCandidate, CrossMemoryType } from "./crossMemoryBuild.ts";
 
 function normalizeSentence(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
@@ -167,10 +154,10 @@ export function parseLifeMemoryFromModel(raw: string): CrossMemoryCandidate[] {
       out.push({
         memory_type,
         content,
-        importance: TYPE_IMPORTANCE[memory_type],
+        importance: CROSS_MEMORY_TYPE_IMPORTANCE[memory_type],
       });
     }
-    return filterCrossMemoryCandidates(out).slice(0, 3) as CrossMemoryCandidate[];
+    return filterCrossMemoryCandidates(out).slice(0, 3);
   } catch {
     return [];
   }
@@ -383,7 +370,9 @@ export async function refreshUserLifeMemory(
       if (!content) continue;
       if (crossMemoryContradictsCorrection(content, durableCorrections)) continue;
 
-      for (const id of evolution.deleteRowIds ?? []) {
+      // Only "enrich" and "replace" may remove older rows (the contract of FactEvolutionDecision); a plain "add" never deletes.
+      const staleRowIds: string[] = evolution.action === "add" ? [] : evolution.deleteRowIds;
+      for (const id of staleRowIds) {
         const { error: delErr } = await supabase.from("user_memory").delete().eq("id", id);
         if (!delErr) {
           const removed = trackedRows.find((r) => r.id === id);
@@ -408,13 +397,18 @@ export async function refreshUserLifeMemory(
         continue;
       }
 
+      // A whole number from 1 to 5: the candidate's own, else the one of its type. Never left to the column default.
+      const importance = resolveCandidateImportance({
+        memory_type: evolution.memory_type,
+        importance: c.importance,
+      });
       const { data: inserted, error } = await supabase
         .from("user_memory")
         .insert({
           user_id: userId,
           memory_type: evolution.memory_type,
           content,
-          importance: c.importance,
+          importance,
         })
         .select("id")
         .single();
@@ -422,7 +416,7 @@ export async function refreshUserLifeMemory(
       if (!error && inserted?.id) {
         known.add(key);
         rowCount++;
-        importanceById.set(inserted.id as string, c.importance);
+        importanceById.set(inserted.id as string, importance);
         trackedRows.push({
           id: inserted.id as string,
           content,
@@ -434,7 +428,7 @@ export async function refreshUserLifeMemory(
           parsedSlot: classifyFactCandidate(c.content),
           action: evolution.action,
           insertedContent: content,
-          deletedRows: evolution.deleteRowIds?.length ?? 0,
+          deletedRows: staleRowIds.length,
         });
         console.log(
           `[userLifeMemory] fact evolution ${evolution.action} type=${evolution.memory_type} len=${content.length}`
@@ -477,7 +471,7 @@ export async function refreshUserLifeMemory(
       user_id: userId,
       memory_type: c.memory_type,
       content,
-      importance: c.importance,
+      importance: resolveCandidateImportance(c),
     });
 
     if (!error) {

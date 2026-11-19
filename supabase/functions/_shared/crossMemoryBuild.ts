@@ -58,6 +58,29 @@ export interface CrossMemoryCandidate {
   importance: number;
 }
 
+/**
+ * How important a new row is by its type (the column allows 1..5): a way of talking or a preference 5, a fact about a person 4.
+ * The only table: the builders, the model parser and the write all read it. Types that are no longer allowed are not here on purpose.
+ */
+export const CROSS_MEMORY_TYPE_IMPORTANCE: Record<CrossMemoryType, number> = {
+  communication: 5,
+  preference: 5,
+  life_context: 4,
+};
+
+/**
+ * The importance to write for a candidate: its own when it is a whole number from 1 to 5, otherwise the one of its type.
+ * Never left empty: an empty value would be filled by the column default (3), which is not a decision anyone made.
+ */
+export function resolveCandidateImportance(candidate: {
+  memory_type: string;
+  importance?: unknown;
+}): number {
+  const own = candidate.importance;
+  if (typeof own === "number" && Number.isInteger(own) && own >= 1 && own <= 5) return own;
+  return CROSS_MEMORY_TYPE_IMPORTANCE[candidate.memory_type as CrossMemoryType] ?? 3;
+}
+
 function normalizeSentence(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
   if (!t) return "";
@@ -96,7 +119,7 @@ export function eventToFactEvolutionCandidate(
   if (!content || isBlockedCrossMemoryContent(content)) return null;
   if (!isPromotableToCrossMemory("life_context", content)) return null;
 
-  return { memory_type: "life_context", content, importance: 4 };
+  return { memory_type: "life_context", content, importance: CROSS_MEMORY_TYPE_IMPORTANCE.life_context };
 }
 
 /** Rule-based: one candidate per allowed people/preference item. */
@@ -108,7 +131,7 @@ export function buildCrossMemoryCandidates(
   for (const raw of memory.people) {
     const content = normalizePeopleFieldToLifeContext(raw);
     if (!content || isBlockedCrossMemoryContent(content)) continue;
-    out.push({ memory_type: "life_context", content, importance: 4 });
+    out.push({ memory_type: "life_context", content, importance: CROSS_MEMORY_TYPE_IMPORTANCE.life_context });
   }
 
   for (const raw of memory.important_events ?? []) {
@@ -124,10 +147,10 @@ export function buildCrossMemoryCandidates(
     const memory_type =
       category === "preference" ? "preference" : "communication";
     if (!isPromotableToCrossMemory(memory_type, content)) continue;
-    out.push({ memory_type, content, importance: 5 });
+    out.push({ memory_type, content, importance: CROSS_MEMORY_TYPE_IMPORTANCE[memory_type] });
   }
 
   return dedupeCrossMemoryCandidates(
-    filterCrossMemoryCandidates(out) as CrossMemoryCandidate[]
+    filterCrossMemoryCandidates(out)
   );
 }

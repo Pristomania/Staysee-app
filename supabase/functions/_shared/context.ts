@@ -12,7 +12,7 @@
  * - Never return or log the context packet in response bodies.
  */
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   collectMemoryCorrectionHints,
   countMessagesSinceSummary,
@@ -202,17 +202,27 @@ const MAX_WEEKLY_REFLECTIONS = 3;
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 async function fetchConversationMeta(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   conversationId: string
 ): Promise<ConversationMeta | null> {
   const fullSelect =
     "id, title, conversation_summary, summary, summary_updated_at, emotional_tone, created_at, last_message_at, metadata";
 
-  let { data, error } = await supabase
+  // Both selects describe the same row; the fallback one has no summary_updated_at / emotional_tone (an older schema),
+  // so those two (and the unchecked metadata) are optional here and normalized below.
+  type ConversationMetaRow = Omit<ConversationMeta, "summary_updated_at" | "emotional_tone" | "metadata"> & {
+    summary_updated_at?: string | null;
+    emotional_tone?: string | null;
+    metadata?: unknown;
+  };
+
+  const first = await supabase
     .from("conversations")
     .select(fullSelect)
     .eq("id", conversationId)
     .maybeSingle();
+  let data: ConversationMetaRow | null = first.data;
+  let error = first.error;
 
   if (error) {
     console.warn("[context] fetchConversationMeta fallback:", error.message);
@@ -231,21 +241,20 @@ async function fetchConversationMeta(
   }
 
   if (!data) return null;
+  const metadata = data.metadata;
   return {
     ...data,
-    summary_updated_at: (data as ConversationMeta).summary_updated_at ?? null,
-    emotional_tone: (data as ConversationMeta).emotional_tone ?? null,
+    summary_updated_at: data.summary_updated_at ?? null,
+    emotional_tone: data.emotional_tone ?? null,
     metadata:
-      (data as ConversationMeta).metadata &&
-      typeof (data as ConversationMeta).metadata === "object" &&
-      !Array.isArray((data as ConversationMeta).metadata)
-        ? ((data as ConversationMeta).metadata as Record<string, unknown>)
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)
         : null,
   };
 }
 
 async function fetchRecentMessages(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   conversationId: string
 ): Promise<RecentMessage[]> {
   // Messages are stored in Supabase for session continuity.
@@ -282,7 +291,7 @@ function normalizeMemoryRow(
 }
 
 async function fetchMemoryItems(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   userId: string
 ): Promise<MemoryItem[]> {
   const rich = await supabase
@@ -324,7 +333,7 @@ async function fetchMemoryItems(
 }
 
 async function fetchWeeklyReflections(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   conversationId: string
 ): Promise<WeeklyReflection[]> {
   const { data, error } = await supabase
@@ -351,7 +360,7 @@ async function fetchWeeklyReflections(
 // ── Stamp memory items as used ────────────────────────────────────────────────
 
 export async function stampMemoryUsed(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   ids: string[]
 ): Promise<void> {
   if (ids.length === 0) return;

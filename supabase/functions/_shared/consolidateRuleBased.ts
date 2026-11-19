@@ -67,8 +67,5 @@ export function consolidateRowsRuleBased(
     }
     out.push({ memory_type: memoryType, content });
   }
-  return filterCrossMemoryCandidates(out) as Array<{
-    memory_type: CrossMemoryType;
-    content: string;
-  }>;
+  return filterCrossMemoryCandidates(out);
 }
