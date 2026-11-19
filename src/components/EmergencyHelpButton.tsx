@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { EMERGENCY_HELP_COPY } from '../lib/emergencyHelp';
@@ -34,9 +35,11 @@ export function EmergencyHelpButton() {
       >
         <AlertCircle className={`w-4 h-4 ${theme.textSecondary}`} strokeWidth={1.5} />
       </button>
-      {open && (
+      {/* Drawn at the root of the page: the top row has a blurred background, and inside such a block "fixed" is measured from the block,
+          not from the screen (the window slipped out of the top of the screen). */}
+      {open && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-5"
+          className="fixed inset-0 z-[100] flex items-center justify-center px-5 py-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="emergency-help-title"
@@ -48,7 +51,7 @@ export function EmergencyHelpButton() {
             tabIndex={-1}
             onClick={() => setOpen(false)}
           />
-          <div className={`relative w-full max-w-sm rounded-2xl border px-5 py-5 ${theme.bg} ${theme.border}`}>
+          <div className={`relative w-full max-w-sm max-h-full overflow-y-auto rounded-2xl border px-5 py-5 ${theme.bg} ${theme.border}`}>
             <h2 id="emergency-help-title" className={`${theme.textPrimary} text-base font-light tracking-wide mb-4`}>
               {EMERGENCY_HELP_COPY.title}
             </h2>
@@ -81,7 +84,8 @@ export function EmergencyHelpButton() {
               <span className={`${theme.btnText} font-light text-sm tracking-widest`}>{EMERGENCY_HELP_COPY.close}</span>
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
