@@ -4,7 +4,11 @@
  */
 
 import {
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
   APPROVED_MODEL_GPT4O,
+  APPROVED_MODEL_KIMI_K26,
+  APPROVED_MODEL_KIMI_K26_CLOUDRU,
   APPROVED_MODEL_SONNET,
   assertApprovedRuntimeModel,
   normalizeApprovedModelId,
@@ -25,7 +29,6 @@ export interface ModelRouteResult {
   model: string;
   source:
     | "request"
-    | "crisis"
     | "brief"
     | "medium"
     | "deep"
@@ -38,7 +41,6 @@ export interface ModelRouteResult {
 const DEFAULT_BRIEF = APPROVED_MODEL_GPT4O;
 const DEFAULT_MEDIUM = APPROVED_MODEL_GPT4O;
 const DEFAULT_DEEP = APPROVED_MODEL_SONNET;
-const DEFAULT_CRISIS = APPROVED_MODEL_GPT4O;
 const DEFAULT_FALLBACK = APPROVED_MODEL_SONNET;
 
 function envModel(key: string): string | undefined {
@@ -53,19 +55,35 @@ function envModel(key: string): string | undefined {
  * All routes use the same OpenRouter API key; `model` is the OpenRouter slug.
  */
 export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
+  const route = resolveChatModelBase(input);
+  const reserve = resolveOwnModelFallback(route.model);
+  return reserve ? { ...route, fallbackModel: reserve } : route;
+}
+
+/**
+ * The model that answers when DeepSeek V4 Pro or Kimi K2.6 fails: STAYSEE_CHAT_MODEL_FALLBACK if it is set (and approved), otherwise
+ * the other one of the two, on the same host (OpenRouter now, Cloud.ru after the move, so that the words of the person stay with
+ * the Russian host). Any other model keeps its own reserve (undefined here).
+ */
+export function resolveOwnModelFallback(primary: string): string | undefined {
+  const id = normalizeApprovedModelId(primary);
+  const pair: Record<string, string> = {
+    [APPROVED_MODEL_DEEPSEEK_V4_PRO]: APPROVED_MODEL_KIMI_K26,
+    [APPROVED_MODEL_KIMI_K26]: APPROVED_MODEL_DEEPSEEK_V4_PRO,
+    [APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU]: APPROVED_MODEL_KIMI_K26_CLOUDRU,
+    [APPROVED_MODEL_KIMI_K26_CLOUDRU]: APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
+  };
+  const other = pair[id];
+  if (!other) return undefined;
+  const forced = envModel("STAYSEE_CHAT_MODEL_FALLBACK");
+  return forced && forced !== id ? forced : other;
+}
+
+function resolveChatModelBase(input: ModelRouteInput): ModelRouteResult {
   const override = input.requestModel?.trim();
   if (override) {
     assertApprovedRuntimeModel(override, "requestModel");
     return { model: normalizeApprovedModelId(override), source: "request" };
-  }
-
-  if (input.safetyCategory === "crisis") {
-    const model =
-      envModel("STAYSEE_CHAT_MODEL_CRISIS") ??
-      envModel("STAYSEE_CHAT_MODEL_DEEP") ??
-      envModel("STAYSEE_CHAT_MODEL") ??
-      DEFAULT_CRISIS;
-    return { model, source: "crisis", fallbackModel: DEFAULT_DEEP };
   }
 
   if (input.flatOrdinary) {

@@ -19,6 +19,7 @@ import { formatMessageTime } from '../../lib/formatMessageTime';
 import { findMatchingMessageIds } from '../../lib/chatInDialogSearch';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { DYNAMICS_COPY } from '../../lib/dynamicsCopy';
+import { EmergencyHelpButton } from '../EmergencyHelpButton';
 import type { Message } from '../../types';
 import { dedupeMessages, mergeFetchedWithPending } from '../../lib/messages';
 import {
@@ -1340,6 +1341,7 @@ ${built.message}` : built.message));
               strokeWidth={1.5}
             />
           </button>
+          <EmergencyHelpButton />
         </div>
         {searchOpen && (
           <div className={`relative pb-3 ${LAYOUT_CONTAINER_CLASS}`}>

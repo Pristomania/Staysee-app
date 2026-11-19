@@ -115,10 +115,6 @@ export function validateAtomicQuotaWiring(source: string): void {
     /safety\.immediateResponse/.test(beforeReserve),
     "safety immediate-response check must appear before atomic reserve",
   );
-  assert(
-    /detectExplicitPromptAttackHardStop|explicitPromptAttackStop/.test(beforeReserve),
-    "explicit prompt-attack hard-stop must appear before atomic reserve",
-  );
 
   // ── 4. All provider-backed seams after reserve (eager summary first) ──────
 

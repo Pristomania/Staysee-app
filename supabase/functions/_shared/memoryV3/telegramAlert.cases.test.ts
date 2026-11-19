@@ -64,6 +64,27 @@ describe("Memory V3 Telegram alert boundary", () => {
     }
   });
 
+  it("says in plain words what the code means, for every code, without any identifier", async () => {
+    const codes: Array<[string, string]> = [
+      ["read", "load_failed"], ["read", "invalid_shape"], ["read", "too_large"],
+      ["write", "invalid_source"], ["write", "state_too_large"], ["write", "extractor_transport_failed"],
+      ["write", "extractor_parse_invalid"], ["write", "extractor_shape_invalid"], ["write", "extractor_contract_invalid"],
+      ["write", "reconciler_request_too_large"], ["write", "reconciler_transport_failed"], ["write", "reconciler_parse_invalid"],
+      ["write", "reconciler_shape_invalid"], ["write", "reconciler_contract_invalid"], ["write", "state_conflict"],
+      ["write", "state_write_failed"], ["write", "reservation_failed"], ["write", "unknown_failure"], ["write", "forced_skip"],
+    ];
+    for (const [path, diagnosticCode] of codes) {
+      const { options, fetchCalls } = harness({ path, diagnosticCode });
+      await sendMemoryV3TelegramAlertSafely(options as never);
+      const text = JSON.parse(fetchCalls[0].init.body ?? "null").text as string;
+      assert.match(text, /\nЧто это: [^\n]{20,}$/u, `${diagnosticCode} explains itself`);
+      assert.equal(/[0-9a-f]{8}-[0-9a-f]{4}-/i.test(text), false, `${diagnosticCode}: no identifier`);
+    }
+    const source = harness({ path: "write", diagnosticCode: "invalid_source" });
+    await sendMemoryV3TelegramAlertSafely(source.options as never);
+    assert.match(JSON.parse(source.fetchCalls[0].init.body ?? "null").text, /не нашла сообщений беседы/u);
+  });
+
   it("suppresses a duplicate before Telegram", async () => {
     const { options, reserved, fetchCalls } = harness({
       reserveAlertKey: async (key: string) => {

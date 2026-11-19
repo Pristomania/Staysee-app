@@ -44,19 +44,14 @@ assert(deepLegacy.source === "deep", "legacy deep → source deep");
 const briefLegacy = resolveChatModel({ depth: "brief", safetyCategory: "normal" });
 assert(briefLegacy.model === APPROVED_MODEL_GPT4O, "legacy brief → gpt-4o");
 
-console.log("\n=== modelRouter crisis unchanged ===\n");
+console.log("\n=== modelRouter: no separate model for a crisis (the model understands it from the prompt) ===\n");
 
-const crisis = resolveChatModel({
-  depth: "brief",
-  safetyCategory: "crisis",
-  flatOrdinary: true,
-});
-assert(crisis.model === APPROVED_MODEL_GPT4O, "crisis → gpt-4o (default crisis model)");
-assert(crisis.source === "crisis", "crisis → source crisis (not flat_ordinary)");
-assert(
-  crisis.fallbackModel === APPROVED_MODEL_SONNET,
-  "crisis → sonnet fallback unchanged",
-);
+for (const flatOrdinary of [true, false]) {
+  const ordinary = resolveChatModel({ depth: "brief", safetyCategory: "normal", flatOrdinary });
+  const crisis = resolveChatModel({ depth: "brief", safetyCategory: "crisis", flatOrdinary });
+  assert(crisis.model === ordinary.model, `crisis (flat=${flatOrdinary}) → the same model as an ordinary turn`);
+  assert(crisis.source === ordinary.source, `crisis (flat=${flatOrdinary}) → the same route as an ordinary turn`);
+}
 
 if (failed > 0) {
   console.error(`\n${failed} case(s) failed`);

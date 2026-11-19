@@ -71,6 +71,33 @@ const WRITE_DIAGNOSTICS = new Set<MemoryV3TelegramAlertDiagnostic>([
   "forced_skip",
 ]);
 
+/**
+ * What each code means, in plain words, so that the alert explains itself. Fixed texts: nothing of a conversation, a person or
+ * a message goes into them (the test of this file checks that no identifier reaches the alert).
+ */
+const MEANING: Record<MemoryV3TelegramAlertDiagnostic, string> = {
+  load_failed: "память не смогла прочитать сохранённое о человеке (сбой чтения базы).",
+  invalid_shape: "прочитанное из базы оказалось в неожиданном виде и не было использовано.",
+  too_large: "прочитанного оказалось слишком много, и оно не было использовано.",
+  invalid_source:
+    "память не нашла сообщений беседы для чтения или они в неверном виде. Бывает, если ответ был, а сообщения не сохранили (в проверках, которые сообщения не записывают, это ожидаемо).",
+  state_too_large: "накопленное состояние памяти слишком велико, запись остановлена.",
+  extractor_transport_failed: "запрос к модели, которая выбирает факты из беседы, не дошёл (сеть или отказ хоста).",
+  extractor_parse_invalid: "модель выбора фактов ответила так, что ответ нельзя разобрать.",
+  extractor_shape_invalid: "модель выбора фактов вернула данные неверной формы.",
+  extractor_contract_invalid: "модель выбора фактов нарушила договорённый формат.",
+  reconciler_request_too_large: "запрос на сведение фактов получился слишком большим.",
+  reconciler_transport_failed: "запрос к модели, которая сводит факты, не дошёл (сеть или отказ хоста).",
+  reconciler_parse_invalid: "модель сведения фактов ответила так, что ответ нельзя разобрать.",
+  reconciler_shape_invalid: "модель сведения фактов вернула данные неверной формы.",
+  reconciler_contract_invalid: "модель сведения фактов нарушила договорённый формат.",
+  state_conflict: "две записи памяти пересеклись одновременно, вторая не прошла.",
+  state_write_failed: "запись в память не удалась (сбой базы).",
+  reservation_failed: "не удалось занять очередь на запись памяти.",
+  unknown_failure: "неизвестный сбой записи памяти.",
+  forced_skip: "память пропустила одно сообщение, чтобы не застрять на нём.",
+};
+
 type ProjectedOptions = {
   botToken: unknown;
   chatId: unknown;
@@ -155,6 +182,7 @@ export async function sendMemoryV3TelegramAlertSafely(
       `Path: ${path}`,
       `Code: ${diagnosticCode}`,
       `Time: ${new Date().toISOString()}`,
+      `Что это: ${MEANING[diagnosticCode]}`,
     ].join("\n");
     await options.fetchImpl(
       `https://api.telegram.org/bot${options.botToken}/sendMessage`,
