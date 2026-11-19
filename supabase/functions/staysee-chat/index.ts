@@ -158,6 +158,7 @@ import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts
 import { logProtocolSignals } from "../_shared/protocolEvents.ts";
 import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
 import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
+import { K3_LAYER_ID } from "../_shared/promptCore/k3Prompt.ts";
 import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
 import {
   computeResponseBudget,
@@ -293,6 +294,9 @@ const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 const BASE_PROMPT = buildSurgery1BasePrompt();
 const ACTIVE_PROMPT_LAYER_ID = resolveActivePromptLayerId();
+// With the K3 base the meaning (crisis, medicine, role, attachment, pause, goodbye, grammatical gender) is in the text of
+// the prompt: the word-based layers around it are skipped (and the history is not cleaned by words).
+const isK3Base = ACTIVE_PROMPT_LAYER_ID === K3_LAYER_ID;
 
 console.log(
   `[staysee-chat] ${ACTIVE_PROMPT_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
@@ -1326,7 +1330,7 @@ Deno.serve(async (req: Request) => {
       `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated} rule=${diagnosis.matchedRule}`
     );
 
-    if (safety.systemGuidance) {
+    if (safety.systemGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, safety.systemGuidance].join("\n\n");
     }
 
@@ -1355,11 +1359,11 @@ Deno.serve(async (req: Request) => {
       genderResult,
       genderGuidanceOptions
     );
-    const genderGuidanceOn = userGenderGuidanceInjected(
+    const genderGuidanceOn = !isK3Base && userGenderGuidanceInjected(
       genderResult,
       genderGuidanceOptions
     );
-    if (genderGuidance) {
+    if (genderGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, genderGuidance].join("\n\n");
     }
 
@@ -1381,7 +1385,7 @@ Deno.serve(async (req: Request) => {
         ? historyMessages
         : [...historyMessages, { role: "user", content: message }];
 
-    const modelMessages = sanitizeHistoryForModel(messages);
+    const modelMessages = isK3Base ? messages : sanitizeHistoryForModel(messages);
 
     // ── L7: Dynamic response budget + model call ─────────────────────────────
 
@@ -1400,7 +1404,7 @@ Deno.serve(async (req: Request) => {
       depthReason: responseBudget.depthReason,
       message,
     });
-    const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
+    const explicitClosureGuidanceOn = !isK3Base && explicitClosureGuidanceInjected({
       depthReason: responseBudget.depthReason,
       message,
     });
@@ -1410,12 +1414,12 @@ Deno.serve(async (req: Request) => {
       explicitClosureActive: explicitClosureGuidanceOn,
       safetyCategory: safety.category,
     });
-    const sessionProcessGuidanceOn = sessionProcessGuidanceInjected({
+    const sessionProcessGuidanceOn = !isK3Base && sessionProcessGuidanceInjected({
       priorState: priorSessionProcessState,
       explicitClosureActive: explicitClosureGuidanceOn,
       safetyCategory: safety.category,
     });
-    if (sessionProcessGuidance) {
+    if (sessionProcessGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
     }
 
@@ -1430,12 +1434,12 @@ Deno.serve(async (req: Request) => {
       safetyCategory: safety.category,
     };
     const pauseInArcGuidance = buildPauseInArcTurnGuidance(pauseInArcGuidanceInput);
-    const pauseInArcGuidanceOn = pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
-    if (pauseInArcGuidance) {
+    const pauseInArcGuidanceOn = !isK3Base && pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
+    if (pauseInArcGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
     }
 
-    if (explicitClosureGuidance) {
+    if (explicitClosureGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
     }
 
