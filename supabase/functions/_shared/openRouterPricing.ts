@@ -22,6 +22,9 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   "mistral-small-latest": { inputPer1M: 0.2, outputPer1M: 0.6 },
   "google/gemini-flash-1.5": { inputPer1M: 0.075, outputPer1M: 0.3 },
   "deepseek/deepseek-chat": { inputPer1M: 0.14, outputPer1M: 0.28 },
+  // Cloud.ru (Russia): 183 / 732 and 175.68 / 725.9 roubles per 1M tokens, counted at 90 roubles per dollar.
+  "deepseek-ai/deepseek-v4-pro": { inputPer1M: 2.033, outputPer1M: 8.133 },
+  "moonshotai/kimi-k2.6": { inputPer1M: 1.952, outputPer1M: 8.066 },
 };
 
 const DEFAULT_PRICING: ModelPricing = { inputPer1M: 1.0, outputPer1M: 3.0 };

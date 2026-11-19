@@ -181,9 +181,10 @@ import {
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
-import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { APPROVED_MODEL_DEEPSEEK_V4_PRO, APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel } from "../_shared/modelHost.ts";
+import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
 import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
-import { OPENROUTER_PRIVATE_ROUTE } from "../_shared/openRouterPrivateRoute.ts";
 import {
   ensurePublishableReply,
   isPublishableReply,
@@ -243,7 +244,7 @@ const corsHeaders = {
 
 // ── Provider registry ────────────────────────────────────────────────────────
 
-type AiProvider = "openrouter" | "openai" | "gemini" | "deepseek" | "mistral";
+type AiProvider = "openrouter" | "cloudru" | "openai" | "gemini" | "deepseek" | "mistral";
 
 type FullProviderConfig = ProviderConfig;
 
@@ -264,6 +265,12 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
       "HTTP-Referer": "https://staysee.app",
       "X-Title": "StaySee AI",
     },
+  },
+  // Hosted in Russia: the models of StaySee (DeepSeek V4 Pro, Kimi K2.6) are asked here; see _shared/modelHost.ts.
+  cloudru: {
+    baseUrl: CLOUDRU_BASE_URL,
+    model: APPROVED_MODEL_DEEPSEEK_V4_PRO,
+    envKey: CLOUDRU_API_KEY_ENV,
   },
   openai: {
     baseUrl: "https://api.openai.com/v1",
@@ -451,6 +458,14 @@ async function callModel(
     finishReason?: string;
     usage?: { cost?: number; total_tokens?: number };
   } | null> {
+    // The host follows the model: a Cloud.ru model goes to Cloud.ru, any other model to the provider that was asked.
+    if (hostForModel(model) === "cloudru") {
+      provider = "cloudru";
+      config = PROVIDERS.cloudru;
+    } else if (provider === "cloudru") {
+      provider = "openrouter";
+      config = PROVIDERS.openrouter;
+    }
     const apiKey = Deno.env.get(config.envKey);
     if (!apiKey) {
       console.warn(`[staysee-chat] no key for ${provider} (env: ${config.envKey})`);
@@ -477,7 +492,7 @@ async function callModel(
           ],
           max_tokens: maxTokens,
           ...buildChatModelParameters(model, temperature),
-          usage: { include: true },
+          ...(provider === "cloudru" ? {} : { usage: { include: true } }),
           ...(provider === "openrouter" ? { provider: buildChatModelProviderRoute(model) } : {}),
         }),
       });
@@ -489,6 +504,10 @@ async function callModel(
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
       console.error(`[staysee-chat] ${provider} HTTP ${res.status}: ${errBody.slice(0, 300)}`);
+      // No money left or the key is refused: the founder is told in Telegram (once in half an hour), the next model answers.
+      if (provider === "cloudru" && (res.status === 402 || res.status === 401 || res.status === 403)) {
+        await sendProviderAlertSafely(res.status === 402 ? "balance_empty" : "key_rejected");
+      }
       return null;
     }
 
@@ -554,8 +573,10 @@ async function callModel(
     if (modelFallbackResult) return modelFallbackResult;
   }
 
-  // Fallback chain
-  const fallback = findFallbackProvider([...tried]);
+  // Fallback chain. With a Cloud.ru model the words of the person do not leave Russia on their own: the foreign providers
+  // answer only if STAYSEE_FOREIGN_FALLBACK=1 is set.
+  const foreignFallbackAllowed = hostForModel(primaryModel) !== "cloudru" || Deno.env.get("STAYSEE_FOREIGN_FALLBACK") === "1";
+  const fallback = foreignFallbackAllowed ? findFallbackProvider([...tried]) : null;
   if (fallback) {
     const fallbackResult = await attempt(fallback.provider, fallback.config as FullProviderConfig, fallback.config.model);
     if (fallbackResult) return fallbackResult;

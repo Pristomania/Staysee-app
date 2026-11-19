@@ -13,12 +13,21 @@
 export const APPROVED_MODEL_GPT4O = "openai/gpt-4o-2024-08-06";
 export const APPROVED_MODEL_SOL = "openai/gpt-6.1-sol";
 export const APPROVED_MODEL_SONNET = "anthropic/claude-sonnet-4-5";
+/** Hosted by Cloud.ru in Russia (see modelHost.ts): the main model and the reserve chosen on 17.11.2026. */
+export const APPROVED_MODEL_DEEPSEEK_V4_PRO = "deepseek-ai/DeepSeek-V4-Pro";
+export const APPROVED_MODEL_KIMI_K26 = "moonshotai/Kimi-K2.6";
+export const CLOUDRU_RUNTIME_MODELS = new Set<string>([
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_KIMI_K26,
+]);
 
 /** OpenRouter slugs allowed for runtime API calls. */
 export const APPROVED_RUNTIME_MODELS = new Set<string>([
   APPROVED_MODEL_GPT4O,
   APPROVED_MODEL_SOL,
   APPROVED_MODEL_SONNET,
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_KIMI_K26,
 ]);
 
 /** Substrings that must not appear as hardcoded runtime defaults. */
@@ -31,6 +40,8 @@ const MODEL_ALIASES: Record<string, string> = {
   "gpt-4o": APPROVED_MODEL_GPT4O,
   "openai/gpt-4o": APPROVED_MODEL_GPT4O,
   "claude-sonnet-4-5": APPROVED_MODEL_SONNET,
+  "deepseek-ai/deepseek-v4-pro": APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  "moonshotai/kimi-k2.6": APPROVED_MODEL_KIMI_K26,
 };
 
 export function normalizeApprovedModelId(model: string): string {

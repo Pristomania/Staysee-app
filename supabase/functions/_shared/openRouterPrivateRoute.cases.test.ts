@@ -37,7 +37,7 @@ describe("the private route for model requests", () => {
     const files = sourceFiles(functionsDir).filter((path) => sendsRequest.test(readFileSync(path, "utf8")));
     assert.ok(files.length >= 10, `expected to find the model callers, found ${files.length}`);
     const without = files
-      .filter((path) => !/data_collection|OPENROUTER_PRIVATE_ROUTE/.test(readFileSync(path, "utf8")))
+      .filter((path) => !/data_collection|OPENROUTER_PRIVATE_ROUTE|buildChatModelProviderRoute/.test(readFileSync(path, "utf8")))
       .map((path) => path.slice(functionsDir.length).split("\\").join("/"));
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
     assert.deepEqual(without.filter((path) => path !== "_shared/longMessageSummarizer.ts"), [], "these files send a request without the private route");

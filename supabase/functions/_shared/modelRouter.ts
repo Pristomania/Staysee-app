@@ -4,11 +4,14 @@
  */
 
 import {
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
   APPROVED_MODEL_GPT4O,
+  APPROVED_MODEL_KIMI_K26,
   APPROVED_MODEL_SONNET,
   assertApprovedRuntimeModel,
   normalizeApprovedModelId,
 } from "./approvedModels.ts";
+import { hostForModel } from "./modelHost.ts";
 import type { ResponseDepth } from "./responseBudget.ts";
 import type { SafetyCategory } from "./safety.ts";
 
@@ -51,6 +54,22 @@ function envModel(key: string): string | undefined {
  * All routes use the same OpenRouter API key; `model` is the OpenRouter slug.
  */
 export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
+  const route = resolveChatModelBase(input);
+  if (hostForModel(route.model) !== "cloudru") return route;
+  return { ...route, fallbackModel: resolveCloudruFallbackModel(route.model) };
+}
+
+/**
+ * The model that answers when a Cloud.ru model fails: STAYSEE_CHAT_MODEL_FALLBACK if it is set (and approved), otherwise
+ * the other Cloud.ru model, so that the words of the person stay with the Russian host.
+ */
+export function resolveCloudruFallbackModel(primary: string): string {
+  const forced = envModel("STAYSEE_CHAT_MODEL_FALLBACK");
+  if (forced && forced !== primary) return forced;
+  return normalizeApprovedModelId(primary) === APPROVED_MODEL_KIMI_K26 ? APPROVED_MODEL_DEEPSEEK_V4_PRO : APPROVED_MODEL_KIMI_K26;
+}
+
+function resolveChatModelBase(input: ModelRouteInput): ModelRouteResult {
   const override = input.requestModel?.trim();
   if (override) {
     assertApprovedRuntimeModel(override, "requestModel");
