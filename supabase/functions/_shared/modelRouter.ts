@@ -5,13 +5,14 @@
 
 import {
   APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
   APPROVED_MODEL_GPT4O,
   APPROVED_MODEL_KIMI_K26,
+  APPROVED_MODEL_KIMI_K26_CLOUDRU,
   APPROVED_MODEL_SONNET,
   assertApprovedRuntimeModel,
   normalizeApprovedModelId,
 } from "./approvedModels.ts";
-import { hostForModel } from "./modelHost.ts";
 import type { ResponseDepth } from "./responseBudget.ts";
 import type { SafetyCategory } from "./safety.ts";
 
@@ -55,18 +56,27 @@ function envModel(key: string): string | undefined {
  */
 export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
   const route = resolveChatModelBase(input);
-  if (hostForModel(route.model) !== "cloudru") return route;
-  return { ...route, fallbackModel: resolveCloudruFallbackModel(route.model) };
+  const reserve = resolveOwnModelFallback(route.model);
+  return reserve ? { ...route, fallbackModel: reserve } : route;
 }
 
 /**
- * The model that answers when a Cloud.ru model fails: STAYSEE_CHAT_MODEL_FALLBACK if it is set (and approved), otherwise
- * the other Cloud.ru model, so that the words of the person stay with the Russian host.
+ * The model that answers when DeepSeek V4 Pro or Kimi K2.6 fails: STAYSEE_CHAT_MODEL_FALLBACK if it is set (and approved), otherwise
+ * the other one of the two, on the same host (OpenRouter now, Cloud.ru after the move, so that the words of the person stay with
+ * the Russian host). Any other model keeps its own reserve (undefined here).
  */
-export function resolveCloudruFallbackModel(primary: string): string {
+export function resolveOwnModelFallback(primary: string): string | undefined {
+  const id = normalizeApprovedModelId(primary);
+  const pair: Record<string, string> = {
+    [APPROVED_MODEL_DEEPSEEK_V4_PRO]: APPROVED_MODEL_KIMI_K26,
+    [APPROVED_MODEL_KIMI_K26]: APPROVED_MODEL_DEEPSEEK_V4_PRO,
+    [APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU]: APPROVED_MODEL_KIMI_K26_CLOUDRU,
+    [APPROVED_MODEL_KIMI_K26_CLOUDRU]: APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
+  };
+  const other = pair[id];
+  if (!other) return undefined;
   const forced = envModel("STAYSEE_CHAT_MODEL_FALLBACK");
-  if (forced && forced !== primary) return forced;
-  return normalizeApprovedModelId(primary) === APPROVED_MODEL_KIMI_K26 ? APPROVED_MODEL_DEEPSEEK_V4_PRO : APPROVED_MODEL_KIMI_K26;
+  return forced && forced !== id ? forced : other;
 }
 
 function resolveChatModelBase(input: ModelRouteInput): ModelRouteResult {

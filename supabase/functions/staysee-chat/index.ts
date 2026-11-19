@@ -181,7 +181,7 @@ import {
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
-import { APPROVED_MODEL_DEEPSEEK_V4_PRO, APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel } from "../_shared/modelHost.ts";
 import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
 import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
@@ -266,10 +266,10 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
       "X-Title": "StaySee AI",
     },
   },
-  // Hosted in Russia: the models of StaySee (DeepSeek V4 Pro, Kimi K2.6) are asked here; see _shared/modelHost.ts.
+  // Hosted in Russia: DeepSeek V4 Pro and Kimi K2.6 are asked here after the move (their Cloud.ru names); see _shared/modelHost.ts.
   cloudru: {
     baseUrl: CLOUDRU_BASE_URL,
-    model: APPROVED_MODEL_DEEPSEEK_V4_PRO,
+    model: APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
     envKey: CLOUDRU_API_KEY_ENV,
   },
   openai: {

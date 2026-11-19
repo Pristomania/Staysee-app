@@ -1,8 +1,10 @@
 /**
  * Which host answers a model: the host follows the model.
  *
- * The models chosen for StaySee (DeepSeek V4 Pro as the main one, Kimi K2.6 as the reserve) are hosted by Cloud.ru in Russia,
- * through an OpenAI-compatible API. Every other approved model goes through OpenRouter, as before.
+ * DeepSeek V4 Pro (main) and Kimi K2.6 (reserve) are chosen for StaySee. Now they are asked through OpenRouter, on the private
+ * route (the OpenRouter ids: "deepseek/deepseek-v4-pro", "moonshotai/kimi-k2.6"). When the move to Russia comes, the same two models
+ * are asked of Cloud.ru (OpenAI-compatible API, ids "deepseek-ai/DeepSeek-V4-Pro", "moonshotai/Kimi-K2.6", secret CLOUDRU_API_KEY):
+ * only the model names in the secrets change. Every other approved model goes through OpenRouter, as before.
  */
 
 import { CLOUDRU_RUNTIME_MODELS, normalizeApprovedModelId } from "./approvedModels.ts";
