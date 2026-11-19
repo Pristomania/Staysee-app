@@ -18,6 +18,9 @@ assert(/createPortal\(\s*<div[\s\S]*?document\.body,\s*\)/.test(source), "into t
 assert(/fixed inset-0 z-\[100\]/.test(source), "over everything, from the screen");
 assert(/max-h-full overflow-y-auto/.test(source), "and it scrolls inside the screen when the screen is low");
 
+// A phone number is never broken across two lines (seen on a phone and on the desktop: «8-» at the end of a line, «800-2000-122» on the next).
+assert(/underline underline-offset-4 whitespace-nowrap/.test(source), "every number and link stays in one line");
+
 const chat = readFileSync(resolve("src/components/screens/ChatScreen.tsx"), "utf8").replace(/\r/g, "");
 assert(/backdropFilter: 'blur\(12px\)'/.test(chat) && /<EmergencyHelpButton \/>/.test(chat), "the button still sits in the blurred top row, which is why the portal is needed");
 

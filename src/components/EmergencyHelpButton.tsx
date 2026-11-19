@@ -65,7 +65,7 @@ export function EmergencyHelpButton() {
                       <a
                         key={partIndex}
                         href={part.href}
-                        className={`${theme.textPrimary} underline underline-offset-4`}
+                        className={`${theme.textPrimary} underline underline-offset-4 whitespace-nowrap`}
                         {...(part.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                       >
                         {part.label}
