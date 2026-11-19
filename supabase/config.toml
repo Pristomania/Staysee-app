@@ -26,3 +26,7 @@ verify_jwt = false
 
 [functions.memory-health-check]
 verify_jwt = false
+
+# No bearer JWT on Auth hooks: auth-email verifies Standard Webhooks signatures before any reads or sends.
+[functions.auth-email]
+verify_jwt = false
