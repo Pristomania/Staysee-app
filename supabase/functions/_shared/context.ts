@@ -29,7 +29,6 @@ import {
 import {
   buildNarrativeContext,
   formatNarrativeForPrompt,
-  type WeeklyReflection,
 } from "./narrativeEngine.ts";
 import {
   formatArchiveExcerptsForPrompt,
@@ -98,8 +97,8 @@ export interface ContextPacket {
   archiveExcerpts: ArchiveExcerpt[];
   /** Verbatim user lines for recall / topic questions (this chat only). */
   userEvidenceQuotes: UserEvidenceQuote[];
-  /** Saved weekly dynamics snapshots for this conversation. */
-  weeklyReflections: WeeklyReflection[];
+  // There is deliberately no field for the weekly dynamics ("Динамика", progress_entries): the owner's rule (20.11.2026) is that
+  // they never go into Stacy's prompt. contextNoWeeklyDynamics.cases.test.ts keeps it that way.
 }
 
 export interface ContextPromptOptions {
@@ -197,7 +196,6 @@ function inspectContextPromptOptions(
 const MAX_RECENT_MESSAGES = 40;
 /** Cross-memory: fewer rows, each is a full sentence. */
 const MAX_MEMORY_ITEMS = 8;
-const MAX_WEEKLY_REFLECTIONS = 3;
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
@@ -332,31 +330,6 @@ async function fetchMemoryItems(
   return (basic.data ?? []).map((r) => normalizeMemoryRow(r as Record<string, unknown>));
 }
 
-async function fetchWeeklyReflections(
-  supabase: SupabaseClient,
-  conversationId: string
-): Promise<WeeklyReflection[]> {
-  const { data, error } = await supabase
-    .from("progress_entries")
-    .select("content, created_at, entry_date")
-    .eq("conversation_id", conversationId)
-    .eq("entry_type", "weekly")
-    .order("entry_date", { ascending: false })
-    .limit(MAX_WEEKLY_REFLECTIONS);
-
-  if (error) {
-    console.warn("[context] fetchWeeklyReflections:", error.message);
-    return [];
-  }
-
-  return (data ?? [])
-    .map((r) => ({
-      content: (r.content ?? "").trim(),
-      created_at: (r.created_at as string | undefined) ?? undefined,
-    }))
-    .filter((r) => r.content.length > 0);
-}
-
 // ── Stamp memory items as used ────────────────────────────────────────────────
 
 export async function stampMemoryUsed(
@@ -416,7 +389,6 @@ export function buildContextPrompt(
   const narrativeBlock = formatNarrativeForPrompt(
     buildNarrativeContext({
       summary: getParsedMemory(meta) ?? undefined,
-      weekly: packet.weeklyReflections,
       crossMemory: injectableCrossMemory,
       recentMessages: packet.recentMessages,
     })
@@ -452,7 +424,7 @@ export async function buildContextPacket(
     global: { headers: { Authorization: `Bearer ${input.authToken}` } },
   });
 
-  const [conversationMeta, recentMessages, crossMemoryOn, weeklyReflections] =
+  const [conversationMeta, recentMessages, crossMemoryOn] =
     await Promise.all([
       fetchConversationMeta(supabase, input.conversationId),
       fetchRecentMessages(supabase, input.conversationId),
@@ -461,7 +433,6 @@ export async function buildContextPacket(
         input.userId,
         input.conversationId
       ),
-      fetchWeeklyReflections(supabase, input.conversationId),
     ]);
 
   const legacyMemoryCompatibilityEnabled =
@@ -491,6 +462,5 @@ export async function buildContextPacket(
     messagesSinceSummary,
     archiveExcerpts: [],
     userEvidenceQuotes: [],
-    weeklyReflections,
   };
 }

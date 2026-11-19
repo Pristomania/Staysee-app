@@ -102,10 +102,6 @@ function packet(): ContextPacket {
       createdAt: "2026-09-19T08:00:00Z",
       text: "EVIDENCE_SENTINEL from the user",
     }],
-    weeklyReflections: [{
-      content: "WEEKLY_REFLECTION_SENTINEL remained important this week",
-      created_at: "2026-09-20T07:00:00Z",
-    }],
   };
 }
 
@@ -133,7 +129,6 @@ function assertPreservedContext(result: string): void {
     "SUMMARY_THEME_SENTINEL",
     "EPHEMERAL_CORRECTION_SENTINEL",
     "DURABLE_CORRECTION_SENTINEL",
-    "WEEKLY_REFLECTION_SENTINEL",
     "ARCHIVE_SENTINEL",
     "EVIDENCE_SENTINEL",
   ]) {
