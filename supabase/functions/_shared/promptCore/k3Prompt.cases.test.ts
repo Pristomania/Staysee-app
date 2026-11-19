@@ -50,6 +50,12 @@ const approved = new Set(["74959895050", "88002000122"]);
 assert(phones.length > 0 && phones.every((p) => approved.has(p)), "K3 holds no phone number except the two approved ones");
 assert(!/линия\s+150|\b111\b|\b124\b/.test(k3), "K3 names no hotline of another country");
 
+console.log("\n=== the emergency help button shows the same contacts ===\n");
+const helpSource = readFileSync(resolve("src/lib/emergencyHelp.ts"), "utf8").replace(/\r/g, "");
+for (const token of ["+7 (495) 989-50-50", "112", "103", "findahelpline.com", "8-800-2000-122"]) {
+  assert(helpSource.includes(token) && k3.includes(token), `the button and the prompt name the same: ${token}`);
+}
+
 console.log("\n=== the rules that the word layers used to carry ===\n");
 const RULES: Array<[string, RegExp]> = [
   ["a memory, a story about someone else and an intention are not the same", /Мысль, воспоминание, чужая история и намерение действовать не одно и то же/],
