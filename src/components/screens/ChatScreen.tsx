@@ -93,6 +93,9 @@ import { splitPhotoBlocks } from '../../lib/photoBlocks';
 import { IMAGES_NOTICE_TEXT, recordImagesConsent } from '../../lib/imagesConsent';
 import { markImagesConsentGiven } from '../../lib/ai/imageCapability';
 import { ImagesConsentCard } from '../chat/ImagesConsentCard';
+import { MessageFeedback } from '../chat/MessageFeedback';
+import { canMarkMessage, loadFeedback, type FeedbackState } from '../../lib/messageFeedback';
+import { supabaseFeedbackDeps } from '../../lib/messageFeedbackDeps';
 
 export const GREETING = 'О чём сегодня хочется поговорить?';
 
@@ -1177,6 +1180,25 @@ ${built.message}` : built.message));
     ? roomMessages.filter((m) => m.id !== suppressAiMessageId)
     : roomMessages;
 
+  // Thumbs under the answers: the marks already given are read once per answer (a mark made now is kept in the same map).
+  const [feedbackMarks, setFeedbackMarks] = useState<Record<string, FeedbackState>>({});
+  const askedFeedbackIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = visibleMessages.filter(canMarkMessage).map((m) => m.id).filter((id) => !askedFeedbackIdsRef.current.has(id));
+    if (ids.length === 0) return;
+    ids.forEach((id) => askedFeedbackIdsRef.current.add(id));
+    void loadFeedback(supabaseFeedbackDeps, ids).then((found) => {
+      if (Object.keys(found).length > 0) setFeedbackMarks((prev) => ({ ...found, ...prev }));
+    });
+  }, [visibleMessages]);
+  const changeFeedbackMark = (messageId: string, next: FeedbackState | null) =>
+    setFeedbackMarks((prev) => {
+      const copy = { ...prev };
+      if (next) copy[messageId] = next;
+      else delete copy[messageId];
+      return copy;
+    });
+
   const trimmedSearch = searchQuery.trim();
   const matchingMessageIds = useMemo(
     () => findMatchingMessageIds(visibleMessages, trimmedSearch),
@@ -1405,6 +1427,9 @@ ${built.message}` : built.message));
               isSearchMatch={trimmedSearch ? matchingMessageIds.includes(msg.id) : false}
               isActiveSearchMatch={msg.id === activeMatchId}
               photoPreviews={photoPreviewsRef.current.get(msg.id)}
+              conversationId={currentConversation?.id}
+              feedback={feedbackMarks[msg.id] ?? null}
+              onFeedbackChange={changeFeedbackMark}
             />
           ))}
 
@@ -1778,6 +1803,9 @@ function MessageRow({
   isSearchMatch = false,
   isActiveSearchMatch = false,
   photoPreviews,
+  conversationId,
+  feedback = null,
+  onFeedbackChange,
 }: {
   msg: Message;
   theme: ReturnType<typeof useTheme>['theme'];
@@ -1788,6 +1816,10 @@ function MessageRow({
   isActiveSearchMatch?: boolean;
   /** Small previews of the pictures sent in this visit (not saved; after a reload only the description shows). */
   photoPreviews?: string[];
+  /** Thumbs under a saved answer of Stacy: the conversation, the mark given so far, and what to do when it changes. */
+  conversationId?: string;
+  feedback?: FeedbackState | null;
+  onFeedbackChange?: (messageId: string, next: FeedbackState | null) => void;
 }) {
   if (!msg.content) return null;
   const isUser = msg.sender === 'user';
@@ -1859,6 +1891,16 @@ function MessageRow({
         <p className={`mt-1 text-[10px] font-light tabular-nums opacity-45 ${theme.textMuted}`}>
           {timestamp}
         </p>
+      )}
+      {conversationId && onFeedbackChange && canMarkMessage(msg) && (
+        <MessageFeedback
+          conversationId={conversationId}
+          messageId={msg.id}
+          state={feedback}
+          onChange={(next) => onFeedbackChange(msg.id, next)}
+          deps={supabaseFeedbackDeps}
+          theme={theme}
+        />
       )}
     </div>
   );

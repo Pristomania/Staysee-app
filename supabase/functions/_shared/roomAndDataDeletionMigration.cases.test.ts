@@ -26,9 +26,19 @@ assert(!/onboarding_completed|primary_concern/.test(body), "no column that produ
 assert(!/\bai_usage_log\b/.test(body), "no table (ai_usage_log) that production lacks");
 
 // 2. The tables that are wiped are the ones the checker counts, so the check and the deletion cannot disagree.
+// The list is read from the LATEST migration that defines the function (092 made it; a later migration may add a table).
+const latestBody = (name: string): string => {
+  const marker = new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\(`, "i");
+  let latest = body;
+  for (const migration of readdirSync(dir).sort()) {
+    const text = readFileSync(resolve(dir, migration), "utf8").replace(/^--.*$/gm, "");
+    if (migration >= file! && marker.test(text)) latest = text;
+  }
+  return latest;
+};
 const arrayOf = (name: string): string[] => {
   const pattern = new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([\\s\\S]*?v_tables text\\[\\] := ARRAY\\[([\\s\\S]*?)\\];`, "i");
-  const block = pattern.exec(body)?.[1] ?? "";
+  const block = pattern.exec(latestBody(name))?.[1] ?? "";
   return [...block.matchAll(/'([a-z0-9_]+)'/g)].map((match) => match[1]);
 };
 const memoryTables = arrayOf("_wipe_memory");

@@ -21,6 +21,7 @@ export const DATA_TABLES = [
   "protocol_events",
   "user_memory",
   "ai_reply_recovery_events",
+  "message_feedback",
   "memory_v3_dialogue_backfill_imports",
   "memory_v3_dialogue_evidence",
   "memory_v3_dialogue_heads",
