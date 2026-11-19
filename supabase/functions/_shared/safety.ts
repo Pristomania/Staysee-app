@@ -270,12 +270,7 @@ export const CRISIS_RESPONSE = `Сейчас важно не оставатьс�
 
 Я не заменяю живую помощь в такой момент. Сначала — безопасность и контакт с реальными людьми.`;
 
-/**
- * Level 2 crisis — implied distress, no immediate physical danger (caught by semantic check).
- * Not used by the running code (the crisis hard-stop was removed); kept in line with the approved contacts in case it is
- * used again. 8-800-2000-122 is the line for a child, a teenager or a parent, so it is not named here for an adult.
- * The contacts that the chat adds to a crisis reply are in crisisContacts.ts.
- */
+/** Level 2 crisis — implied distress, no immediate physical danger (caught by semantic check). */
 export const CRISIS_LEVEL2_RESPONSE = `Я слышу тебя. То, что ты сейчас описываешь — это серьёзно.
 
 Здесь нужен живой человек. Психолог, психотерапевт или психиатр — зависит от того, насколько тебе сейчас тяжело.
@@ -284,7 +279,7 @@ export const CRISIS_LEVEL2_RESPONSE = `Я слышу тебя. То, что ты
 
 Пока этого не произошло, я буду рядом — но не как терапевт.
 
-В России для психологической кризисной поддержки есть линия МЧС +7 (495) 989-50-50. При непосредственной угрозе жизни или физической опасности нужны 112 или 103. В другой стране нужна местная экстренная служба, а психологическую кризисную поддержку можно найти на findahelpline.com.`;
+Позвони прямо сейчас: 8-800-2000-122 — бесплатно, анонимно, круглосуточно. Если ты не в России — findahelpline.com`;
 
 export const PROMPT_ATTACK_RESPONSE = `Я не могу раскрывать внутренние инструкции. Но могу остаться с тем, что тебе сейчас важно понять или почувствовать.`;
 
