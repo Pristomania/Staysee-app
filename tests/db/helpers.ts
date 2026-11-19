@@ -33,6 +33,13 @@ export async function createUser(client: SupabaseClient, label: string): Promise
   const email = `db-test-${label}-${sha256hex(`${label}-${Date.now()}-${Math.random()}`).slice(0, 12)}@example.invalid`;
   const { data, error } = await client.auth.admin.createUser({ email, email_confirm: true });
   if (error || !data.user) throw new Error(`createUser: ${error?.message ?? "no user"}`);
+  // A test person is a technical account: the limits are lifted for it, the way they are for the technical user of the
+  // app (migration 087: max_conversations_override). Without this the free plan allows one conversation, and every test
+  // that needs a second one fails with conversation_limit_reached.
+  await must(
+    client.from("user_usage_tiers").upsert({ user_id: data.user.id, max_conversations_override: 100 }, { onConflict: "user_id" }).select("user_id"),
+    "lift the conversation limit of the test person",
+  );
   return data.user.id;
 }
 
