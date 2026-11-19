@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {buildChatModelParameters,buildChatModelProviderRoute} from './chatModelParameters.ts';
+import {isApprovedRuntimeModel} from './approvedModels.ts';
+assert.equal(isApprovedRuntimeModel('openai/gpt-6.1-sol'),true);
+assert.deepEqual(buildChatModelParameters('openai/gpt-6.1-sol',.85),{reasoning:{effort:'low',exclude:true}});
+assert.deepEqual(buildChatModelParameters('openai/gpt-4o-2024-08-06',.85),{temperature:.85});
+assert.deepEqual(buildChatModelParameters('anthropic/claude-sonnet-4-5',.85),{temperature:.85});
+assert.deepEqual(buildChatModelParameters('openai/gpt-6.1-sol-other',.85),{temperature:.85});
+assert.deepEqual(buildChatModelProviderRoute('openai/gpt-6.1-sol'),{data_collection:'deny',zdr:true,order:['azure/eu'],allow_fallbacks:false,max_price:{prompt:2.2,completion:11}});
+assert.deepEqual(buildChatModelProviderRoute('openai/gpt-4o-2024-08-06'),{data_collection:'deny',zdr:true});
+console.log('chat model parameters: 7 checks passed');

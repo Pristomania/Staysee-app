@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+import { buildChatModelProviderRoute } from "./chatModelParameters.ts";
 
 // Found on 31.10: only some model calls asked OpenRouter for a route that keeps nothing. The main reply, the
 // conversation summary, the embeddings, the weekly reflection and the older memory jobs carried what a person wrote
@@ -36,7 +37,7 @@ describe("the private route for model requests", () => {
     const files = sourceFiles(functionsDir).filter((path) => sendsRequest.test(readFileSync(path, "utf8")));
     assert.ok(files.length >= 10, `expected to find the model callers, found ${files.length}`);
     const without = files
-      .filter((path) => !/data_collection|OPENROUTER_PRIVATE_ROUTE/.test(readFileSync(path, "utf8")))
+      .filter((path) => !/data_collection|OPENROUTER_PRIVATE_ROUTE|buildChatModelProviderRoute/.test(readFileSync(path, "utf8")))
       .map((path) => path.slice(functionsDir.length).split("\\").join("/"));
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
     assert.deepEqual(without.filter((path) => path !== "_shared/longMessageSummarizer.ts"), [], "these files send a request without the private route");
@@ -49,7 +50,12 @@ describe("the private route for model requests", () => {
 
   it("goes only to OpenRouter in the calls that may also reach another provider", () => {
     const chat = read("staysee-chat/index.ts");
-    assert.match(chat, /provider === "openrouter" \? \{ provider: OPENROUTER_PRIVATE_ROUTE \} : \{\}/);
+    assert.match(chat, /provider === "openrouter" \? \{ provider: buildChatModelProviderRoute\(model\) \} : \{\}/);
+    for (const model of ["openai/gpt-6.1-sol", "openai/gpt-4o-2024-08-06", "anthropic/claude-sonnet-4-5"]) {
+      const route = buildChatModelProviderRoute(model);
+      assert.equal(route.data_collection, "deny");
+      assert.equal(route.zdr, true);
+    }
     const structured = read("_shared/structuredModelCall.ts");
     assert.match(structured, /input\.primaryProvider === "openrouter" \? \{ provider: OPENROUTER_PRIVATE_ROUTE \} : \{\}/);
     const embeddings = read("_shared/embeddings.ts");
@@ -63,7 +69,6 @@ describe("the private route for model requests", () => {
       "_shared/consolidateUserLifeMemory.ts",
       "_shared/backfillMemory.ts",
       "_shared/weeklyReflection.ts",
-      "_shared/semanticCrisisCheck.ts",
     ]) {
       assert.match(read(relative), /provider: OPENROUTER_PRIVATE_ROUTE,/, relative);
     }

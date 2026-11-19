@@ -32,7 +32,6 @@ const RUNTIME_SCAN_PATHS = [
   join(ROOT, "consolidate-user-life-memory", "index.ts"),
   join(ROOT, "weekly-reflection", "index.ts"),
   join(ROOT, "staysee-chat", "index.ts"),
-  join(ROOT, "_shared", "semanticCrisisCheck.ts"),
   join(ROOT, "_shared", "cost.ts"),
   join(ROOT, "_shared", "modelRouter.ts"),
 ];

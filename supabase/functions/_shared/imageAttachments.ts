@@ -97,7 +97,8 @@ export function appendPhotoBlocks(typedText: string, descriptions: readonly stri
 
 /** Models that take pictures in the main call. Everything else (and every repair call) gets text only. */
 export function modelAcceptsImages(model: string): boolean {
-  return /^(openai\/gpt-4o|anthropic\/claude|google\/gemini)/.test(model.trim());
+  const normalized = model.trim();
+  return normalized === "openai/gpt-6.1-sol" || /^(openai\/gpt-4o|anthropic\/claude|google\/gemini)/.test(normalized);
 }
 
 export type ModelContentPart =

@@ -154,11 +154,11 @@ import {
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
 import { crossMemoryActive, isFeatureAvailable } from "../_shared/plans.ts";
-import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
-import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
+import { logProtocolSignals } from "../_shared/protocolEvents.ts";
 import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
 import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
+import { K3_LAYER_ID } from "../_shared/promptCore/k3Prompt.ts";
 import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
 import {
   computeResponseBudget,
@@ -181,8 +181,10 @@ import {
 } from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
-import { APPROVED_MODEL_GPT4O, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
-import { OPENROUTER_PRIVATE_ROUTE } from "../_shared/openRouterPrivateRoute.ts";
+import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
+import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel, isOwnModelOnOpenRouter } from "../_shared/modelHost.ts";
+import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
+import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
 import {
   ensurePublishableReply,
   isPublishableReply,
@@ -242,7 +244,7 @@ const corsHeaders = {
 
 // ── Provider registry ────────────────────────────────────────────────────────
 
-type AiProvider = "openrouter" | "openai" | "gemini" | "deepseek" | "mistral";
+type AiProvider = "openrouter" | "cloudru" | "openai" | "gemini" | "deepseek" | "mistral";
 
 type FullProviderConfig = ProviderConfig;
 
@@ -263,6 +265,12 @@ const PROVIDERS: Record<AiProvider, FullProviderConfig> = {
       "HTTP-Referer": "https://staysee.app",
       "X-Title": "StaySee AI",
     },
+  },
+  // Hosted in Russia: DeepSeek V4 Pro and Kimi K2.6 are asked here after the move (their Cloud.ru names); see _shared/modelHost.ts.
+  cloudru: {
+    baseUrl: CLOUDRU_BASE_URL,
+    model: APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU,
+    envKey: CLOUDRU_API_KEY_ENV,
   },
   openai: {
     baseUrl: "https://api.openai.com/v1",
@@ -294,6 +302,9 @@ const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 const BASE_PROMPT = buildSurgery1BasePrompt();
 const ACTIVE_PROMPT_LAYER_ID = resolveActivePromptLayerId();
+// With the K3 base the meaning (crisis, medicine, role, attachment, pause, goodbye, grammatical gender) is in the text of
+// the prompt: the word-based layers around it are skipped (and the history is not cleaned by words).
+const isK3Base = ACTIVE_PROMPT_LAYER_ID === K3_LAYER_ID;
 
 console.log(
   `[staysee-chat] ${ACTIVE_PROMPT_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
@@ -447,6 +458,14 @@ async function callModel(
     finishReason?: string;
     usage?: { cost?: number; total_tokens?: number };
   } | null> {
+    // The host follows the model: a Cloud.ru model goes to Cloud.ru, any other model to the provider that was asked.
+    if (hostForModel(model) === "cloudru") {
+      provider = "cloudru";
+      config = PROVIDERS.cloudru;
+    } else if (provider === "cloudru") {
+      provider = "openrouter";
+      config = PROVIDERS.openrouter;
+    }
     const apiKey = Deno.env.get(config.envKey);
     if (!apiKey) {
       console.warn(`[staysee-chat] no key for ${provider} (env: ${config.envKey})`);
@@ -472,9 +491,9 @@ async function callModel(
             ...(images.length > 0 && modelAcceptsImages(model) ? withImageParts(messages, images) : messages),
           ],
           max_tokens: maxTokens,
-          temperature,
-          usage: { include: true },
-          ...(provider === "openrouter" ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
+          ...buildChatModelParameters(model, temperature),
+          ...(provider === "cloudru" ? {} : { usage: { include: true } }),
+          ...(provider === "openrouter" ? { provider: buildChatModelProviderRoute(model) } : {}),
         }),
       });
     } catch (fetchErr) {
@@ -485,6 +504,10 @@ async function callModel(
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
       console.error(`[staysee-chat] ${provider} HTTP ${res.status}: ${errBody.slice(0, 300)}`);
+      // No money left or the key is refused: the founder is told in Telegram (once in half an hour), the next model answers.
+      if (provider === "cloudru" && (res.status === 402 || res.status === 401 || res.status === 403)) {
+        await sendProviderAlertSafely(res.status === 402 ? "balance_empty" : "key_rejected");
+      }
       return null;
     }
 
@@ -493,6 +516,12 @@ async function callModel(
     const contentInspect = inspectOpenRouterMessageContent(rawMessageContent);
     const content: string = legacyOpenRouterContent(rawMessageContent);
     const finishReason: string | undefined = data.choices?.[0]?.finish_reason;
+    // The provider's content filter (Azure) withheld the answer: what came back is a stub or nothing, never a reply for the person.
+    // It is a failed attempt, so the next model in the chain answers; a person in distress must not get «Слышу тебя.» and nothing else.
+    if (finishReason === "content_filter") {
+      console.error(`[staysee-chat] ${provider} model=${model} content_filter: the answer was withheld by the provider`);
+      return null;
+    }
     if (!content) {
       console.error(`[staysee-chat] ${provider} empty content, raw:`, JSON.stringify(data).slice(0, 200));
       return null;
@@ -544,8 +573,18 @@ async function callModel(
     if (modelFallbackResult) return modelFallbackResult;
   }
 
-  // Fallback chain
-  const fallback = findFallbackProvider([...tried]);
+  // DeepSeek V4 Pro and Kimi K2.6 on OpenRouter: when both are unavailable the approved Sonnet answers (private route), as the other
+  // models always had a reserve; without it a short failure of the two hosts leaves the person with only «Сейчас не могу ответить».
+  if (isOwnModelOnOpenRouter(primaryModel) && primaryModel !== APPROVED_MODEL_SONNET && fallbackModelOverride !== APPROVED_MODEL_SONNET) {
+    console.log("[staysee-chat] both own models failed — last resort: Sonnet");
+    const lastResort = await attempt("openrouter", PROVIDERS.openrouter, APPROVED_MODEL_SONNET);
+    if (lastResort) return lastResort;
+  }
+
+  // Fallback chain. With a Cloud.ru model the words of the person do not leave Russia on their own: the foreign providers
+  // answer only if STAYSEE_FOREIGN_FALLBACK=1 is set.
+  const foreignFallbackAllowed = hostForModel(primaryModel) !== "cloudru" || Deno.env.get("STAYSEE_FOREIGN_FALLBACK") === "1";
+  const fallback = foreignFallbackAllowed ? findFallbackProvider([...tried]) : null;
   if (fallback) {
     const fallbackResult = await attempt(fallback.provider, fallback.config as FullProviderConfig, fallback.config.model);
     if (fallbackResult) return fallbackResult;
@@ -848,37 +887,6 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           content: safety.immediateResponse,
-          provider: providerKey,
-          model: reqModel ?? config.model,
-          ...userTextField,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ── PR7a: Explicit prompt-attack hard-stop only (crisis hard-stop removed) ──
-
-    const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
-    if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
-      void logProtocolEvent(makeServiceClient(), {
-        userId: userId ?? null,
-        conversationId: conversationId ?? null,
-        requestId: requestId ?? null,
-        eventType: "prompt_attack_hard_stop",
-        severity: "tier_3",
-        protocol: explicitPromptAttackStop.protocol ?? "regex_prompt_attack_explicit",
-        actionTaken: "hard_stop",
-        confidence: "high",
-        matchedPattern: explicitPromptAttackStop.matched_pattern ?? null,
-        promptVersion: getPromptAuditVersion(),
-        reason: "explicit_prompt_attack_construction",
-      });
-      console.log(
-        `[staysee-chat] explicit prompt-attack hard-stop: ${explicitPromptAttackStop.matched_pattern}`
-      );
-      return new Response(
-        JSON.stringify({
-          content: explicitPromptAttackStop.response,
           provider: providerKey,
           model: reqModel ?? config.model,
           ...userTextField,
@@ -1358,7 +1366,7 @@ Deno.serve(async (req: Request) => {
       `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated} rule=${diagnosis.matchedRule}`
     );
 
-    if (safety.systemGuidance) {
+    if (safety.systemGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, safety.systemGuidance].join("\n\n");
     }
 
@@ -1387,11 +1395,11 @@ Deno.serve(async (req: Request) => {
       genderResult,
       genderGuidanceOptions
     );
-    const genderGuidanceOn = userGenderGuidanceInjected(
+    const genderGuidanceOn = !isK3Base && userGenderGuidanceInjected(
       genderResult,
       genderGuidanceOptions
     );
-    if (genderGuidance) {
+    if (genderGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, genderGuidance].join("\n\n");
     }
 
@@ -1413,7 +1421,7 @@ Deno.serve(async (req: Request) => {
         ? historyMessages
         : [...historyMessages, { role: "user", content: message }];
 
-    const modelMessages = sanitizeHistoryForModel(messages);
+    const modelMessages = isK3Base ? messages : sanitizeHistoryForModel(messages);
 
     // ── L7: Dynamic response budget + model call ─────────────────────────────
 
@@ -1432,7 +1440,7 @@ Deno.serve(async (req: Request) => {
       depthReason: responseBudget.depthReason,
       message,
     });
-    const explicitClosureGuidanceOn = explicitClosureGuidanceInjected({
+    const explicitClosureGuidanceOn = !isK3Base && explicitClosureGuidanceInjected({
       depthReason: responseBudget.depthReason,
       message,
     });
@@ -1442,12 +1450,12 @@ Deno.serve(async (req: Request) => {
       explicitClosureActive: explicitClosureGuidanceOn,
       safetyCategory: safety.category,
     });
-    const sessionProcessGuidanceOn = sessionProcessGuidanceInjected({
+    const sessionProcessGuidanceOn = !isK3Base && sessionProcessGuidanceInjected({
       priorState: priorSessionProcessState,
       explicitClosureActive: explicitClosureGuidanceOn,
       safetyCategory: safety.category,
     });
-    if (sessionProcessGuidance) {
+    if (sessionProcessGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
     }
 
@@ -1462,12 +1470,12 @@ Deno.serve(async (req: Request) => {
       safetyCategory: safety.category,
     };
     const pauseInArcGuidance = buildPauseInArcTurnGuidance(pauseInArcGuidanceInput);
-    const pauseInArcGuidanceOn = pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
-    if (pauseInArcGuidance) {
+    const pauseInArcGuidanceOn = !isK3Base && pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
+    if (pauseInArcGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
     }
 
-    if (explicitClosureGuidance) {
+    if (explicitClosureGuidance && !isK3Base) {
       systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
     }
 
