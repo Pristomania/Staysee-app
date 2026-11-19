@@ -13,6 +13,7 @@ import {
   buildStayseeCorePromptV2GptsSource,
   STAYSEE_CORE_V2_LAYER_ID,
 } from "./stayseeCorePromptV2GptsSource.ts";
+import { buildK3Prompt, K3_LAYER_ID } from "./k3Prompt.ts";
 import {
   buildLegacyDocFlatCleanPrompt,
   buildLegacyDocFlatPrompt,
@@ -32,7 +33,8 @@ export type PromptCoreMode = "legacy" | "v1" | "v2";
 export type PromptCoreDoc =
   | "gpts_source"
   | "legacy_doc_flat"
-  | "legacy_doc_flat_clean";
+  | "legacy_doc_flat_clean"
+  | "k3";
 
 /** Parse raw env value; unknown / empty / missing → "legacy". */
 export function parsePromptCoreMode(
@@ -51,6 +53,7 @@ export function parsePromptCoreDoc(
   const trimmed = raw?.trim();
   if (trimmed === "legacy_doc_flat") return "legacy_doc_flat";
   if (trimmed === "legacy_doc_flat_clean") return "legacy_doc_flat_clean";
+  if (trimmed === "k3") return "k3";
   return "gpts_source";
 }
 
@@ -93,6 +96,9 @@ export function resolveV2Document(
       text: buildLegacyDocFlatPrompt(),
       layerId: LEGACY_DOC_FLAT_LAYER_ID,
     };
+  }
+  if (doc === "k3") {
+    return { text: buildK3Prompt(), layerId: K3_LAYER_ID };
   }
   if (doc === "legacy_doc_flat_clean") {
     return {
