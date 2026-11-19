@@ -12,12 +12,11 @@
  * - Never return or log the context packet in response bodies.
  */
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   collectMemoryCorrectionHints,
   countMessagesSinceSummary,
   getConversationSummary,
-  getParsedMemory,
   injectSummaryIntoPrompt,
   type ConversationMemoryMeta,
 } from "./memory.ts";
@@ -26,11 +25,6 @@ import {
   loadActiveCorrections,
   memoryCorrectionsEnabled,
 } from "./memoryCorrections.ts";
-import {
-  buildNarrativeContext,
-  formatNarrativeForPrompt,
-  type WeeklyReflection,
-} from "./narrativeEngine.ts";
 import {
   formatArchiveExcerptsForPrompt,
   formatUserEvidenceForPrompt,
@@ -98,8 +92,8 @@ export interface ContextPacket {
   archiveExcerpts: ArchiveExcerpt[];
   /** Verbatim user lines for recall / topic questions (this chat only). */
   userEvidenceQuotes: UserEvidenceQuote[];
-  /** Saved weekly dynamics snapshots for this conversation. */
-  weeklyReflections: WeeklyReflection[];
+  // There is deliberately no field for the weekly dynamics ("Динамика", progress_entries): the owner's rule (20.11.2026) is that
+  // they never go into Stacy's prompt. contextNoWeeklyDynamics.cases.test.ts keeps it that way.
 }
 
 export interface ContextPromptOptions {
@@ -197,22 +191,31 @@ function inspectContextPromptOptions(
 const MAX_RECENT_MESSAGES = 40;
 /** Cross-memory: fewer rows, each is a full sentence. */
 const MAX_MEMORY_ITEMS = 8;
-const MAX_WEEKLY_REFLECTIONS = 3;
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 async function fetchConversationMeta(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   conversationId: string
 ): Promise<ConversationMeta | null> {
   const fullSelect =
     "id, title, conversation_summary, summary, summary_updated_at, emotional_tone, created_at, last_message_at, metadata";
 
-  let { data, error } = await supabase
+  // Both selects describe the same row; the fallback one has no summary_updated_at / emotional_tone (an older schema),
+  // so those two (and the unchecked metadata) are optional here and normalized below.
+  type ConversationMetaRow = Omit<ConversationMeta, "summary_updated_at" | "emotional_tone" | "metadata"> & {
+    summary_updated_at?: string | null;
+    emotional_tone?: string | null;
+    metadata?: unknown;
+  };
+
+  const first = await supabase
     .from("conversations")
     .select(fullSelect)
     .eq("id", conversationId)
     .maybeSingle();
+  let data: ConversationMetaRow | null = first.data;
+  let error = first.error;
 
   if (error) {
     console.warn("[context] fetchConversationMeta fallback:", error.message);
@@ -231,21 +234,20 @@ async function fetchConversationMeta(
   }
 
   if (!data) return null;
+  const metadata = data.metadata;
   return {
     ...data,
-    summary_updated_at: (data as ConversationMeta).summary_updated_at ?? null,
-    emotional_tone: (data as ConversationMeta).emotional_tone ?? null,
+    summary_updated_at: data.summary_updated_at ?? null,
+    emotional_tone: data.emotional_tone ?? null,
     metadata:
-      (data as ConversationMeta).metadata &&
-      typeof (data as ConversationMeta).metadata === "object" &&
-      !Array.isArray((data as ConversationMeta).metadata)
-        ? ((data as ConversationMeta).metadata as Record<string, unknown>)
+      metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? (metadata as Record<string, unknown>)
         : null,
   };
 }
 
 async function fetchRecentMessages(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   conversationId: string
 ): Promise<RecentMessage[]> {
   // Messages are stored in Supabase for session continuity.
@@ -282,7 +284,7 @@ function normalizeMemoryRow(
 }
 
 async function fetchMemoryItems(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   userId: string
 ): Promise<MemoryItem[]> {
   const rich = await supabase
@@ -323,35 +325,10 @@ async function fetchMemoryItems(
   return (basic.data ?? []).map((r) => normalizeMemoryRow(r as Record<string, unknown>));
 }
 
-async function fetchWeeklyReflections(
-  supabase: ReturnType<typeof createClient>,
-  conversationId: string
-): Promise<WeeklyReflection[]> {
-  const { data, error } = await supabase
-    .from("progress_entries")
-    .select("content, created_at, entry_date")
-    .eq("conversation_id", conversationId)
-    .eq("entry_type", "weekly")
-    .order("entry_date", { ascending: false })
-    .limit(MAX_WEEKLY_REFLECTIONS);
-
-  if (error) {
-    console.warn("[context] fetchWeeklyReflections:", error.message);
-    return [];
-  }
-
-  return (data ?? [])
-    .map((r) => ({
-      content: (r.content ?? "").trim(),
-      created_at: (r.created_at as string | undefined) ?? undefined,
-    }))
-    .filter((r) => r.content.length > 0);
-}
-
 // ── Stamp memory items as used ────────────────────────────────────────────────
 
 export async function stampMemoryUsed(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   ids: string[]
 ): Promise<void> {
   if (ids.length === 0) return;
@@ -404,15 +381,9 @@ export function buildContextPrompt(
     if (crossBlock) parts.push(crossBlock);
   }
 
-  const narrativeBlock = formatNarrativeForPrompt(
-    buildNarrativeContext({
-      summary: getParsedMemory(meta) ?? undefined,
-      weekly: packet.weeklyReflections,
-      crossMemory: injectableCrossMemory,
-      recentMessages: packet.recentMessages,
-    })
-  );
-  if (narrativeBlock) parts.push(narrativeBlock);
+  // The block «ИСТОРИЯ И ДВИЖЕНИЕ ЖИЗНИ» used to be built here by narrativeEngine.ts (word patterns over the person's last lines,
+  // the old chat summary and the weekly dynamics). Removed on 20.11.2026 by the owner's decision: it decided by words, spoke
+  // in the feminine («в её словах») and the new memory does this job. contextNoNarrativeBlock.cases.test.ts keeps it out.
 
   const evidenceBlock = formatUserEvidenceForPrompt(
     packet.userEvidenceQuotes ?? []
@@ -443,7 +414,7 @@ export async function buildContextPacket(
     global: { headers: { Authorization: `Bearer ${input.authToken}` } },
   });
 
-  const [conversationMeta, recentMessages, crossMemoryOn, weeklyReflections] =
+  const [conversationMeta, recentMessages, crossMemoryOn] =
     await Promise.all([
       fetchConversationMeta(supabase, input.conversationId),
       fetchRecentMessages(supabase, input.conversationId),
@@ -452,7 +423,6 @@ export async function buildContextPacket(
         input.userId,
         input.conversationId
       ),
-      fetchWeeklyReflections(supabase, input.conversationId),
     ]);
 
   const legacyMemoryCompatibilityEnabled =
@@ -482,6 +452,5 @@ export async function buildContextPacket(
     messagesSinceSummary,
     archiveExcerpts: [],
     userEvidenceQuotes: [],
-    weeklyReflections,
   };
 }

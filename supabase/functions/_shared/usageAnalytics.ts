@@ -42,6 +42,11 @@ export type UsageCallKind =
   | "legacy_cross_memory_synthesis"
   | "memory_lifecycle_extractor"
   | "memory_lifecycle_reconciler"
+  // The same two stages of the per-conversation (dialogue) pipeline, written by logMemoryV3LifecycleUsage.
+  // ai_usage_logs.call_kind is a free text column (no CHECK), so these were always stored; only the type lacked them.
+  // Note: the report get_memory_lifecycle_cost_by_users() counts the two lifecycle kinds only.
+  | "memory_dialogue_extractor"
+  | "memory_dialogue_reconciler"
   | "long_message_summary"
   | "image_description"
   | "structured_turn_shadow";

@@ -274,22 +274,27 @@ export function isAllowedCrossMemoryType(
   return false;
 }
 
-export function filterCrossMemoryCandidate(
-  candidate: CrossMemoryCandidateLike
-): CrossMemoryCandidateLike | null {
+/**
+ * Admits or rejects a candidate; an admitted one comes back as it came (importance and any other field kept)
+ * with only the content normalized. It used to rebuild the object from memory_type + content, which silently
+ * dropped importance (the column default 3 was then written instead of 4 or 5).
+ */
+export function filterCrossMemoryCandidate<T extends CrossMemoryCandidateLike>(
+  candidate: T
+): T | null {
   if (!isAllowedCrossMemoryType(candidate.memory_type, "promote")) {
     return null;
   }
   const content = normalizeCrossMemoryContent(candidate.content);
   if (!content) return null;
   if (!isPromotableToCrossMemory(candidate.memory_type, content)) return null;
-  return { memory_type: candidate.memory_type, content };
+  return { ...candidate, content };
 }
 
-export function filterCrossMemoryCandidates(
-  candidates: CrossMemoryCandidateLike[]
-): CrossMemoryCandidateLike[] {
-  const out: CrossMemoryCandidateLike[] = [];
+export function filterCrossMemoryCandidates<T extends CrossMemoryCandidateLike>(
+  candidates: T[]
+): T[] {
+  const out: T[] = [];
   for (const c of candidates) {
     const kept = filterCrossMemoryCandidate(c);
     if (kept) out.push(kept);

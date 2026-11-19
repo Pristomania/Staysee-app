@@ -102,10 +102,6 @@ function packet(): ContextPacket {
       createdAt: "2026-09-19T08:00:00Z",
       text: "EVIDENCE_SENTINEL from the user",
     }],
-    weeklyReflections: [{
-      content: "WEEKLY_REFLECTION_SENTINEL remained important this week",
-      created_at: "2026-09-20T07:00:00Z",
-    }],
   };
 }
 
@@ -133,7 +129,6 @@ function assertPreservedContext(result: string): void {
     "SUMMARY_THEME_SENTINEL",
     "EPHEMERAL_CORRECTION_SENTINEL",
     "DURABLE_CORRECTION_SENTINEL",
-    "WEEKLY_REFLECTION_SENTINEL",
     "ARCHIVE_SENTINEL",
     "EVIDENCE_SENTINEL",
   ]) {
@@ -272,7 +267,8 @@ describe("Memory V3 lifecycle read context wiring", () => {
 
     const legacy = buildContextPrompt(input);
     const legacyMentions = legacy.match(/LEGACY_CROSS_MEMORY_SENTINEL/g) ?? [];
-    assert.equal(legacyMentions.length >= 2, true);
+    // Once, in the legacy cross-memory block. It used to be twice: the removed block «ИСТОРИЯ И ДВИЖЕНИЕ ЖИЗНИ» copied it too.
+    assert.equal(legacyMentions.length, 1);
 
     const loaded = buildContextPrompt(input, { lifecycleCrossMemory: context });
     assert.equal(loaded.includes("LEGACY_CROSS_MEMORY_SENTINEL"), false);

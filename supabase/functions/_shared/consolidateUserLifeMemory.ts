@@ -20,9 +20,13 @@ import {
   type CrossMemoryType,
   type LifeMemoryModelConfig,
 } from "./userLifeMemory.ts";
+import { resolveCandidateImportance } from "./crossMemoryBuild.ts";
 import { fetchLegacyMemoryCompatibilityEnabled } from "./profilePrefs.ts";
 
 export { consolidateRowsRuleBased } from "./consolidateRuleBased.ts";
+
+/** What this job has always given to the rows it rebuilds from rule-based text (the model path keeps the importance of its type). */
+const CONSOLIDATED_ROW_IMPORTANCE = 4;
 
 export interface UserMemoryRow extends ConsolidateRowInput {
   id: string;
@@ -153,7 +157,7 @@ export async function consolidateUserLifeMemoryRows(
   if (allClean) {
     candidates = consolidateRowsRuleBased(sourceRows).map((c) => ({
       ...c,
-      importance: 4,
+      importance: CONSOLIDATED_ROW_IMPORTANCE,
     }));
   } else if (model?.apiKey) {
     try {
@@ -176,7 +180,7 @@ export async function consolidateUserLifeMemoryRows(
   if (!candidates.length) {
     candidates = consolidateRowsRuleBased(sourceRows).map((c) => ({
       ...c,
-      importance: 4,
+      importance: CONSOLIDATED_ROW_IMPORTANCE,
     }));
   }
 
@@ -189,12 +193,13 @@ export async function consolidateUserLifeMemoryRows(
     return !known.some((k) => similarMemory(k, content));
   });
 
-  toInsert = filterCrossMemoryCandidates(toInsert) as typeof toInsert;
+  toInsert = filterCrossMemoryCandidates(toInsert);
 
   if (!toInsert.length) {
-    toInsert = consolidateRowsRuleBased(sourceRows).filter(
-      (c) => !isLifeMemoryFragment(c.content)
-    );
+    // The same importance as the two other rule-based lists above; this one used to have none (the column default 3 was written).
+    toInsert = consolidateRowsRuleBased(sourceRows)
+      .filter((c) => !isLifeMemoryFragment(c.content))
+      .map((c) => ({ ...c, importance: CONSOLIDATED_ROW_IMPORTANCE }));
   }
 
   const removeIds = fullRebuild
@@ -236,7 +241,7 @@ export async function consolidateUserLifeMemoryRows(
       user_id: userId,
       memory_type: c.memory_type,
       content,
-      importance: c.importance,
+      importance: resolveCandidateImportance(c),
     });
     if (error) {
       console.error(`[consolidate] insert failed user=${userId}:`, error.message);

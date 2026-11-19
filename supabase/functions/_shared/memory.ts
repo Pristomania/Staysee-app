@@ -697,7 +697,10 @@ export function formatMemoryForInjection(mem: StructuredMemory): MemoryInjection
 
 // ── Read / inject ─────────────────────────────────────────────────────────────
 
-export function getConversationSummary(meta: ConversationMemoryMeta | null): string | null {
+/** Reads only the two summary columns, so a caller that selected just those two (the safe select after a save) can pass its row. */
+export type ConversationSummaryColumns = Pick<ConversationMemoryMeta, "conversation_summary" | "summary">;
+
+export function getConversationSummary(meta: ConversationSummaryColumns | null): string | null {
   if (!meta) return null;
   return meta.conversation_summary?.trim() || meta.summary?.trim() || null;
 }
