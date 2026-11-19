@@ -156,6 +156,7 @@ import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
 import { crossMemoryActive, isFeatureAvailable } from "../_shared/plans.ts";
 import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
+import { applyCrisisContacts } from "../_shared/crisisContacts.ts";
 import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
 import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
 import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
@@ -1640,6 +1641,22 @@ Deno.serve(async (req: Request) => {
       safe = signalParse.text;
       if (signalParse.signals.length > 0 || signalParse.leakageSanitized) {
         protocolSignalsForLog = signalParse;
+      }
+
+      // The crisis contacts are the code's, not the model's: the full approved list is added under the answer when a
+      // crisis is on (the words, the model's own signal, or a goodbye after one), and any other phone number the model
+      // wrote in such a reply is removed. Nothing of the conversation goes to the log, only what was done.
+      const crisisContacts = applyCrisisContacts(safe, {
+        userMessage: message,
+        categoryIsCrisis: safety.category === "crisis",
+        modelSignalCrisis: signalParse.signals.includes("crisis_detected"),
+        history: historyMessages.map((m) => ({ role: m.role, content: m.content })),
+      });
+      safe = crisisContacts.text;
+      if (crisisContacts.appended || crisisContacts.stripped > 0) {
+        console.log(
+          `[staysee-chat] crisis contacts: appended=${crisisContacts.appended} reason=${crisisContacts.reason} stripped=${crisisContacts.stripped}`,
+        );
       }
 
       result = { ...result, content: safe };

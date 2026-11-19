@@ -96,5 +96,31 @@ for (const signal of [
   assert(out.leakageSanitized === false, "inline prose does not set leakageSanitized");
 }
 
+// The word "StaySee" in a reply is ordinary text: it must never cut the reply (the old pattern ate everything after it).
+for (const sentence of [
+  "Я здесь, в StaySee, чтобы побыть с тобой рядом. Что сейчас самое тяжёлое?",
+  "Это не про услугу, а про тебя. StaySee — опора для самопознания, поэтому давай вернёмся: что за этим стоит?",
+  "Ты спросила про staysee. Давай я отвечу честно, а потом спрошу про тебя.",
+]) {
+  const out = parseAndStripProtocolSignals(sentence);
+  assert(out.text === sentence, `the word StaySee does not cut the reply: ${sentence.slice(0, 30)}…`);
+  assert(out.leakageSanitized === false, "the word StaySee is not a leak");
+}
+
+// A real tag is still removed, also a tag cut off at the end, and it never eats the paragraphs that follow it.
+{
+  const out = parseAndStripProtocolSignals("Слышу тебя. Что сейчас происходит?\n\n[STAYSEE_SIGNAL: crisis_detected]");
+  assert(out.text === "Слышу тебя. Что сейчас происходит?" && out.signals.includes("crisis_detected"), "a complete tag is removed and read");
+}
+{
+  const out = parseAndStripProtocolSignals("Слышу тебя. Что сейчас происходит? [STAYSEE_SIGN");
+  assert(out.text === "Слышу тебя. Что сейчас происходит?", "a tag cut off at the end is removed");
+}
+{
+  const out = parseAndStripProtocolSignals("Первый абзац [STAYSEE_SIGNAL: crisis_detected\n\nВторой абзац остаётся.");
+  assert(/Второй абзац остаётся\./.test(out.text), "a broken tag does not eat the next paragraph");
+  assertNoLeak(out.text, "and nothing of the tag is left");
+}
+
 console.log(`\n=== ${failed === 0 ? "All passed" : `${failed} failed`} ===`);
 if (failed > 0) process.exit(1);
