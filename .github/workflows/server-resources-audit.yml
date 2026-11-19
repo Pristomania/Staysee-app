@@ -1,0 +1,59 @@
+name: Server resources audit (read-only)
+
+# Reads how big the server of the site is and what runs on it: processors, memory, disk, load, services. Nothing is changed, no file is
+# written, and no secret or command line of a process is printed (only the names of the programs and the numbers).
+# Started by hand: Actions -> "Server resources audit (read-only)" -> Run workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read-only resources audit on the VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAYSEE_HOST }}
+          username: ${{ secrets.STAYSEE_USER }}
+          key: ${{ secrets.STAYSEE_SSH_KEY }}
+          port: ${{ secrets.STAYSEE_PORT }}
+          script: |
+            set +e
+            echo "===== system ====="
+            . /etc/os-release 2>/dev/null; echo "$PRETTY_NAME"
+            uname -r
+            echo "virtualization: $(systemd-detect-virt 2>/dev/null)"
+            echo "===== processors ====="
+            echo "cores: $(nproc)"
+            lscpu 2>/dev/null | grep -E "^(Model name|CPU\(s\)|Thread|Core|MHz|CPU max MHz)"
+            echo "===== memory (MB) ====="
+            free -m
+            echo "===== swap ====="
+            swapon --show 2>/dev/null || echo "no swap"
+            echo "===== disk ====="
+            df -h -x tmpfs -x devtmpfs 2>/dev/null
+            echo "inodes:"
+            df -i / 2>/dev/null | tail -n 1
+            echo "===== load ====="
+            cat /proc/loadavg
+            uptime
+            echo "vmstat (5 seconds):"
+            vmstat 1 5 2>/dev/null
+            echo "===== biggest memory users (names only) ====="
+            ps -eo comm,%mem,%cpu,rss --sort=-rss 2>/dev/null | head -n 15
+            echo "===== services running ====="
+            systemctl list-units --type=service --state=running --no-legend 2>/dev/null | awk '{print $1}' | head -n 40
+            echo "===== docker ====="
+            (command -v docker >/dev/null && (docker ps --format '{{.Names}}  {{.Image}}' 2>/dev/null; docker system df 2>/dev/null)) || echo "docker is not installed"
+            echo "===== listening ports ====="
+            ss -tlnH 2>/dev/null | awk '{print $4}' | sort -u | head -n 30
+            echo "===== sizes of the site and the logs ====="
+            du -sh /var/www 2>/dev/null
+            du -sh /var/log 2>/dev/null
+            echo "===== network (one-second sample of the main interface) ====="
+            IF=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}'); echo "interface: $IF"
+            R1=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null); T1=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null); sleep 1
+            R2=$(cat /sys/class/net/$IF/statistics/rx_bytes 2>/dev/null); T2=$(cat /sys/class/net/$IF/statistics/tx_bytes 2>/dev/null)
+            echo "in: $(( (R2-R1)/1024 )) KB/s, out: $(( (T2-T1)/1024 )) KB/s; total since start: in $(( R2/1048576 )) MB, out $(( T2/1048576 )) MB"
+            echo "===== DONE ====="
