@@ -154,9 +154,8 @@ import {
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { mapQuotaDenyResponse } from "../_shared/quotaDenyResponse.ts";
 import { crossMemoryActive, isFeatureAvailable } from "../_shared/plans.ts";
-import { detectExplicitPromptAttackHardStop } from "../_shared/explicitPromptAttackHardStop.ts";
 import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts";
-import { logProtocolEvent, logProtocolSignals } from "../_shared/protocolEvents.ts";
+import { logProtocolSignals } from "../_shared/protocolEvents.ts";
 import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
 import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
 import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
@@ -849,37 +848,6 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           content: safety.immediateResponse,
-          provider: providerKey,
-          model: reqModel ?? config.model,
-          ...userTextField,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ── PR7a: Explicit prompt-attack hard-stop only (crisis hard-stop removed) ──
-
-    const explicitPromptAttackStop = detectExplicitPromptAttackHardStop(message);
-    if (explicitPromptAttackStop.shouldStop && explicitPromptAttackStop.response) {
-      void logProtocolEvent(makeServiceClient(), {
-        userId: userId ?? null,
-        conversationId: conversationId ?? null,
-        requestId: requestId ?? null,
-        eventType: "prompt_attack_hard_stop",
-        severity: "tier_3",
-        protocol: explicitPromptAttackStop.protocol ?? "regex_prompt_attack_explicit",
-        actionTaken: "hard_stop",
-        confidence: "high",
-        matchedPattern: explicitPromptAttackStop.matched_pattern ?? null,
-        promptVersion: getPromptAuditVersion(),
-        reason: "explicit_prompt_attack_construction",
-      });
-      console.log(
-        `[staysee-chat] explicit prompt-attack hard-stop: ${explicitPromptAttackStop.matched_pattern}`
-      );
-      return new Response(
-        JSON.stringify({
-          content: explicitPromptAttackStop.response,
           provider: providerKey,
           model: reqModel ?? config.model,
           ...userTextField,
