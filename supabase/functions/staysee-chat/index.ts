@@ -1532,7 +1532,11 @@ Deno.serve(async (req: Request) => {
     );
 
     // ── Reply completion routes ─────────────────────────────────────────────
-    const firstSegmentContent = result.content?.trim() ?? "";
+    // The hidden signal tags are taken off BEFORE the reply is checked for completeness: a tag at the end made a whole,
+    // good answer look cut off, and the check then shortened the answers that carry a tag (the crisis and the role attacks)
+    // to their first sentence. The signals themselves are kept for the log below.
+    const firstSegmentSplit = parseAndStripProtocolSignals(result.content?.trim() ?? "");
+    const firstSegmentContent = firstSegmentSplit.text;
     const segmentBudget = continuationTokenBudget(userTier, responseDepth, flatOrdinary);
 
     const recovery = await runReplyRecoveryRoutes({
@@ -1646,8 +1650,14 @@ Deno.serve(async (req: Request) => {
 
       const signalParse = parseAndStripProtocolSignals(safe);
       safe = signalParse.text;
-      if (signalParse.signals.length > 0 || signalParse.leakageSanitized) {
-        protocolSignalsForLog = signalParse;
+      const allSignals = [...new Set([...firstSegmentSplit.signals, ...signalParse.signals])];
+      if (allSignals.length > 0 || signalParse.leakageSanitized || firstSegmentSplit.leakageSanitized) {
+        protocolSignalsForLog = {
+          ...signalParse,
+          signals: allSignals,
+          signalCount: allSignals.length,
+          leakageSanitized: signalParse.leakageSanitized || firstSegmentSplit.leakageSanitized,
+        };
       }
 
       result = { ...result, content: safe };
