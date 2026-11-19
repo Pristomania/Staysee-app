@@ -85,9 +85,9 @@ describe("pictures are wired into the chat function", () => {
     const retry = chat.indexOf("const retry = await callModel(");
     assert.doesNotMatch(chat.slice(retry, retry + 400), /turnImages/);
     assert.match(chat, /const userTextField = turnImages\.length > 0 \? \{ userText: message \} : \{\};/);
-    // Every answer after the picture step carries it: the final one and the two early stops (safety, prompt attack),
+    // Every answer after the picture step carries it: the final one and the early stop (safety),
     // so the saved message always has the description lines the safety check read.
-    assert.ok(chat.split("...userTextField").length - 1 >= 3, "userTextField must be in every 200 answer after the picture step");
+    assert.ok(chat.split("...userTextField").length - 1 >= 2, "userTextField must be in every 200 answer after the picture step");
   });
 
   it("never writes a picture or a description into the log", () => {

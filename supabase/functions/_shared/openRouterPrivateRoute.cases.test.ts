@@ -63,7 +63,6 @@ describe("the private route for model requests", () => {
       "_shared/consolidateUserLifeMemory.ts",
       "_shared/backfillMemory.ts",
       "_shared/weeklyReflection.ts",
-      "_shared/semanticCrisisCheck.ts",
     ]) {
       assert.match(read(relative), /provider: OPENROUTER_PRIVATE_ROUTE,/, relative);
     }

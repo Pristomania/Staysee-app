@@ -12,7 +12,8 @@ Frontend **не** знает про OpenRouter и **не** выбирает мо
 | **brief** | «привет», «спасибо», короткая реплика | `anthropic/claude-3.5-haiku` (дёшево) |
 | **medium** | обычный диалог | `openai/gpt-4.1` |
 | **deep** | длинный текст, эмоции, «разобраться» | `openai/gpt-4.1` |
-| **crisis** | кризис (safety) | `openai/gpt-4.1` |
+
+Отдельной модели для кризиса нет: кризис понимает основная модель по тексту промпта (с 19.11.2026; секрет `STAYSEE_CHAT_MODEL_CRISIS` больше не читается).
 
 Код: `supabase/functions/_shared/responseBudget.ts` (глубина) + `modelRouter.ts` (модель).
 
@@ -26,7 +27,6 @@ Dashboard → Project → **Edge Functions** → **Secrets**:
 | `STAYSEE_CHAT_MODEL_BRIEF` | переопределить brief |
 | `STAYSEE_CHAT_MODEL_MEDIUM` | переопределить medium |
 | `STAYSEE_CHAT_MODEL_DEEP` | переопределить deep |
-| `STAYSEE_CHAT_MODEL_CRISIS` | кризис |
 | `STAYSEE_CHAT_MODEL` | legacy: если depth-ключи не заданы, подставляется везде |
 
 Примеры OpenRouter id (проверьте на https://openrouter.ai/models):
@@ -99,7 +99,6 @@ npx supabase functions deploy staysee-chat --project-ref jnxrildlwvtxhtiwucbt
 STAYSEE_CHAT_MODEL_BRIEF=anthropic/claude-3.5-haiku
 STAYSEE_CHAT_MODEL_MEDIUM=openai/gpt-4.1
 STAYSEE_CHAT_MODEL_DEEP=openai/gpt-4.1
-STAYSEE_CHAT_MODEL_CRISIS=openai/gpt-4.1
 ```
 
 **Удалите или не задавайте** `STAYSEE_CHAT_MODEL=anthropic/claude-sonnet-4-5` — иначе он перебивает пресет по глубине.

@@ -25,7 +25,6 @@ export interface ModelRouteResult {
   model: string;
   source:
     | "request"
-    | "crisis"
     | "brief"
     | "medium"
     | "deep"
@@ -38,7 +37,6 @@ export interface ModelRouteResult {
 const DEFAULT_BRIEF = APPROVED_MODEL_GPT4O;
 const DEFAULT_MEDIUM = APPROVED_MODEL_GPT4O;
 const DEFAULT_DEEP = APPROVED_MODEL_SONNET;
-const DEFAULT_CRISIS = APPROVED_MODEL_GPT4O;
 const DEFAULT_FALLBACK = APPROVED_MODEL_SONNET;
 
 function envModel(key: string): string | undefined {
@@ -57,15 +55,6 @@ export function resolveChatModel(input: ModelRouteInput): ModelRouteResult {
   if (override) {
     assertApprovedRuntimeModel(override, "requestModel");
     return { model: normalizeApprovedModelId(override), source: "request" };
-  }
-
-  if (input.safetyCategory === "crisis") {
-    const model =
-      envModel("STAYSEE_CHAT_MODEL_CRISIS") ??
-      envModel("STAYSEE_CHAT_MODEL_DEEP") ??
-      envModel("STAYSEE_CHAT_MODEL") ??
-      DEFAULT_CRISIS;
-    return { model, source: "crisis", fallbackModel: DEFAULT_DEEP };
   }
 
   if (input.flatOrdinary) {
