@@ -7,6 +7,8 @@ import { supabase } from '../../lib/supabase';
 import { User, Plus } from 'lucide-react';
 import type { Conversation } from '../../types';
 import { GREETING } from './ChatScreen';
+import { FIRST_CONTACT_MESSAGE, isFirstConversation } from '../../lib/firstContact';
+import { insertChatMessage } from '../../lib/chatMessages';
 import { formatRelativeTime } from '../../lib/chatPresentation';
 import { AppContainer } from '../layout';
 import { filterVisibleConversations } from '../../lib/conversationFilters';
@@ -119,7 +121,14 @@ export function MainScreen() {
       return;
     }
     if (data) {
-      setMessages([greetingFor(data.id)]);
+      if (!loading && isFirstConversation(conversations.length)) {
+        // The very first conversation of the account opens with the introduction, saved as a message of Stacy: it is shown like
+        // any message and the model reads it as history with the first answer.
+        const introduction = await insertChatMessage(data.id, 'ai', FIRST_CONTACT_MESSAGE, { userId: user!.id });
+        setMessages([introduction.message ?? greetingFor(data.id)]);
+      } else {
+        setMessages([greetingFor(data.id)]);
+      }
       navigateTo('chat', { conversation: data });
     }
   }
