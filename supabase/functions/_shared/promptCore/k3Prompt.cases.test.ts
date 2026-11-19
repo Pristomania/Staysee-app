@@ -65,6 +65,7 @@ const RULES: Array<[string, RegExp]> = [
   ["the pause, the closing of a topic, the goodbye and the border", /ПАУЗА, ЗАКРЫТИЕ, ЗАВЕРШЕНИЕ, ГРАНИЦА/],
   ["the grammatical gender of the person", /К человеку обращаешься в том роде, в каком он говорит о себе/],
   ["no question about the gender, no guessing", /Не спрашивай об этом и не угадывай/],
+  ["the answer to the introduction is kept, incognito means no name and no gender", /если он выбрал остаться инкогнито, не называй его по имени, говори без рода/],
   ["life comes first", /Если из сообщения следует риск для жизни, всё остальное .* уступает\. Сначала безопасность человека/],
   ["the same on the first and on the hundredth message", /на первом и на сотом сообщении/],
   ["proportion: a pill or a bad day is not a crisis by itself", /Соразмерность. Обычный рассказ о самочувствии не кризис, даже если в нём есть лекарства/],
