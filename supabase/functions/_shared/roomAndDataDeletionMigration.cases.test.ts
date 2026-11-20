@@ -46,7 +46,10 @@ const contentTables = arrayOf("_wipe_account_content");
 const wiped = [...memoryTables, ...contentTables];
 assert(memoryTables.length >= 15 && contentTables.length >= 5, `both lists are there (${memoryTables.length}, ${contentTables.length})`);
 assert(JSON.stringify([...wiped].sort()) === JSON.stringify([...DATA_TABLES].sort()), "the wipe and the checker agree on which tables are a person's content");
-const kept = ["user_usage_tiers", "message_packs", "user_consents", "ai_usage_logs", "ai_usage_log", "profiles"];
+// admin_users and account_label_assignments (migration 097) are the owner's own marks on an account (the admin flag and the label that splits
+// costs into user and technical), not a person's content: deleting the data does not touch them, like the plan; both go with the account itself
+// (ON DELETE CASCADE from auth.users). The admin log has no user_id column on purpose: it outlives the person and holds ids only.
+const kept = ["user_usage_tiers", "message_packs", "user_consents", "ai_usage_logs", "ai_usage_log", "profiles", "admin_users", "account_label_assignments"];
 for (const table of kept) assert(!wiped.includes(table), `${table} is not wiped by the data deletion`);
 assert(contentTables[0] === "conversations", "conversations first: what hangs on them goes with them");
 assert(
