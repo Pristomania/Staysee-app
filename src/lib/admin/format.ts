@@ -34,3 +34,20 @@ export function formatMoscow(iso: string | null | undefined): string {
 export function costClassTitle(costClass: CostClass): string {
   return costClass === 'technical' ? 'Технические' : 'Пользовательские';
 }
+
+/** What a call was for, in plain words. A kind nobody has named yet is shown as it is: a cost is never hidden behind a missing name. */
+const COST_KIND_TITLES: Record<string, string> = {
+  reply: 'Ответы Стейси',
+  memory_dialogue_extractor: 'Память: выделение фактов из беседы',
+  memory_dialogue_reconciler: 'Память: сверка фактов',
+  memory_lifecycle_extractor: 'Память: жизненные события, выделение',
+  memory_lifecycle_reconciler: 'Память: жизненные события, сверка',
+  memory_v3_topic_backfill: 'Память: разметка тем (разовая)',
+  legacy_conversation_summary: 'Пересказ беседы (старая память)',
+  long_message_summary: 'Сжатие длинных сообщений',
+  image_description: 'Описание картинок',
+};
+
+export function costKindTitle(kind: string): string {
+  return COST_KIND_TITLES[kind] ?? kind;
+}

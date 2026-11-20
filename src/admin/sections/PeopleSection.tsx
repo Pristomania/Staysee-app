@@ -1,14 +1,36 @@
 import { useState, type FormEvent } from 'react';
 import type { AdminPeoplePage, AdminPersonCard } from '../../lib/admin/adminTypes';
-import { describeAdminError, labelChangeMessage, toPersonRow } from '../../lib/admin/adminViewModels';
-import { costClassTitle, formatMoscow, formatUsd } from '../../lib/admin/format';
-import { Chip, Notice, Pager, SectionTitle, Table } from '../ui';
+import { describeAdminError, kindsForClass, labelChangeMessage, toPersonRow } from '../../lib/admin/adminViewModels';
+import { costClassTitle, formatMoscow } from '../../lib/admin/format';
+import { LabelSelect } from '../LabelSelect';
+import { Notice, Pager, SectionTitle, Table } from '../ui';
 import { useAdmin } from '../adminContext';
 import { useAdminLoad } from '../useAdminLoad';
 
 const PAGE = 50;
 
-/** People: search by the start of the e-mail, filter by label, the card of one person, and the label (changed here, and logged). */
+/** A label change that has been asked for and waits for the owner's "yes". */
+interface PendingChange {
+  userId: string;
+  email: string;
+  fromKey: string;
+  fromTitle: string;
+  toKey: string;
+  toTitle: string;
+}
+
+/** Who a label change is about; what the label selects hand over when something is chosen in them. */
+interface LabelTarget {
+  userId: string;
+  email: string;
+  labelKey: string;
+  labelTitle: string;
+}
+
+/**
+ * People: search by the start of the e-mail, filter by label, the card of one person. The label is changed right where it is shown (in the
+ * table and in the card): choosing another one asks first, in a bar that stays on screen, and only "Поменять" saves it (and logs it).
+ */
 export function PeopleSection() {
   const { labels, call } = useAdmin();
   const [typed, setTyped] = useState('');
@@ -16,6 +38,10 @@ export function PeopleSection() {
   const [labelFilter, setLabelFilter] = useState('');
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [cardVersion, setCardVersion] = useState(0);
+  const [pending, setPending] = useState<PendingChange | null>(null);
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const people = useAdminLoad<AdminPeoplePage>('people', {
     ...(search ? { search } : {}),
@@ -30,7 +56,28 @@ export function PeopleSection() {
     setSearch(typed.trim());
   }
 
-  const colorOf = (key: string) => labels.find((label) => label.key === key)?.color ?? null;
+  function ask(target: LabelTarget, toKey: string) {
+    if (toKey === target.labelKey) return;
+    const toTitle = labels.find((label) => label.key === toKey)?.title ?? toKey;
+    setNote(null);
+    setPending({ userId: target.userId, email: target.email, fromKey: target.labelKey, fromTitle: target.labelTitle, toKey, toTitle });
+  }
+
+  async function confirmChange() {
+    if (!pending || busy) return;
+    setBusy(true);
+    const result = await call('set_label', { user_id: pending.userId, label_key: pending.toKey });
+    setBusy(false);
+    if (!result.ok) {
+      setNote({ text: describeAdminError(result.reason), error: true });
+      setPending(null);
+      return;
+    }
+    setNote({ text: `Метка поменяна: ${pending.email} теперь «${pending.toTitle}».`, error: false });
+    setPending(null);
+    setCardVersion((version) => version + 1);
+    people.reload();
+  }
 
   return (
     <div>
@@ -48,7 +95,7 @@ export function PeopleSection() {
             setLabelFilter(event.target.value);
           }}
           className="rounded border border-neutral-300 px-2 py-2 text-sm"
-          aria-label="Метка"
+          aria-label="Показать только с меткой"
         >
           <option value="">Все метки</option>
           {labels.map((label) => (
@@ -61,6 +108,19 @@ export function PeopleSection() {
           Найти
         </button>
       </form>
+
+      {pending && (
+        <div className="sticky top-2 z-10 my-3 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm shadow">
+          <span className="text-neutral-900">{labelChangeMessage(pending.email, pending.fromTitle, pending.toTitle)}</span>
+          <button type="button" disabled={busy} onClick={() => void confirmChange()} className="rounded bg-neutral-900 px-3 py-1 text-white disabled:opacity-50">
+            {busy ? 'Меняем…' : 'Поменять'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setPending(null)} className="rounded border border-neutral-300 bg-white px-3 py-1">
+            Отмена
+          </button>
+        </div>
+      )}
+      {note && <Notice tone={note.error ? 'error' : 'quiet'}>{note.text}</Notice>}
 
       {people.loading && !people.data && <Notice tone="quiet">Загружаем…</Notice>}
       {people.error && <Notice tone="error">{people.error}</Notice>}
@@ -79,7 +139,12 @@ export function PeopleSection() {
                   >
                     <td className="whitespace-nowrap px-3 py-2">{row.email}</td>
                     <td className="px-3 py-2">
-                      <Chip text={row.label} color={colorOf(row.labelKey)} />
+                      <LabelSelect
+                        labels={labels}
+                        valueKey={row.labelKey}
+                        disabled={busy}
+                        onPick={(toKey) => ask({ userId: row.id, email: row.email, labelKey: row.labelKey, labelTitle: row.label }, toKey)}
+                      />
                     </td>
                     <td className="px-3 py-2">{row.tier}</td>
                     <td className="whitespace-nowrap px-3 py-2">{row.registered}</td>
@@ -100,50 +165,29 @@ export function PeopleSection() {
 
       {selectedId && (
         <PersonCardPanel
-          key={selectedId}
+          key={`${selectedId}:${cardVersion}`}
           userId={selectedId}
-          onLabelChanged={people.reload}
+          busy={busy}
+          onAsk={ask}
           onClose={() => setSelectedId(null)}
-          call={call}
         />
       )}
     </div>
   );
 }
 
-function PersonCardPanel(props: {
-  userId: string;
-  onLabelChanged(): void;
-  onClose(): void;
-  call: ReturnType<typeof useAdmin>['call'];
-}) {
+function PersonCardPanel(props: { userId: string; busy: boolean; onAsk(target: LabelTarget, toKey: string): void; onClose(): void }) {
   const { labels } = useAdmin();
   const card = useAdminLoad<AdminPersonCard>('person', { user_id: props.userId });
-  const [message, setMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function changeLabel(toKey: string) {
-    const person = card.data?.person;
-    if (!person || toKey === person.label_key || busy) return;
-    const toTitle = labels.find((label) => label.key === toKey)?.title ?? toKey;
-    if (!window.confirm(labelChangeMessage(person.email, person.label_title, toTitle))) return;
-    setBusy(true);
-    setMessage(null);
-    const result = await props.call('set_label', { user_id: props.userId, label_key: toKey });
-    setBusy(false);
-    if (!result.ok) {
-      setMessage(describeAdminError(result.reason));
-      return;
-    }
-    setMessage('Метка поменяна.');
-    card.reload();
-    props.onLabelChanged();
-  }
 
   if (card.loading && !card.data) return <Notice tone="quiet">Загружаем карточку…</Notice>;
   if (card.error || !card.data) return <Notice tone="error">{card.error ?? 'Карточки нет.'}</Notice>;
 
   const { person } = card.data;
+  const costGroups = (['user', 'technical'] as const)
+    .map((costClass) => ({ costClass, kinds: kindsForClass(card.data?.costs.by_kind ?? [], costClass) }))
+    .filter((group) => group.kinds.length > 0);
+
   return (
     <div className="mt-6 rounded-lg border border-neutral-300 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -162,24 +206,17 @@ function PersonCardPanel(props: {
         </button>
       </div>
 
-      <div className="mt-4 flex items-center gap-2 text-sm">
-        <label htmlFor="person-label" className="text-neutral-600">
-          Метка
-        </label>
-        <select
-          id="person-label"
-          value={person.label_key}
-          disabled={busy}
-          onChange={(event) => void changeLabel(event.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1"
-        >
-          {labels.map((label) => (
-            <option key={label.key} value={label.key}>
-              {label.title} ({costClassTitle(label.cost_class).toLowerCase()} расходы)
-            </option>
-          ))}
-        </select>
-        {message && <span className="text-neutral-600">{message}</span>}
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-neutral-600">Метка:</span>
+        <LabelSelect
+          labels={labels}
+          valueKey={person.label_key}
+          disabled={props.busy}
+          onPick={(toKey) => props.onAsk({ userId: props.userId, email: person.email, labelKey: person.label_key, labelTitle: person.label_title }, toKey)}
+        />
+        <span className="text-neutral-500">
+          ({costClassTitle(labels.find((label) => label.key === person.label_key)?.cost_class ?? 'user').toLowerCase()} расходы)
+        </span>
       </div>
 
       <SectionTitle>Согласия</SectionTitle>
@@ -209,16 +246,21 @@ function PersonCardPanel(props: {
       )}
 
       <SectionTitle>Расходы за 30 дней</SectionTitle>
-      {card.data.costs.by_kind.length === 0 ? (
+      {costGroups.length === 0 ? (
         <Notice tone="quiet">Нет.</Notice>
       ) : (
-        <ul className="text-sm text-neutral-700">
-          {card.data.costs.by_kind.map((item) => (
-            <li key={`${item.cost_class}-${item.kind}`}>
-              {costClassTitle(item.cost_class)}: {item.kind}, {item.calls} вызовов, {formatUsd(item.usd)}
-            </li>
-          ))}
-        </ul>
+        costGroups.map((group) => (
+          <div key={group.costClass} className="mb-3">
+            <div className="text-sm font-medium text-neutral-800">{costClassTitle(group.costClass)}</div>
+            <ul className="text-sm text-neutral-700">
+              {group.kinds.map((item) => (
+                <li key={item.kind}>
+                  {item.kind}: {item.calls} вызовов, {item.usd}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
 
       <SectionTitle>Оценки</SectionTitle>

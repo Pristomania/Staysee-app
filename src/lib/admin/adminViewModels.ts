@@ -1,5 +1,5 @@
-import type { AdminPersonRow } from './adminTypes';
-import { costClassTitle, formatMoscow, formatUsd } from './format';
+import type { AdminCostKind, AdminCosts, AdminPersonRow } from './adminTypes';
+import { costClassTitle, costKindTitle, formatMoscow, formatUsd, type CostClass } from './format';
 
 /** What a row of the people table shows. Everything is ready text: the screen only places it. */
 export function toPersonRow(row: AdminPersonRow) {
@@ -24,6 +24,37 @@ export function splitCostTotals(totals: { user_usd: number | string; technical_u
     { title: costClassTitle('user'), value: formatUsd(totals.user_usd) },
     { title: costClassTitle('technical'), value: formatUsd(totals.technical_usd) },
   ];
+}
+
+/** What the calls of one class were for: plain names, only the rows of that class, in the order the server gave (biggest first). */
+export function kindsForClass(kinds: AdminCostKind[], costClass: CostClass): Array<{ kind: string; calls: number; usd: string }> {
+  return kinds
+    .filter((item) => item.cost_class === costClass)
+    .map((item) => ({ kind: costKindTitle(item.kind), calls: item.calls, usd: formatUsd(item.usd) }));
+}
+
+/** One tab of the costs screen: only the rows of the class asked for; days newest first (as DD.MM.YYYY, Moscow days). */
+export function costsForClass(
+  costs: AdminCosts,
+  costClass: CostClass,
+): {
+  total: string;
+  empty: boolean;
+  kinds: Array<{ kind: string; calls: number; usd: string }>;
+  days: Array<{ day: string; usd: string }>;
+  people: Array<{ email: string; usd: string }>;
+} {
+  const total = costClass === 'technical' ? costs.totals.technical_usd : costs.totals.user_usd;
+  const kinds = kindsForClass(costs.by_kind, costClass);
+  const days = costs.by_day
+    .filter((item) => item.cost_class === costClass)
+    .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
+    .map((item) => {
+      const [year, month, day] = item.day.split('-');
+      return { day: `${day}.${month}.${year}`, usd: formatUsd(item.usd) };
+    });
+  const people = costs.by_person.filter((item) => item.cost_class === costClass).map((item) => ({ email: item.email ?? '—', usd: formatUsd(item.usd) }));
+  return { total: formatUsd(total), empty: kinds.length === 0 && days.length === 0 && people.length === 0, kinds, days, people };
 }
 
 /** "51–100 of 120" and which arrows work. An offset beyond the end shows 0–0 and still lets the person go back. */

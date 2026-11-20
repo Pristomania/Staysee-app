@@ -3,8 +3,9 @@
  * Run: npx tsx src/lib/admin/adminViewModels.cases.test.ts
  */
 
-import { describeAdminError, labelChangeMessage, pageInfo, splitCostTotals, toPersonRow } from './adminViewModels.ts';
-import type { AdminPersonRow } from './adminTypes.ts';
+import { costsForClass, describeAdminError, kindsForClass, labelChangeMessage, pageInfo, splitCostTotals, toPersonRow } from './adminViewModels.ts';
+import { costKindTitle } from './format.ts';
+import type { AdminCosts, AdminPersonRow } from './adminTypes.ts';
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg);
@@ -66,6 +67,73 @@ same(
   'numbers that came as text',
 );
 console.log('✓ the two cost cards');
+
+// ── plain words for what a call was for ─────────────────────────────────────────────────────────────────
+same(costKindTitle('reply'), 'Ответы Стейси', 'the reply');
+same(costKindTitle('memory_dialogue_extractor'), 'Память: выделение фактов из беседы', 'memory extractor');
+same(costKindTitle('memory_dialogue_reconciler'), 'Память: сверка фактов', 'memory reconciler');
+same(costKindTitle('legacy_conversation_summary'), 'Пересказ беседы (старая память)', 'the old summary');
+same(costKindTitle('image_description'), 'Описание картинок', 'images');
+same(costKindTitle('a_kind_nobody_named_yet'), 'a_kind_nobody_named_yet', 'an unknown kind is shown as it is, never hidden');
+console.log('✓ plain words for what a call was for');
+
+// ── costs as two tabs: only the class that was asked for ────────────────────────────────────────────────
+const costs: AdminCosts = {
+  totals: { user_usd: '3.5', technical_usd: 24 },
+  by_day: [
+    { day: '2026-11-18', cost_class: 'user', usd: 1 },
+    { day: '2026-11-19', cost_class: 'user', usd: '2.5' },
+    { day: '2026-11-19', cost_class: 'technical', usd: 24 },
+  ],
+  by_kind: [
+    { cost_class: 'technical', kind: 'reply', calls: 10, usd: 24 },
+    { cost_class: 'user', kind: 'reply', calls: 7, usd: 3 },
+    { cost_class: 'user', kind: 'memory_dialogue_extractor', calls: 2, usd: '0.5' },
+  ],
+  by_person: [
+    { user_id: 'a', email: 'anna@example.invalid', cost_class: 'technical', usd: 24 },
+    { user_id: 'b', email: null, cost_class: 'user', usd: 3.5 },
+  ],
+};
+same(
+  costsForClass(costs, 'user'),
+  {
+    total: '3,50 $',
+    empty: false,
+    kinds: [
+      { kind: 'Ответы Стейси', calls: 7, usd: '3,00 $' },
+      { kind: 'Память: выделение фактов из беседы', calls: 2, usd: '0,50 $' },
+    ],
+    days: [
+      { day: '19.11.2026', usd: '2,50 $' },
+      { day: '18.11.2026', usd: '1,00 $' },
+    ],
+    people: [{ email: '—', usd: '3,50 $' }],
+  },
+  'the user tab holds user rows only, newest day first',
+);
+same(
+  costsForClass(costs, 'technical'),
+  {
+    total: '24,00 $',
+    empty: false,
+    kinds: [{ kind: 'Ответы Стейси', calls: 10, usd: '24,00 $' }],
+    days: [{ day: '19.11.2026', usd: '24,00 $' }],
+    people: [{ email: 'anna@example.invalid', usd: '24,00 $' }],
+  },
+  'the technical tab holds technical rows only',
+);
+same(
+  costsForClass({ totals: { user_usd: 0, technical_usd: 0 }, by_day: [], by_kind: [], by_person: [] }, 'technical'),
+  { total: '0,00 $', empty: true, kinds: [], days: [], people: [] },
+  'a class with nothing in it says so',
+);
+same(
+  kindsForClass([{ cost_class: 'technical', kind: 'reply', calls: 1, usd: 2 }, { cost_class: 'user', kind: 'image_description', calls: 3, usd: 0.07 }], 'user'),
+  [{ kind: 'Описание картинок', calls: 3, usd: '0,07 $' }],
+  'the same split for one person',
+);
+console.log('✓ costs as two tabs');
 
 // ── pages ───────────────────────────────────────────────────────────────────────────────────────────────
 same(pageInfo(120, 50, 0), { from: 1, to: 50, hasPrev: false, hasNext: true }, 'the first page');
