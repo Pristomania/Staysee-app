@@ -21,6 +21,11 @@ export function canCreateRoom(activeCount: number, maxRooms: number): boolean {
   return activeCount < maxRooms;
 }
 
+/** Archived rows remain in the safe list but do not occupy the free replacement slot. */
+export function canCreateFromConversationList(rows:{can_read?:boolean}[],maxRooms:number):boolean {
+  return rows.every(row=>typeof row.can_read==='boolean')&&canCreateRoom(rows.filter(row=>row.can_read===true).length,maxRooms);
+}
+
 const ROOMS_IN_WORDS: Record<number, string> = { 1: 'одна беседа', 3: 'три беседы', 6: 'шесть бесед' };
 
 /** What the person reads when the places are taken: how many their plan gives and how to open one. */

@@ -19,6 +19,7 @@ import {
 import { ThemePicker } from '../ThemePicker';
 import { usePlan } from '../../context/PlanContext';
 import { counterLine, renewalLine } from '../../lib/messageCounter';
+import { BillingCheckNotice } from '../payments/BillingCheckNotice';
 import { ROOM_COPY } from '../../lib/roomCopy';
 import { DeleteAccountDataSection } from '../DeleteAccountDataSection';
 import { DeleteRoomSection } from '../DeleteRoomSection';
@@ -96,7 +97,7 @@ export function ProfileScreen() {
     setCurrentConversation,
   } = useApp();
   const { theme } = useTheme();
-  const { tier, plan: currentPlan, counter, loaded: planLoaded } = usePlan();
+  const { tier, plan: currentPlan, counter, loaded: planLoaded, checking, verificationError, refresh: refreshBilling } = usePlan();
   const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
   const sectionLabel = useSectionLabelClass();
@@ -123,6 +124,7 @@ export function ProfileScreen() {
         />
       )}
     >
+      {(!planLoaded || verificationError) && <BillingCheckNotice checking={checking} error={verificationError} onRetry={() => void refreshBilling()} />}
       {counter && (
         <div className={`${card} px-4 py-3 mb-6`}>
           <div className="flex items-center gap-3">

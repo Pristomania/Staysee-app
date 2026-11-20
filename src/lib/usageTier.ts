@@ -15,6 +15,13 @@ const TIER_LABELS: Record<string, string> = {
   premium: 'Premium',
 };
 
+/** No raw-row fallback: upgraded UI requires the self-scoped096 snapshot migration. */
+export async function fetchBillingSnapshot(signal: AbortSignal): Promise<unknown> {
+  const {data,error}=await supabase.rpc('get_my_billing_snapshot').abortSignal(signal);
+  if(error) throw Error('billing_snapshot_unavailable');
+  return data;
+}
+
 export function tierLabel(tier: string): string {
   return TIER_LABELS[tier] ?? tier;
 }

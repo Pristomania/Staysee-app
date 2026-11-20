@@ -8,6 +8,8 @@ import { ROOM_COPY } from '../lib/roomCopy';
 import { useTheme } from '../context/ThemeContext';
 import { usePaywall } from '../context/PaywallContext';
 import { useSectionLabelClass } from './layout';
+import { usePlan } from '../context/PlanContext';
+import { BillingCheckNotice } from './payments/BillingCheckNotice';
 
 const MEMORY_HINT = 'Факты будут видны после оплаты.';
 
@@ -19,11 +21,12 @@ export function LockedMemoryPanel({ cardBase, onMemoryDeleted }: { cardBase: str
   const { theme } = useTheme();
   const { openPaywall } = usePaywall();
   const { user } = useAuth();
+  const {loaded,checking,verificationError,refresh}=usePlan();
   const sectionLabel = useSectionLabelClass();
 
   return (
     <>
-      <section className="mb-8">
+      {loaded ? <><section className="mb-8">
         <p className={sectionLabel}>Память этой беседы</p>
         <p className={`${theme.textSecondary} mb-3 text-xs font-light leading-relaxed`}>{MEMORY_HINT}</p>
       </section>
@@ -53,7 +56,7 @@ export function LockedMemoryPanel({ cardBase, onMemoryDeleted }: { cardBase: str
             </button>
           </div>
         </div>
-      </section>
+      </section></> : <BillingCheckNotice checking={checking} error={verificationError} onRetry={()=>void refresh()} />}
 
       {/* The memory is not shown on this plan, but the person can always wipe all of it. */}
       <section className="mt-8">
@@ -83,6 +86,8 @@ export function LockedMemoryPanel({ cardBase, onMemoryDeleted }: { cardBase: str
 export function LockedFeaturePanel({ title, hint }: { title?: string; hint: string }) {
   const { theme } = useTheme();
   const { openPaywall } = usePaywall();
+  const {loaded,checking,verificationError,refresh}=usePlan();
+  if(!loaded)return <BillingCheckNotice checking={checking} error={verificationError} onRetry={()=>void refresh()} />;
   return (
     <div className={`flex items-center gap-3 rounded-xl border px-4 py-4 ${theme.surface} ${theme.border}`}>
       <div className="min-w-0 flex-1">

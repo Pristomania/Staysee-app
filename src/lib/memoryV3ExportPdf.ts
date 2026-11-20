@@ -1,4 +1,5 @@
 import type { jsPDF } from 'jspdf';
+import {commitIfCurrent} from './accessGeneration';
 import ptSansFontUrl from '../assets/fonts/PTSans-Regular.ttf';
 import { formatMemoryRecordedOrUpdated } from './memoryV3Formatting';
 import type { MemoryV3ExportData, MemoryV3ExportItem } from './memoryV3Viewer';
@@ -104,7 +105,8 @@ function writeSection(
  * подгружаются динамически здесь же, а не при открытии экрана Память, чтобы
  * не раздувать загрузку приложения для всех, кто ни разу не нажмёт эту
  * кнопку. */
-export async function downloadMemoryV3ExportAsPdf(data: MemoryV3ExportData): Promise<void> {
+export async function downloadMemoryV3ExportAsPdf(data: MemoryV3ExportData,canSave:()=>boolean=()=>true): Promise<void> {
+  if(!canSave())return;
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF();
   await embedCyrillicFont(doc);
@@ -123,5 +125,5 @@ export async function downloadMemoryV3ExportAsPdf(data: MemoryV3ExportData): Pro
     data.dialogueAvailable ? 'Пусто.' : 'Сейчас недоступно для выгрузки.',
   );
 
-  doc.save(`staysee-memory-export-${new Date().toISOString().slice(0, 10)}.pdf`);
+  commitIfCurrent(doc,canSave,doc=>{void doc.save(`staysee-memory-export-${new Date().toISOString().slice(0, 10)}.pdf`);});
 }

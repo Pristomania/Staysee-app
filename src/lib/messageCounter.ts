@@ -17,6 +17,9 @@ export const WARN_AT_REMAINING = 10;
 
 /** The columns of the person's usage row the counter reads. Every one may be missing: the database may be older. */
 export interface UsageRow {
+  access_source?: 'manual' | 'purchase' | null;
+  paid_access_until?: string | null;
+  first_real_purchase_at?: string | null;
   tier?: string | null;
   period_requests_used?: number | null;
   period_started_at?: string | null;
@@ -34,6 +37,8 @@ export interface PackRow {
 }
 
 export interface MessageCounter {
+  renewalDisabled?: boolean;
+  paidUntil?: Date | null;
   unlimited: boolean;
   total: number;
   used: number;
@@ -85,9 +90,12 @@ export function messageCounter(
   packs: PackRow[] | null | undefined = null,
 ): MessageCounter | null {
   if (!row) return null;
-  const plan = planFor(row.tier);
+  const purchased = row.access_source === 'purchase' && row.unlimited_usage !== true;
+  const purchasedEnd = parseDate(row.paid_access_until);
+  const expired = purchased && (!purchasedEnd || purchasedEnd.getTime() <= now.getTime());
+  const plan = planFor(expired ? 'free' : row.tier);
   const total = plan.messages;
-  const stored = Math.max(0, Math.floor(Number(row.period_requests_used ?? 0)) || 0);
+  const stored = expired ? 50 : Math.max(0, Math.floor(Number(row.period_requests_used ?? 0)) || 0);
   const periodStart = parseDate(row.period_started_at);
   const lastRequest = parseDate(row.last_request_at);
 
@@ -98,8 +106,9 @@ export function messageCounter(
 
   let used = stored;
   let renewsAt: Date | null = null;
+  const renewalDisabled = purchased || (plan.id === 'free' && !!row.first_real_purchase_at);
 
-  if (plan.renewAfterIdleMonths !== null) {
+  if (!renewalDisabled && plan.renewAfterIdleMonths !== null) {
     // The free plan: counted from the last answered message (from the period start while nobody answered yet).
     const reference = lastRequest ?? periodStart;
     if (reference) {
@@ -107,7 +116,7 @@ export function messageCounter(
       if (now.getTime() >= comeBack.getTime()) used = 0;
       else renewsAt = comeBack;
     }
-  } else if (plan.periodDays !== null && periodStart) {
+  } else if (!renewalDisabled && plan.periodDays !== null && periodStart) {
     // A paid plan: a period of its length; after it a new one starts with the next message.
     const end = new Date(periodStart.getTime() + plan.periodDays * DAY_MS);
     if (now.getTime() - periodStart.getTime() > plan.periodDays * DAY_MS) used = 0;
@@ -117,7 +126,7 @@ export function messageCounter(
   const remaining = Math.max(0, total - used);
   const packRemaining = packMessagesLeft(packs, now);
   const available = remaining + packRemaining;
-  return { unlimited: false, total, used: Math.min(used, total), remaining, packRemaining, available, renewsAt, warn: available <= WARN_AT_REMAINING };
+  return { unlimited: false, total, used: Math.min(used, total), remaining, packRemaining, available, renewsAt, warn: available <= WARN_AT_REMAINING, renewalDisabled, paidUntil: purchased && !expired ? purchasedEnd : null };
 }
 
 /** "сообщение", "сообщения", "сообщений" for the number. */
@@ -161,6 +170,8 @@ export function lowMessagesLine(counter: MessageCounter, now: Date = new Date())
  */
 export function renewalLine(counter: MessageCounter, tier: unknown, now: Date = new Date()): string {
   if (counter.unlimited) return '';
+  if (counter.paidUntil) return `Оплачен до ${new Intl.DateTimeFormat('ru-RU',{day:'numeric',month:'long',year:'numeric',timeZone:'Europe/Moscow'}).format(counter.paidUntil)}`;
+  if (counter.renewalDisabled) return '';
   const plan = planFor(tier);
   if (counter.remaining === 0 && counter.renewsAt) {
     return `Новые ${plan.messages} ${pluralMessages(plan.messages)} будут доступны ${formatDateRu(counter.renewsAt, now)}`;
@@ -176,7 +187,9 @@ export function renewalLine(counter: MessageCounter, tier: unknown, now: Date = 
  * What a refused message is answered with when nothing is left and the day the messages come back is known; null
  * otherwise (the server's own calm text is shown). Calm: no money, no numbers except the day.
  */
-export function exhaustedReply(counter: MessageCounter, tier: unknown, now: Date = new Date()): string | null {
+export function exhaustedReply(counter: MessageCounter, tier: unknown, now: Date = new Date(), serverMessage?: string): string | null {
+  if (serverMessage?.trim()) return serverMessage;
+  if (!counter.unlimited && counter.available === 0 && counter.renewalDisabled) return 'Сообщения закончились. Беседа сохранена.';
   if (counter.unlimited || counter.available > 0 || !counter.renewsAt) return null;
   const plan = planFor(tier);
   const fresh = `Новые ${plan.messages} ${pluralMessages(plan.messages)} будут доступны ${formatDateRu(counter.renewsAt, now)}.`;

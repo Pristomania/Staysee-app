@@ -4,6 +4,8 @@ import { Lock } from 'lucide-react';
 import { useApp } from './AppContext';
 import { useTheme } from './ThemeContext';
 import { LOCKED_LABEL, PAYWALL_GO, PAYWALL_LATER } from '../lib/planCopy';
+import { usePlan } from './PlanContext';
+import { BillingCheckNotice } from '../components/payments/BillingCheckNotice';
 
 interface PaywallContextType {
   /** Tells the person that the thing is after payment and offers to go to it. Without extra words. */
@@ -13,7 +15,7 @@ interface PaywallContextType {
 const PaywallContext = createContext<PaywallContextType | null>(null);
 
 /** The notice itself: a lock, the words, and the two ways out. Shown over whatever the person was doing. */
-export function PaywallDialog({ onGo, onClose }: { onGo: () => void; onClose: () => void }) {
+export function PaywallDialog({ onGo, onClose, verification }: { onGo: () => void; onClose: () => void; verification?: {checking:boolean;error:boolean;onRetry:()=>void} }) {
   const { theme } = useTheme();
   return (
     <div
@@ -27,19 +29,19 @@ export function PaywallDialog({ onGo, onClose }: { onGo: () => void; onClose: ()
         onClick={(event) => event.stopPropagation()}
         className={`w-full max-w-sm rounded-2xl border p-6 text-center ${theme.surface} ${theme.border}`}
       >
-        <Lock className="mx-auto mb-3 h-5 w-5 text-[#c9a96e]" strokeWidth={1.5} />
+        {verification ? <><span id="paywall-title" className="sr-only">Проверка тарифа</span><BillingCheckNotice {...verification} /></> : <><Lock className="mx-auto mb-3 h-5 w-5 text-[#c9a96e]" strokeWidth={1.5} />
         <p id="paywall-title" className={`${theme.textPrimary} mb-5 text-base font-light`}>
           {LOCKED_LABEL}
-        </p>
+        </p></>}
         <div className="flex flex-col gap-2">
-          <button
+          {!verification && <button
             type="button"
             autoFocus
             onClick={onGo}
             className={`w-full rounded-xl border py-3 text-sm font-light transition-all duration-200 ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover} ${theme.btnText}`}
           >
             {PAYWALL_GO}
-          </button>
+          </button>}
           <button
             type="button"
             onClick={onClose}
@@ -59,10 +61,13 @@ export function PaywallDialog({ onGo, onClose }: { onGo: () => void; onClose: ()
  */
 export function PaywallProvider({ children }: { children: ReactNode }) {
   const { navigateTo } = useApp();
-  const [open, setOpen] = useState(false);
+  const {loaded,tier,ownerId,checking,verificationError,refresh}=usePlan();
+  const [open, setOpen] = useState<'paywall'|'verification'|false>(false);
 
-  const openPaywall = useCallback(() => setOpen(true), []);
+  const openPaywall = useCallback(() => setOpen(loaded?'paywall':'verification'), [loaded]);
   const close = useCallback(() => setOpen(false), []);
+  // An upsell belongs to one verified identity/tier. Never carry it across re-verification or account change.
+  useEffect(()=>{setOpen(false);},[loaded,tier,ownerId]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -80,6 +85,7 @@ export function PaywallProvider({ children }: { children: ReactNode }) {
       {children}
       {open && (
         <PaywallDialog
+          verification={open==='verification'||!loaded ? {checking,error:verificationError,onRetry:()=>void refresh()} : undefined}
           onGo={() => {
             setOpen(false);
             navigateTo('tariffs');

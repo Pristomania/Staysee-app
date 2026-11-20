@@ -49,6 +49,8 @@ function assert(condition: boolean, message: string): void {
 }
 
 type FakeRow = {
+  access_source?: string;
+  paid_access_until?: string;
   tier: string;
   daily_request_limit: number;
   daily_requests_used: number;
@@ -85,6 +87,15 @@ function makeFakeClient(result: FakeResult) {
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const recentDayReset = new Date().toISOString();
+
+{
+  const expired = await checkRateLimit(makeFakeClient({data:{
+    tier:'premium',access_source:'purchase',paid_access_until:'2020-01-01T00:00:00Z',
+    daily_request_limit:1000,daily_requests_used:50,month_reset_at:recentDayReset,day_reset_at:recentDayReset,is_suspended:false,
+  },error:null}) as never,USER_ID);
+  assert(expired.tier==='free','expired purchase must not pass premium features in preliminary guard');
+  assert(!expired.allowed && expired.reason==='daily_limit','expired purchase uses free daily guard, not stale premium daily limit');
+}
 
 // ── 1. SELECT error → fail-closed ─────────────────────────────────────────────
 
@@ -284,6 +295,22 @@ function makeFakeRpcClient(handlers: {
 }
 
 // ── 6. reserve allow for free / basic / premium ───────────────────────────────
+{
+ const calls:unknown[]=[];
+ const guarded={rpc:async(fn:string,args:Record<string,unknown>)=>{
+  calls.push({fn,args});return {data:{allowed:false,tier:'free',reason:'conversation_locked'},error:null};
+ }};
+ const result=await reserveAiRequest(guarded as never,USER_ID,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+ assert(result.reason==='conversation_locked','archived conversation denial stays distinguishable');
+ assert(JSON.stringify(calls)===JSON.stringify([{fn:'reserve_ai_request_for_conversation',args:{p_user_id:USER_ID,p_conversation_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}}]),'conversation-aware atomic reserve RPC, no unguarded fallback');
+}
+{
+  const fake=makeFakeRpcClient({reserve:{data:{allowed:false,tier:'free',reason:'period_limit',can_renew_messages:false},error:null}});
+  const result=await reserveAiRequest(fake.client as never,USER_ID);
+  assert((result as {canRenewMessages?:boolean}).canRenewMessages===false,'real-purchase refusal retains no-renewal policy');
+  const invalid=makeFakeRpcClient({reserve:{data:{allowed:false,tier:'free',reason:'period_limit',can_renew_messages:'false'},error:null}});
+  assert((await reserveAiRequest(invalid.client as never,USER_ID)).reason==='limit_check_error','malformed renewal marker fails closed');
+}
 
 for (const tier of ["free", "basic", "premium"] as const) {
   const fake = makeFakeRpcClient({

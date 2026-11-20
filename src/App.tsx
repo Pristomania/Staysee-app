@@ -4,6 +4,9 @@ import { AppProvider, useApp } from './context/AppContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { PlanProvider } from './context/PlanContext';
 import { PaywallProvider } from './context/PaywallContext';
+import { PaymentTestReturnRouter } from './components/payments/PaymentTestReturnRouter';
+import {ProtectedConversationScreen} from './components/ProtectedConversationScreen';
+import {ConversationLeaseProvider} from './context/ConversationLeaseContext';
 import { canWriteAppHistory, isAppHistoryState, replaceAppHistory } from './lib/appHistory';
 import { hasAuthCallbackNotice } from './lib/authCallbackNotice';
 import { hasRoomDeletedNotice } from './lib/roomDeletedNotice';
@@ -164,15 +167,15 @@ function AppContent() {
       case 'reset-password': return <ResetPasswordScreen />;
       case 'register':    return <RegisterScreen />;
       case 'main':        return user ? <MainScreen /> : <WelcomeScreen />;
-      case 'chat':      return user ? <ChatScreen /> : <WelcomeScreen />;
+      case 'chat':      return user ? <ProtectedConversationScreen><ChatScreen /></ProtectedConversationScreen> : <WelcomeScreen />;
       case 'profile':   return user ? <ProfileScreen /> : <WelcomeScreen />;
-      case 'memory':    return user ? <MemoryScreen /> : <WelcomeScreen />;
+      case 'memory':    return user ? <ProtectedConversationScreen paid><MemoryScreen /></ProtectedConversationScreen> : <WelcomeScreen />;
       case 'tariffs':   return user ? <TariffsScreen /> : <WelcomeScreen />;
       case 'conversation-dynamics':
-        return user ? <ConversationDynamicsScreen /> : <WelcomeScreen />;
+        return user ? <ProtectedConversationScreen paid><ConversationDynamicsScreen /></ProtectedConversationScreen> : <WelcomeScreen />;
       case 'conversation-notes':
-        return user ? <ConversationNotesScreen /> : <WelcomeScreen />;
-      case 'privacy':     return <PrivacyScreen />;
+        return user ? <ProtectedConversationScreen><ConversationNotesScreen /></ProtectedConversationScreen> : <WelcomeScreen />;
+      case 'privacy':     return <PrivacyScreen key={user?.id??'public'} />;
       case 'disclaimer':  return <DisclaimerScreen />;
       case 'terms':       return <TermsScreen />;
       case 'policy':      return <PrivacyPolicyScreen />;
@@ -190,9 +193,12 @@ function App() {
       <PlanProvider>
         <AppProvider>
           <ThemeProvider>
-            <PaywallProvider>
-              <AppContent />
-            </PaywallProvider>
+            <ConversationLeaseProvider>
+              <PaywallProvider>
+                <AppContent />
+              </PaywallProvider>
+            </ConversationLeaseProvider>
+            <PaymentTestReturnRouter />
           </ThemeProvider>
         </AppProvider>
       </PlanProvider>

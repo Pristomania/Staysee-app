@@ -3,12 +3,13 @@ import { Check, Feather, Pencil, Plus, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
 import { ConversationHubNav } from '../ConversationHubNav';
 import { useAuth } from '../../context/AuthContext';
+import {useConversationLease} from '../../context/ConversationLeaseContext';
+import {readIfCurrent} from '../../lib/accessGeneration';
+import {conversationClient} from '../../lib/conversationAccessBrowser';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
-import { supabase } from '../../lib/supabase';
 import { REFLECTION_COPY, type SelfNoteKind } from '../../lib/reflectionCopy';
 import { ConversationScopePicker } from '../ConversationScopePicker';
-import type { Conversation } from '../../types';
 import {
   addSelfNote,
   deleteProgressEntry,
@@ -306,6 +307,7 @@ function NotesBottomBar({
 
 export function ConversationNotesScreen() {
   const { user } = useAuth();
+  const lease=useConversationLease();
   const {
     currentConversation,
     setCurrentConversation,
@@ -355,40 +357,26 @@ export function ConversationNotesScreen() {
   ].join(' ');
 
   useEffect(() => {
-    if (!fromProfile || !user) return;
-    const userId = user.id;
-
-    async function loadConversations() {
-      setConvsLoading(true);
-      let list = conversationsRef.current.filter((c) => c.is_active);
-      if (list.length === 0) {
-        const { data } = await supabase
-          .from('conversations')
-          .select('*')
-          .eq('user_id', userId)
-          .eq('is_active', true)
-          .order('last_message_at', { ascending: false });
-        list = (data ?? []) as Conversation[];
-        setConversations(list);
-      }
-      setConvOptions(
-        list.map((c) => ({ id: c.id, title: c.title || 'Без названия' })),
-      );
-      const initial =
-        selectedConvIdRef.current
-        ?? currentConversationIdRef.current
-        ?? list[0]?.id
-        ?? null;
-      if (initial) {
+    if(!fromProfile||!user)return;
+    let active=true;
+    const isCurrent=()=>active&&lease?.isCurrent()!==false;
+    setConvsLoading(true);
+    void readIfCurrent(()=>conversationClient.list(user.id),isCurrent).then(rows=>{
+      if(!rows||!isCurrent())return;
+      setConversations(rows);
+      const list=rows.filter(row=>row.user_id===user.id&&row.can_read===true);
+      setConvOptions(list.map(c=>({id:c.id,title:c.title||'Без названия'})));
+      const wanted=selectedConvIdRef.current??currentConversationIdRef.current;
+      const initial=list.some(c=>c.id===wanted)?wanted:list[0]?.id??null;
+      if(initial){
         setSelectedConvId(initial);
-        const conv = list.find((c) => c.id === initial);
-        if (conv) setCurrentConversation(conv);
+        const conv=list.find(c=>c.id===initial);
+        if(conv&&isCurrent())setCurrentConversation(conv);
       }
       setConvsLoading(false);
-    }
-
-    void loadConversations();
-  }, [fromProfile, setConversations, setCurrentConversation, user]);
+    }).catch(()=>{if(isCurrent())setConvsLoading(false);});
+    return()=>{active=false;};
+  },[fromProfile,setConversations,setCurrentConversation,user?.id,lease]);
 
   function handleSelectConversation(id: string) {
     setSelectedConvId(id);

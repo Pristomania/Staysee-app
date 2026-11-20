@@ -11,6 +11,8 @@ import { DeleteAccountDataSection } from '../DeleteAccountDataSection';
 import { deleteAllMemory } from '../../lib/deleteAccountData';
 import { supabaseAccountDataDeps } from '../../lib/deleteAccountDataDeps';
 import { supabase } from '../../lib/supabase';
+import {conversationClient} from '../../lib/conversationAccessBrowser';
+import {useConversationLease} from '../../context/ConversationLeaseContext';
 import { deleteAllMemoryV3Data } from '../../lib/memoryV3Viewer';
 import { isLegacyMemoryCompatibilityEnabled } from '../../lib/memoryScreenMode';
 import {
@@ -134,6 +136,7 @@ export function PrivacyScreen() {
   const plansDeleteKnown = !user || planLoaded;
   const showLegacyMemoryDelete = isLegacyMemoryCompatibilityEnabled(profile);
   const [deleteAllState, setDeleteAllState] = useState<DeleteState>('idle');
+  const lease=useConversationLease();
   const [deleteMemoryState, setDeleteMemoryState] = useState<DeleteState>('idle');
   const [deleteLifecycleState, setDeleteLifecycleState] = useState<DeleteState>('idle');
   const [deleteDialogueState, setDeleteDialogueState] = useState<DeleteState>('idle');
@@ -160,11 +163,9 @@ export function PrivacyScreen() {
     if (deleteAllState !== 'confirming') return;
     setDeleteAllState('loading');
     try {
-      const { error } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('user_id', user.id);
-      if (error) throw error;
+      if(lease?.isCurrent()===false)return;
+      await conversationClient.removeAll(user.id);
+      if(lease?.isCurrent()===false)return;
       setConversations([]);
       setMessages([]);
       setCurrentConversation(null);
