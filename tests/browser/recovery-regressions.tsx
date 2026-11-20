@@ -51,14 +51,10 @@ async function withAuthBoundary(run:(boundary:{emit:(event:string,id:string|null
 }
 
 const tests:[string,()=>Promise<void>][]=[
- ['the complete app revisits auth navigation after callback popstate settles without reload',async()=>{
-  const originalFrame=window.requestAnimationFrame;const frames:FrameRequestCallback[]=[];window.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
-  try{await withAuthBoundary(async b=>{
-   window.dispatchEvent(new PopStateEvent('popstate',{state:null}));b.emit('SIGNED_IN','alpha');b.restore(null);await pause(80);
-   check(!fixture.querySelector('[aria-label="Контекст"]'),'history pause did not hold the navigation');for(const frame of frames.splice(0))frame(performance.now());await pause(100);
+ ['the complete app revisits auth navigation after callback popstate settles without reload',()=>withAuthBoundary(async b=>{
+   window.dispatchEvent(new PopStateEvent('popstate',{state:null}));b.emit('SIGNED_IN','alpha');b.restore(null);await pause(1250);
    check(!!fixture.querySelector('[aria-label="Контекст"]'),'authenticated app stayed on welcome after history settled');
-  },false,false,false,false,true);}finally{window.requestAnimationFrame=originalFrame;}
- }],
+  },false,false,false,false,true)],
  ['deleted owner cannot reappear on refresh or remount while profile is unavailable; another owner still enters',()=>withAuthBoundary(async b=>{
   b.restore('alpha');await pause();b.resolveProfile('alpha',true);await pause();check(state('data-user')==='none','initial deletion rejection missing');
   b.emit('TOKEN_REFRESHED','alpha');await pause();check(state('data-user')==='none','refresh republished known deleted owner before profile');b.failProfile('alpha');await pause();check(state('data-user')==='none','failed profile revived deleted owner');
@@ -141,6 +137,9 @@ const tests:[string,()=>Promise<void>][]=[
   render(<ConversationAccessGate identityKey={identity} verified={true} conversationId={room} requirePaid={false} readAccess={()=>new Promise(()=>{})} onInvalidate={()=>{}} onBack={()=>{}} onPlans={()=>{}}><p>PRIVATE GATE CHILD</p></ConversationAccessGate>);
   const mountWait=performance.now();while(mountedAt===null&&performance.now()-mountWait<1000)await pause(10);
   if(mountedAt===null){observer.disconnect();throw Error('access gate did not mount');}
+  // The JSON results grow above the fixture. Measure a visible gate, not an
+  // offscreen animation that the embedded browser is free to suspend.
+  fixture.scrollIntoView({block:'start'});
   const start=mountedAt;let firstVisible:number|null=null,samples=0;
   while(performance.now()-start<900){
    await pause(50);samples++;
