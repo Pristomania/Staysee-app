@@ -28,11 +28,18 @@ export function canCreateFromConversationList(rows:{can_read?:boolean}[],maxRoom
 
 const ROOMS_IN_WORDS: Record<number, string> = { 1: 'одна беседа', 3: 'три беседы', 6: 'шесть бесед' };
 
-/** What the person reads when the places are taken: how many their plan gives and how to open one. */
-export function roomLimitNotice(tier: unknown): string {
+/**
+ * What the person reads when the places are taken: how many they have and how to open one. `maxRooms` is the person's own number
+ * (getMaxRooms: the plan's, or the one set by hand); when it is not the plan's, the notice names that number and does not
+ * promise a bigger plan to someone who already has more.
+ */
+export function roomLimitNotice(tier: unknown, maxRooms?: number): string {
   const plan = planFor(tier);
-  const count = ROOMS_IN_WORDS[plan.maxConversations] ?? `${plan.maxConversations} бесед`;
   const open = 'Чтобы начать новую, удалите одну из начатых.';
+  if (typeof maxRooms === 'number' && Number.isFinite(maxRooms) && maxRooms > 0 && maxRooms !== plan.maxConversations) {
+    return `У вас доступно ${maxRooms} бесед. ${open}`;
+  }
+  const count = ROOMS_IN_WORDS[plan.maxConversations] ?? `${plan.maxConversations} бесед`;
   if (plan.id === 'free') {
     return `На бесплатном тарифе доступна ${count}. ${open} Больше бесед открывается с тарифом.`;
   }

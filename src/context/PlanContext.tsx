@@ -5,6 +5,7 @@ import { fetchBillingSnapshot } from '../lib/usageTier';
 import { BillingSnapshotController, type BillingSnapshotState } from '../lib/billingSnapshot';
 import {createAccessGeneration} from '../lib/accessGeneration';
 import {planRetryDelayMs} from '../lib/accessGate';
+import {PLAN_RECHECK_MS,shouldRecheckOnTick} from '../lib/planRefreshPolicy';
 import type { MessageCounter } from '../lib/messageCounter';
 import { getMaxRooms } from '../lib/roomLimits';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
@@ -55,15 +56,18 @@ export function PlanStateProvider({userId,readSnapshot,children}:{
       setState({...next,generation:generation.current.observe(authority)});
     });
     void model.refresh();
-    const verify=()=>{void model.refresh({requireFresh:true});};
+    // Quiet re-reads: the screens do not turn into "checking" while the answer comes (see planRefreshPolicy.ts).
+    const verify=()=>{void model.refresh();};
     const visible=()=>{if(document.visibilityState==='visible')verify();};
     document.addEventListener('visibilitychange',visible);
     window.addEventListener('focus',verify);window.addEventListener('pageshow',verify);window.addEventListener('online',verify);
+    const recheck=window.setInterval(()=>{if(shouldRecheckOnTick(document.visibilityState))verify();},PLAN_RECHECK_MS);
     return ()=>{
       unsubscribe();model.dispose();
       if(modelRef.current===model)modelRef.current=null;
       document.removeEventListener('visibilitychange',visible);
       window.removeEventListener('focus',verify);window.removeEventListener('pageshow',verify);window.removeEventListener('online',verify);
+      window.clearInterval(recheck);
     };
   },[userId,readSnapshot]);
   // A plan read that failed or timed out is tried again by itself (2, 4, 8, 16, then every 30 seconds): a screen that waits for the plan

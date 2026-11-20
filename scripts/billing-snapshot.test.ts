@@ -358,3 +358,33 @@ test("fresh server no-renewal refusal wins over a captured stale renewable count
   );
   assert.equal(reply, "Сообщения закончились. Беседа сохранена.");
 });
+test("a plain refresh keeps a trusted plan loaded while it asks; only a strict one makes it unverified", async () => {
+  const c = clock();
+  let release: (v: unknown) => void = () => {};
+  let first = true;
+  const model = new BillingSnapshotController(uid, () => {
+    if (first) {
+      first = false;
+      return Promise.resolve(snapshot());
+    }
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  }, c.host);
+  await model.refresh();
+  assert.equal(model.state.loaded, true);
+
+  const plain = model.refresh();
+  assert.equal(model.state.loaded, true, "a quiet re-read does not turn the screens into 'checking'");
+  assert.equal(model.state.checking, true);
+  release({ ...snapshot(), serverNow: "2026-11-20T12:00:01Z" });
+  await plain;
+  assert.equal(model.state.loaded, true);
+
+  const strict = model.refresh({ requireFresh: true });
+  assert.equal(model.state.loaded, false, "a strict re-read (a real jump of the clock) still fails closed");
+  release({ ...snapshot(), serverNow: "2026-11-20T12:00:02Z" });
+  await strict;
+  assert.equal(model.state.loaded, true);
+  model.dispose();
+});

@@ -245,7 +245,7 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
       {limitReached && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
-            {roomLimitNotice(tier)}
+            {roomLimitNotice(tier, maxConversations)}
           </p>
         </div>
       )}

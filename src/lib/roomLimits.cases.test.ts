@@ -51,4 +51,12 @@ assert(/шесть бесед/.test(roomLimitNotice('premium')), 'premium notice
 assert(/удалит/.test(roomLimitNotice('basic')), 'every notice tells how to open a place');
 assert(!/пять/.test(`${free}${roomLimitNotice('basic')}${roomLimitNotice('premium')}`), 'the old "five" is gone');
 
+// A person whose number was set by hand reads THEIR number, not the plan's (the notice used to say six to someone who has fifty)
+const handSet = roomLimitNotice('premium', 50);
+assert(/50 бесед/.test(handSet) && !/шесть/.test(handSet), 'a hand-set limit is named as it is');
+assert(/удалит/.test(handSet), 'and it still says how to open a place');
+assert(roomLimitNotice('premium', 6) === roomLimitNotice('premium'), 'the plan own number reads as before');
+assert(roomLimitNotice('free', 1) === roomLimitNotice('free'), 'free with its own number reads as before');
+assert(roomLimitNotice('basic', 40).includes('40 бесед') && !/Шесть бесед открывается/.test(roomLimitNotice('basic', 40)), 'no promise of a bigger plan to someone who already has more');
+
 console.log('All roomLimits cases passed.');
