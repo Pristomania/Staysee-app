@@ -10,9 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-21-conversation-step-reorder-design.md` (approved21.11.2026).
 
+## Execution status 21.11.2026
+
+Tasks1/2 implemented locally; Task3 local component/layout and existing-stack archive acceptance completed, release acceptance remains open. Independent whole-branch review found three Important issues; all reproduced and fixed in one pass. Evidence:3008 offline tests,45 isolated DB scenarios, real two-session lock waits in four races,13 browser component scenarios and12 geometry measurements including repeated moves. Typecheck/build/smoke pass; lint0errors/11documented warnings.
+
+Plan rulings: the planned tests/db file is replaced by an actually executed network-isolated PostgreSQL driver, since shared8100 must not receive108. Real controls are tested in the browser rather than a static controls snapshot. Paid-only ordering uses paid_features, not the broader multiroom reading exception. Order and chosen free anchor are committed atomically after authorization. Old list authority and previews are invalidated on uncertain/refused moves; failed refresh never claims success. Full Auth/PostgREST+108 and physical-phone acceptance are NOT passed; no production migration, push or deployment performed. The original task checklists below remain the planned contract, not a blanket completion claim.
+
 ## Global Constraints
 
-- One click changes one position. Normal row tap opens chat. Only currently paid/full-access callers may reorder.
+- One click changes one position. Normal row tap opens chat. Only currently paid-feature callers may reorder; a free multiroom reading override does not grant ordering.
 - Renaming/manual moves never alter message text or last-message timestamps. New activity still promotes its conversation.
 - Preserve first-row access on expiry, frozen free anchor, locked-row deletion and empty replacement; do not reopen archives by deletion/reordering.
 - No production DB writes, migrations, model calls, payments or new messages during implementation. Use isolated fixtures; do not reset/stop shared8100.
