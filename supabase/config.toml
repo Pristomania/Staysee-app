@@ -34,3 +34,17 @@ verify_jwt = false
 # The admin panel (docs/superpowers/specs/2026-11-20-admin-panel-design.md): the gateway checks the login token; admin-api checks the admin flag and a fresh password itself.
 [functions.admin-api]
 verify_jwt = true
+
+# Payments (test mode only for now; sales are off). create/status need the person's login token. The cashier's result calls have no login token:
+# they check the signature, the mode, the shop and the amount themselves. robokassa-live-result is NOT deployed until the owner approves sales.
+[functions.robokassa-test-create]
+verify_jwt = true
+
+[functions.robokassa-test-status]
+verify_jwt = true
+
+[functions.robokassa-test-result]
+verify_jwt = false
+
+[functions.robokassa-live-result]
+verify_jwt = false
