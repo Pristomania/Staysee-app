@@ -156,7 +156,6 @@ describe("staysee-chat Memory V3 source wiring", () => {
       "previousSummary",
       "transcript: transcriptForSummary",
       "memoryHints",
-      "extraDurableCorrections: sameTurnDurableCorrection",
       "baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl",
       "model: PROVIDERS[ACTIVE_PROVIDER].model",
       "apiKey: summaryApiKey",
@@ -202,7 +201,6 @@ describe("staysee-chat Memory V3 source wiring", () => {
     for (const relativePath of [
       "../context.ts",
       "../memory.ts",
-      "../memoryLayersV2.ts",
       "../../staysee-chat/index.ts",
     ]) {
       const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");

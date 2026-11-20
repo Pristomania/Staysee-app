@@ -14,17 +14,12 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
-  collectMemoryCorrectionHints,
   countMessagesSinceSummary,
   getConversationSummary,
   injectSummaryIntoPrompt,
   type ConversationMemoryMeta,
 } from "./memory.ts";
 import type { DurableMemoryCorrection } from "./memoryCorrectionApply.ts";
-import {
-  loadActiveCorrections,
-  memoryCorrectionsEnabled,
-} from "./memoryCorrections.ts";
 import {
   formatArchiveExcerptsForPrompt,
   formatUserEvidenceForPrompt,
@@ -431,10 +426,11 @@ export async function buildContextPacket(
     ? await fetchMemoryItems(supabase, input.userId)
     : [];
 
-  const corrections = collectMemoryCorrectionHints(recentMessages);
-  const durableCorrections = memoryCorrectionsEnabled()
-    ? await loadActiveCorrections(supabase, input.userId, input.conversationId)
-    : [];
+  // «Corrections» are no longer picked out of the person's words by patterns (owner's rule, 20.11.2026: no decisions by words
+  // in app code), and the stored ones are not loaded: the table memory_corrections never got a row. The two fields stay in the
+  // packet, empty, for the old summary code that still reads them.
+  const corrections: string[] = [];
+  const durableCorrections: DurableMemoryCorrection[] = [];
   const messagesSinceSummary = await countMessagesSinceSummary(
     supabase,
     input.conversationId,

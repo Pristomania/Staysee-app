@@ -103,17 +103,6 @@ import {
   summaryDiagStart,
 } from "../_shared/summaryDiag.ts";
 import {
-  detectMemoryCorrection,
-  isEphemeralDenialOnly,
-} from "../_shared/memoryCorrectionDetect.ts";
-import {
-  memoryCorrectionsEnabled,
-  candidateToDurable,
-  mergeDurableCorrections,
-  persistMemoryCorrection,
-} from "../_shared/memoryCorrections.ts";
-import type { DurableMemoryCorrection } from "../_shared/memoryCorrectionApply.ts";
-import {
   buildLegacySessionProcessState,
   buildStructuredSessionProcessState,
   extractSessionProcessStateFromMetadata,
@@ -924,31 +913,8 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── Durable memory corrections (flag-gated) ───────────────────────────
-
-    let sameTurnDurableCorrection: DurableMemoryCorrection | null = null;
-
-    if (
-      memoryCorrectionsEnabled() &&
-      userId &&
-      conversationId &&
-      !isEphemeralDenialOnly(message)
-    ) {
-      const candidate = detectMemoryCorrection({
-        message,
-        hasConversationId: true,
-      });
-      if (candidate?.confidence === "high") {
-        const persisted = await persistMemoryCorrection(makeServiceClient(), {
-          userId,
-          conversationId,
-          candidate,
-        });
-        if (persisted) {
-          sameTurnDurableCorrection = candidateToDurable(candidate);
-        }
-      }
-    }
+    // Durable memory corrections by word patterns were removed here on 20.11.2026 (owner's rule: no decisions by words in app code).
+    // The table memory_corrections never got a single row; a wrong remembered fact is the job of the memory itself (Memory V3).
 
     const tierCfg = TIER_CONFIG[userTier];
     const gapTier = classifyTimeGap(timeGap);
@@ -1015,15 +981,6 @@ Deno.serve(async (req: Request) => {
                 return made;
               },
             })],
-          };
-        }
-
-        if (sameTurnDurableCorrection) {
-          packet = {
-            ...packet,
-            durableCorrections: mergeDurableCorrections(packet.durableCorrections, [
-              sameTurnDurableCorrection,
-            ]),
           };
         }
 
@@ -1153,9 +1110,6 @@ Deno.serve(async (req: Request) => {
               previousSummary: getConversationSummary(packet.conversationMeta),
               transcript: preTranscript,
               memoryHints: preHints,
-              extraDurableCorrections: sameTurnDurableCorrection
-                ? [sameTurnDurableCorrection]
-                : undefined,
               model: {
                 baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
                 model: PROVIDERS[ACTIVE_PROVIDER].model,
@@ -1171,14 +1125,6 @@ Deno.serve(async (req: Request) => {
               supabaseUrl,
               supabaseAnonKey,
             });
-            if (sameTurnDurableCorrection) {
-              packet = {
-                ...packet,
-                durableCorrections: mergeDurableCorrections(packet.durableCorrections, [
-                  sameTurnDurableCorrection,
-                ]),
-              };
-            }
           }
         } else if (memoryDiagEnabled) {
           smokeDiagSnapshot.eager_should = false;
@@ -2206,9 +2152,6 @@ Deno.serve(async (req: Request) => {
                         previousSummary,
                         transcript: transcriptForSummary,
                         memoryHints,
-                        extraDurableCorrections: sameTurnDurableCorrection
-                          ? [sameTurnDurableCorrection]
-                          : undefined,
                         model: {
                           baseUrl: PROVIDERS[ACTIVE_PROVIDER].baseUrl,
                           model: PROVIDERS[ACTIVE_PROVIDER].model,
