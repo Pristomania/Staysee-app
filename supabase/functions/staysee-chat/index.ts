@@ -1510,7 +1510,6 @@ Deno.serve(async (req: Request) => {
       },
       baseModelMessages: modelMessages,
       unavailableMessage: CALM_ERRORS.unavailable,
-      replyNotRecoveredMessage: CALM_ERRORS.replyNotRecovered,
       callModel: async (messages, kind) => {
         const tokenBudget =
           kind === "auto_continue"
@@ -1580,15 +1579,18 @@ Deno.serve(async (req: Request) => {
         finalizeUsed: wasFinalizeUsed,
       });
     }
-    let safe = ensurePublishableReply(polishedBeforeEnsure);
+    // Only a reply the model was CUT in (finish_reason "length") is ever trimmed, to its last sentence mark; a reply that stopped by
+    // itself goes out as it is (owner's rule, 20.11.2026: no decisions by words, no cutting).
+    let safe = ensurePublishableReply(polishedBeforeEnsure, result.finishReason);
 
       if (
-        !isPublishableReply(safe) &&
+        !isPublishableReply(safe, result.finishReason) &&
         wasAutoContinued &&
         firstSegmentContent.length >= 12
       ) {
         safe = ensurePublishableReply(
-          polishAssistantOutput(firstSegmentContent)
+          polishAssistantOutput(firstSegmentContent),
+          "length"
         );
         usedMergeFallback = true;
         lengthAfterMerge = safe.length;
@@ -1600,7 +1602,7 @@ Deno.serve(async (req: Request) => {
           model: result.model,
           autoContinueUsed: wasAutoContinued,
           finalizeUsed: wasFinalizeUsed,
-          publishable: isPublishableReply(safe),
+          publishable: isPublishableReply(safe, result.finishReason),
           contactComplete: !isContactSuspicious(safe),
         });
       }
@@ -1632,12 +1634,12 @@ Deno.serve(async (req: Request) => {
           model: result.model,
           autoContinueUsed: wasAutoContinued,
           finalizeUsed: wasFinalizeUsed,
-          publishable: isPublishableReply(safe),
+          publishable: isPublishableReply(safe, result.finishReason),
           contactComplete: !isContactSuspicious(safe),
         });
       }
 
-      replyPublishable = isPublishableReply(safe);
+      replyPublishable = isPublishableReply(safe, result.finishReason);
       if (
         wasAutoContinued ||
         wasFinalizeUsed ||

@@ -7,8 +7,8 @@ import { buildRecoveryEventInsert } from "./replyRecoveryDiagnostics.ts";
 import { createEmptyRecoveryDiagnostics, snapshotSegment } from "./replyRecovery.ts";
 
 const d = createEmptyRecoveryDiagnostics();
-d.completionRoute = "stop_not_publishable_repair";
-d.segment1 = snapshotSegment("обрыв", "stop");
+d.completionRoute = "length_truncation_continue";
+d.segment1 = snapshotSegment("обрыв", "length");
 d.stopNotPublishableReasons = ["broken_ending"];
 
 const row = buildRecoveryEventInsert({
@@ -21,7 +21,7 @@ const row = buildRecoveryEventInsert({
   diagnostics: d,
 });
 
-if (row.completion_route !== "stop_not_publishable_repair") {
+if (row.completion_route !== "length_truncation_continue") {
   throw new Error("completion_route mismatch");
 }
 if (row.request_id !== "req-1") throw new Error("request_id mismatch");
