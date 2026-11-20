@@ -7,6 +7,7 @@ import {
   summaryTextForRetrieval,
 } from "../_shared/conversationRetrieval.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
+import { logEmbeddingUsage } from "../_shared/embeddingUsage.ts";
 import { buildContextPacket, buildContextPrompt, stampMemoryUsed } from "../_shared/context.ts";
 import { fetchConversationCrossMemoryEnabled } from "../_shared/profilePrefs.ts";
 import {
@@ -1184,6 +1185,7 @@ Deno.serve(async (req: Request) => {
           .slice(-4)
           .map((m) => m.content);
 
+        const embedUsageClient = makeServiceClient();
         const archiveSearch = await searchConversationArchive(userSupabase, {
           conversationId,
           query: message,
@@ -1200,9 +1202,11 @@ Deno.serve(async (req: Request) => {
             ? {
                 apiKey: embedApiKey,
                 extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
+                // The vector of the question is a paid call: its cost goes into the log like every other (the owner's rule: all costs).
+                onUsage: (usage) => logEmbeddingUsage(embedUsageClient, { userId, conversationId }, usage),
               }
             : undefined,
-          supabaseService: embedApiKey ? makeServiceClient() : undefined,
+          supabaseService: embedApiKey ? embedUsageClient : undefined,
         });
 
         // Preserve corrections through trim — they are high-priority context
@@ -2274,6 +2278,8 @@ Deno.serve(async (req: Request) => {
                 embedConfig: {
                   apiKey: embedApiKey,
                   extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
+                  // The vectors of the new messages are a paid call too: written into the cost log.
+                  onUsage: (usage) => logEmbeddingUsage(svc, { userId, conversationId }, usage),
                 },
                 maxMessages: 12,
               })

@@ -3,6 +3,7 @@
  */
 
 import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+import { readEmbeddingUsage, type EmbeddingUsage } from "./embeddingUsage.ts";
 
 export const EMBEDDING_MODEL =
   Deno.env.get("STAYSEE_EMBEDDING_MODEL")?.trim() ||
@@ -16,6 +17,11 @@ export interface EmbeddingApiConfig {
   apiKey: string;
   baseUrl?: string;
   extraHeaders?: Record<string, string>;
+  /**
+   * Called once with what the call cost, right after the provider answered (before the vectors are checked: the call was paid either
+   * way). The chat passes a function that writes the cost into ai_usage_logs. A failure in it never fails the embeddings.
+   */
+  onUsage?: (usage: EmbeddingUsage) => void | Promise<void>;
 }
 
 function normalizeInput(text: string): string {
@@ -32,6 +38,7 @@ export async function createEmbeddings(
   if (!texts.length) return [];
 
   const baseUrl = config.baseUrl ?? "https://openrouter.ai/api/v1";
+  const inputs = texts.map(normalizeInput);
   const res = await fetch(`${baseUrl}/embeddings`, {
     method: "POST",
     headers: {
@@ -41,7 +48,7 @@ export async function createEmbeddings(
     },
     body: JSON.stringify({
       model: EMBEDDING_MODEL,
-      input: texts.map(normalizeInput),
+      input: inputs,
       ...(baseUrl.includes("openrouter.ai") ? { provider: OPENROUTER_PRIVATE_ROUTE } : {}),
     }),
   });
@@ -53,6 +60,16 @@ export async function createEmbeddings(
   }
 
   const data = await res.json();
+
+  // The provider has answered, so the call is paid whatever happens to the vectors below: write the cost first.
+  if (config.onUsage) {
+    try {
+      await config.onUsage(readEmbeddingUsage(data, EMBEDDING_MODEL, inputs));
+    } catch (e) {
+      console.warn("[embeddings] usage logger failed:", e);
+    }
+  }
+
   const rows = data.data as Array<{ embedding: number[]; index: number }>;
   if (!Array.isArray(rows) || !rows.length) {
     throw new Error("embeddings_empty_response");

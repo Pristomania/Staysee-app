@@ -49,6 +49,8 @@ export type UsageCallKind =
   | "memory_dialogue_reconciler"
   | "long_message_summary"
   | "image_description"
+  // The vectors for the memory search; written by logEmbeddingUsage (embeddingUsage.ts).
+  | "embedding"
   | "structured_turn_shadow";
 
 export type UsageCostCategory = "automatic" | "technical";

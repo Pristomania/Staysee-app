@@ -74,6 +74,7 @@ same(costKindTitle('memory_dialogue_extractor'), 'Память: выделени
 same(costKindTitle('memory_dialogue_reconciler'), 'Память: сверка фактов', 'memory reconciler');
 same(costKindTitle('legacy_conversation_summary'), 'Пересказ беседы (старая память)', 'the old summary');
 same(costKindTitle('image_description'), 'Описание картинок', 'images');
+same(costKindTitle('embedding'), 'Векторы для поиска по памяти', 'embeddings');
 same(costKindTitle('a_kind_nobody_named_yet'), 'a_kind_nobody_named_yet', 'an unknown kind is shown as it is, never hidden');
 same(costKindTitle('offapp:stacy-eval'), 'Вне приложения: stacy-eval', 'a call made outside the app says so and keeps what it was for');
 console.log('✓ plain words for what a call was for');
