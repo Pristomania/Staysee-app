@@ -40,7 +40,19 @@ describe("the private route for model requests", () => {
       .filter((path) => !/data_collection|OPENROUTER_PRIVATE_ROUTE|buildChatModelProviderRoute/.test(readFileSync(path, "utf8")))
       .map((path) => path.slice(functionsDir.length).split("\\").join("/"));
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
-    assert.deepEqual(without.filter((path) => path !== "_shared/longMessageSummarizer.ts"), [], "these files send a request without the private route");
+    // The small model that reads a message before the search in the past is asked of Cloud.ru only (checked below): there is no OpenRouter route to carry.
+    assert.deepEqual(
+      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts"),
+      [],
+      "these files send a request without the private route",
+    );
+  });
+
+  it("the small model of the recall search goes to Cloud.ru only, never to OpenRouter", () => {
+    const gate = read("_shared/recallGate.ts");
+    assert.match(gate, /CLOUDRU_BASE_URL/);
+    assert.doesNotMatch(gate, /openrouter/i);
+    assert.doesNotMatch(read("_shared/reranker.ts"), /openrouter/i);
   });
 
   it("is on the long-message summary, whose request is built in another file", () => {

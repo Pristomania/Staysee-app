@@ -51,6 +51,9 @@ export type UsageCallKind =
   | "image_description"
   // The vectors for the memory search; written by logEmbeddingUsage (embeddingUsage.ts).
   | "embedding"
+  // The small model that reads a message (is it a request to remember) and the reranker that sorts the found lines.
+  | "recall_gate"
+  | "recall_rerank"
   | "structured_turn_shadow";
 
 export type UsageCostCategory = "automatic" | "technical";

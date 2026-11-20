@@ -11,10 +11,14 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { estimateTokens } from "./tokenEstimate.ts";
 import type { EmbeddingApiConfig } from "./embeddings.ts";
 import {
+  SEMANTIC_MIN_LINE_CHARS,
   ensureConversationEmbeddings,
   searchSemanticConversationArchive,
+  semanticThreshold,
 } from "./messageEmbeddings.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
+import type { RecallDecision } from "./recallGate.ts";
+import { DEFAULT_RERANK_THRESHOLD, rerankLines, type RerankConfig } from "./reranker.ts";
 
 /** The newest messages read for the search by words when the person did not ask to remember. */
 export const RETRIEVAL_RECENT_WINDOW = 400;
@@ -341,11 +345,11 @@ export function rankArchiveExcerpts(
   messages: RetrievalMessage[],
   query: string,
   excludeTailCount: number,
-  options?: { light?: boolean }
+  options?: { light?: boolean; recall?: boolean }
 ): ArchiveExcerpt[] {
   if (messages.length < 4) return [];
 
-  const recallIntent = hasRecallIntent(query);
+  const recallIntent = options?.recall ?? hasRecallIntent(query);
   const light = options?.light === true && !recallIntent;
   const topiclessLight = light && query.trim().length >= 180;
   const terms = tokenizeQuery(query);
@@ -517,19 +521,150 @@ export async function fetchConversationMessagesForRetrieval(
   }));
 }
 
+/** The vectors give the candidates (down to this closeness), the reranker decides. */
+const RERANK_CANDIDATE_FLOOR = 0.45;
+const RERANK_SEMANTIC_CANDIDATES = 20;
+const RERANK_KEYWORD_CANDIDATES = 15;
+const RERANK_POOL_CAP = 40;
+/** The most lines handed to the answer when the reranker has chosen. */
+const RECALL_FINAL_CAP = 5;
+const CANDIDATE_TEXT_CHARS = 1000;
+
+/** Lines of the person that carry the words of the phrase (names, numbers, rare words that the vectors may miss); nothing else is added. */
+function keywordCandidates(
+  messages: RetrievalMessage[],
+  phrase: string,
+  excludeTailCount: number,
+  cap: number
+): ArchiveExcerpt[] {
+  const terms = tokenizeQuery(phrase).filter((t) => t.length >= 3);
+  if (!terms.length) return [];
+  const excludeTail = computeExcludeTail(messages.length, excludeTailCount);
+  const archive = excludeTail > 0 ? messages.slice(0, -excludeTail) : messages;
+  return extractArchiveExchanges(archive)
+    .filter((ex) => ex.userText.length >= SEMANTIC_MIN_LINE_CHARS)
+    .map((ex) => ({ ex, score: scoreText(ex.userText, terms) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, cap)
+    .map(({ ex, score }) => ({
+      userText: trimExcerpt(ex.userText, CANDIDATE_TEXT_CHARS),
+      assistantText: ex.assistantText ? trimExcerpt(ex.assistantText, RETRIEVAL_MAX_EXCERPT_CHARS) : null,
+      createdAt: ex.createdAt,
+      score,
+    }));
+}
+
+interface ArchiveSearchParams {
+  conversationId: string;
+  query: string;
+  excludeTailCount: number;
+  userId?: string;
+  embedConfig?: EmbeddingApiConfig;
+  supabaseService?: SupabaseClient;
+  /** What the small model decided about this message (null: it was not asked or did not answer; then the old rule by words applies). */
+  decision?: RecallDecision | null;
+  /** The reranker; without it the threshold on the vectors is used. */
+  rerank?: RerankConfig;
+  rerankThreshold?: number;
+}
+
+/** The person asked to remember (the small model says so): the phrase to search for, candidates by meaning and by words, the reranker chooses. */
+async function searchRecallPrecise(
+  supabase: SupabaseClient,
+  params: ArchiveSearchParams,
+  decision: RecallDecision,
+  messages: RetrievalMessage[]
+): Promise<ArchiveSearchResult> {
+  const phrase = (decision.query.trim() || params.query).slice(0, 300);
+
+  let semantic: ArchiveExcerpt[] = [];
+  if (params.embedConfig?.apiKey && params.supabaseService && params.userId && messages.length >= 6) {
+    try {
+      await ensureConversationEmbeddings(params.supabaseService, {
+        conversationId: params.conversationId,
+        userId: params.userId,
+        embedConfig: params.embedConfig,
+        maxMessages: 40,
+      });
+      const tail = Math.max(0, params.excludeTailCount);
+      const cutoff = tail > 0 && messages.length > tail ? messages[messages.length - tail].created_at : null;
+      semantic = await searchSemanticConversationArchive(supabase, {
+        conversationId: params.conversationId,
+        query: phrase,
+        beforeCreatedAt: cutoff,
+        embedConfig: params.embedConfig,
+        maxExcerptChars: CANDIDATE_TEXT_CHARS,
+        matchCount: RERANK_SEMANTIC_CANDIDATES,
+        threshold: params.rerank ? RERANK_CANDIDATE_FLOOR : undefined,
+      });
+    } catch (e) {
+      console.warn("[retrieval] semantic path failed:", e);
+    }
+  }
+
+  const byWords = keywordCandidates(messages, phrase, params.excludeTailCount, RERANK_KEYWORD_CANDIDATES);
+
+  const seen = new Set<string>();
+  const pool: ArchiveExcerpt[] = [];
+  for (const ex of [...semantic, ...byWords]) {
+    const key = exchangeDedupeKey(ex);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pool.push(ex);
+    if (pool.length >= RERANK_POOL_CAP) break;
+  }
+
+  const scores = params.rerank && pool.length ? await rerankLines(phrase, pool.map((e) => e.userText), params.rerank) : null;
+
+  let picked: ArchiveExcerpt[];
+  let how: string;
+  if (scores) {
+    const threshold = params.rerankThreshold ?? DEFAULT_RERANK_THRESHOLD;
+    picked = pool
+      .map((ex, i) => ({ ex, s: scores[i] }))
+      .filter((x) => x.s > threshold)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, RECALL_FINAL_CAP)
+      .map(({ ex, s }) => ({ ...ex, score: s }));
+    how = "reranked";
+  } else {
+    // No reranker (not configured, or it did not answer): the closeness of the vectors, as before, and the lines that carry two words of the phrase.
+    const close = semantic.filter((ex) => ex.score - 10 > semanticThreshold()).slice(0, 8);
+    const strongWords = byWords.filter((ex) => ex.score >= 8).slice(0, 3);
+    const once = new Set<string>();
+    picked = [...close, ...strongWords].filter((ex) => {
+      const key = exchangeDedupeKey(ex);
+      if (once.has(key)) return false;
+      once.add(key);
+      return true;
+    });
+    how = "threshold";
+  }
+
+  const excerpts = picked.map((ex) => ({
+    ...ex,
+    userText: trimExcerpt(ex.userText, RETRIEVAL_MAX_EXCERPT_CHARS),
+  }));
+  const userEvidenceQuotes = evidenceFromArchiveUserLines(excerpts);
+
+  console.log(
+    `[retrieval] conversation=${params.conversationId} mode=full-precise how=${how} totalMsgs=${messages.length} ` +
+      `semantic=${semantic.length} words=${byWords.length} pool=${pool.length} picked=${excerpts.length}`
+  );
+
+  return { excerpts, userEvidenceQuotes };
+}
+
 export async function searchConversationArchive(
   supabase: SupabaseClient,
-  params: {
-    conversationId: string;
-    query: string;
-    excludeTailCount: number;
-    userId?: string;
-    embedConfig?: EmbeddingApiConfig;
-    supabaseService?: SupabaseClient;
-  }
+  params: ArchiveSearchParams
 ): Promise<ArchiveSearchResult> {
-  const recallIntent = hasRecallIntent(params.query);
-  const mode = resolveArchiveRetrievalMode(params.query);
+  const decision = params.decision ?? null;
+  // The small model, when it answered, decides whether this is a request to remember; the words only decide when it did not answer.
+  const recallIntent = decision ? decision.recall : hasRecallIntent(params.query);
+  let mode = resolveArchiveRetrievalMode(params.query);
+  if (decision) mode = decision.recall ? "full" : mode === "full" ? "light" : mode;
 
   if (mode === "off") {
     console.log(
@@ -546,11 +681,15 @@ export async function searchConversationArchive(
     light ? "recent" : "all"
   );
 
+  if (decision?.recall) {
+    return await searchRecallPrecise(supabase, params, decision, messages);
+  }
+
   const keywordHits = rankArchiveExcerpts(
     messages,
     params.query,
     params.excludeTailCount,
-    { light }
+    { light, recall: recallIntent }
   );
 
   let semanticHits: ArchiveExcerpt[] = [];

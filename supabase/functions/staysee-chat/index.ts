@@ -3,8 +3,11 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { checkConversationAccess } from "../_shared/conversationAccess.ts";
 import {
   hasRecallIntent,
+  resolveArchiveRetrievalMode,
   searchConversationArchive,
 } from "../_shared/conversationRetrieval.ts";
+import { RECALL_GATE_MODEL, askRecallGate, resolveRecallGateMode } from "../_shared/recallGate.ts";
+import { RERANK_MODEL, resolveRerankThreshold } from "../_shared/reranker.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { logEmbeddingUsage } from "../_shared/embeddingUsage.ts";
 import { buildContextPacket, buildContextPrompt, stampMemoryUsed } from "../_shared/context.ts";
@@ -899,6 +902,19 @@ Deno.serve(async (req: Request) => {
           global: { headers: { Authorization: `Bearer ${authToken}` } },
         });
 
+        // The small model reads the message (is it a request to remember, and what to search for). It is started now and awaited
+        // just before the search, so its time is spent while the context is being built. STAYSEE_RECALL_GATE_MODE: words (default:
+        // asked only when the message has words of asking to remember), always, off. Without an answer the old rule by words applies.
+        const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV) ?? undefined;
+        const recallGateMode = resolveRecallGateMode(Deno.env.get("STAYSEE_RECALL_GATE_MODE"));
+        const recallGateWanted =
+          !!cloudruKey &&
+          (recallGateMode === "always" ||
+            (recallGateMode === "words" && resolveArchiveRetrievalMode(message) === "full"));
+        const recallGatePromise = recallGateWanted
+          ? askRecallGate(message, { apiKey: cloudruKey })
+          : Promise.resolve(null);
+
         const builtPacket = await buildContextPacket({
           conversationId,
           userId,
@@ -1117,10 +1133,50 @@ Deno.serve(async (req: Request) => {
         );
 
         const embedUsageClient = makeServiceClient();
+        const recallGate = await recallGatePromise;
+        const recallDecision = recallGate?.decision ?? null;
+        if (recallGate?.usage) {
+          EdgeRuntime.waitUntil(logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
+            userId,
+            conversationId,
+            model: RECALL_GATE_MODEL,
+            promptTokens: recallGate.usage.promptTokens,
+            completionTokens: recallGate.usage.completionTokens,
+            usage: {},
+            memoryTokens: 0,
+            summaryTokens: 0,
+            callKind: "recall_gate",
+            audit: { latencyMs: recallGate.latencyMs },
+          })));
+        }
+        console.log(
+          `[staysee-chat] recall gate mode=${recallGateMode} asked=${recallGateWanted} answered=${recallDecision !== null} ` +
+            `recall=${recallDecision?.recall ?? "-"} ms=${recallGate?.latencyMs ?? "-"}`
+        );
         const archiveSearch = await searchConversationArchive(userSupabase, {
           conversationId,
           query: message,
           excludeTailCount: trimmed.messages.length,
+          decision: recallDecision,
+          rerank: cloudruKey
+            ? {
+                apiKey: cloudruKey,
+                // The reranker is a paid call too: written into the cost log (the owner's rule: all costs).
+                onUsage: (usage) =>
+                  logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
+                    userId,
+                    conversationId,
+                    model: RERANK_MODEL,
+                    promptTokens: usage.totalTokens,
+                    completionTokens: 0,
+                    usage: {},
+                    memoryTokens: 0,
+                    summaryTokens: 0,
+                    callKind: "recall_rerank",
+                  })),
+              }
+            : undefined,
+          rerankThreshold: resolveRerankThreshold(Deno.env.get("STAYSEE_RERANK_THRESHOLD")),
           userId,
           embedConfig: embedApiKey
             ? {
@@ -1212,7 +1268,7 @@ Deno.serve(async (req: Request) => {
 
         systemPrompt = [BASE_PROMPT, contextPrompt].join("\n\n");
 
-        if (hasRecallIntent(message)) {
+        if (recallDecision ? recallDecision.recall : hasRecallIntent(message)) {
           const recallGrounding = buildRecallGroundingPrompt({
             evidenceCount: trimmedPacket.userEvidenceQuotes?.length ?? 0,
             archiveCount: trimmedPacket.archiveExcerpts?.length ?? 0,
