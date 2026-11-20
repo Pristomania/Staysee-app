@@ -26,6 +26,7 @@ const MODEL = "openai/text-embedding-3-small";
 // ── the price table knows the embedding model (the default $1/$3 would overstate it 50 times) ─────────────
 same(getModelPricing(MODEL), { inputPer1M: 0.02, outputPer1M: 0 }, "text-embedding-3-small is priced as input only");
 same(getModelPricing("openai/text-embedding-3-large"), { inputPer1M: 0.13, outputPer1M: 0 }, "text-embedding-3-large too");
+same(getModelPricing("baai/bge-m3"), { inputPer1M: 0.01, outputPer1M: 0 }, "bge-m3 (the model of the search by meaning) too");
 
 // ── reading what the provider says ─────────────────────────────────────────────────────────────────────────
 {
@@ -95,8 +96,8 @@ console.log("✓ writing the row (a failing log never breaks the answer)");
 
 // ── the embeddings call reports its usage ──────────────────────────────────────────────────────────────────
 {
-  const { createEmbeddings } = await import("./embeddings.ts");
-  const vector = Array.from({ length: 1536 }, () => 0.1);
+  const { createEmbeddings, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } = await import("./embeddings.ts");
+  const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
   const realFetch = globalThis.fetch;
   const answer = (body: unknown, status = 200) => async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const reports: unknown[] = [];
@@ -105,7 +106,7 @@ console.log("✓ writing the row (a failing log never breaks the answer)");
     globalThis.fetch = answer({ data: [{ index: 0, embedding: vector }], usage: { prompt_tokens: 30, total_tokens: 30, cost: 6e-7 } }) as typeof fetch;
     const vectors = await createEmbeddings(["hello"], { apiKey: "k", onUsage: (u) => { reports.push(u); } });
     same(vectors.length, 1, "the vectors still come back");
-    same(reports, [{ model: MODEL, promptTokens: 30, totalTokens: 30, cost: 6e-7 }], "the usage is reported once");
+    same(reports, [{ model: EMBEDDING_MODEL, promptTokens: 30, totalTokens: 30, cost: 6e-7 }], "the usage is reported once, under the model that made the vectors");
 
     // The provider billed the call even if the vectors are then refused: the cost is reported first.
     reports.length = 0;

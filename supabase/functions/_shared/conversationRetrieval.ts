@@ -1,10 +1,14 @@
 /**
  * Archive search within ONE conversation only.
  * Never searches other chats or merges conversation summaries.
+ *
+ * What is searched: when someone asks to remember, the WHOLE conversation (newest RETRIEVAL_MAX_FETCH messages by words,
+ * everything by meaning through the vectors); otherwise only the recent window. Nothing here is written for one story:
+ * no topic is guessed from the words, and no word is added to the person's own.
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { estimateTokens } from "./cost.ts";
+import { estimateTokens } from "./tokenEstimate.ts";
 import type { EmbeddingApiConfig } from "./embeddings.ts";
 import {
   ensureConversationEmbeddings,
@@ -12,7 +16,11 @@ import {
 } from "./messageEmbeddings.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 
-export const RETRIEVAL_MAX_FETCH = 400;
+/** The newest messages read for the search by words when the person did not ask to remember. */
+export const RETRIEVAL_RECENT_WINDOW = 400;
+/** The newest messages read for the search by words when the person asked to remember. Older ones are reached by meaning. */
+export const RETRIEVAL_MAX_FETCH = 6_000;
+const FETCH_PAGE = 1_000;
 export const RETRIEVAL_TOP_K = 8;
 export const RETRIEVAL_TOP_K_RECALL = 12;
 export const RETRIEVAL_MAX_EXCERPT_CHARS = 420;
@@ -32,7 +40,7 @@ const RU_STOP = new Set([
 ]);
 
 const RECALL_INTENT_RE =
-  /помнишь|помните|помни|забыла|забыл|говорил[аи]?|говорила|сказал[аи]?|сказала|обсуждал[аи]?|обсуждали|раньше|прошл(ый|ом|ую|ого|ым)|в прошл|прошлом году|прошлым летом|напомни|не помню|ты писал|ты написал|мы говорили|посмотри|говорила тебе|сказала тебе|я говорила|как было|что было|что случилось|тогда|в том числе|ещё раз|еще раз|продолжим|продолжить тему|рассказала|рассказывала|что я говорила|что ты помнишь|у меня этого нет|не доверя|прошлого раза|вчера\s+(?:я\s+)?рассказывала|рассказывала\s+вчера|о\s+себе\s+и|что\s+я\s+рассказывала/i;
+  /помнишь|помните|помни|забыла|забыл|говорил[аи]?|говорила|сказал[аи]?|сказала|обсуждал[аи]?|обсуждали|раньше|прошл(ый|ом|ую|ого|ым)|в прошл|прошлом году|прошлым летом|напомни|не помню|ты писал|ты написал|мы говорили|посмотри|говорила тебе|сказала тебе|я говорила|как было|что было|что случилось|тогда|в том числе|ещё раз|еще раз|продолжим|продолжить тему|рассказала|рассказывала|что я говорила|что ты помнишь|у меня этого нет|прошлого раза|вчера\s+(?:я\s+)?рассказывала|рассказывала\s+вчера|что\s+я\s+рассказывала/i;
 
 /** Topic return without explicit «помнишь» — light archive only. */
 const CONTINUITY_INTENT_RE =
@@ -40,7 +48,7 @@ const CONTINUITY_INTENT_RE =
 
 /** User corrects memory («я ещё писала…», «не только это») — full retrieval. */
 const MEMORY_CORRECTION_RE =
-  /ещ[её]\s+писал|я\s+(?:уже\s+)?писал|не\s+только\s+это|забыл[аи]?\s+что|ты\s+не\s+то\s+помнишь|а\s+я\s+(?:же\s+)?(?:писала|говорила)|мы\s+поругал/i;
+  /ещ[её]\s+писал|я\s+(?:уже\s+)?писал|не\s+только\s+это|забыл[аи]?\s+что|ты\s+не\s+то\s+помнишь|а\s+я\s+(?:же\s+)?(?:писала|говорила)/i;
 
 export type ArchiveRetrievalMode = "off" | "light" | "full";
 
@@ -59,6 +67,8 @@ interface RawExchange {
   assistantText: string | null;
   createdAt: string;
 }
+
+type RetrievalMessage = { role: "user" | "assistant"; content: string; created_at: string };
 
 function tokenizeQuery(text: string): string[] {
   const raw = text
@@ -88,73 +98,7 @@ export function resolveArchiveRetrievalMode(query: string): ArchiveRetrievalMode
   return "off";
 }
 
-/** «Про ссору» → поругалась, обвинил, манипулировал и т.д. */
-export function expandRecallTopicStems(query: string): string[] {
-  const stems = topicStemsFromText(query);
-  const q = query.toLowerCase();
-
-  if (/ссор|поругал|ругал|поссор|конфликт/i.test(q)) {
-    stems.push("поругал", "ругал", "ссор", "обвин", "манипул", "контрол", "улич");
-  }
-
-  if (/на\s+связи|связи|связь|проверял|прощуп|вопрос/i.test(q)) {
-    stems.push("связ", "провер", "вопрос", "мужчин");
-  }
-
-  if (/его\b|мужчин|партн|\bон\b/i.test(q) && !stems.includes("мужчин")) {
-    stems.push("мужчин");
-  }
-
-  const about = q.match(/\bпро\s+([а-яё]{3,12})/i);
-  if (about?.[1]) {
-    const topic = about[1];
-    if (/^ссор/.test(topic)) {
-      stems.push("поругал", "ругал", "ссор", "обвин", "манипул", "контрол", "улич");
-    }
-    if (/мужчин|партн|^муж/.test(topic)) stems.push("мужчин");
-  }
-
-  return [...new Set(stems)];
-}
-
-function mergeSearchTerms(query: string, recallIntent: boolean): string[] {
-  const terms = tokenizeQuery(query);
-  if (!recallIntent) return terms;
-  return [...new Set([...terms, ...expandRecallTopicStems(query)])];
-}
-
-function topicStemsFromText(text: string): string[] {
-  const stems: string[] = [];
-  if (/мужчин|\bему\b|\bего\b|\bон\b/i.test(text)) stems.push("мужчин");
-  if (/отношен/i.test(text)) stems.push("отношен");
-  if (/партн/i.test(text)) stems.push("партн");
-  if (/поругал|ссор|ругал|поссор/i.test(text)) {
-    stems.push("поругал", "ссор");
-  }
-  if (/развод/i.test(text)) stems.push("развод");
-  if (/не живу|живу одн|прожива|вместе/i.test(text)) stems.push("жив");
-  if (/довер/i.test(text)) stems.push("довер");
-  if (/прошл|прошлом|прошлым|прошлого|в прошл|год[ауе]?|летом|лете/i.test(text)) {
-    stems.push("прошл");
-  }
-  if (/преда|предатель/i.test(text)) stems.push("пред");
-  if (/испугал|беспомощ|отдаля/i.test(text)) stems.push("испуг");
-  if (/сын|дочь|дочер|детей|ребён|ребен/i.test(text)) stems.push("сын");
-  return [...new Set(stems)];
-}
-
-function newestUserMessageAt(
-  messages: Array<{ role: "user" | "assistant"; created_at: string }>
-): string {
-  let best = "";
-  for (const m of messages) {
-    if (m.role !== "user") continue;
-    if (!best || m.created_at > best) best = m.created_at;
-  }
-  return best;
-}
-
-/** Prefer fresh lines when scores are close (old «сын» vs new «поругались»). */
+/** Prefer fresh lines when scores are close. Not used when the person asks to remember: then an old line is as good as a new one. */
 function recencyBoost(createdAt: string, newestAt: string): number {
   if (!newestAt) return 0;
   const t = Date.parse(createdAt);
@@ -168,28 +112,9 @@ function recencyBoost(createdAt: string, newestAt: string): number {
   return 0;
 }
 
-function queryAsksFightTopic(query: string): boolean {
-  return /поругал|ссор|ругал|поссор|не\s+только\s+это|ещ[её]\s+писал/i.test(query);
-}
-
-const FIGHT_PRIORITY_STEMS = ["поругал", "ссор", "ругал", "обвин", "манипул", "контрол"];
-
-function scoreQuoteAgainstStems(content: string, stems: string[]): number {
+function scoreQuoteAgainstTerms(content: string, terms: string[]): number {
   const lower = content.toLowerCase();
   let score = 0;
-  for (const s of stems) {
-    if (lower.includes(s)) score += s.length >= 5 ? 3 : 2;
-  }
-  return score;
-}
-
-function scoreQuoteAgainstQuery(
-  content: string,
-  stems: string[],
-  terms: string[]
-): number {
-  let score = scoreQuoteAgainstStems(content, stems);
-  const lower = content.toLowerCase();
   for (const t of terms) {
     if (t.length >= 4 && lower.includes(t)) score += 3;
     else if (t.length >= 3 && lower.includes(t)) score += 1;
@@ -197,11 +122,16 @@ function scoreQuoteAgainstQuery(
   return score;
 }
 
-/** Token match when stems miss («на связи», «проверяла»). */
-function collectRecallByQueryTokens(
-  messages: Array<{ role: "user" | "assistant"; content: string; created_at: string }>,
+export interface UserEvidenceQuote {
+  createdAt: string;
+  text: string;
+}
+
+/** Verbatim lines of the person that carry the words of the question — for recall questions. */
+export function collectUserEvidenceQuotes(
+  messages: RetrievalMessage[],
   query: string,
-  cap: number
+  cap = 16
 ): UserEvidenceQuote[] {
   const terms = tokenizeQuery(query).filter((t) => t.length >= 3);
   if (terms.length < 1) return [];
@@ -213,7 +143,7 @@ function collectRecallByQueryTokens(
     if (m.role !== "user") continue;
     const text = m.content?.trim() ?? "";
     if (text.length < 8) continue;
-    const score = scoreQuoteAgainstQuery(text, [], terms);
+    const score = scoreQuoteAgainstTerms(text, terms);
     if (score <= 0) continue;
     const key = text.slice(0, 64);
     if (seen.has(key)) continue;
@@ -239,58 +169,6 @@ function evidenceFromArchiveUserLines(excerpts: ArchiveExcerpt[]): UserEvidenceQ
   return out;
 }
 
-export interface UserEvidenceQuote {
-  createdAt: string;
-  text: string;
-}
-
-const FIGHT_ANCHOR_RE = /поругал|ссор|ругал|поссор/i;
-const RECALL_THREAD_USER_CAP = 12;
-const RECALL_THREAD_MSG_SCAN = 40;
-
-/** After «поругалась» — подтянуть следующие реплики пользователя (детали ссоры). */
-function collectRecallThreadQuotes(
-  messages: Array<{ role: "user" | "assistant"; content: string; created_at: string }>,
-  anchorStems: string[]
-): UserEvidenceQuote[] {
-  let anchorIdx = -1;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const text = m.content?.trim() ?? "";
-    if (text.length < 8) continue;
-    if (
-      scoreQuoteAgainstStems(text, anchorStems) > 0 ||
-      FIGHT_ANCHOR_RE.test(text)
-    ) {
-      anchorIdx = i;
-    }
-  }
-  if (anchorIdx < 0) return [];
-
-  const out: UserEvidenceQuote[] = [];
-  const seen = new Set<string>();
-  let userCount = 0;
-
-  for (
-    let i = anchorIdx;
-    i < messages.length && userCount < RECALL_THREAD_USER_CAP;
-    i++
-  ) {
-    if (i - anchorIdx > RECALL_THREAD_MSG_SCAN) break;
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const text = m.content?.trim() ?? "";
-    if (text.length < 6) continue;
-    const key = text.slice(0, 64);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ createdAt: m.created_at, text });
-    userCount++;
-  }
-  return out;
-}
-
 function mergeEvidenceQuotes(
   primary: UserEvidenceQuote[],
   extra: UserEvidenceQuote[],
@@ -308,98 +186,15 @@ function mergeEvidenceQuotes(
   return out;
 }
 
-/** Verbatim user lines from this chat — for recall / relationship questions. */
-export function collectUserEvidenceQuotes(
-  messages: Array<{ role: "user" | "assistant"; content: string; created_at: string }>,
-  query: string,
-  contextBlob: string
-): UserEvidenceQuote[] {
-  const recall = hasRecallIntent(query);
-  const queryTerms = mergeSearchTerms(query, recall);
-  let effectiveStems = expandRecallTopicStems(query);
-  if (!effectiveStems.length && recall) {
-    effectiveStems = topicStemsFromText(`${query} ${contextBlob}`);
-  }
-  if (recall && /мужчин|партн|муж\b|его\b/i.test(query) && !effectiveStems.includes("мужчин")) {
-    effectiveStems = [...effectiveStems, "мужчин"];
-  }
-  if (!recall && !effectiveStems.length) return [];
-
-  // Trust / timeline recall often omits «мужчина» in the story message («он предавал…»).
-  if (effectiveStems.includes("прошл") || effectiveStems.includes("довер")) {
-    if (!effectiveStems.includes("пред")) effectiveStems.push("пред");
-    if (!effectiveStems.includes("мужчин")) effectiveStems.push("мужчин");
-  }
-  effectiveStems = [...new Set(effectiveStems)];
-
-  const ranked: Array<UserEvidenceQuote & { score: number }> = [];
-  const seen = new Set<string>();
-
-  for (const m of messages) {
-    if (m.role !== "user") continue;
-    const text = m.content?.trim() ?? "";
-    if (text.length < 8) continue;
-    let hitScore = scoreQuoteAgainstQuery(text, effectiveStems, queryTerms);
-    if (FIGHT_ANCHOR_RE.test(text) && queryAsksFightTopic(query)) {
-      hitScore += 8;
-    }
-    if (hitScore <= 0) continue;
-    const key = text.slice(0, 64);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const newestAt = newestUserMessageAt(messages);
-    ranked.push({
-      createdAt: m.created_at,
-      text,
-      score: hitScore + recencyBoost(m.created_at, newestAt),
-    });
-  }
-
-  ranked.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
-
-  const max = recall ? 16 : 6;
-  let quotes = ranked.slice(0, max).map(({ createdAt, text }) => ({ createdAt, text }));
-
-  const fightRecall =
-    recall &&
-    (queryAsksFightTopic(query) ||
-      effectiveStems.some((s) => FIGHT_PRIORITY_STEMS.includes(s)) ||
-      FIGHT_ANCHOR_RE.test(query) ||
-      FIGHT_ANCHOR_RE.test(contextBlob));
-
-  if (fightRecall) {
-    const thread = collectRecallThreadQuotes(messages, FIGHT_PRIORITY_STEMS);
-    quotes = mergeEvidenceQuotes(thread, quotes, max);
-  }
-
-  if (recall) {
-    const byTokens = collectRecallByQueryTokens(messages, query, max);
-    quotes = mergeEvidenceQuotes(byTokens, quotes, max);
-  }
-
-  if (recall && queryAsksFightTopic(query)) {
-    const fightLines = ranked
-      .filter((r) => FIGHT_ANCHOR_RE.test(r.text))
-      .map(({ createdAt, text }) => ({ createdAt, text }));
-    quotes = mergeEvidenceQuotes(fightLines, quotes, max);
-  }
-
-  return quotes;
-}
-
 export function formatUserEvidenceForPrompt(quotes: UserEvidenceQuote[]): string {
   if (!quotes.length) return "";
 
   const lines: string[] = [
     "ПОДТВЕРЖДЁННЫЕ СЛОВА ПОЛЬЗОВАТЕЛЯ В ЭТОЙ БЕСЕДЕ (дословно, только этот чат):",
-    "Это реальные её сообщения из истории. Если блок не пуст — она УЖЕ говорила об этом здесь.",
-    "Запрещено: «ты не говорила», «не помню что было», «у меня этого нет» — если ниже есть цитаты про тот же период/тему.",
+    "Это реальные сообщения человека из истории этой беседы. Если блок не пуст — об этом здесь уже говорили.",
+    "Запрещено отрицать, что об этом говорили («не помню», «у меня этого нет»), если ниже есть цитаты по той же теме или за тот же период.",
     "Запрещено: выдумывать людей и факты, которых нет в цитатах.",
-    "Если в чате и сын, и ссора — не сливай в одно: отвечай по теме вопроса; свежие реплики про ссору важнее старых линий.",
-    "«Прошлый год / прошлым летом» в её словах = она уже рассказывала; не проси рассказать с нуля, пока не уточнишь пробел.",
+    "Если цитаты про разные темы — не сливай их в одно: отвечай по теме вопроса.",
     "Можно не помнить каждую деталь, но отрицать весь разговор нельзя.",
     "",
   ];
@@ -434,6 +229,7 @@ function formatShortDate(iso: string): string {
     return new Date(iso).toLocaleDateString("ru-RU", {
       day: "numeric",
       month: "short",
+      year: "numeric",
     });
   } catch {
     return "";
@@ -444,9 +240,7 @@ function exchangeKey(ex: RawExchange): string {
   return `${ex.createdAt}:${ex.userText.slice(0, 40)}`;
 }
 
-function extractArchiveExchanges(
-  archive: Array<{ role: "user" | "assistant"; content: string; created_at: string }>
-): RawExchange[] {
+function extractArchiveExchanges(archive: RetrievalMessage[]): RawExchange[] {
   const out: RawExchange[] = [];
   for (let i = 0; i < archive.length; i++) {
     const m = archive[i];
@@ -470,10 +264,7 @@ function extractArchiveExchanges(
   return out;
 }
 
-function computeExcludeTail(
-  totalMessages: number,
-  requestedTail: number
-): number {
+function computeExcludeTail(totalMessages: number, requestedTail: number): number {
   const tail = Math.max(0, requestedTail);
   if (totalMessages <= MIN_ARCHIVE_MESSAGES + 4) {
     return Math.max(0, totalMessages - MIN_ARCHIVE_MESSAGES);
@@ -545,9 +336,9 @@ function mergePicks(
   return out.slice(0, max);
 }
 
-/** Score and rank past exchanges in this conversation only. */
+/** Score and rank past exchanges in this conversation only, by the words of the question. */
 export function rankArchiveExcerpts(
-  messages: Array<{ role: "user" | "assistant"; content: string; created_at: string }>,
+  messages: RetrievalMessage[],
   query: string,
   excludeTailCount: number,
   options?: { light?: boolean }
@@ -557,7 +348,7 @@ export function rankArchiveExcerpts(
   const recallIntent = hasRecallIntent(query);
   const light = options?.light === true && !recallIntent;
   const topiclessLight = light && query.trim().length >= 180;
-  const terms = mergeSearchTerms(query, recallIntent);
+  const terms = tokenizeQuery(query);
 
   if (terms.length < 1 && !recallIntent && !topiclessLight) return [];
 
@@ -591,10 +382,7 @@ export function rankArchiveExcerpts(
         scoreText(ex.userText, terms) * 2 +
         scoreText(ex.assistantText ?? "", terms) +
         (recallIntent ? 1 : 0);
-      if (recallIntent && queryAsksFightTopic(query) && FIGHT_ANCHOR_RE.test(ex.userText)) {
-        score += 10;
-      }
-      score += recencyBoost(ex.createdAt, newestAt);
+      if (!recallIntent) score += recencyBoost(ex.createdAt, newestAt);
       return {
         userText: ex.userText,
         assistantText: ex.assistantText,
@@ -689,26 +477,43 @@ export interface ArchiveSearchResult {
   userEvidenceQuotes: UserEvidenceQuote[];
 }
 
+export type RetrievalFetchScope = "recent" | "all";
+
+/**
+ * The messages of one conversation, oldest first. "recent" reads the newest RETRIEVAL_RECENT_WINDOW; "all" reads
+ * newest-first in pages of 1000 up to RETRIEVAL_MAX_FETCH, so a long conversation is not cut to its first messages.
+ */
 export async function fetchConversationMessagesForRetrieval(
   supabase: SupabaseClient,
-  conversationId: string
-): Promise<Array<{ role: "user" | "assistant"; content: string; created_at: string }>> {
-  const { data, error } = await supabase
-    .from("messages")
-    .select("sender, role, content, created_at")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-    .limit(RETRIEVAL_MAX_FETCH);
+  conversationId: string,
+  scope: RetrievalFetchScope = "recent"
+): Promise<RetrievalMessage[]> {
+  const cap = scope === "all" ? RETRIEVAL_MAX_FETCH : RETRIEVAL_RECENT_WINDOW;
+  const rows: Array<{ sender?: string | null; role?: string | null; content: string | null; created_at: string }> = [];
 
-  if (error) {
-    console.error("[retrieval] fetch messages:", error.message);
-    return [];
+  for (let from = 0; from < cap; from += FETCH_PAGE) {
+    const to = Math.min(from + FETCH_PAGE, cap) - 1;
+    const { data, error } = await supabase
+      .from("messages")
+      .select("sender, role, content, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      console.error("[retrieval] fetch messages:", error.message);
+      break;
+    }
+    const page = (data ?? []) as typeof rows;
+    rows.push(...page);
+    if (page.length < to - from + 1) break;
   }
 
-  return (data ?? []).map((row) => ({
+  return rows.reverse().map((row) => ({
     role: normalizeMessageRole(row),
     content: row.content ?? "",
-    created_at: row.created_at as string,
+    created_at: row.created_at,
   }));
 }
 
@@ -740,7 +545,8 @@ export async function searchConversationArchive(
 
   const messages = await fetchConversationMessagesForRetrieval(
     supabase,
-    params.conversationId
+    params.conversationId,
+    light ? "recent" : "all"
   );
 
   const keywordHits = rankArchiveExcerpts(
@@ -760,19 +566,19 @@ export async function searchConversationArchive(
     messages.length >= 6
   ) {
     try {
+      // Catch up the vectors of messages that have none yet (newest first), then compare by meaning across the whole history.
       await ensureConversationEmbeddings(params.supabaseService, {
         conversationId: params.conversationId,
         userId: params.userId,
         embedConfig: params.embedConfig,
-        maxMessages: 35,
+        maxMessages: 40,
       });
 
-      const rawRows = await params.supabaseService
-        .from("messages")
-        .select("id, conversation_id, sender, role, content, created_at")
-        .eq("conversation_id", params.conversationId)
-        .order("created_at", { ascending: true })
-        .limit(RETRIEVAL_MAX_FETCH);
+      const tail = Math.max(0, params.excludeTailCount);
+      const cutoff =
+        tail > 0 && messages.length > tail
+          ? messages[messages.length - tail].created_at
+          : null;
 
       const semanticQuery = [params.query, contextBlob.slice(0, 800)]
         .filter(Boolean)
@@ -781,16 +587,9 @@ export async function searchConversationArchive(
       semanticHits = await searchSemanticConversationArchive(supabase, {
         conversationId: params.conversationId,
         query: semanticQuery.slice(0, 2000),
-        excludeTailCount: params.excludeTailCount,
+        beforeCreatedAt: cutoff,
         embedConfig: params.embedConfig,
-        allMessages: (rawRows.data ?? []) as Array<{
-          id: string;
-          conversation_id: string;
-          sender?: string | null;
-          role?: string | null;
-          content: string;
-          created_at: string;
-        }>,
+        maxExcerptChars: RETRIEVAL_MAX_EXCERPT_CHARS,
       });
     } catch (e) {
       console.warn("[retrieval] semantic path failed:", e);
@@ -803,26 +602,14 @@ export async function searchConversationArchive(
     recallIntent
   );
 
-  let userEvidenceQuotes =
+  const userEvidenceQuotes =
     mode === "full" || recallIntent
-      ? collectUserEvidenceQuotes(
-          messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-            created_at: m.created_at,
-          })),
-          params.query,
-          contextBlob
+      ? mergeEvidenceQuotes(
+          collectUserEvidenceQuotes(messages, params.query),
+          evidenceFromArchiveUserLines(excerpts),
+          16
         )
       : [];
-
-  if (recallIntent && userEvidenceQuotes.length < 4 && keywordHits.length > 0) {
-    userEvidenceQuotes = mergeEvidenceQuotes(
-      userEvidenceQuotes,
-      evidenceFromArchiveUserLines(keywordHits),
-      14
-    );
-  }
 
   console.log(
     `[retrieval] conversation=${params.conversationId} mode=${mode} totalMsgs=${messages.length} ` +
@@ -838,9 +625,9 @@ export function formatArchiveExcerptsForPrompt(excerpts: ArchiveExcerpt[]): stri
 
   const lines: string[] = [
     "АРХИВ ЭТОЙ БЕСЕДЫ (обязательно учти — только этот чат, не другие диалоги):",
-    "Ниже — реальные прошлые реплики пользователя и ответы StaySee из ЭТОЙ беседы (подобраны по смыслу и словам).",
-    "Если в архиве есть реплика «Пользователь: …» про тему — пользователь УЖЕ говорила это здесь. Не пиши «ты не говорила».",
-    "Опирайся на архив по любой теме, о которой пользователь спрашивает — даже если формулировки другие.",
+    "Ниже — реальные прошлые реплики человека и ответы StaySee из ЭТОЙ беседы (подобраны по смыслу и словам), с датами.",
+    "Если в архиве есть реплика «Пользователь: …» по теме — это уже было сказано здесь. Не отрицай этого.",
+    "Опирайся на архив по любой теме, о которой человек спрашивает — даже если формулировки другие.",
     "При противоречии с самыми последними репликами — уточни актуальность, не отрицай весь прошлый разговор.",
     "",
   ];
