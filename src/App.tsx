@@ -46,6 +46,7 @@ function AppContent() {
   } = useApp();
   const { theme } = useTheme();
   const [showLoadingReset, setShowLoadingReset] = useState(false);
+  const [historySettlement, setHistorySettlement] = useState(0);
 
   useEffect(() => {
     if (!loading) {
@@ -77,6 +78,9 @@ function AppContent() {
       } finally {
         window.requestAnimationFrame(() => {
           popNavigationRef.current = false;
+          // A callback can authenticate while popstate temporarily blocks routing.
+          // Clearing a ref alone does not rerun the skipped auth navigation effect.
+          setHistorySettlement(value => value + 1);
         });
       }
     };
@@ -122,6 +126,7 @@ function AppContent() {
     currentConversation,
     replaceNavigation,
     popNavigationRef,
+    historySettlement,
   ]);
 
   async function handleEmergencyReset() {

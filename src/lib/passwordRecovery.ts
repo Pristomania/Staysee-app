@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'staysee:password-recovery';
+const OWNER_KEY = 'staysee:password-recovery-owner';
 
 /** Auth redirect types in Supabase email / OAuth links (hash or query). */
 export type AuthCallbackType =
@@ -9,9 +10,10 @@ export type AuthCallbackType =
   | 'email_change'
   | 'email';
 
-export function markPasswordRecoveryPending(): void {
+export function markPasswordRecoveryPending(ownerId?: string | null): void {
   try {
     sessionStorage.setItem(STORAGE_KEY, '1');
+    if (ownerId) sessionStorage.setItem(OWNER_KEY, ownerId);
   } catch {
     // ignore
   }
@@ -20,9 +22,15 @@ export function markPasswordRecoveryPending(): void {
 export function clearPasswordRecoveryPending(): void {
   try {
     sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(OWNER_KEY);
   } catch {
     // ignore
   }
+}
+
+/** A recovery episode belongs to one account, including after a clean-URL reload. */
+export function getPasswordRecoveryOwner(): string | null {
+  try { return sessionStorage.getItem(OWNER_KEY); } catch { return null; }
 }
 
 export function isPasswordRecoveryPending(): boolean {

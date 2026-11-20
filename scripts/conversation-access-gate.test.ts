@@ -61,6 +61,8 @@ test('the memory of a yes is short and exact: another room, another screen kind,
  const key=accessGateKey('uid:flash:4',true,'room-d',false);
  rememberAccessYes(key,1_000);
  assert.equal(isAccessRemembered(key,1_000+19_000),true);
+ assert.equal(isAccessRemembered(key,20_999),true,'one millisecond before the20s expiry');
+ assert.equal(isAccessRemembered(key,21_000),false,'at the exact20s expiry a cached grant is no longer enough');
  assert.equal(isAccessRemembered(key,1_000+21_000),false,'after 20 seconds it is asked again');
  assert.equal(isAccessRemembered(accessGateKey('uid:flash:4',true,'room-OTHER',false),1_000),false,'another room');
  assert.equal(isAccessRemembered(accessGateKey('uid:flash:4',true,'room-d',true),1_000),false,'a paid-only screen is another question');
