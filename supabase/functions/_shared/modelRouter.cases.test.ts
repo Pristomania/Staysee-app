@@ -1,12 +1,19 @@
 /**
- * Model router — Core V2 flat ordinary runtime cases.
+ * Model router cases (the rule of 20.11.2026: the model is the configured one, the same for every message; nothing is chosen by the
+ * words of the message, a "depth" read off them, or a category guessed from them).
  * Run: npx tsx supabase/functions/_shared/modelRouter.cases.test.ts
  */
 
-import { APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET } from "./approvedModels.ts";
+import {
+  APPROVED_MODEL_DEEPSEEK_V4_PRO,
+  APPROVED_MODEL_GPT4O,
+  APPROVED_MODEL_KIMI_K26,
+  APPROVED_MODEL_SONNET,
+} from "./approvedModels.ts";
 import { resolveChatModel } from "./modelRouter.ts";
 
-globalThis.Deno = { env: { get: () => undefined } };
+const env: Record<string, string> = {};
+globalThis.Deno = { env: { get: (key: string) => env[key] } };
 
 let failed = 0;
 
@@ -19,38 +26,42 @@ function assert(condition: boolean, message: string): void {
   console.log(`PASS: ${message}`);
 }
 
-console.log("=== modelRouter flat ordinary ===\n");
-
-for (const depth of ["brief", "medium", "deep"] as const) {
-  const route = resolveChatModel({
-    depth,
-    safetyCategory: "normal",
-    flatOrdinary: true,
-  });
-  assert(route.model === APPROVED_MODEL_GPT4O, `flat ${depth} → gpt-4o primary`);
-  assert(route.source === "flat_ordinary", `flat ${depth} → source flat_ordinary`);
-  assert(
-    route.fallbackModel === APPROVED_MODEL_SONNET,
-    `flat ${depth} → sonnet fallback only`,
-  );
+console.log("=== nothing configured: gpt-4o, with sonnet as the reserve ===\n");
+{
+  const route = resolveChatModel({});
+  assert(route.model === APPROVED_MODEL_GPT4O, "default → gpt-4o primary");
+  assert(route.source === "configured", "default → source configured");
+  assert(route.fallbackModel === APPROVED_MODEL_SONNET, "default → sonnet reserve");
 }
 
-console.log("\n=== modelRouter depth-routed legacy (no flat) ===\n");
+console.log("\n=== configured: the same model for every turn ===\n");
+{
+  env.STAYSEE_CHAT_MODEL = APPROVED_MODEL_DEEPSEEK_V4_PRO;
+  const first = resolveChatModel({});
+  const second = resolveChatModel({});
+  assert(first.model === APPROVED_MODEL_DEEPSEEK_V4_PRO && second.model === first.model, "STAYSEE_CHAT_MODEL → that model, every time");
+  assert(first.fallbackModel === APPROVED_MODEL_KIMI_K26, "DeepSeek V4 Pro → Kimi K2.6 is the reserve");
 
-const deepLegacy = resolveChatModel({ depth: "deep", safetyCategory: "normal" });
-assert(deepLegacy.model === APPROVED_MODEL_SONNET, "legacy deep → sonnet primary");
-assert(deepLegacy.source === "deep", "legacy deep → source deep");
+  // The older per-depth settings still name the model (the first of brief → medium → the main one), but no depth is read any more.
+  env.STAYSEE_CHAT_MODEL_BRIEF = APPROVED_MODEL_KIMI_K26;
+  assert(resolveChatModel({}).model === APPROVED_MODEL_KIMI_K26, "STAYSEE_CHAT_MODEL_BRIEF still wins over the main one");
+  delete env.STAYSEE_CHAT_MODEL_BRIEF;
+  delete env.STAYSEE_CHAT_MODEL;
+}
 
-const briefLegacy = resolveChatModel({ depth: "brief", safetyCategory: "normal" });
-assert(briefLegacy.model === APPROVED_MODEL_GPT4O, "legacy brief → gpt-4o");
+console.log("\n=== a model may be asked in the request (dev and tests) ===\n");
+{
+  const route = resolveChatModel({ requestModel: APPROVED_MODEL_KIMI_K26 });
+  assert(route.model === APPROVED_MODEL_KIMI_K26 && route.source === "request", "request model → that model, source request");
+}
 
-console.log("\n=== modelRouter: no separate model for a crisis (the model understands it from the prompt) ===\n");
-
-for (const flatOrdinary of [true, false]) {
-  const ordinary = resolveChatModel({ depth: "brief", safetyCategory: "normal", flatOrdinary });
-  const crisis = resolveChatModel({ depth: "brief", safetyCategory: "crisis", flatOrdinary });
-  assert(crisis.model === ordinary.model, `crisis (flat=${flatOrdinary}) → the same model as an ordinary turn`);
-  assert(crisis.source === ordinary.source, `crisis (flat=${flatOrdinary}) → the same route as an ordinary turn`);
+console.log("\n=== the router takes nothing that is read from the words ===\n");
+{
+  const input = resolveChatModel.length;
+  assert(input === 1, "resolveChatModel takes one argument");
+  // A leftover from the older callers is simply not used: the route does not change with it.
+  const withLeftovers = resolveChatModel({ depth: "deep", safetyCategory: "crisis", flatOrdinary: false } as never);
+  assert(withLeftovers.model === APPROVED_MODEL_GPT4O && withLeftovers.source === "configured", "depth / category leftovers change nothing");
 }
 
 if (failed > 0) {

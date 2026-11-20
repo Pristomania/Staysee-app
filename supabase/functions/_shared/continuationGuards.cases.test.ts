@@ -9,11 +9,6 @@ import {
   shouldRunFinalize,
 } from "./completeReply.ts";
 import { mergeContinuationWithoutOverlap } from "./mergeContinuation.ts";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-
-const __dir = dirname(fileURLToPath(import.meta.url));
 
 function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -91,12 +86,5 @@ assert(
   "finalize after mid-word"
 );
 console.log("PASS: finalize allowed when clearly truncated");
-
-// deep budget audit (source constant — avoids npm: import chain via responseBudget.ts)
-const budgetSrc = readFileSync(join(__dir, "responseBudget.ts"), "utf8");
-assert(/deep:\s*1600/.test(budgetSrc), "deep maxTokens target must be 1600");
-assert(/brief:\s*380/.test(budgetSrc), "brief maxTokens unchanged");
-assert(/medium:\s*900/.test(budgetSrc), "medium maxTokens unchanged");
-console.log("PASS: deep maxTokens=1600 (brief/medium unchanged)");
 
 console.log("\nAll continuationGuards cases passed.");

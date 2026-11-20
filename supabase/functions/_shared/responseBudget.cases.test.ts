@@ -1,305 +1,45 @@
 /**
- * Response depth router — emotional trajectory cases.
+ * The token budget of a reply (the rule of 20.11.2026: nothing is decided by the words of the message).
  * Run: npx tsx supabase/functions/_shared/responseBudget.cases.test.ts
+ *
+ * The ceiling of a reply is the ceiling of the tier, whatever the message says; a continuation gets a shorter budget. The "short /
+ * medium / deep" depth that used to be read off the wording of the message is gone.
  */
 
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import {
-  analyzeResponseDepth,
-  detectResponseDepth,
-  type ResponseDepth,
-  type SafetyCategory,
-} from "./responseDepthTrajectory.ts";
+  continuationTokenBudget,
+  OUTPUT_TOKEN_CEILING_GUIDANCE,
+  responseTokenCeiling,
+} from "./responseBudget.ts";
+import * as responseBudget from "./responseBudget.ts";
 
-const TIER_CEILING = { free: 1200, basic: 1600, premium: 2000 } as const;
-const DEPTH_TOKEN_TARGET = { brief: 380, medium: 900, deep: 1600 } as const;
-const OUTPUT_TOKEN_CEILING_GUIDANCE =
-  "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
+describe("the ceiling of a reply is the ceiling of the tier", () => {
+  it("free 1200, basic 1600, premium 2000", () => {
+    assert.equal(responseTokenCeiling("free"), 1200);
+    assert.equal(responseTokenCeiling("basic"), 1600);
+    assert.equal(responseTokenCeiling("premium"), 2000);
+  });
 
-function legacyBudgetMaxTokens(
-  depth: ResponseDepth,
-  tier: keyof typeof TIER_CEILING,
-): number {
-  return Math.min(TIER_CEILING[tier], DEPTH_TOKEN_TARGET[depth]);
-}
+  it("a continuation gets 55% of the ceiling, never less than 280 and never more than the ceiling", () => {
+    assert.equal(continuationTokenBudget("free"), 660);
+    assert.equal(continuationTokenBudget("basic"), 880);
+    assert.equal(continuationTokenBudget("premium"), 1100);
+  });
+});
 
-function flatBudgetMaxTokens(tier: keyof typeof TIER_CEILING): number {
-  return TIER_CEILING[tier];
-}
+describe("the model is told the ceiling is a boundary, not a length to fill", () => {
+  it("keeps its wording", () => {
+    assert.ok(OUTPUT_TOKEN_CEILING_GUIDANCE.includes("ceiling is a boundary, not a requested response length"));
+  });
+});
 
-type Turn = { role: "user" | "assistant"; content: string };
-
-/** Pre-trajectory router (length-only baseline). */
-function detectResponseDepthOld(
-  message: string,
-  safetyCategory: SafetyCategory,
-  recentHistory: Turn[]
-): ResponseDepth {
-  void recentHistory;
-  const trimmed = message.trim();
-  const len = trimmed.length;
-  const words = trimmed.split(/\s+/).filter(Boolean).length;
-
-  if (/^(дальше|продолжай|continue)\b/i.test(trimmed)) return "brief";
-  if (safetyCategory === "crisis") return "deep";
-  if (
-    safetyCategory === "off_topic" ||
-    safetyCategory === "boundary_pressure" ||
-    safetyCategory === "medical_boundary"
-  ) {
-    return "brief";
-  }
-  if (len < 40) return "brief";
-  if (len < 100 && words < 18) return "brief";
-  return "medium";
-}
-
-function buildHistory(pairs: Array<[string, string?]>): Turn[] {
-  const out: Turn[] = [];
-  for (const [user, assistant] of pairs) {
-    out.push({ role: "user", content: user });
-    if (assistant) out.push({ role: "assistant", content: assistant });
-  }
-  return out;
-}
-
-interface Case {
-  name: string;
-  history: Turn[];
-  message: string;
-  expectedDepth: ResponseDepth;
-  expectedReason?: string;
-  oldDepth?: ResponseDepth;
-}
-
-const cases: Case[] = [
-  {
-    name: "1. isolated neutral short → brief",
-    history: [],
-    message: "Привет",
-    expectedDepth: "brief",
-    expectedReason: "greeting_short",
-    oldDepth: "brief",
-  },
-  {
-    name: "2. technical short question → brief",
-    history: [],
-    message: "Где настройки?",
-    expectedDepth: "brief",
-    expectedReason: "short_neutral",
-    oldDepth: "brief",
-  },
-  {
-    name: "2b. isolated emotional short → open_figure medium",
-    history: [],
-    message: "устала",
-    expectedDepth: "medium",
-    expectedReason: "open_figure",
-    oldDepth: "brief",
-  },
-  {
-    name: "3. work arc → сон → medium",
-    history: buildHistory([
-      ["Пока не понятно", "..."],
-      ["Ну вот я и работаю как всегда", "..."],
-      ["Но работа меня выматывает", "..."],
-    ]),
-    message: "Сон",
-    expectedDepth: "medium",
-    expectedReason: "recent_emotional_trajectory",
-    oldDepth: "brief",
-  },
-  {
-    name: "4. sadness / loneliness arc → не знаю → medium",
-    history: buildHistory([
-      ["Мне грустно", "..."],
-      ["Просто есть", "..."],
-      ["Наверное про одиночество", "..."],
-      ["Он перестал писать", "..."],
-    ]),
-    message: "Не знаю",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-    oldDepth: "brief",
-  },
-  {
-    name: "5. anger / mother arc → устала → medium",
-    history: buildHistory([
-      ["Я злюсь", "..."],
-      ["На мать", "..."],
-      ["Опять одно и то же", "..."],
-    ]),
-    message: "Устала",
-    expectedDepth: "medium",
-    expectedReason: "recent_emotional_trajectory",
-    oldDepth: "brief",
-  },
-  {
-    name: "6. long strong emotional → deep",
-    history: [],
-    message:
-      "Мне так тревожно последние недели, я не могу спать, постоянно думаю что со мной не так и боюсь что всё рухнет и я не выдержу этот круг одиночества и усталости от работы которая меня выматывает каждый день без конца",
-    expectedDepth: "deep",
-    expectedReason: "long_emotional",
-    oldDepth: "medium",
-  },
-  {
-    name: "7. short after emotional without prior arc → brief",
-    history: [],
-    message: "Ок",
-    expectedDepth: "brief",
-    expectedReason: "greeting_short",
-    oldDepth: "brief",
-  },
-  {
-    name: "8. overnight arc → не знаю → uncertainty_in_process",
-    history: buildHistory([
-      [
-        "Он остался ночевать. Не из-за секса — ему было небезопасно ехать без машины.",
-        "...",
-      ],
-      ["Мне непривычно. Ситуация новая и какая-то живая.", "..."],
-    ]),
-    message: "Не знаю",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-    oldDepth: "brief",
-  },
-  {
-    name: "9. isolated не знаю → uncertainty_in_process",
-    history: [],
-    message: "Не знаю",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-    oldDepth: "brief",
-  },
-  {
-    name: "11. пока не знаю with arc → uncertainty_in_process",
-    history: buildHistory([
-      [
-        "сегодня впервые попросила мужчину остаться на ночь, в другой комнате",
-        "...",
-      ],
-      ["и то и другое важно", "..."],
-    ]),
-    message: "пока не знаю",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-  },
-  {
-    name: "12. да вот я и не знаю with arc → uncertainty_in_process",
-    history: buildHistory([
-      ["Мужчина остался ночевать, мне непривычно.", "..."],
-    ]),
-    message: "да вот я и не знаю",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-  },
-  {
-    name: "10. work arc → пока не понятно → uncertainty_in_process",
-    history: buildHistory([
-      ["Ну вот я и работаю как всегда", "..."],
-      ["Но работа меня выматывает", "..."],
-    ]),
-    message: "Пока не понятно",
-    expectedDepth: "medium",
-    expectedReason: "uncertainty_in_process",
-    oldDepth: "brief",
-  },
-];
-
-let failed = 0;
-
-console.log("=== responseBudget depth router ===\n");
-
-for (const c of cases) {
-  const analysis = analyzeResponseDepth(c.message, "normal", c.history);
-  const oldDepth =
-    c.oldDepth ?? detectResponseDepthOld(c.message, "normal", c.history);
-
-  const depthOk = analysis.depth === c.expectedDepth;
-  const reasonOk = !c.expectedReason || analysis.depthReason === c.expectedReason;
-  const pass = depthOk && reasonOk;
-
-  console.log(`${pass ? "PASS" : "FAIL"}: ${c.name}`);
-  console.log(
-    `  depth: ${analysis.depth} (expected ${c.expectedDepth}) | old: ${oldDepth}`
-  );
-  console.log(
-    `  reason: ${analysis.depthReason}` +
-      (c.expectedReason ? ` (expected ${c.expectedReason})` : "")
-  );
-  console.log(
-    `  meta: recentUserTurns=${analysis.recentUserTurns} emotionalMomentum=${analysis.emotionalMomentum} openFigure=${analysis.openFigure.isOpen}`
-  );
-
-  if (!pass) {
-    failed++;
-    console.log(`  message: ${JSON.stringify(c.message)}`);
-  }
-  console.log("");
-}
-
-// Sanity: detectResponseDepth matches analyzeResponseDepth.depth
-const sanityHistory = buildHistory([["Мне грустно", "..."]]);
-const msg = "Не знаю";
-if (detectResponseDepth(msg, "normal", sanityHistory) !== analyzeResponseDepth(msg, "normal", sanityHistory).depth) {
-  failed++;
-  console.log("FAIL: detectResponseDepth wrapper mismatch");
-}
-
-if (failed > 0) {
-  console.error(`\n${failed} case(s) failed`);
-  process.exit(1);
-}
-
-console.log("All cases passed.");
-
-console.log("\n=== responseBudget flat ordinary ceiling ===\n");
-
-let flatFailed = 0;
-function flatAssert(condition: boolean, message: string): void {
-  if (!condition) {
-    console.log(`FAIL: ${message}`);
-    flatFailed++;
-    return;
-  }
-  console.log(`PASS: ${message}`);
-}
-
-const deepMsg =
-  "Мне так тревожно последние недели, я не могу спать, постоянно думаю что со мной не так и боюсь что всё рухнет";
-
-for (const [depthLabel, msg] of [
-  ["brief", "Привет"],
-  ["medium", "устала"],
-  ["deep", deepMsg],
-] as const) {
-  const analysis = analyzeResponseDepth(msg, "normal", []);
-  const legacy = legacyBudgetMaxTokens(analysis.depth, "free");
-  const flat = flatBudgetMaxTokens("free");
-  flatAssert(flat === 1200, `flat ${depthLabel} free → 1200 ceiling`);
-  flatAssert(
-    flat !== legacy || depthLabel === "deep",
-    `flat ${depthLabel} ≠ legacy depth target when not deep`,
-  );
-  if (depthLabel === "brief") flatAssert(legacy === 380, "legacy brief still 380 for comparison");
-  if (depthLabel === "medium") flatAssert(legacy === 900, "legacy medium still 900 for comparison");
-}
-
-flatAssert(
-  OUTPUT_TOKEN_CEILING_GUIDANCE.includes("ceiling is a boundary, not a requested response length"),
-  "OUTPUT_TOKEN_CEILING_GUIDANCE unchanged",
-);
-flatAssert(TIER_CEILING.premium === 2000, "premium ceiling configured");
-flatAssert(flatBudgetMaxTokens("premium") === 2000, "flat premium uses tier ceiling");
-flatAssert(
-  flatBudgetMaxTokens("basic") === TIER_CEILING.basic,
-  "flat basic uses tier ceiling",
-);
-
-if (flatFailed > 0) {
-  console.error(`\n${flatFailed} flat budget case(s) failed`);
-  process.exit(1);
-}
-
-console.log("\nAll flat budget cases passed.");
+describe("the depth read off the words is gone and must not come back", () => {
+  it("has no function that takes the message and returns a budget", () => {
+    for (const gone of ["computeResponseBudget", "analyzeResponseDepth", "detectResponseDepth", "analyzeEmotionalTrajectory"]) {
+      assert.equal(gone in responseBudget, false, `${gone} must not exist`);
+    }
+  });
+});

@@ -3,10 +3,10 @@
  * Run: npx tsx supabase/functions/_shared/promptCore/k3Prompt.cases.test.ts
  *
  * The K3 base must keep the approved crisis contacts word for word, keep every rule that the word layers used to carry,
- * hold nothing secret, and the chat function must skip the word layers when K3 is the base.
+ * hold nothing secret, and the chat function must read no words of the person (the word layers are gone).
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { buildLegacyDocFlatCleanPrompt } from "./legacyDocFlatPrompt.ts";
@@ -84,21 +84,46 @@ assert(!/sk-[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{20,}|api[_-]?key\s*[:=]|service_
 assert(!/`|\$\{/.test(k3), "no template characters that could break the module");
 assert(k3.length > 20000 && k3.length < 45000, `K3 has a sensible size (${k3.length} characters)`);
 
-console.log("\n=== the chat function skips the word layers for the K3 base ===\n");
+console.log("\n=== the chat function reads no words of the person ===\n");
+// The meaning (crisis, medicine, role, attachment, pause, goodbye, grammatical gender) is in the text of the prompt. No code around it
+// reads the words of the message or of the history to decide anything (owner's rule, 20.11.2026).
 const chat = readFileSync(resolve("supabase/functions/staysee-chat/index.ts"), "utf8").replace(/\r/g, "");
-const WIRING: Array<[string, RegExp]> = [
-  ["the base is K3 when the audit label says so", /const isK3Base = ACTIVE_PROMPT_LAYER_ID === K3_LAYER_ID;/],
-  ["no safety hint by words", /if \(safety\.systemGuidance && !isK3Base\)/],
-  ["no gender hint by words", /if \(genderGuidance && !isK3Base\)/],
-  ["no clean-up of the history by words", /isK3Base \? messages : sanitizeHistoryForModel\(messages\)/],
-  ["no closure hint by words", /if \(explicitClosureGuidance && !isK3Base\)/],
-  ["no pause hint by words", /if \(pauseInArcGuidance && !isK3Base\)/],
-  ["no process hint", /if \(sessionProcessGuidance && !isK3Base\)/],
-  ["the log says the truth about the gender hint", /const genderGuidanceOn = !isK3Base &&/],
-  ["the log says the truth about the closure hint", /const explicitClosureGuidanceOn = !isK3Base &&/],
-  ["the log says the truth about the pause hint", /const pauseInArcGuidanceOn = !isK3Base &&/],
-];
-for (const [name, pattern] of WIRING) assert(pattern.test(chat), `chat function: ${name}`);
+for (const gone of [
+  "evaluateTurnSafety",
+  "logSafetyDiagnosis",
+  "sanitizeHistoryForModel",
+  "enforceRoleBoundedReply",
+  "detectUserGrammaticalGender",
+  "buildUserGenderTurnGuidance",
+  "buildExplicitClosureTurnGuidance",
+  "buildPauseInArcTurnGuidance",
+  "buildSessionProcessGuidance",
+  "computeResponseBudget",
+  "computeProcessState",
+  "isFlatCoreV2OrdinaryRuntime",
+  "isK3Base",
+]) {
+  assert(!chat.includes(gone), `chat function does not use ${gone}`);
+}
+for (const file of [
+  "safety",
+  "roleEnforcement",
+  "roleGuard",
+  "languageGuard",
+  "boundaryFallback",
+  "safetyDiagnose",
+  "userGrammaticalGender",
+  "userGenderTurnGuidance",
+  "explicitClosureTurnGuidance",
+  "pauseInArcTurnGuidance",
+  "sessionProcessGuidance",
+  "sessionProcessState",
+  "responseDepthTrajectory",
+  "processState",
+  "flatCoreV2Runtime",
+]) {
+  assert(!existsSync(resolve(`supabase/functions/_shared/${file}.ts`)), `${file}.ts is gone and must not come back`);
+}
 
 console.log(`\n=== ${failed === 0 ? "All passed" : `${failed} failed`} ===`);
 if (failed > 0) process.exit(1);

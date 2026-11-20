@@ -1,6 +1,6 @@
 /**
- * OpenRouter model selection by dialogue depth (and safety).
- * Configure via Supabase Edge secrets — no frontend changes.
+ * Model selection. The model is the configured one (Supabase Edge secrets), the same for every message: nothing here is decided by
+ * the words of the message (owner's rule, 20.11.2026). The older choice by "depth" and safety category is gone.
  */
 
 import {
@@ -13,34 +13,20 @@ import {
   assertApprovedRuntimeModel,
   normalizeApprovedModelId,
 } from "./approvedModels.ts";
-import type { ResponseDepth } from "./responseBudget.ts";
-import type { SafetyCategory } from "./safety.ts";
 
 export interface ModelRouteInput {
-  depth: ResponseDepth;
-  safetyCategory: SafetyCategory;
   /** Explicit override from request body (dev / A-B only). */
   requestModel?: string;
-  /** Core V2 flat ordinary runtime — gpt-4o primary regardless of depth. */
-  flatOrdinary?: boolean;
 }
 
 export interface ModelRouteResult {
   model: string;
-  source:
-    | "request"
-    | "brief"
-    | "medium"
-    | "deep"
-    | "default"
-    | "flat_ordinary";
+  source: "request" | "configured";
   /** Alternate model on the same provider — tried if primary model returns error. */
   fallbackModel?: string;
 }
 
 const DEFAULT_BRIEF = APPROVED_MODEL_GPT4O;
-const DEFAULT_MEDIUM = APPROVED_MODEL_GPT4O;
-const DEFAULT_DEEP = APPROVED_MODEL_SONNET;
 const DEFAULT_FALLBACK = APPROVED_MODEL_SONNET;
 
 function envModel(key: string): string | undefined {
@@ -86,36 +72,10 @@ function resolveChatModelBase(input: ModelRouteInput): ModelRouteResult {
     return { model: normalizeApprovedModelId(override), source: "request" };
   }
 
-  if (input.flatOrdinary) {
-    const model =
-      envModel("STAYSEE_CHAT_MODEL_BRIEF") ??
-      envModel("STAYSEE_CHAT_MODEL_MEDIUM") ??
-      envModel("STAYSEE_CHAT_MODEL") ??
-      DEFAULT_BRIEF;
-    return { model, source: "flat_ordinary", fallbackModel: DEFAULT_FALLBACK };
-  }
-
-  const legacy = envModel("STAYSEE_CHAT_MODEL");
-
-  switch (input.depth) {
-    case "brief": {
-      const model =
-        envModel("STAYSEE_CHAT_MODEL_BRIEF") ?? legacy ?? DEFAULT_BRIEF;
-      return { model, source: "brief", fallbackModel: DEFAULT_DEEP };
-    }
-    case "medium": {
-      const model =
-        envModel("STAYSEE_CHAT_MODEL_MEDIUM") ?? legacy ?? DEFAULT_MEDIUM;
-      return { model, source: "medium", fallbackModel: DEFAULT_DEEP };
-    }
-    case "deep": {
-      const model =
-        envModel("STAYSEE_CHAT_MODEL_DEEP") ?? legacy ?? DEFAULT_DEEP;
-      return { model, source: "deep", fallbackModel: DEFAULT_BRIEF };
-    }
-    default: {
-      const model = legacy ?? DEFAULT_FALLBACK;
-      return { model, source: "default", fallbackModel: DEFAULT_BRIEF };
-    }
-  }
+  const model =
+    envModel("STAYSEE_CHAT_MODEL_BRIEF") ??
+    envModel("STAYSEE_CHAT_MODEL_MEDIUM") ??
+    envModel("STAYSEE_CHAT_MODEL") ??
+    DEFAULT_BRIEF;
+  return { model, source: "configured", fallbackModel: DEFAULT_FALLBACK };
 }
