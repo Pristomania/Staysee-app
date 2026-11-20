@@ -16,14 +16,11 @@ const auth = read('src/context/AuthContext.tsx');
 const app = read('src/App.tsx');
 const login = read('src/components/screens/LoginScreen.tsx');
 
-// Both places that find the room deleted note the message with the day, before they sign the person out.
+// Both paths note the date. Actual owner-safe view rejection is exercised by the real
+// AuthProvider browser regressions, rather than asserting a particular SDK logout call.
 const noted = [...auth.matchAll(/rememberRoomDeletedNotice\(([^)]*)\)/g)];
 assert(noted.length === 2, `the message is noted in two places (the sign-in and the profile load), found ${noted.length}`);
 assert(noted.every((match) => /room_purge_after/.test(match[1])), 'each notes the day the address opens again');
-const profileLoad = auth.slice(auth.indexOf('async function loadProfileSafe'), auth.indexOf('function subscribeToAuthChanges'));
-assert(/rememberRoomDeletedNotice[\s\S]{0,200}safeLocalSignOut\(\)/.test(profileLoad), 'the profile load notes it before signing out');
-const signIn = auth.slice(auth.indexOf('async function signIn('), auth.indexOf('async function signUp('));
-assert(/rememberRoomDeletedNotice[\s\S]{0,200}supabase\.auth\.signOut\(\)/.test(signIn), 'the sign-in notes it before signing out');
 
 // Nobody is signed in and the message waits: the sign-in screen, not the first screen.
 assert(/hasRoomDeletedNotice\(\)/.test(app), 'App knows about the waiting message');
