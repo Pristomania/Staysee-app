@@ -1,6 +1,4 @@
 import type { ReactNode } from 'react';
-import { sanitizeProfanityInReply } from './languageGuard';
-
 const LEGACY_TAIL_RE =
   /\n*\(Мысль ещё не закончилась[^)]*\)\s*$/i;
 
@@ -31,13 +29,12 @@ const PARA_CLASS = 'mb-2.5 last:mb-0';
 
 /** Single pipeline for save, stream, and final render — avoids layout shifts at handoff. */
 export function prepareAiDisplayText(text: string): string {
-  const stripped = stripOrphanContinueMarkers(
+  return stripOrphanContinueMarkers(
     stripMarkdownFormatting(text)
       .replace(LEGACY_TAIL_RE, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim(),
   );
-  return sanitizeProfanityInReply(stripped);
 }
 
 /** @deprecated Use prepareAiDisplayText */
