@@ -43,13 +43,20 @@ export type GateView='open'|'checking'|'denied'|'error';
 export function gateView(input:{
   current:{access:ConversationAccess|null;error:boolean}|null;
   remembered:boolean;verified:boolean;conversationId:string|null;requirePaid:boolean;
+  /** The plan snapshot could not be read (a failed or timed-out request), as opposed to still loading. */
+  planFailed?:boolean;
 }):GateView{
-  if(!input.verified)return 'checking';
+  if(!input.verified)return input.planFailed?'error':'checking';
   if(input.current){
     if(!input.current.access)return 'error';
     return accessGrants(input.current.access,input.conversationId,input.requirePaid)?'open':'denied';
   }
   return input.remembered?'open':'checking';
+}
+
+/** How long to wait before the plan snapshot is read again after a failure: 2, 4, 8, 16 seconds, then every 30. */
+export function planRetryDelayMs(failures:number):number{
+  return Math.min(2_000*2**Math.max(0,Math.min(failures,10)),30_000);
 }
 
 /**
