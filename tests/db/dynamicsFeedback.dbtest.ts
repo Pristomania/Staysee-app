@@ -34,7 +34,9 @@ describe("feedback on the weekly dynamics on the real database", { skip: !hasAno
     // a trigger that does it. Either way, make sure the row is there.
     const profile = await admin.from("profiles").upsert({ id: userId }, { onConflict: "id" }).select("id");
     if (profile.error) throw new Error(`profile: ${profile.error.message}`);
-    const lifted = await admin.from("user_usage_tiers").upsert({ user_id: userId, max_conversations_override: 100 }, { onConflict: "user_id" }).select("user_id");
+    // The weekly dynamics is a paid feature: since the conversation locks (migration 103) a weekly entry is visible only to a person with
+    // paid features (a basic or premium plan), so the person here is a premium one with a hand-set room limit, like the owner's accounts.
+    const lifted = await admin.from("user_usage_tiers").upsert({ user_id: userId, tier: "premium", max_conversations_override: 100 }, { onConflict: "user_id" }).select("user_id");
     if (lifted.error) throw new Error(`lift limit: ${lifted.error.message}`);
     const client = createClient(process.env.SUPABASE_URL as string, process.env.SUPABASE_ANON_KEY as string, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -194,7 +196,8 @@ describe("feedback on the weekly dynamics on the real database", { skip: !hasAno
     const a = await newPerson("wipe");
     const added = await a.client.from("dynamics_feedback").insert({ conversation_id: a.conversationId, entry_id: a.weeklyId, rating: 1 });
     assert.equal(added.error, null);
-    const wiped = await admin.rpc("_wipe_account_content", { p_user_id: a.userId });
+    // The helper itself is closed to every role (migration 103 also closed it to the service key); the person's own call goes through it.
+    const wiped = await a.client.rpc("delete_my_account_data");
     assert.equal(wiped.error, null, wiped.error?.message);
     const left = await admin.from("dynamics_feedback").select("id").eq("user_id", a.userId);
     assert.deepEqual(left.data, []);
