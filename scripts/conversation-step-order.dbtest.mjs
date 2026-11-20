@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {archiveDatabase,asUser,rpc,uid,other,oldest as A,middle as B,top as C} from './lib/archive-access-test-db.mjs';
+async function fixture(){
+ const db=await archiveDatabase();
+ await db.query("UPDATE user_usage_tiers SET access_source='manual',tier='premium',paid_access_until=NULL WHERE user_id=$1",[uid]);
+ return db;
+}
+const ids=async db=>(await rpc(db,'list_my_conversations')).map(r=>r.id);
+test('adjacent swaps persist without rewriting historical dates or message content',async()=>{
+ const db=await fixture();try{
+  const before=(await db.query('SELECT id,last_message_at,manual_sort_at FROM conversations ORDER BY id')).rows;
+  assert.deepEqual(await ids(db),[C,B,A]);
+  assert.equal(await rpc(db,'move_my_conversation_step',[A,'up',B]),true);
+  assert.deepEqual(await ids(db),[C,A,B]);
+  assert.equal(await rpc(db,'move_my_conversation_step',[A,'down',B]),true);
+  assert.deepEqual(await ids(db),[C,B,A]);
+  assert.deepEqual((await db.query('SELECT id,last_message_at,manual_sort_at FROM conversations ORDER BY id')).rows,before);
+  assert.equal((await db.query('SELECT count(*)::int n FROM messages')).rows[0].n,3);
+ }finally{await db.close();}
+});
+test('rejects stale adjacency, edges, invalid direction, foreign caller and free access without mutation',async()=>{
+ const db=await fixture();try{
+  for(const args of [[A,'up',C],[C,'up',B],[A,'down',B]])await assert.rejects(rpc(db,'move_my_conversation_step',args),/conversation_order_changed/);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[A,'sideways',B]),/invalid_direction/);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[A,'up',B],other),/conversation_locked/);
+  await db.query("UPDATE user_usage_tiers SET access_source='purchase',paid_access_until=clock_timestamp()-interval '1 day' WHERE user_id=$1",[uid]);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[A,'up',B]),/conversation_locked/);
+  assert.deepEqual(await ids(db),[C,B,A]);
+  await assert.rejects(asUser(db,()=>db.query('UPDATE user_usage_tiers SET conversation_order=$1 WHERE user_id=$2',[[A,B,C],uid])),/permission denied/);
+ }finally{await db.close();}
+});
+test('activity and old move-top promote a room; insert/delete retain a normalized own active list',async()=>{
+ const db=await fixture();try{
+  await rpc(db,'move_my_conversation_step',[A,'up',B]);
+  await rpc(db,'touch_my_conversation',[B]);assert.deepEqual(await ids(db),[B,C,A]);
+  await rpc(db,'move_my_conversation_to_top',[A]);assert.deepEqual(await ids(db),[A,B,C]);
+  const next=(await asUser(db,()=>db.query('INSERT INTO conversations(user_id) VALUES($1) RETURNING id',[uid]))).rows[0].id;
+  assert.deepEqual(await ids(db),[next,A,B,C]);
+  await rpc(db,'delete_my_conversation',[B]);assert.deepEqual(await ids(db),[next,A,C]);
+  assert.deepEqual((await db.query('SELECT conversation_order FROM user_usage_tiers WHERE user_id=$1',[uid])).rows[0].conversation_order,[next,A,C]);
+ }finally{await db.close();}
+});
+test('expiry freezes the actual chosen first room; deletion cannot expose an archived replacement',async()=>{
+ const db=await fixture();try{
+  await rpc(db,'move_my_conversation_step',[B,'up',C]);
+  await db.query("UPDATE user_usage_tiers SET access_source='purchase',paid_access_until=clock_timestamp()-interval '1 second' WHERE user_id=$1",[uid]);
+  assert.deepEqual((await rpc(db,'list_my_conversations')).filter(r=>r.can_read).map(r=>r.id),[B]);
+  await rpc(db,'delete_my_conversation',[B]);
+  assert.deepEqual((await rpc(db,'list_my_conversations')).map(r=>[r.id,r.can_read]),[[C,false],[A,false]]);
+  const next=(await asUser(db,()=>db.query('INSERT INTO conversations(user_id) VALUES($1) RETURNING id',[uid]))).rows[0].id;
+  assert.deepEqual((await rpc(db,'list_my_conversations')).filter(r=>r.can_read).map(r=>r.id),[next]);
+ }finally{await db.close();}
+});
+test('normalization removes duplicates and foreign/deleted ids, appending missing active rooms in legacy order',async()=>{
+ const db=await fixture();try{
+  await db.query('UPDATE user_usage_tiers SET conversation_order=$1 WHERE user_id=$2',[[C,C,other],uid]);
+  assert.deepEqual(await ids(db),[C,B,A]);
+  await rpc(db,'move_my_conversation_step',[A,'up',B]);
+  assert.deepEqual((await db.query('SELECT conversation_order FROM user_usage_tiers WHERE user_id=$1',[uid])).rows[0].conversation_order,[C,A,B]);
+  await db.query('UPDATE conversations SET is_active=false WHERE id=$1',[C]);assert.deepEqual(await ids(db),[A,B]);
+  await assert.rejects(rpc(db,'normalized_conversation_order',[other]),/permission denied/);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[null,'up',B]),/conversation_locked/);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[A,null,B]),/invalid_direction/);
+ }finally{await db.close();}
+});

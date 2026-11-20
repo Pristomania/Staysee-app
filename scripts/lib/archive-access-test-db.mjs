@@ -4,8 +4,8 @@ const { PGlite } = await import(new URL('../../tmp/robokassa-test/runtime/node_m
 export const uid='11111111-1111-4111-8111-111111111111', other='22222222-2222-4222-8222-222222222222';
 export const oldest='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', middle='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', top='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const dir=new URL('../../supabase/migrations/',import.meta.url);
-export async function archiveDatabase() {
- const db=new PGlite();
+export async function archiveDatabase(database) {
+ const db=database??new PGlite();
  await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
  CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO authenticated;
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
@@ -49,7 +49,7 @@ export async function archiveDatabase() {
  await db.query("UPDATE user_usage_tiers SET tier='premium',access_source='purchase',paid_access_until=clock_timestamp()-interval '1 day' WHERE user_id=$1",[uid]);
  const archive=new URL('20261120190000_103_conversation_archive_access.sql',dir);
  if(existsSync(archive))await db.exec(readFileSync(archive,'utf8'));
- for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql']){
+ for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql','20261121030000_108_conversation_step_order.sql']){
   const file=new URL(name,dir); if(existsSync(file))await db.exec(readFileSync(file,'utf8'));
  }
  return db;
