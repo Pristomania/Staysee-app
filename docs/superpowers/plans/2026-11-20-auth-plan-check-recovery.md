@@ -64,3 +64,11 @@ Interfaces: existing AuthContext public contract, usePlan verificationError/load
 - Real local initial slow/error state and retry verified. Individual override/unlimited revocations closed the open view after15691/17129ms without reload.390px deletion/new-empty flow passed; pointerType=touch drag passed as emulation, not physical touch.
 - Final offline groups:2974 tests,0 failures. Typecheck/build passed. Independent review's Important findings reproduced RED and fixed GREEN; no second independent review or production deployment claimed.
 - Disposable fixture deleted and verified absent, conversations0/messages0. QA processes stopped; existing local Supabase8100 left running. Diagnostic dashboard/probe archived outside Git; reusable17-case browser regression page retained.
+
+## Authorized release follow-up
+
+- Owner explicitly authorized cautious commit/integration/production deployment. Synced latest main ba194b4 without touching the original dirty worktree or rewriting the other agent's changes.
+- Pre-merge review found confirmed-deleted owner resurrection, clean-URL early recovery binding and a suspended signIn consuming a newer recovery episode. Five new browser cases reproduced RED; fixed with owner-bound session rejection, persisted recovery owner and recovery-episode revision plus signIn response owner.
+- Related stale INITIAL_SESSION must be ignored by both auth listeners; rejection remains on authoritative restore. This was reproduced RED and fixed. Deleted owner PASSWORD_RECOVERY is rejected without affecting another account. Both deleted-profile and explicit-login paths retain the date in real component tests, replacing brittle source call-count assertions.
+- Final browser run:24/24 PASS. Latest-main offline suite:188 shared files/1553 cases,54 frontend files/54 cases,45 scripts-ts/467 cases,48 scripts-js/910 cases:2984 total,0 failures. Typecheck passed; lint0 errors,9 warnings (8 existing plus test-page fast-refresh warning). Release only frontend; no migrations/functions/secrets/payment flags/model requests.
+- Rollback: revert the eventual release merge commit, not reset to an old main; this preserves unrelated upstream work. Current public HTML/entry assets and hashes saved outside application Git before deployment.
