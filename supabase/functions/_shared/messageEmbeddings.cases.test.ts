@@ -6,6 +6,7 @@ import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "
 import {
   DEFAULT_SEMANTIC_THRESHOLD,
   SEMANTIC_MATCH_COUNT,
+  SEMANTIC_MIN_LINE_CHARS,
   ensureConversationEmbeddings,
   resolveSemanticThreshold,
   searchSemanticConversationArchive,
@@ -14,6 +15,10 @@ import {
 
 const migration = readFileSync(
   new URL("../../migrations/20261121000000_107_embeddings_by_model.sql", import.meta.url),
+  "utf8",
+);
+const migration108 = readFileSync(
+  new URL("../../migrations/20261121010000_108_match_user_lines_min_length.sql", import.meta.url),
   "utf8",
 );
 const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
@@ -155,6 +160,8 @@ describe("the search by meaning covers the whole conversation and reads only vec
     assert.equal(calls[0].args.match_count, SEMANTIC_MATCH_COUNT);
     assert.equal(calls[0].args.match_threshold, DEFAULT_SEMANTIC_THRESHOLD);
     assert.equal(calls[0].args.p_before_created_at, "2026-06-01T00:00:00Z");
+    assert.equal(calls[0].args.p_min_chars, SEMANTIC_MIN_LINE_CHARS);
+    assert.equal(SEMANTIC_MIN_LINE_CHARS, 20);
     assert.equal((calls[0].args.query_embedding as number[]).length, 1024);
   });
 
@@ -209,5 +216,27 @@ describe("the chat keeps filling the vectors after every reply", () => {
     const at = chat.indexOf("Embed new messages for semantic archive");
     assert.ok(at > 0);
     assert.match(chat.slice(at, at + 700), /ensureConversationEmbeddings\(svc,/);
+  });
+});
+
+describe("migration 108: only the person's own lines, and not the very short ones", () => {
+  const code = migration108.replace(/\/\*[\s\S]*?\*\//, "");
+
+  it("replaces only the function of migration 107 and touches no data", () => {
+    assert.match(code, /DROP FUNCTION IF EXISTS public\.match_conversation_embeddings_by_model\(/);
+    for (const forbidden of [/DROP\s+TABLE/i, /TRUNCATE/i, /DELETE\s+FROM/i, /DROP\s+COLUMN/i, /UPDATE\s+public\./i, /ALTER\s+TABLE/i]) {
+      assert.doesNotMatch(code, forbidden);
+    }
+    assert.equal((code.match(/DROP FUNCTION/g) ?? []).length, 1);
+  });
+
+  it("looks only at the person's lines, skips short ones by length, and still reads one model in one conversation with the caller's rights", () => {
+    assert.match(code, /m\.sender = 'user'/);
+    assert.match(code, /length\(btrim\(coalesce\(m\.content, ''\)\)\) >= GREATEST\(0, p_min_chars\)/);
+    assert.match(code, /p_min_chars int DEFAULT 20/);
+    assert.match(code, /me\.embedding_model = p_model/);
+    assert.match(code, /me\.conversation_id = p_conversation_id/);
+    assert.match(code, /SECURITY INVOKER/);
+    assert.doesNotMatch(code, /SECURITY DEFINER/);
   });
 });

@@ -523,14 +523,11 @@ export async function searchConversationArchive(
     conversationId: string;
     query: string;
     excludeTailCount: number;
-    /** Extra text: recent user lines, memory summary bullets, corrections */
-    queryContext?: string[];
     userId?: string;
     embedConfig?: EmbeddingApiConfig;
     supabaseService?: SupabaseClient;
   }
 ): Promise<ArchiveSearchResult> {
-  const contextBlob = (params.queryContext ?? []).join(" ");
   const recallIntent = hasRecallIntent(params.query);
   const mode = resolveArchiveRetrievalMode(params.query);
 
@@ -580,13 +577,10 @@ export async function searchConversationArchive(
           ? messages[messages.length - tail].created_at
           : null;
 
-      const semanticQuery = [params.query, contextBlob.slice(0, 800)]
-        .filter(Boolean)
-        .join(" ");
-
+      // The question alone: mixed with the latest lines and the summary it never put the right line first (measured, 20.11.2026).
       semanticHits = await searchSemanticConversationArchive(supabase, {
         conversationId: params.conversationId,
-        query: semanticQuery.slice(0, 2000),
+        query: params.query.slice(0, 2000),
         beforeCreatedAt: cutoff,
         embedConfig: params.embedConfig,
         maxExcerptChars: RETRIEVAL_MAX_EXCERPT_CHARS,
@@ -648,31 +642,4 @@ export function formatArchiveExcerptsForPrompt(excerpts: ArchiveExcerpt[]): stri
 export function estimateArchiveTokens(excerpts: ArchiveExcerpt[]): number {
   if (!excerpts.length) return 0;
   return estimateTokens(formatArchiveExcerptsForPrompt(excerpts));
-}
-
-/** Flatten conversation summary JSON into search terms. */
-export function summaryTextForRetrieval(
-  conversationSummary: string | null | undefined
-): string {
-  if (!conversationSummary?.trim()) return "";
-  try {
-    if (conversationSummary.trim().startsWith("{")) {
-      const o = JSON.parse(conversationSummary) as Record<string, string[]>;
-      const parts: string[] = [];
-      for (const key of [
-        "people",
-        "themes",
-        "important_events",
-        "open_loops",
-        "emotional_state",
-      ]) {
-        const arr = o[key];
-        if (Array.isArray(arr)) parts.push(...arr);
-      }
-      return parts.join(" ");
-    }
-  } catch {
-    /* legacy prose */
-  }
-  return conversationSummary.slice(0, 800);
 }
