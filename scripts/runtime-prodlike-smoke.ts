@@ -15,6 +15,7 @@ import {
 import { buildTimeGapPrompt } from "../supabase/functions/_shared/timeGap.ts";
 import { isExplicitConversationClosure } from "../supabase/functions/_shared/responseDepthTrajectory.ts";
 import { sanitizeHistoryForModel } from "../supabase/functions/_shared/roleGuard.ts";
+import { wrapForOffAppUsage } from "./lib/off-app-usage-log.mjs";
 
 const envRaw = readFileSync(resolve(process.cwd(), ".env"), "utf8");
 const env: Record<string, string> = {};
@@ -97,9 +98,12 @@ function buildSystemPrompt(message: string, history: Turn[]) {
   };
 }
 
+// The smoke talks to the provider directly, not through the app: its cost is written into the cost log as a call made outside the app.
+const paidFetch = wrapForOffAppUsage(globalThis.fetch.bind(globalThis), "runtime-prodlike-smoke", { env });
+
 async function callModel(systemPrompt: string, history: Turn[]) {
   const messages = sanitizeHistoryForModel(history);
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await paidFetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${OR_KEY}`,

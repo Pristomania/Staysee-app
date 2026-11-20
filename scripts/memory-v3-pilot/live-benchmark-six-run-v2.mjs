@@ -3,6 +3,7 @@
  * Shared run loads memory-v3-ru-golden.v2.json and owns safe-output behavior.
  */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { getLiveBenchmarkProfileV2 } from './live-benchmark-profiles-v2.mjs';
@@ -96,7 +97,7 @@ async function runDirect() {
     await main({
       argv: process.argv.slice(2),
       readFileImpl: readFile,
-      fetchImpl: globalThis.fetch.bind(globalThis),
+      fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-six-case-v2'),
       writeStdout: (chunk) => process.stdout.write(String(chunk)),
       writeStderr: (chunk) => process.stderr.write(String(chunk)),
       writeFileImpl: writeFile,

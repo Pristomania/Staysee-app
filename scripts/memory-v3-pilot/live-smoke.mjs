@@ -3,6 +3,7 @@
  * Fake-fetch unit tests first. Live HTTP only via injected fetchImpl after gates.
  */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { validateCase } from './contracts.mjs';
@@ -788,7 +789,7 @@ async function main() {
       if (dry.providerHttpCalls !== 0 || dry.configuredBudget.gate !== 'PASS' || !dry.keyPresent) {
         throw fail('dry-run gate failed');
       }
-      io.fetchImpl = globalThis.fetch.bind(globalThis);
+      io.fetchImpl = wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-live-smoke');
     }
     const result = await runLiveSmokeFromArgv(argv, io);
     process.stdout.write(`${JSON.stringify(safeCliOutput(result), null, 2)}\n`);

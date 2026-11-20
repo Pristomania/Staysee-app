@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { wrapForOffAppUsage } from "./lib/off-app-usage-log.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -59,8 +60,11 @@ function parseArgs(argv) {
   return { conversationId: conversationId?.trim() || null };
 }
 
+// Set once the .env is read (below): every embeddings call is written into the cost log as a call made outside the app.
+let paidFetch = null;
+
 async function createEmbeddings(texts, apiKey) {
-  const res = await fetch("https://openrouter.ai/api/v1/embeddings", {
+  const res = await paidFetch("https://openrouter.ai/api/v1/embeddings", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -137,6 +141,7 @@ if (!baseUrl || !serviceKey || !apiKey) {
 }
 
 const supabase = createClient(baseUrl, serviceKey);
+paidFetch = wrapForOffAppUsage(globalThis.fetch.bind(globalThis), "backfill-embeddings", { env });
 
 let query = supabase.from("conversations").select("id, user_id, title");
 if (conversationId) query = query.eq("id", conversationId);

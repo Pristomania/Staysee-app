@@ -48,6 +48,10 @@ const COST_KIND_TITLES: Record<string, string> = {
   image_description: 'Описание картинок',
 };
 
+/** Calls made outside the app (checks, comparisons, one-off runs) are written with the kind `offapp:<what it was for>`. */
+const OFF_APP_PREFIX = 'offapp:';
+
 export function costKindTitle(kind: string): string {
+  if (kind.startsWith(OFF_APP_PREFIX)) return `Вне приложения: ${kind.slice(OFF_APP_PREFIX.length)}`;
   return COST_KIND_TITLES[kind] ?? kind;
 }

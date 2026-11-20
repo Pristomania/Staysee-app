@@ -33,6 +33,13 @@ export function kindsForClass(kinds: AdminCostKind[], costClass: CostClass): Arr
     .map((item) => ({ kind: costKindTitle(item.kind), calls: item.calls, usd: formatUsd(item.usd) }));
 }
 
+/** Whose cost a line is: the e-mail of a person, or one line for all the deleted accounts, or one for the calls made outside the app. */
+function costOwnerTitle(item: AdminCosts['by_person'][number]): string {
+  if (item.who === 'deleted') return 'Удалённые аккаунты';
+  if (item.who === 'off_app') return 'Вне приложения (проверки и тесты)';
+  return item.email ?? '—';
+}
+
 /** One tab of the costs screen: only the rows of the class asked for; days newest first (as DD.MM.YYYY, Moscow days). */
 export function costsForClass(
   costs: AdminCosts,
@@ -53,7 +60,9 @@ export function costsForClass(
       const [year, month, day] = item.day.split('-');
       return { day: `${day}.${month}.${year}`, usd: formatUsd(item.usd) };
     });
-  const people = costs.by_person.filter((item) => item.cost_class === costClass).map((item) => ({ email: item.email ?? '—', usd: formatUsd(item.usd) }));
+  const people = costs.by_person
+    .filter((item) => item.cost_class === costClass)
+    .map((item) => ({ email: costOwnerTitle(item), usd: formatUsd(item.usd) }));
   return { total: formatUsd(total), empty: kinds.length === 0 && days.length === 0 && people.length === 0, kinds, days, people };
 }
 
