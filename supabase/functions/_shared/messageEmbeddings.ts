@@ -26,10 +26,12 @@ const MAX_ENSURE_PER_REQUEST = 40;
 const MAX_ENSURE_HARD = 80;
 export const SEMANTIC_MATCH_COUNT = 12;
 /**
- * A line of the person shorter than this is never a hit of the search by meaning (a length, not a word). Measured: lines like
- * «устала» or «мне тяжело» are close in meaning to any question about feelings and crowd out the right line.
+ * A line of the person shorter than this is never a hit of the search by meaning (a length, not a word). Measured on a made-up
+ * conversation of nine months (21.11.2026): fillers like «наверное», «ну да», «устала» are close in meaning to many questions and
+ * crowd out the right line, but a cut at 20 characters also lost every short fact («Мне 31 год.», «Живу в Туле.», «Я левша.»:
+ * 0 of 5 found). At 10 the short facts are found (4 of 5) and the right line is found in 24 of 28 questions instead of 20.
  */
-export const SEMANTIC_MIN_LINE_CHARS = 20;
+export const SEMANTIC_MIN_LINE_CHARS = 10;
 
 /**
  * How close in meaning a past message must be to count as a hit. Measured on bge-m3 (20.11.2026, made-up Russian phrases):

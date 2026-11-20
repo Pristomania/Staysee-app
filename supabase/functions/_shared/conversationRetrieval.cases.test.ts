@@ -182,7 +182,7 @@ describe("the search by meaning gets the question alone", () => {
     const search = user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model");
     assert.ok(search, "the search by meaning ran, as the user");
     assert.equal(search.args.p_conversation_id, "c1", "in this conversation only");
-    assert.equal(search.args.p_min_chars, 20);
+    assert.equal(search.args.p_min_chars, 10);
     assert.equal(service.rpcCalls[0].name, "messages_missing_embeddings");
   });
 

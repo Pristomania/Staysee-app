@@ -200,6 +200,27 @@ describe("a chat call made through the wrapped fetch", () => {
     assert.equal(inserts[0].row.call_kind, "offapp:stacy-eval");
   });
 
+  it("a reranker call is paid too: it reports only total_tokens, all of them input, counted from the table of prices", async () => {
+    const answer = { model: "BAAI/bge-reranker-v2-m3", usage: { total_tokens: 100000 }, results: [{ index: 0, relevance_score: 0.9 }] };
+    const { wrapped, inserts } = setup({ provider: async () => jsonResponse(answer) });
+    const response = await wrapped("https://foundation-models.api.cloud.ru/rerank", post({ model: "BAAI/bge-reranker-v2-m3", query: "q", documents: ["d"] }));
+    assert.deepEqual(await response.json(), answer);
+    assert.equal(inserts.length, 1, "written, not skipped as free");
+    assert.equal(inserts[0].row.prompt_tokens, 100000);
+    assert.equal(inserts[0].row.completion_tokens, 0);
+    // 100000 tokens * 0.0022 dollars per million
+    assert.equal(inserts[0].row.cost, 0.00022);
+    assert.equal(inserts[0].row.error_code, null);
+    assert.equal(inserts[0].row.model, "BAAI/bge-reranker-v2-m3");
+  });
+
+  it("the vectors of bge-m3 on Cloud.ru are priced from the table too", async () => {
+    const answer = { model: "BAAI/bge-m3", usage: { prompt_tokens: 1000000, total_tokens: 1000000 }, data: [{ embedding: [0.1] }] };
+    const { wrapped, inserts } = setup({ provider: async () => jsonResponse(answer) });
+    await wrapped("https://foundation-models.api.cloud.ru/v1/embeddings", post({ model: "BAAI/bge-m3", input: "x" }));
+    assert.equal(inserts[0].row.cost, 0.0056);
+  });
+
   it("a request that is not a paid call is passed on untouched and not written", async () => {
     const seen = [];
     const { wrapped, inserts } = setup({ provider: async (input) => (seen.push(input), jsonResponse({ ok: true })) });
