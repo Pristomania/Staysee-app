@@ -22,6 +22,10 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   "mistral-small-latest": { inputPer1M: 0.2, outputPer1M: 0.6 },
   "google/gemini-flash-1.5": { inputPer1M: 0.075, outputPer1M: 0.3 },
   "deepseek/deepseek-chat": { inputPer1M: 0.14, outputPer1M: 0.28 },
+  // Embeddings (the vectors for the memory search): input only, nothing is generated. Without these lines the default price
+  // below would be used and overstate the cost fifty times.
+  "openai/text-embedding-3-small": { inputPer1M: 0.02, outputPer1M: 0 },
+  "openai/text-embedding-3-large": { inputPer1M: 0.13, outputPer1M: 0 },
   // OpenRouter, 19.11.2026.
   "deepseek/deepseek-v4-pro": { inputPer1M: 0.9, outputPer1M: 1.5 },
   "moonshotai/kimi-k2.6": { inputPer1M: 0.65, outputPer1M: 3.41 },

@@ -46,6 +46,7 @@ const COST_KIND_TITLES: Record<string, string> = {
   legacy_conversation_summary: 'Пересказ беседы (старая память)',
   long_message_summary: 'Сжатие длинных сообщений',
   image_description: 'Описание картинок',
+  embedding: 'Векторы для поиска по памяти',
 };
 
 /** Calls made outside the app (checks, comparisons, one-off runs) are written with the kind `offapp:<what it was for>`. */
