@@ -161,7 +161,7 @@ describe("the search by meaning covers the whole conversation and reads only vec
     assert.equal(calls[0].args.match_threshold, DEFAULT_SEMANTIC_THRESHOLD);
     assert.equal(calls[0].args.p_before_created_at, "2026-06-01T00:00:00Z");
     assert.equal(calls[0].args.p_min_chars, SEMANTIC_MIN_LINE_CHARS);
-    assert.equal(SEMANTIC_MIN_LINE_CHARS, 20);
+    assert.equal(SEMANTIC_MIN_LINE_CHARS, 10);
     assert.equal((calls[0].args.query_embedding as number[]).length, 1024);
   });
 

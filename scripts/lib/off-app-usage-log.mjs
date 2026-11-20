@@ -73,9 +73,20 @@ function addressOf(input) {
   return typeof input?.url === 'string' ? input.url : '';
 }
 
-/** The paid calls: a chat answer, and the vectors for the memory search (embeddings). Anything else (the list of models, say) is free. */
+/**
+ * The paid calls: a chat answer, the vectors for the memory search (embeddings), and the reranker that sorts the found lines (rerank, score).
+ * Anything else (the list of models, say) is free.
+ */
 function isPaidCall(input) {
-  return /\/(?:chat\/completions|embeddings)(?:\?|$)/.test(addressOf(input));
+  return /\/(?:chat\/completions|embeddings|rerank|score)(?:\?|$)/.test(addressOf(input));
+}
+
+/** A reranker (and some hosts) report only total_tokens: everything it read is input. */
+function usageWithInput(usage) {
+  if (whole(usage.prompt_tokens) === 0 && whole(usage.completion_tokens) === 0 && whole(usage.total_tokens) > 0) {
+    return { ...usage, prompt_tokens: whole(usage.total_tokens) };
+  }
+  return usage;
 }
 
 export function createOffAppUsageRecorder({
@@ -161,7 +172,7 @@ export function createOffAppUsageRecorder({
         body = null;
       }
       const model = body?.model ?? requested.model;
-      const usage = body?.usage && typeof body.usage === 'object' ? body.usage : null;
+      const usage = body?.usage && typeof body.usage === 'object' ? usageWithInput(body.usage) : null;
       if (!usage) {
         if (response.ok) warn('[off-app-usage] в ответе нет usage: расход этого вызова неизвестен, записан 0 с пометкой usage_missing');
         await record(buildOffAppUsageRow({ what, model, errorCode: response.ok ? 'usage_missing' : `http_${response.status}`, latencyMs }));

@@ -34,6 +34,11 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   // Cloud.ru (Russia), exact capitals: 183 / 732 and 175.68 / 725.9 roubles per 1M tokens, counted at 90 roubles per dollar.
   "deepseek-ai/DeepSeek-V4-Pro": { inputPer1M: 2.033, outputPer1M: 8.133 },
   "moonshotai/Kimi-K2.6": { inputPer1M: 1.952, outputPer1M: 8.066 },
+  // Cloud.ru tariff 261029 (20.11.2026), roubles without VAT per 1M tokens counted at 90 roubles per dollar: the model of the vectors
+  // (0.50), the reranker that sorts the found lines (0.20), and a small chat model for short checks (13 in / 50 out).
+  "BAAI/bge-m3": { inputPer1M: 0.0056, outputPer1M: 0 },
+  "BAAI/bge-reranker-v2-m3": { inputPer1M: 0.0022, outputPer1M: 0 },
+  "openai/gpt-oss-120b": { inputPer1M: 0.1444, outputPer1M: 0.5556 },
 };
 
 const DEFAULT_PRICING: ModelPricing = { inputPer1M: 1.0, outputPer1M: 3.0 };
