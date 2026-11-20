@@ -43,13 +43,19 @@ afterEach(() => {
 });
 
 /** A client that serves the messages table the way the database does: newest first, a page at a time. */
-function fakeMessagesClient(rows: Row[], options: { failAtPage?: number } = {}) {
+function fakeMessagesClient(
+  rows: Row[],
+  options: {
+    failAtPage?: number;
+    rpc?: (name: string, args: Record<string, unknown>) => { data: unknown; error: { message: string } | null };
+  } = {}
+) {
   const pages: Array<[number, number]> = [];
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const client = {
     rpc(name: string, args: Record<string, unknown>) {
       rpcCalls.push({ name, args });
-      return Promise.resolve({ data: [], error: null });
+      return Promise.resolve(options.rpc ? options.rpc(name, args) : { data: [], error: null });
     },
     from(table: string) {
       assert.equal(table, "messages");
@@ -192,5 +198,157 @@ describe("the search by meaning gets the question alone", () => {
     const chatSource = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
     assert.ok(!chatSource.includes("queryContext"));
     assert.ok(!chatSource.includes("summaryTextForRetrieval"));
+  });
+});
+
+describe("when the small model has decided that the person asks to remember", () => {
+  const rows = conversation(60, {
+    20: "я хожу на йогу по вторникам и мне там спокойно",
+    21: "Рада, что тебе там спокойно.",
+    30: "купила новые кроссовки для бега, красные",
+  });
+  const yoga = rows[20];
+  const sneakers = rows[30];
+
+  function semanticRow(row: Row, similarity: number, reply: Row | null) {
+    return {
+      message_id: row.id, sender: row.sender, role: null, content: row.content, created_at: row.created_at, similarity,
+      reply_sender: reply?.sender ?? null, reply_role: null, reply_content: reply?.content ?? null,
+    };
+  }
+
+  /** The providers: the vectors (always 1024 numbers) and the reranker (the line about yoga answers, the rest does not). */
+  function stubProviders(options: { rerankStatus?: number } = {}) {
+    const embedInputs: string[] = [];
+    const rerankCalls: Array<{ query: string; documents: string[] }> = [];
+    globalThis.fetch = (async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      if (String(url).endsWith("/rerank")) {
+        rerankCalls.push({ query: body.query, documents: body.documents });
+        if (options.rerankStatus && options.rerankStatus !== 200) return { ok: false, status: options.rerankStatus, json: async () => ({}), text: async () => "" };
+        const results = body.documents.map((text: string, index: number) => ({ index, relevance_score: text.includes("йог") ? 0.9 : text.includes("кроссовки") ? 0.02 : 0.001 }));
+        return { ok: true, status: 200, json: async () => ({ usage: { total_tokens: 50 }, results }), text: async () => "" };
+      }
+      embedInputs.push(...body.input);
+      return {
+        ok: true, status: 200, text: async () => "",
+        json: async () => ({ data: body.input.map((_: string, index: number) => ({ index, embedding: Array(1024).fill(0.01) })), usage: { prompt_tokens: 5, total_tokens: 5, cost: 0 } }),
+      };
+    }) as never;
+    return { embedInputs, rerankCalls };
+  }
+
+  function run(decision: { recall: boolean; query: string } | null, options: { rerank?: boolean; message?: string } = {}) {
+    const user = fakeMessagesClient(rows, {
+      rpc: (name) => (name === "match_conversation_embeddings_by_model" ? { data: [semanticRow(yoga, 0.72, rows[21]), semanticRow(sneakers, 0.5, null)], error: null } : { data: [], error: null }),
+    });
+    const service = fakeMessagesClient([]);
+    const usages: number[] = [];
+    const promise = searchConversationArchive(user.client, {
+      conversationId: "c1",
+      query: options.message ?? "помнишь, я говорила про йогу?",
+      excludeTailCount: 6,
+      userId: "u1",
+      embedConfig: { apiKey: "key" },
+      supabaseService: service.client,
+      decision,
+      rerank: options.rerank === false ? undefined : { apiKey: "cloudru-key", onUsage: (u) => void usages.push(u.totalTokens) },
+    });
+    return { promise, user, usages };
+  }
+
+  it("searches for the phrase of the model (not the question), asks for 20 candidates from a low floor, and keeps only what the reranker accepts", async () => {
+    const providers = stubProviders();
+    const { promise, user, usages } = run({ recall: true, query: "йога по вторникам" });
+    const result = await promise;
+
+    assert.deepEqual(providers.embedInputs, ["йога по вторникам"], "the vectors get the phrase");
+    const search = user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model");
+    assert.ok(search);
+    assert.equal(search.args.match_count, 20);
+    assert.equal(search.args.match_threshold, 0.45);
+    assert.equal(search.args.p_conversation_id, "c1");
+
+    assert.equal(providers.rerankCalls.length, 1);
+    assert.equal(providers.rerankCalls[0].query, "йога по вторникам", "the reranker gets the phrase too");
+    assert.ok(providers.rerankCalls[0].documents.some((d) => d.includes("кроссовки")), "the candidate that is not an answer was sent to it");
+    assert.ok(providers.rerankCalls[0].documents.length <= 40);
+    assert.equal(providers.rerankCalls[0].documents.filter((d) => d.includes("йог")).length, 1, "a line found both by meaning and by words is sent once");
+
+    assert.equal(result.excerpts.length, 1);
+    assert.equal(result.excerpts[0].userText, yoga.content);
+    assert.equal(result.excerpts[0].assistantText, "Рада, что тебе там спокойно.");
+    assert.equal(result.excerpts[0].score, 0.9);
+    assert.deepEqual(result.userEvidenceQuotes.map((q) => q.text), [yoga.content]);
+    assert.deepEqual(usages, [50], "the reranker's cost is reported");
+  });
+
+  it("falls back to the closeness of the vectors when the reranker does not answer", async () => {
+    stubProviders({ rerankStatus: 503 });
+    const { promise } = run({ recall: true, query: "йога по вторникам" });
+    const result = await promise;
+    assert.deepEqual(result.excerpts.map((e) => e.userText), [yoga.content], "0.72 is close enough, 0.5 is not");
+  });
+
+  it("falls back the same way when there is no reranker at all (no key)", async () => {
+    const providers = stubProviders();
+    const { promise, user } = run({ recall: true, query: "йога по вторникам" }, { rerank: false });
+    const result = await promise;
+    assert.equal(providers.rerankCalls.length, 0);
+    assert.equal(user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model")?.args.match_threshold, 0.58);
+    assert.deepEqual(result.excerpts.map((e) => e.userText), [yoga.content]);
+  });
+
+  it("searches for the question itself when the model gave no phrase", async () => {
+    const providers = stubProviders();
+    await run({ recall: true, query: "" }, { message: "что я говорила про йогу" }).promise;
+    assert.deepEqual(providers.embedInputs, ["что я говорила про йогу"]);
+  });
+
+  it("does not dig into the past when the model says this is not a request to remember, even if the message carries words of asking", async () => {
+    const providers = stubProviders();
+    const { promise, user } = run({ recall: false, query: "" }, { message: "помнишь, как в детстве мы строили шалаш? Это было лучшее лето." });
+    await promise;
+    assert.equal(providers.embedInputs.length, 0, "no vectors");
+    assert.equal(providers.rerankCalls.length, 0, "no reranker");
+    assert.equal(user.rpcCalls.filter((c) => c.name === "match_conversation_embeddings_by_model").length, 0, "no search by meaning");
+  });
+
+  it("goes on by the old rule (the words) only when the model did not answer", async () => {
+    const providers = stubProviders();
+    const { promise, user } = run(null, { message: "помнишь, что я говорила про йогу?" });
+    await promise;
+    assert.deepEqual(providers.embedInputs, ["помнишь, что я говорила про йогу?"], "the question itself, as before");
+    assert.equal(providers.rerankCalls.length, 0);
+    assert.equal(user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model")?.args.match_count, 12);
+  });
+});
+
+describe("the chat function uses the decision of the small model and counts every call", () => {
+  const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
+
+  it("starts the small model early, awaits it before the search, and passes its decision on", () => {
+    const start = chat.indexOf("askRecallGate(message, { apiKey: cloudruKey })");
+    const build = chat.indexOf("const builtPacket = await buildContextPacket");
+    const wait = chat.indexOf("await recallGatePromise");
+    const search = chat.indexOf("await searchConversationArchive(userSupabase");
+    assert.ok(start > 0 && start < build, "started before the context is built (its time is spent meanwhile)");
+    assert.ok(wait > build && wait < search, "awaited just before the search");
+    assert.match(chat.slice(search, search + 600), /decision: recallDecision/);
+    assert.match(chat, /STAYSEE_RECALL_GATE_MODE/);
+    assert.match(chat, /STAYSEE_RERANK_THRESHOLD/);
+  });
+
+  it("writes the cost of the small model and of the reranker into the cost log, under their own kinds", () => {
+    assert.match(chat, /callKind: "recall_gate"/);
+    assert.match(chat, /callKind: "recall_rerank"/);
+    assert.match(chat, /model: RECALL_GATE_MODEL/);
+    assert.match(chat, /model: RERANK_MODEL/);
+  });
+
+  it("the recall instruction follows the same decision, and the key is never written to the log", () => {
+    assert.match(chat, /if \(recallDecision \? recallDecision\.recall : hasRecallIntent\(message\)\)/);
+    const logLines = chat.split("\n").filter((line) => /console\.(log|warn|error|info)\(/.test(line));
+    for (const line of logLines) assert.doesNotMatch(line, /cloudruKey/, line);
   });
 });

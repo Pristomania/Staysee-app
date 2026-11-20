@@ -46,7 +46,7 @@ export function resolveSemanticThreshold(raw: string | undefined | null): number
   return DEFAULT_SEMANTIC_THRESHOLD;
 }
 
-function semanticThreshold(): number {
+export function semanticThreshold(): number {
   if (typeof Deno === "undefined") return DEFAULT_SEMANTIC_THRESHOLD;
   return resolveSemanticThreshold(Deno.env.get("STAYSEE_SEMANTIC_THRESHOLD"));
 }
@@ -183,6 +183,9 @@ export async function searchSemanticConversationArchive(
     beforeCreatedAt: string | null;
     embedConfig: EmbeddingApiConfig;
     maxExcerptChars: number;
+    /** How many lines to ask for (default 12) and how close they must be (default: the measured threshold). */
+    matchCount?: number;
+    threshold?: number;
   }
 ): Promise<ArchiveExcerpt[]> {
   const query = params.query.trim();
@@ -200,8 +203,8 @@ export async function searchSemanticConversationArchive(
     p_conversation_id: params.conversationId,
     p_model: EMBEDDING_MODEL,
     query_embedding: queryVector,
-    match_count: SEMANTIC_MATCH_COUNT,
-    match_threshold: semanticThreshold(),
+    match_count: params.matchCount ?? SEMANTIC_MATCH_COUNT,
+    match_threshold: params.threshold ?? semanticThreshold(),
     p_before_created_at: params.beforeCreatedAt,
     p_min_chars: SEMANTIC_MIN_LINE_CHARS,
   });
