@@ -188,7 +188,7 @@ describe("Memory V3 shadow migration", () => {
   it("relies on conversation deletion cascades without adding legacy read integration", () => {
     const roomDeletion = readFileSync(new URL("../../../migrations/20260605120000_020_room_deletion.sql", import.meta.url), "utf8");
     assert.match(roomDeletion, /DELETE FROM public\.conversations WHERE user_id = uid/i);
-    for (const path of ["../context.ts", "../memory.ts", "../memoryLayersV2.ts", "../../staysee-chat/index.ts"]) {
+    for (const path of ["../context.ts", "../memory.ts", "../../staysee-chat/index.ts"]) {
       const source = readFileSync(new URL(path, import.meta.url), "utf8");
       assert.doesNotMatch(source, /memory_v3_shadow_(runs|identities)/i, path);
     }

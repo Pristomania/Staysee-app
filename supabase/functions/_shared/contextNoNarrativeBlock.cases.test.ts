@@ -33,3 +33,18 @@ it("context.ts does not read the weekly dynamics and its packet has no field for
   assert.doesNotMatch(source, /fetchWeeklyReflections|weeklyReflections/);
   assert.doesNotMatch(source, /\bweekly\s*:/);
 });
+
+// ── No «corrections» picked out of the person's words by patterns (owner's rule, 20.11.2026: no decisions by words in app code) ──
+
+const indexSource = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+
+it("the chat does not detect or store memory corrections by word patterns", () => {
+  assert.doesNotMatch(indexSource, /detectMemoryCorrection|isEphemeralDenialOnly|persistMemoryCorrection|candidateToDurable|sameTurnDurableCorrection/);
+  assert.doesNotMatch(indexSource, /memoryCorrectionsEnabled/);
+});
+
+it("the context does not pick «corrections» out of the person's words and does not load stored ones", () => {
+  assert.doesNotMatch(source, /collectMemoryCorrectionHints|loadActiveCorrections|memoryCorrectionsEnabled/);
+});
