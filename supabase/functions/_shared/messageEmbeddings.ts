@@ -25,6 +25,11 @@ const ENSURE_BATCH = 20;
 const MAX_ENSURE_PER_REQUEST = 40;
 const MAX_ENSURE_HARD = 80;
 export const SEMANTIC_MATCH_COUNT = 12;
+/**
+ * A line of the person shorter than this is never a hit of the search by meaning (a length, not a word). Measured: lines like
+ * «устала» or «мне тяжело» are close in meaning to any question about feelings and crowd out the right line.
+ */
+export const SEMANTIC_MIN_LINE_CHARS = 20;
 
 /**
  * How close in meaning a past message must be to count as a hit. Measured on bge-m3 (20.11.2026, made-up Russian phrases):
@@ -196,6 +201,7 @@ export async function searchSemanticConversationArchive(
     match_count: SEMANTIC_MATCH_COUNT,
     match_threshold: semanticThreshold(),
     p_before_created_at: params.beforeCreatedAt,
+    p_min_chars: SEMANTIC_MIN_LINE_CHARS,
   });
 
   if (error) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import * as retrieval from "./conversationRetrieval.ts";
 import {
@@ -11,6 +11,7 @@ import {
   formatUserEvidenceForPrompt,
   hasRecallIntent,
   rankArchiveExcerpts,
+  searchConversationArchive,
 } from "./conversationRetrieval.ts";
 
 const source = readFileSync(new URL("./conversationRetrieval.ts", import.meta.url), "utf8");
@@ -36,10 +37,20 @@ function conversation(count: number, special: Record<number, string> = {}): Row[
   }));
 }
 
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
 /** A client that serves the messages table the way the database does: newest first, a page at a time. */
 function fakeMessagesClient(rows: Row[], options: { failAtPage?: number } = {}) {
   const pages: Array<[number, number]> = [];
+  const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const client = {
+    rpc(name: string, args: Record<string, unknown>) {
+      rpcCalls.push({ name, args });
+      return Promise.resolve({ data: [], error: null });
+    },
     from(table: string) {
       assert.equal(table, "messages");
       const query = {
@@ -58,7 +69,7 @@ function fakeMessagesClient(rows: Row[], options: { failAtPage?: number } = {}) 
       return query;
     },
   };
-  return { client: client as never, pages };
+  return { client: client as never, pages, rpcCalls };
 }
 
 describe("the archive search reads the whole conversation, not its first messages", () => {
@@ -137,5 +148,49 @@ describe("nothing in the search is written for one story", () => {
       assert.match(block, /2026/, "an old line carries its year");
       assert.ok(!/\bона\b|говорила\b|\bей\b/.test(block.split("\n").slice(0, 7).join(" ")), "the instructions do not assume a gender");
     }
+  });
+});
+
+describe("the search by meaning gets the question alone", () => {
+  it("embeds exactly the person's question (not mixed with other lines or the summary) and asks for lines of the person only", async () => {
+    const bodies: Array<{ model: string; input: string[] }> = [];
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      return {
+        ok: true,
+        json: async () => ({ data: body.input.map((_: string, index: number) => ({ index, embedding: Array(1024).fill(0.01) })), usage: { prompt_tokens: 5, total_tokens: 5, cost: 0 } }),
+        text: async () => "",
+      };
+    }) as never;
+
+    const user = fakeMessagesClient(conversation(60));
+    const service = fakeMessagesClient([]);
+    const question = "помнишь, что я говорила про йогу?";
+    await searchConversationArchive(user.client, {
+      conversationId: "c1",
+      query: question,
+      excludeTailCount: 6,
+      userId: "u1",
+      embedConfig: { apiKey: "key" },
+      supabaseService: service.client,
+    });
+
+    assert.equal(bodies.length, 1, "one call: the question (the service client had nothing to catch up)");
+    assert.equal(bodies[0].input.length, 1);
+    assert.equal(bodies[0].input[0], question);
+    const search = user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model");
+    assert.ok(search, "the search by meaning ran, as the user");
+    assert.equal(search.args.p_conversation_id, "c1", "in this conversation only");
+    assert.equal(search.args.p_min_chars, 20);
+    assert.equal(service.rpcCalls[0].name, "messages_missing_embeddings");
+  });
+
+  it("no longer takes a context parameter or builds one in the chat", () => {
+    assert.ok(!source.includes("queryContext"));
+    assert.ok(!source.includes("contextBlob"));
+    const chatSource = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
+    assert.ok(!chatSource.includes("queryContext"));
+    assert.ok(!chatSource.includes("summaryTextForRetrieval"));
   });
 });

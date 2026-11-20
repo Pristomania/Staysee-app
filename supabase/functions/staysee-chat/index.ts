@@ -4,7 +4,6 @@ import { checkConversationAccess } from "../_shared/conversationAccess.ts";
 import {
   hasRecallIntent,
   searchConversationArchive,
-  summaryTextForRetrieval,
 } from "../_shared/conversationRetrieval.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { logEmbeddingUsage } from "../_shared/embeddingUsage.ts";
@@ -1117,23 +1116,11 @@ Deno.serve(async (req: Request) => {
           userTier
         );
 
-        const recentUserLines = packet.recentMessages
-          .filter((m) => m.role === "user")
-          .slice(-4)
-          .map((m) => m.content);
-
         const embedUsageClient = makeServiceClient();
         const archiveSearch = await searchConversationArchive(userSupabase, {
           conversationId,
           query: message,
           excludeTailCount: trimmed.messages.length,
-          queryContext: [
-            ...packet.corrections,
-            ...recentUserLines,
-            summaryTextForRetrieval(
-              getConversationSummary(packet.conversationMeta)
-            ),
-          ],
           userId,
           embedConfig: embedApiKey
             ? {
