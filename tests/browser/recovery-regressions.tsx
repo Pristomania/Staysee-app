@@ -1,4 +1,5 @@
 import React,{StrictMode} from 'react';
+import App from '../../src/App';
 import {createRoot,type Root} from 'react-dom/client';
 import {AuthProvider,useAuth} from '../../src/context/AuthContext';
 import {ThemeProvider} from '../../src/context/ThemeContext';
@@ -21,9 +22,11 @@ const state=(attribute:string)=>fixture.querySelector('#auth-state')?.getAttribu
 const user=(id:string)=>({id,email:`${id}@example.invalid`,app_metadata:{},user_metadata:{},aud:'authenticated',created_at:'2026-01-01T00:00:00Z'});
 const session=(id:string)=>({user:user(id),expires_at:Math.floor(Date.now()/1000)+3600,access_token:'fictional-test-only',refresh_token:'fictional-test-only',token_type:'bearer',expires_in:3600});
 
-async function withAuthBoundary(run:(boundary:{emit:(event:string,id:string|null)=>void;restore:(id:string|null)=>void;failRestore:()=>void;flushSignOut:()=>void;finishSignIn:()=>void;remount:()=>void;signOutCalls:()=>number;failProfile:(id:string)=>void;resolveProfile:(id:string,deleted?:boolean)=>void})=>Promise<void>,deferProfiles=false,deferSignOut=false,deferSignIn=false,persistedRecovery=false){
+async function withAuthBoundary(run:(boundary:{emit:(event:string,id:string|null)=>void;restore:(id:string|null)=>void;failRestore:()=>void;flushSignOut:()=>void;finishSignIn:()=>void;remount:()=>void;signOutCalls:()=>number;failProfile:(id:string)=>void;resolveProfile:(id:string,deleted?:boolean)=>void})=>Promise<void>,deferProfiles=false,deferSignOut=false,deferSignIn=false,persistedRecovery=false,wholeApp=false){
  const auth=supabase.auth as unknown as Record<string,unknown>;
- const originals={getSession:auth.getSession,onAuthStateChange:auth.onAuthStateChange,getUser:auth.getUser,signOut:auth.signOut,signInWithPassword:auth.signInWithPassword,from:supabase.from};
+ const originals={getSession:auth.getSession,onAuthStateChange:auth.onAuthStateChange,getUser:auth.getUser,signOut:auth.signOut,signInWithPassword:auth.signInWithPassword,from:supabase.from,rpc:supabase.rpc};
+ const view=()=>wholeApp?<App/>:<StrictMode><AuthProvider><Probe/></AuthProvider></StrictMode>;
+ if(wholeApp)supabase.rpc=((name:string)=>{check(['get_my_billing_snapshot','list_my_conversations','get_my_conversation_previews'].includes(name),'unexpected RPC '+name);const reply=Promise.resolve({data:name==='get_my_billing_snapshot'?{version:1,userId:'alpha',serverNow:'2026-11-20T12:00:00Z',usage:{tier:'premium',period_requests_used:0,period_started_at:'2026-11-20T00:00:00Z',last_request_at:null,unlimited_usage:true,max_conversations_override:50,access_source:'manual',paid_access_until:null,first_real_purchase_at:null},packs:[]}:[],error:null});return Object.assign(reply,{abortSignal:()=>reply});}) as never;
  const callbacks=new Set<(event:string,session:unknown)=>void>();
  const profileReads=new Map<string,((value:unknown)=>void)[]>();
  let restored!:(value:unknown)=>void,current:string|null=null,signOutCalls=0,finishSignOut:(()=>void)|null=null,finishSignIn:(()=>void)|null=null;
@@ -35,19 +38,27 @@ async function withAuthBoundary(run:(boundary:{emit:(event:string,id:string|null
  auth.signInWithPassword=async()=>{current='alpha';for(const callback of [...callbacks])callback('SIGNED_IN',session('alpha'));if(deferSignIn)await new Promise<void>(done=>{finishSignIn=done;});return {data:{user:user('alpha'),session:session('alpha')},error:null};};
  supabase.from=((table:string)=>{check(table==='profiles','unexpected backend write/query');let id='';const query={select:()=>query,eq:(_key:string,value:string)=>{id=value;return query;},maybeSingle:()=>deferProfiles?new Promise(done=>{const list=profileReads.get(id)??[];list.push(done);profileReads.set(id,list);}):Promise.resolve({data:{id,room_deletion_requested_at:null,room_purge_after:null},error:null})};return query;}) as never;
  try{
-  clearPasswordRecoveryPending();sessionStorage.removeItem('staysee:deleted-room-owners');forgetRoomDeletedNotice();if(persistedRecovery)markPasswordRecoveryPending();render(<StrictMode><AuthProvider><Probe/></AuthProvider></StrictMode>);await pause();
+  clearPasswordRecoveryPending();sessionStorage.removeItem('staysee:deleted-room-owners');forgetRoomDeletedNotice();if(persistedRecovery)markPasswordRecoveryPending();render(view());await pause();
   await run({
    emit(event,id){if(event!=='INITIAL_SESSION')current=id;for(const callback of [...callbacks])callback(event,id?session(id):null);},
    restore(id){restored({data:{session:id?session(id):null},error:null});},
    failRestore(){restored({data:{session:null},error:Error('controlled restore failure')});},
-   flushSignOut(){finishSignOut?.();},finishSignIn(){finishSignIn?.();},remount(){render(<StrictMode><AuthProvider><Probe/></AuthProvider></StrictMode>);},signOutCalls(){return signOutCalls;},
+   flushSignOut(){finishSignOut?.();},finishSignIn(){finishSignIn?.();},remount(){render(view());},signOutCalls(){return signOutCalls;},
    failProfile(id){for(const done of profileReads.get(id)??[])done({data:null,error:Error('controlled profile failure')});},
    resolveProfile(id,deleted=false){for(const done of profileReads.get(id)??[])done({data:{id,room_deletion_requested_at:deleted?'2026-01-01T00:00:00Z':null,room_purge_after:deleted?'2026-04-01T00:00:00Z':null},error:null});},
   });
- }finally{root?.unmount();root=null;Object.assign(auth,{getSession:originals.getSession,onAuthStateChange:originals.onAuthStateChange,getUser:originals.getUser,signOut:originals.signOut,signInWithPassword:originals.signInWithPassword});supabase.from=originals.from;clearPasswordRecoveryPending();sessionStorage.removeItem('staysee:deleted-room-owners');forgetRoomDeletedNotice();}
+ }finally{root?.unmount();root=null;Object.assign(auth,{getSession:originals.getSession,onAuthStateChange:originals.onAuthStateChange,getUser:originals.getUser,signOut:originals.signOut,signInWithPassword:originals.signInWithPassword});supabase.from=originals.from;supabase.rpc=originals.rpc;clearPasswordRecoveryPending();sessionStorage.removeItem('staysee:deleted-room-owners');forgetRoomDeletedNotice();}
 }
 
 const tests:[string,()=>Promise<void>][]=[
+ ['the complete app revisits auth navigation after callback popstate settles without reload',async()=>{
+  const originalFrame=window.requestAnimationFrame;const frames:FrameRequestCallback[]=[];window.requestAnimationFrame=callback=>{frames.push(callback);return frames.length;};
+  try{await withAuthBoundary(async b=>{
+   window.dispatchEvent(new PopStateEvent('popstate',{state:null}));b.emit('SIGNED_IN','alpha');b.restore(null);await pause(80);
+   check(!fixture.querySelector('[aria-label="Контекст"]'),'history pause did not hold the navigation');for(const frame of frames.splice(0))frame(performance.now());await pause(100);
+   check(!!fixture.querySelector('[aria-label="Контекст"]'),'authenticated app stayed on welcome after history settled');
+  },false,false,false,false,true);}finally{window.requestAnimationFrame=originalFrame;}
+ }],
  ['deleted owner cannot reappear on refresh or remount while profile is unavailable; another owner still enters',()=>withAuthBoundary(async b=>{
   b.restore('alpha');await pause();b.resolveProfile('alpha',true);await pause();check(state('data-user')==='none','initial deletion rejection missing');
   b.emit('TOKEN_REFRESHED','alpha');await pause();check(state('data-user')==='none','refresh republished known deleted owner before profile');b.failProfile('alpha');await pause();check(state('data-user')==='none','failed profile revived deleted owner');
