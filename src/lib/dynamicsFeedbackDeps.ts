@@ -45,16 +45,17 @@ export function createDynamicsFeedbackDeps(client: SupabaseClient): FeedbackDeps
  * (Stacy speaks of herself in the feminine elsewhere; here nobody speaks about themselves).
  */
 export const DYNAMICS_FEEDBACK_COPY: FeedbackCopy = {
-  good: 'Хорошая динамика',
-  bad: 'Динамика не подошла',
+  // Under a dynamics the thumbs say what they mean in the owner's words: "понравилось" / "не понравилось" (neuter: no gender).
+  good: 'Понравилось',
+  bad: 'Не понравилось',
   askGood: 'Спасибо. Если хочешь, напиши, что понравилось.',
-  askBad: 'Спасибо за отзыв. Если хочешь, напиши, что было не так.',
+  askBad: 'Спасибо за отзыв. Если хочешь, напиши, что не понравилось.',
   thanksNote: 'Записано. Спасибо.',
   write: 'Написать',
   send: 'Отправить',
   skip: 'Не нужно',
-  placeholderGood: 'Что понравилось в динамике (по желанию)',
-  placeholderBad: 'Что в динамике было не так (по желанию)',
+  placeholderGood: 'Что понравилось (по желанию)',
+  placeholderBad: 'Что не понравилось (по желанию)',
   failed: 'Не получилось сохранить. Попробуй ещё раз.',
 };
 

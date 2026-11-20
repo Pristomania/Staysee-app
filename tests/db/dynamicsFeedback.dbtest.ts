@@ -80,6 +80,27 @@ describe("feedback on the weekly dynamics on the real database", { skip: !hasAno
     assert.deepEqual(after.data, []);
   });
 
+  it("changing one's mind leaves only the new mark: the old one is not kept, and the note of the old one goes", async () => {
+    const a = await newPerson("flip");
+    const down = await a.client.from("dynamics_feedback").insert({ conversation_id: a.conversationId, entry_id: a.weeklyId, rating: -1 });
+    assert.equal(down.error, null);
+    const noted = await a.client.from("dynamics_feedback").update({ comment: "Вымышленная заметка к «не понравилось»." }).eq("entry_id", a.weeklyId);
+    assert.equal(noted.error, null);
+
+    // What the app sends when the other thumb is pressed: the new mark and no note.
+    const up = await a.client.from("dynamics_feedback").update({ rating: 1, comment: null }).eq("entry_id", a.weeklyId);
+    assert.equal(up.error, null);
+    const rows = await admin.from("dynamics_feedback").select("rating, comment").eq("user_id", a.userId);
+    assert.deepEqual(rows.data, [{ rating: 1, comment: null }], "one row, the new mark, no old note");
+    const review = await admin.from("dynamics_feedback_review").select("verdict").eq("user_id", a.userId);
+    assert.deepEqual(review.data, [{ verdict: "хорошо" }], "the owner sees one verdict: the last one");
+
+    const back = await a.client.from("dynamics_feedback").update({ rating: -1, comment: null }).eq("entry_id", a.weeklyId);
+    assert.equal(back.error, null);
+    const again = await admin.from("dynamics_feedback_review").select("verdict").eq("user_id", a.userId);
+    assert.deepEqual(again.data, [{ verdict: "плохо" }], "and the other way round");
+  });
+
   it("one mark per dynamics: a second insert is a unique violation", async () => {
     const a = await newPerson("unique");
     const first = await a.client.from("dynamics_feedback").insert({ conversation_id: a.conversationId, entry_id: a.weeklyId, rating: 1 });

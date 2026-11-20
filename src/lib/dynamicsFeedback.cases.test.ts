@@ -168,11 +168,15 @@ const target = { conversationId: 'conv-1', messageId: 'entry-1' };
 for (const key of Object.keys(FEEDBACK_COPY) as Array<keyof typeof FEEDBACK_COPY>) {
   assert(typeof DYNAMICS_FEEDBACK_COPY[key] === 'string' && DYNAMICS_FEEDBACK_COPY[key].length > 0, `the words have "${key}"`);
 }
-assert(DYNAMICS_FEEDBACK_COPY.good !== FEEDBACK_COPY.good && DYNAMICS_FEEDBACK_COPY.bad !== FEEDBACK_COPY.bad, 'the thumbs name a dynamics, not an answer');
-assert(/динамик/i.test(DYNAMICS_FEEDBACK_COPY.good) && /динамик/i.test(DYNAMICS_FEEDBACK_COPY.bad), 'the thumbs say "динамика"');
+// The owner's words (20.11.2026): "Хорошая динамика / Динамика не подошла" was wrong; the thumbs say «Понравилось» / «Не понравилось»,
+// and the note asks «что понравилось» / «что не понравилось».
+assert(DYNAMICS_FEEDBACK_COPY.good === 'Понравилось' && DYNAMICS_FEEDBACK_COPY.bad === 'Не понравилось', 'the thumbs say what they mean');
+assert(/что понравилось/.test(DYNAMICS_FEEDBACK_COPY.askGood) && /что не понравилось/.test(DYNAMICS_FEEDBACK_COPY.askBad), 'the note asks what was liked / not liked');
+assert(/Что понравилось/.test(DYNAMICS_FEEDBACK_COPY.placeholderGood) && /Что не понравилось/.test(DYNAMICS_FEEDBACK_COPY.placeholderBad), 'the box says what to write');
+assert(!/ответ/i.test(Object.values(DYNAMICS_FEEDBACK_COPY).join(' ')), 'nothing under a dynamics speaks of "an answer"');
 
-// The app does not know the gender of the person: no past-tense word that has one. «подошла» agrees with «динамика», not with the person.
-const ALLOWED_WORDS = new Set(['подошла']);
+// The app does not know the gender of the person: no past-tense word that has one.
+const ALLOWED_WORDS = new Set<string>();
 for (const [key, text] of Object.entries(DYNAMICS_FEEDBACK_COPY)) {
   const found = text.split(/[^а-яёА-ЯЁ]+/u).filter((word) => /^[а-яё]+(ла|л)$/iu.test(word) && !ALLOWED_WORDS.has(word.toLowerCase()));
   assert(found.length === 0, `the text "${key}" has no form that assumes the gender of the person (${found.join(', ')})`);
