@@ -1135,6 +1135,9 @@ Deno.serve(async (req: Request) => {
         const embedUsageClient = makeServiceClient();
         const recallGate = await recallGatePromise;
         const recallDecision = recallGate?.decision ?? null;
+        if (recallGate?.refusedStatus) {
+          await sendProviderAlertSafely(recallGate.refusedStatus === 402 ? "search_balance_empty" : "search_key_rejected");
+        }
         if (recallGate?.usage) {
           EdgeRuntime.waitUntil(logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
             userId,
@@ -1161,6 +1164,9 @@ Deno.serve(async (req: Request) => {
           rerank: cloudruKey
             ? {
                 apiKey: cloudruKey,
+                onRefusal: async (status) => {
+                  await sendProviderAlertSafely(status === 402 ? "search_balance_empty" : "search_key_rejected");
+                },
                 // The reranker is a paid call too: written into the cost log (the owner's rule: all costs).
                 onUsage: (usage) =>
                   logOpenRouterUsage(embedUsageClient, buildUsageLogRow({

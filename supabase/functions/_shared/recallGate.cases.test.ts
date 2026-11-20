@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+import { PROVIDER_ALERT_WINDOW_MS, resetProviderAlertsForTests, sendProviderAlertSafely } from "./providerAlert.ts";
 import {
   RECALL_GATE_MODEL,
   RECALL_GATE_SYSTEM_PROMPT,
@@ -110,5 +111,49 @@ describe("the small model that reads a message before the search in the past", (
     }
     assert.match(RECALL_GATE_SYSTEM_PROMPT, /НЕ нужно заглядывать в прошлое/);
     assert.ok(!/RegExp|\.test\(|\.match\(.*message/.test(source.replace(/parseRecallDecision[\s\S]*?\n}\n/, "")), "no word list is applied to the message");
+  });
+});
+
+describe("a refused key or an empty balance of the small model is told to the owner", () => {
+  it("reports the refusal (401, 402, 403) and nothing else, and still answers without a decision", async () => {
+    for (const status of [401, 402, 403] as const) {
+      const refusing = (async () => ({ ok: false, status, json: async () => ({}) })) as never;
+      const result = await askRecallGate("помнишь?", { apiKey: "k", fetchImpl: refusing });
+      assert.equal(result.decision, null);
+      assert.equal(result.refusedStatus, status);
+    }
+    for (const status of [400 + 100, 429, 500, 503]) {
+      const failing = (async () => ({ ok: false, status, json: async () => ({}) })) as never;
+      assert.equal((await askRecallGate("помнишь?", { apiKey: "k", fetchImpl: failing })).refusedStatus, undefined, String(status));
+    }
+  });
+
+  it("the alerts of the search say what is worse (the remembering), when the key ends, and are sent once in half an hour per kind", async () => {
+    resetProviderAlertsForTests();
+    const sent: string[] = [];
+    const options = {
+      botToken: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz0123456789",
+      chatId: "123456",
+      fetchImpl: async (_url: string, init: { body: string }) => {
+        sent.push(JSON.parse(init.body).text);
+        return { ok: true };
+      },
+    };
+    assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 }), true);
+    assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 2_000 }), false, "the same kind again inside the window");
+    assert.equal(await sendProviderAlertSafely("search_balance_empty", { ...options, now: 2_000 }), true, "another kind is not held back");
+    assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 + PROVIDER_ALERT_WINDOW_MS + 1 }), true);
+    assert.match(sent[0], /CLOUDRU_API_KEY/);
+    assert.match(sent[0], /15\.02\.2027/, "the date the key ends is in the alert");
+    assert.match(sent[0], /хуже вспоминает/);
+    assert.match(sent[1], /402/);
+    assert.ok(sent.every((text) => !text.includes("123456789:")), "the bot token is never in the text");
+    resetProviderAlertsForTests();
+  });
+
+  it("the chat raises both alerts, and awaits them (they are sent only when something is refused)", () => {
+    const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
+    assert.match(chat, /if \(recallGate\?\.refusedStatus\) \{\s*await sendProviderAlertSafely\(recallGate\.refusedStatus === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
+    assert.match(chat, /onRefusal: async \(status\) => \{\s*await sendProviderAlertSafely\(status === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
   });
 });

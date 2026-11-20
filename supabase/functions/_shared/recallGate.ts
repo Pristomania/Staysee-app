@@ -49,6 +49,8 @@ export interface RecallGateResult {
   decision: RecallDecision | null;
   usage: RecallGateUsage | null;
   latencyMs: number;
+  /** The provider refused the key (401, 403) or has no money (402): the caller raises the alert. */
+  refusedStatus?: 401 | 402 | 403;
 }
 
 /** Reads the answer of the model. Anything that is not the expected JSON is null (never guessed). */
@@ -115,7 +117,8 @@ export async function askRecallGate(
     if (response.status === 400 || response.status === 422) response = await call({});
     if (!response.ok) {
       console.warn(`[recallGate] HTTP ${response.status}`);
-      return { decision: null, usage: null, latencyMs: Date.now() - started };
+      const refused = response.status === 401 || response.status === 402 || response.status === 403 ? response.status : undefined;
+      return { decision: null, usage: null, latencyMs: Date.now() - started, ...(refused ? { refusedStatus: refused } : {}) };
     }
     const data = await response.json();
     const usage = data?.usage

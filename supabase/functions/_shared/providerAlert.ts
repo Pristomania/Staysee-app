@@ -5,12 +5,17 @@
  * The bot and the chat are the ones of the Memory V3 alerts (the same secrets).
  */
 
-export type ProviderAlertKind = "balance_empty" | "key_rejected";
+export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected";
 
 const TEXT: Record<ProviderAlertKind, string> = {
   balance_empty:
     "⚠️ StaySee: на Cloud.ru закончились деньги (ответ 402). Ответы идут на запасную модель; если и она недоступна, люди видят «Сейчас не могу ответить». Нужно пополнить баланс.",
   key_rejected: "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403). Проверь секрет CLOUDRU_API_KEY.",
+  // The small model and the reranker of the search in the past (the chat itself is not touched: it goes on, only the remembering gets worse).
+  search_balance_empty:
+    "⚠️ StaySee: на Cloud.ru закончились деньги (ответ 402) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Нужно пополнить баланс.",
+  search_key_rejected:
+    "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Проверь секрет CLOUDRU_API_KEY: ключ создан 17.11.2026 на 90 дней, до 15.02.2027.",
 };
 
 const BOT_TOKEN = /^\d{5,20}:[A-Za-z0-9_-]{20,100}$/;
