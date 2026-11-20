@@ -1,25 +1,14 @@
 /**
- * Dynamic completion token budget — short / medium / deep by message context.
+ * Completion token budget.
  * Imported by: supabase/functions/staysee-chat/index.ts
+ *
+ * Nothing here is decided by the words of the message (owner's rule, 20.11.2026): the ceiling of a reply is the ceiling of the tier,
+ * and the model decides how much of it to use. The older "short / medium / deep" depth that was read off the wording of the
+ * message is gone.
  */
 
 import type { UsageTier } from "./cost.ts";
-import { TIER_CONFIG } from "./cost.ts";
-import type { SafetyCategory } from "./safety.ts";
-import {
-  analyzeEmotionalTrajectory,
-  analyzeResponseDepth,
-  detectResponseDepth,
-  type DepthReason,
-  type EmotionalTrajectory,
-  type OpenFigureConfidence,
-  type OpenFigureIntensity,
-  type OpenFigureKind,
-  type OpenFigureState,
-  type OpenFigureTrigger,
-  type ResponseDepth,
-  type ResponseDepthAnalysis,
-} from "./responseDepthTrajectory.ts";
+import { PLANS } from "./plans.ts";
 
 export {
   cleanReplyEnding,
@@ -29,71 +18,17 @@ export {
   trimToLastCompleteSentence,
 } from "./replyEnding.ts";
 
-export type {
-  DepthReason,
-  EmotionalTrajectory,
-  OpenFigureConfidence,
-  OpenFigureIntensity,
-  OpenFigureKind,
-  OpenFigureState,
-  OpenFigureTrigger,
-  ResponseDepth,
-  ResponseDepthAnalysis,
-};
-
-export {
-  analyzeEmotionalTrajectory,
-  analyzeResponseDepth,
-  detectResponseDepth,
-};
-
-export interface ResponseBudget extends ResponseDepthAnalysis {
-  maxTokens: number;
-}
-
 /** Minimal technical note — ceiling is a boundary, not a target length. */
 export const OUTPUT_TOKEN_CEILING_GUIDANCE =
   "Output has a maximum token ceiling. The ceiling is a boundary, not a requested response length. Respond within the available ceiling.";
 
-/** Per-depth targets (capped by tier ceiling). */
-/** Balanced: 2–4 sentences in identity, enough room to finish a thought. */
-const DEPTH_TOKEN_TARGET: Record<ResponseDepth, number> = {
-  brief: 380,
-  medium: 900,
-  deep: 1600,
-};
-
-export interface ResponseBudgetOptions {
-  /** Core V2 flat ordinary runtime — tier ceiling only, depth diagnostic-only. */
-  flatOrdinary?: boolean;
-}
-
-export function computeResponseBudget(
-  message: string,
-  safetyCategory: SafetyCategory,
-  recentHistory: Array<{ role: string; content: string }>,
-  tier: UsageTier,
-  options: ResponseBudgetOptions = {},
-): ResponseBudget {
-  const analysis = analyzeResponseDepth(message, safetyCategory, recentHistory);
-  const tierCeiling = TIER_CONFIG[tier].maxTokensOutput;
-  const maxTokens = options.flatOrdinary
-    ? tierCeiling
-    : Math.min(tierCeiling, DEPTH_TOKEN_TARGET[analysis.depth]);
-
-  return { ...analysis, maxTokens };
+/** The most tokens one reply may have: the ceiling of the tier. */
+export function responseTokenCeiling(tier: UsageTier): number {
+  return PLANS[tier].maxTokensOutput;
 }
 
 /** Tokens for each automatic continuation segment — short, not another essay. */
-export function continuationTokenBudget(
-  tier: UsageTier,
-  depth: ResponseDepth = "medium",
-  flatOrdinary = false,
-): number {
-  const tierCeiling = TIER_CONFIG[tier].maxTokensOutput;
-  if (flatOrdinary) {
-    return Math.min(tierCeiling, Math.max(280, Math.floor(tierCeiling * 0.55)));
-  }
-  const target = Math.floor(DEPTH_TOKEN_TARGET[depth] * 0.55);
-  return Math.min(tierCeiling, Math.max(280, target));
+export function continuationTokenBudget(tier: UsageTier): number {
+  const tierCeiling = responseTokenCeiling(tier);
+  return Math.min(tierCeiling, Math.max(280, Math.floor(tierCeiling * 0.55)));
 }

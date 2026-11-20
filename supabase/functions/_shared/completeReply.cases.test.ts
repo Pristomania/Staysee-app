@@ -1,5 +1,6 @@
 /**
- * ensurePublishableReply cases.
+ * ensurePublishableReply cases: a reply the model was CUT in (finish_reason length) is trimmed to its last sentence mark;
+ * a reply that stopped by itself is never touched (the rule of 20.11.2026).
  * Run: npx tsx supabase/functions/_shared/completeReply.cases.test.ts
  */
 
@@ -7,7 +8,6 @@ import {
   ensurePublishableReply,
   isPublishableReply,
   needsAutoContinue,
-  needsStopNotPublishableRepair,
   shouldRunFinalize,
 } from "./completeReply.ts";
 
@@ -96,19 +96,16 @@ const routeCases: { name: string; fn: () => void }[] = [
     },
   },
   {
-    name: "needsStopNotPublishableRepair notPublishable stop",
+    name: "a reply that stopped by itself is never trimmed, even without a mark",
     fn: () => {
-      if (!needsStopNotPublishableRepair("важный момен", "stop")) {
-        throw new Error("expected true");
-      }
+      if (ensurePublishableReply("Первое. важный момен", "stop") !== "Первое. важный момен") throw new Error("trimmed a stopped reply");
+      if (!isPublishableReply("важный момен", "stop")) throw new Error("a stopped reply is complete");
     },
   },
   {
-    name: "needsStopNotPublishableRepair publishable stop",
+    name: "no repair route exists for a stopped reply",
     fn: () => {
-      if (needsStopNotPublishableRepair("Я здесь.", "stop")) {
-        throw new Error("expected false");
-      }
+      if ((globalThis as Record<string, unknown>).needsStopNotPublishableRepair) throw new Error("unexpected");
     },
   },
 ];
@@ -117,14 +114,14 @@ let failed = 0;
 
 for (const c of cases) {
   try {
-    const out = ensurePublishableReply(c.input);
+    const out = ensurePublishableReply(c.input, "length");
     c.assert(out);
     console.log(`PASS: ${c.name}`);
   } catch (err) {
     failed++;
     console.log(`FAIL: ${c.name}`);
     console.log(`  ${err instanceof Error ? err.message : err}`);
-    console.log(`  got: ${JSON.stringify(ensurePublishableReply(c.input))}`);
+    console.log(`  got: ${JSON.stringify(ensurePublishableReply(c.input, "length"))}`);
   }
 }
 

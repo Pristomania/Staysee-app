@@ -44,17 +44,17 @@ describe("pictures are wired into the chat function", () => {
     assert.match(chat.slice(validate, daily), /unprocessable\("images_unavailable"\)/);
   });
 
-  it("does the picture step after the rate limit and before every safety check, as the first thing", () => {
+  it("does the picture step after the rate limit and before the daily reserve, as the first thing", () => {
     const rate = chat.indexOf("const rateLimitResult = await checkRateLimit");
     const disabled = chat.indexOf('unprocessable("images_disabled")');
     const validate = chat.indexOf("validateImages(body.images)");
     const daily = chat.indexOf('unprocessable("images_daily_limit")');
     const describe = chat.indexOf("describeImages(");
     const append = chat.indexOf("message = appendPhotoBlocks(typedMessage");
-    const safety = chat.indexOf("let safety = evaluateTurnSafety(message");
+    const reserve = chat.indexOf("const reserveResult = await reserveAiRequest");
     assert.ok(rate > 0 && rate < disabled, "the switch is checked after the rate limit");
     assert.ok(disabled < validate && validate < daily && daily < describe && describe < append, "order of the picture step");
-    assert.ok(append < safety, "safety checks read the text with the description lines");
+    assert.ok(reserve > 0 && append < reserve, "everything after the picture step reads the text with the description lines");
   });
 
   it("refuses when the switch is off, the count cannot be read, or a description fails", () => {
@@ -85,9 +85,8 @@ describe("pictures are wired into the chat function", () => {
     const retry = chat.indexOf("const retry = await callModel(");
     assert.doesNotMatch(chat.slice(retry, retry + 400), /turnImages/);
     assert.match(chat, /const userTextField = turnImages\.length > 0 \? \{ userText: message \} : \{\};/);
-    // Every answer after the picture step carries it: the final one and the early stop (safety),
-    // so the saved message always has the description lines the safety check read.
-    assert.ok(chat.split("...userTextField").length - 1 >= 2, "userTextField must be in every 200 answer after the picture step");
+    // Every answer after the picture step carries it, so the saved message always has the description lines the model read.
+    assert.ok(chat.split("...userTextField").length - 1 >= 1, "userTextField must be in every 200 answer after the picture step");
   });
 
   it("never writes a picture or a description into the log", () => {

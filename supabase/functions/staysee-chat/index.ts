@@ -16,7 +16,6 @@ import {
   collectMemoryCorrectionHints,
   fetchTranscriptForSummary,
   getConversationSummary,
-  getParsedMemory,
   isSummaryStale,
   shouldEagerRefreshSummary,
   shouldUpdateConversationSummary,
@@ -105,24 +104,6 @@ import {
   summaryDiagStart,
 } from "../_shared/summaryDiag.ts";
 import {
-  buildLegacySessionProcessState,
-  buildStructuredSessionProcessState,
-  extractSessionProcessStateFromMetadata,
-  logSessionProcessStateRead,
-  persistSessionProcessState,
-  type SessionProcessState,
-} from "../_shared/sessionProcessState.ts";
-import {
-  buildSessionProcessGuidance,
-  sessionProcessGuidanceInjected,
-} from "../_shared/sessionProcessGuidance.ts";
-import {
-  enforceRoleBoundedReply,
-  evaluateTurnSafety,
-} from "../_shared/roleEnforcement.ts";
-import { logSafetyDiagnosis } from "../_shared/safetyDiagnose.ts";
-import { sanitizeHistoryForModel } from "../_shared/roleGuard.ts";
-import {
   buildSurgery1BasePrompt,
   resolveActivePromptLayerId,
 } from "../_shared/surgery1Prompt.ts";
@@ -149,29 +130,13 @@ import { parseAndStripProtocolSignals } from "../_shared/protocolSignalParser.ts
 import { logProtocolSignals } from "../_shared/protocolEvents.ts";
 import { isProtocolSignalsEnabled } from "../_shared/protocolSignalMode.ts";
 import { logCrisisContactsFromAssistantReply } from "../_shared/logCrisisContacts.ts";
-import { K3_LAYER_ID } from "../_shared/promptCore/k3Prompt.ts";
 import { buildProtocolSignalPrompt } from "../_shared/protocolSignalPrompt.ts";
 import {
-  computeResponseBudget,
   continuationTokenBudget,
   OUTPUT_TOKEN_CEILING_GUIDANCE,
-  analyzeEmotionalTrajectory,
+  responseTokenCeiling,
 } from "../_shared/responseBudget.ts";
-import {
-  buildExplicitClosureTurnGuidance,
-  explicitClosureGuidanceInjected,
-} from "../_shared/explicitClosureTurnGuidance.ts";
-import {
-  buildPauseInArcTurnGuidance,
-  pauseInArcGuidanceInjected,
-} from "../_shared/pauseInArcTurnGuidance.ts";
-import { detectUserGrammaticalGender } from "../_shared/userGrammaticalGender.ts";
-import {
-  buildUserGenderTurnGuidance,
-  userGenderGuidanceInjected,
-} from "../_shared/userGenderTurnGuidance.ts";
 import { resolveChatModel } from "../_shared/modelRouter.ts";
-import { isFlatCoreV2OrdinaryRuntime } from "../_shared/flatCoreV2Runtime.ts";
 import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel, isOwnModelOnOpenRouter } from "../_shared/modelHost.ts";
 import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
@@ -206,7 +171,6 @@ import {
   logOpenRouterUsage,
   parseOpenRouterUsage,
 } from "../_shared/usageAnalytics.ts";
-import { computeProcessState } from "../_shared/processState.ts";
 import { getStructuredTurnMode } from "../_shared/structuredTurnMode.ts";
 import {
   applyStructuredShadowCallError,
@@ -289,13 +253,11 @@ const ACTIVE_PROVIDER: AiProvider = "openrouter";
 
 // ── Static prompt layers (built once at cold start) ───────────────────────────
 // SURGERY1 v3-cognitive: identity + voice v3 + constitution v3 + cognitive signature — surgery1Prompt.ts
-// Per-turn: evaluateTurnSafety (roleEnforcement) + memory context + time gap
+// Per-turn: memory context + time gap. The meaning (crisis, medicine, role, attachment, pause, goodbye, grammatical gender) is in
+// the text of the prompt; no code reads the words of the message or of the history to decide anything (owner's rule, 20.11.2026).
 
 const BASE_PROMPT = buildSurgery1BasePrompt();
 const ACTIVE_PROMPT_LAYER_ID = resolveActivePromptLayerId();
-// With the K3 base the meaning (crisis, medicine, role, attachment, pause, goodbye, grammatical gender) is in the text of
-// the prompt: the word-based layers around it are skipped (and the history is not cleaned by words).
-const isK3Base = ACTIVE_PROMPT_LAYER_ID === K3_LAYER_ID;
 
 console.log(
   `[staysee-chat] ${ACTIVE_PROMPT_LAYER_ID} BASE tokens≈${estimateTokens(BASE_PROMPT)}`
@@ -875,23 +837,8 @@ Deno.serve(async (req: Request) => {
       message = appendPhotoBlocks(typedMessage, described.descriptions.map((entry) => entry.description));
     }
     // Every answer after this point carries the text that was used, so the saved message has the description
-    // lines that the safety checks and the memory read.
+    // lines that the memory reads.
     const userTextField = turnImages.length > 0 ? { userText: message } : {};
-
-    // ── Free message-only guards (no daily slot) ────────────────────────────
-
-    let safety = evaluateTurnSafety(message, []);
-    if (safety.immediateResponse) {
-      return new Response(
-        JSON.stringify({
-          content: safety.immediateResponse,
-          provider: providerKey,
-          model: reqModel ?? config.model,
-          ...userTextField,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     // ── Authoritative daily reserve (before any provider-backed work) ───────
 
@@ -940,8 +887,6 @@ Deno.serve(async (req: Request) => {
     let systemPrompt = BASE_PROMPT;
     let historyMessages: ChatMessage[] = [];
     let memoryItemIds: string[] = [];
-    // PR3c-2 N-1: prior-turn processState for session guidance (legacy only).
-    let priorSessionProcessState: SessionProcessState | null = null;
     // Carry packet out of block for background summary task
     let packetForSummary: Awaited<ReturnType<typeof buildContextPacket>> | null = null;
     const smokeDiagSnapshot: Record<string, unknown> = {};
@@ -998,14 +943,6 @@ Deno.serve(async (req: Request) => {
             })],
           };
         }
-
-        // PR3c-1/2 N-1: Turn N reads processState_{N-1} from metadata.
-        // Same-turn processState_N is computed later and must not affect this response.
-        const extractedSessionProcessState = extractSessionProcessStateFromMetadata(
-          packet.conversationMeta?.metadata ?? null
-        );
-        logSessionProcessStateRead(extractedSessionProcessState);
-        priorSessionProcessState = extractedSessionProcessState.legacy;
 
         const convTitle = packet.conversationMeta?.title ?? null;
         const memoryDiagEnabled = isMemoryDiagConversation(convTitle);
@@ -1322,51 +1259,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ── L5: Safety check ────────────────────────────────────────────────────
-
-    safety = evaluateTurnSafety(message, historyMessages);
-    const diagnosis = logSafetyDiagnosis(message, historyMessages);
-    console.log(
-      `[staysee-chat] safety: ${safety.category} | tier: ${userTier} | thread=${safety.threadEscalated} insist=${safety.insistenceLoop} role=${safety.roleContaminated} rule=${diagnosis.matchedRule}`
-    );
-
-    if (safety.systemGuidance && !isK3Base) {
-      systemPrompt = [systemPrompt, safety.systemGuidance].join("\n\n");
-    }
-
-    const genderMessages =
-      historyMessages[historyMessages.length - 1]?.content === message
-        ? historyMessages
-        : [...historyMessages, { role: "user" as const, content: message }];
-    const userTurnCount = genderMessages.filter((m) => m.role === "user").length;
-    const parsedMem = packetForSummary?.conversationMeta
-      ? getParsedMemory(packetForSummary.conversationMeta)
-      : null;
-    const genderResult = detectUserGrammaticalGender({
-      messages: genderMessages,
-      conversationPreferences: parsedMem?.preferences ?? [],
-      crossMemoryItems: (packetForSummary?.memoryItems ?? []).map((m) => ({
-        memory_type: m.memory_type,
-        content: m.content,
-      })),
-    });
-    const genderGuidanceOptions = {
-      safetyCategory: safety.category,
-      message,
-      userTurnCount,
-    };
-    const genderGuidance = buildUserGenderTurnGuidance(
-      genderResult,
-      genderGuidanceOptions
-    );
-    const genderGuidanceOn = !isK3Base && userGenderGuidanceInjected(
-      genderResult,
-      genderGuidanceOptions
-    );
-    if (genderGuidance && !isK3Base) {
-      systemPrompt = [systemPrompt, genderGuidance].join("\n\n");
-    }
-
     const currentDateTimePrompt = buildCurrentDateTimePrompt(timeGap);
     if (currentDateTimePrompt) {
       systemPrompt = [systemPrompt, currentDateTimePrompt].join("\n\n");
@@ -1385,63 +1277,13 @@ Deno.serve(async (req: Request) => {
         ? historyMessages
         : [...historyMessages, { role: "user", content: message }];
 
-    const modelMessages = isK3Base ? messages : sanitizeHistoryForModel(messages);
+    const modelMessages = messages;
 
-    // ── L7: Dynamic response budget + model call ─────────────────────────────
+    // ── L7: Response budget + model call ─────────────────────────────────────
+    // Nothing here is decided by the words of the message: the reply may be as long as the tier allows, and the model is the one
+    // that is configured (owner's rule, 20.11.2026).
 
-    const flatOrdinary = isFlatCoreV2OrdinaryRuntime(safety.category);
-
-    const responseBudget = computeResponseBudget(
-      message,
-      safety.category,
-      modelMessages,
-      userTier,
-      { flatOrdinary },
-    );
-    const { depth: responseDepth, maxTokens: outputBudget } = responseBudget;
-
-    const explicitClosureGuidance = buildExplicitClosureTurnGuidance({
-      depthReason: responseBudget.depthReason,
-      message,
-    });
-    const explicitClosureGuidanceOn = !isK3Base && explicitClosureGuidanceInjected({
-      depthReason: responseBudget.depthReason,
-      message,
-    });
-
-    const sessionProcessGuidance = buildSessionProcessGuidance({
-      priorState: priorSessionProcessState,
-      explicitClosureActive: explicitClosureGuidanceOn,
-      safetyCategory: safety.category,
-    });
-    const sessionProcessGuidanceOn = !isK3Base && sessionProcessGuidanceInjected({
-      priorState: priorSessionProcessState,
-      explicitClosureActive: explicitClosureGuidanceOn,
-      safetyCategory: safety.category,
-    });
-    if (sessionProcessGuidance && !isK3Base) {
-      systemPrompt = [systemPrompt, sessionProcessGuidance].join("\n\n");
-    }
-
-    const pauseInArcGuidanceInput = {
-      message,
-      depthReason: responseBudget.depthReason,
-      openFigure: responseBudget.openFigure,
-      emotionalMomentum: responseBudget.emotionalMomentum,
-      shortAfterEmotional: analyzeEmotionalTrajectory(message, modelMessages)
-        .shortAfterEmotional,
-      recentHistory: modelMessages,
-      safetyCategory: safety.category,
-    };
-    const pauseInArcGuidance = buildPauseInArcTurnGuidance(pauseInArcGuidanceInput);
-    const pauseInArcGuidanceOn = !isK3Base && pauseInArcGuidanceInjected(pauseInArcGuidanceInput);
-    if (pauseInArcGuidance && !isK3Base) {
-      systemPrompt = [systemPrompt, pauseInArcGuidance].join("\n\n");
-    }
-
-    if (explicitClosureGuidance && !isK3Base) {
-      systemPrompt = [systemPrompt, explicitClosureGuidance].join("\n\n");
-    }
+    const outputBudget = responseTokenCeiling(userTier);
 
     if (isProtocolSignalsEnabled()) {
       systemPrompt = [systemPrompt, buildProtocolSignalPrompt()].join("\n\n");
@@ -1449,27 +1291,8 @@ Deno.serve(async (req: Request) => {
 
     systemPrompt = [systemPrompt, OUTPUT_TOKEN_CEILING_GUIDANCE].join("\n\n");
 
-    const modelRoute = resolveChatModel({
-      depth: responseDepth,
-      safetyCategory: safety.category,
-      requestModel: reqModel,
-      flatOrdinary,
-    });
+    const modelRoute = resolveChatModel({ requestModel: reqModel });
     const turnModel = modelRoute.model;
-
-    // PR3a shadow — current-turn audit only; persisted as processState_N after response.
-    const processState = computeProcessState({
-      openFigure: {
-        isOpen: responseBudget.openFigure.isOpen,
-        intensity: responseBudget.openFigure.intensity,
-        confidence: responseBudget.openFigure.confidence,
-      },
-      depth: responseDepth,
-      explicitClosure: explicitClosureGuidanceOn,
-      uncertainty: responseBudget.depthReason === "uncertainty_in_process",
-      recentUserTurns: responseBudget.recentUserTurns,
-      safetyCategory: safety.category,
-    });
 
     const structuredTurnMode = getStructuredTurnMode();
     const structuredShadowPct = Deno.env.get("STAYSEE_STRUCTURED_TURN_SHADOW_PCT");
@@ -1480,7 +1303,7 @@ Deno.serve(async (req: Request) => {
     );
 
     console.log(
-      `[staysee-chat] depth=${responseDepth} model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
+      `[staysee-chat] model=${turnModel} route=${modelRoute.source} maxTokens=${outputBudget} structured_mode=${structuredTurnMode}`
     );
 
     let result = await callModel(
@@ -1501,7 +1324,7 @@ Deno.serve(async (req: Request) => {
     // to their first sentence. The signals themselves are kept for the log below.
     const firstSegmentSplit = parseAndStripProtocolSignals(result.content?.trim() ?? "");
     const firstSegmentContent = firstSegmentSplit.text;
-    const segmentBudget = continuationTokenBudget(userTier, responseDepth, flatOrdinary);
+    const segmentBudget = continuationTokenBudget(userTier);
 
     const recovery = await runReplyRecoveryRoutes({
       firstSegment: {
@@ -1510,7 +1333,6 @@ Deno.serve(async (req: Request) => {
       },
       baseModelMessages: modelMessages,
       unavailableMessage: CALM_ERRORS.unavailable,
-      replyNotRecoveredMessage: CALM_ERRORS.replyNotRecovered,
       callModel: async (messages, kind) => {
         const tokenBudget =
           kind === "auto_continue"
@@ -1580,15 +1402,18 @@ Deno.serve(async (req: Request) => {
         finalizeUsed: wasFinalizeUsed,
       });
     }
-    let safe = ensurePublishableReply(polishedBeforeEnsure);
+    // Only a reply the model was CUT in (finish_reason "length") is ever trimmed, to its last sentence mark; a reply that stopped by
+    // itself goes out as it is (owner's rule, 20.11.2026: no decisions by words, no cutting).
+    let safe = ensurePublishableReply(polishedBeforeEnsure, result.finishReason);
 
       if (
-        !isPublishableReply(safe) &&
+        !isPublishableReply(safe, result.finishReason) &&
         wasAutoContinued &&
         firstSegmentContent.length >= 12
       ) {
         safe = ensurePublishableReply(
-          polishAssistantOutput(firstSegmentContent)
+          polishAssistantOutput(firstSegmentContent),
+          "length"
         );
         usedMergeFallback = true;
         lengthAfterMerge = safe.length;
@@ -1600,17 +1425,10 @@ Deno.serve(async (req: Request) => {
           model: result.model,
           autoContinueUsed: wasAutoContinued,
           finalizeUsed: wasFinalizeUsed,
-          publishable: isPublishableReply(safe),
+          publishable: isPublishableReply(safe, result.finishReason),
           contactComplete: !isContactSuspicious(safe),
         });
       }
-
-      safe = enforceRoleBoundedReply(safe, safety.category, {
-        insistenceLoop: safety.insistenceLoop,
-        threadEscalated: safety.threadEscalated,
-        userMessage: message,
-        relationalLifeTurn: diagnosis.relationalLifeTurn,
-      });
 
       const signalParse = parseAndStripProtocolSignals(safe);
       safe = signalParse.text;
@@ -1632,12 +1450,12 @@ Deno.serve(async (req: Request) => {
           model: result.model,
           autoContinueUsed: wasAutoContinued,
           finalizeUsed: wasFinalizeUsed,
-          publishable: isPublishableReply(safe),
+          publishable: isPublishableReply(safe, result.finishReason),
           contactComplete: !isContactSuspicious(safe),
         });
       }
 
-      replyPublishable = isPublishableReply(safe);
+      replyPublishable = isPublishableReply(safe, result.finishReason);
       if (
         wasAutoContinued ||
         wasFinalizeUsed ||
@@ -1722,27 +1540,6 @@ Deno.serve(async (req: Request) => {
 
     console.log(
       `[staysee-chat] depth_meta=${JSON.stringify({
-        runtimeMode: flatOrdinary ? "core_v2_flat_ordinary" : "depth_routed",
-        depthDiagnosticOnly: flatOrdinary,
-        depth: responseDepth,
-        depthReason: responseBudget.depthReason,
-        recentUserTurns: responseBudget.recentUserTurns,
-        emotionalMomentum: responseBudget.emotionalMomentum,
-        open_figure: responseBudget.openFigure.isOpen,
-        open_figure_kind: responseBudget.openFigure.kind,
-        open_figure_intensity: responseBudget.openFigure.intensity,
-        open_figure_confidence: responseBudget.openFigure.confidence,
-        open_figure_trigger: responseBudget.openFigure.trigger,
-        sessionProcessGuidanceInjected: sessionProcessGuidanceOn,
-        openFigureGuidanceInjected: false,
-        pauseInArcGuidanceInjected: pauseInArcGuidanceOn,
-        uncertaintyGuidanceInjected: false,
-        explicitClosureGuidanceInjected: explicitClosureGuidanceOn,
-        process_contact: processState.contact,
-        process_movement: processState.movement,
-        process_closure: processState.closure,
-        process_certainty: processState.certainty,
-        process_state_source: processState.source,
         structured_turn_mode: structuredDepthMeta.structured_turn_mode,
         structured_turn_enabled: structuredDepthMeta.structured_turn_enabled,
         structured_shadow_pct: structuredDepthMeta.structured_shadow_pct,
@@ -1758,31 +1555,8 @@ Deno.serve(async (req: Request) => {
         structured_open_figure: structuredDepthMeta.structured_open_figure,
         structured_open_figure_kind: structuredDepthMeta.structured_open_figure_kind,
         structured_model: structuredDepthMeta.structured_model,
-        userGenderGuidanceInjected: genderGuidanceOn,
-        userGrammaticalGender: genderResult.gender,
-        userGenderSource: genderResult.source,
       })}`
     );
-
-    // PR3c-1: persist processState_N after response (Turn N+1 will read it).
-    const sessionProcessStateWrite = {
-      processState: buildLegacySessionProcessState(processState),
-      ...(structuredDepthMeta.structured_attempted === true &&
-      structuredDepthMeta.structured_parse_ok === true &&
-      structuredDepthMeta.structured_process_contact &&
-      structuredDepthMeta.structured_process_movement &&
-      structuredDepthMeta.structured_process_closure &&
-      structuredDepthMeta.structured_process_certainty
-        ? {
-            processStateStructured: buildStructuredSessionProcessState({
-              contact: structuredDepthMeta.structured_process_contact,
-              movement: structuredDepthMeta.structured_process_movement,
-              closure: structuredDepthMeta.structured_process_closure,
-              certainty: structuredDepthMeta.structured_process_certainty,
-            }),
-          }
-        : {}),
-    };
 
     const responseMs = Date.now() - startMs;
     const totalTokens = result.promptTokens + result.completionTokens;
@@ -2211,19 +1985,6 @@ Deno.serve(async (req: Request) => {
                   console.error("[staysee-chat] summary update failed:", sumErr);
                 }
               })()
-            : Promise.resolve(),
-
-          // PR3c-1 — session processState_N (metadata column only; summary untouched)
-          conversationId &&
-          result.content &&
-          !isCalmFallbackContent
-            ? persistSessionProcessState(
-                svc,
-                conversationId,
-                sessionProcessStateWrite
-              ).catch((err) =>
-                console.error("[staysee-chat] session_process_state_write:", err)
-              )
             : Promise.resolve(),
 
           // OpenRouter usage analytics (ai_usage_logs)

@@ -1,12 +1,12 @@
 /**
- * Reply completion routes: length continuation vs stop-not-publishable repair/retry.
+ * Reply completion routes. A reply the model finished on its own is left as it is. A reply cut by the length limit is continued once
+ * (and closed by a short finalize call only if the continuation was itself cut). Nothing is repaired, generated again or removed by
+ * phrases (owner's rule, 20.11.2026: no decisions by words; see completeReply.ts).
  */
 
 import {
-  ensurePublishableReply,
   isPublishableReply,
   needsAutoContinue,
-  needsStopNotPublishableRepair,
   MAX_AUTO_CONTINUE_SEGMENTS,
   MAX_FINALIZE_ATTEMPTS,
   AUTO_CONTINUE_USER_PROMPT,
@@ -17,17 +17,13 @@ import { explainPublishability } from "./replyPublishability.ts";
 import {
   mergeContinuationWithoutOverlap,
   polishMergedReply,
-  stripOrphanContinueMarkers,
   type MergeStrategy,
 } from "./mergeContinuation.ts";
 import { isDuplicateContinuation } from "./continuationGuards.ts";
 
 export type CompletionRoute =
   | "normal_publishable"
-  | "length_truncation_continue"
-  | "stop_not_publishable_repair"
-  | "stop_not_publishable_retry_whole"
-  | "stop_not_publishable_fail_closed";
+  | "length_truncation_continue";
 
 export interface SegmentSnapshot {
   finishReason?: string | null;
@@ -36,6 +32,10 @@ export interface SegmentSnapshot {
   publishabilityFailReasons: string[];
 }
 
+/**
+ * The fields about repair, a second generation and phrase-based clean-up are kept only so that the shape of the log row does not
+ * change; the routes that set them are gone, so they stay empty or false.
+ */
 export interface ReplyRecoveryDiagnostics {
   completionRoute: CompletionRoute;
   autoContinueTriggerReason: "finish_reason_length" | null;
@@ -76,7 +76,7 @@ export function snapshotSegment(
   content: string,
   finishReason?: string | null
 ): SegmentSnapshot {
-  const explained = explainPublishability(content);
+  const explained = explainPublishability(content, finishReason);
   return {
     finishReason: finishReason ?? null,
     contentLength: content.trim().length,
@@ -85,128 +85,32 @@ export function snapshotSegment(
   };
 }
 
-/** Local structural repair only — no new model content. */
-export function applyLocalStructuralRepair(content: string): string {
-  let t = content.trim();
-  if (!t) return t;
-  t = stripOrphanContinueMarkers(t);
-  t = t.replace(/([.!?…])\1+/gu, "$1");
-  t = t.replace(/\n{3,}/g, "\n\n");
-  t = t.replace(/[ \t]+\n/g, "\n");
-  return ensurePublishableReply(t);
-}
-
-const CLOSURE_LINE_RE =
-  /^(?:Спи[,.]?|Ты молодец[.!]?|Отдыхай[.!]?|Пусть будет покой[.!]?)/iu;
-
-const RECAP_OPENING_RE =
-  /^Ты сегодня прошла|^Ты всё выключила|^Ты выгнала|^Из этого места|^Ты только начала этот путь/iu;
-
-export function detectDuplicateClosure(text: string): boolean {
-  const paragraphs = text
-    .split(/\n\n+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (paragraphs.length < 2) return false;
-
-  let closureIdx = -1;
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i];
-    if (CLOSURE_LINE_RE.test(p) || /заслужила этот покой/i.test(p)) {
-      closureIdx = i;
-      break;
-    }
-  }
-  if (closureIdx < 0) return false;
-
-  for (let j = closureIdx + 1; j < paragraphs.length; j++) {
-    const next = paragraphs[j];
-    if (RECAP_OPENING_RE.test(next) || CLOSURE_LINE_RE.test(next)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** Route A only — remove recap paragraph(s) after an established closure. */
-export function repairDuplicateClosure(text: string): {
-  text: string;
-  repaired: boolean;
-  reason: string | null;
-} {
-  if (!detectDuplicateClosure(text)) {
-    return { text, repaired: false, reason: null };
-  }
-
-  const paragraphs = text
-    .split(/\n\n+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  let closureIdx = -1;
-  for (let i = 0; i < paragraphs.length; i++) {
-    const p = paragraphs[i];
-    if (CLOSURE_LINE_RE.test(p) || /заслужила этот покой/i.test(p)) {
-      closureIdx = i;
-      break;
-    }
-  }
-  if (closureIdx < 0) {
-    return { text, repaired: false, reason: null };
-  }
-
-  const kept = paragraphs.slice(0, closureIdx + 1);
-  const dropped = paragraphs.slice(closureIdx + 1).filter(
-    (p) => RECAP_OPENING_RE.test(p) || CLOSURE_LINE_RE.test(p)
-  );
-
-  if (dropped.length === 0) {
-    return { text, repaired: false, reason: null };
-  }
-
-  const repairedText = polishMergedReply(kept.join("\n\n"));
-  return {
-    text: repairedText,
-    repaired: true,
-    reason: "dropped_recap_after_closure",
-  };
-}
-
+/**
+ * Joins a continuation to the text before it. Nothing is removed by phrases (an earlier version dropped paragraphs that followed a
+ * goodbye, chosen by lists of words: not allowed). A continuation that only repeats the text is dropped by the caller
+ * (isDuplicateContinuation); here the two are joined.
+ */
 export function mergeLengthContinuation(
   accumulated: string,
   continuation: string
-): { content: string; mergeStrategy: MergeStrategy; duplicateClosureDetected: boolean; duplicateClosureRepaired: boolean; duplicateClosureRepairReason: string | null } {
+): { content: string; mergeStrategy: MergeStrategy } {
   if (isDuplicateContinuation(accumulated, continuation)) {
-    const guard = repairDuplicateClosure(accumulated);
-    return {
-      content: guard.text,
-      mergeStrategy: "paragraph_sep",
-      duplicateClosureDetected: guard.repaired,
-      duplicateClosureRepaired: guard.repaired,
-      duplicateClosureRepairReason: guard.reason,
-    };
+    return { content: accumulated, mergeStrategy: "paragraph_sep" };
   }
-
   const merged = mergeContinuationWithoutOverlap(accumulated, continuation);
-  const content = polishMergedReply(merged.text);
-  const dup = repairDuplicateClosure(content);
-  return {
-    content: dup.text,
-    mergeStrategy: merged.strategy,
-    duplicateClosureDetected: detectDuplicateClosure(content),
-    duplicateClosureRepaired: dup.repaired,
-    duplicateClosureRepairReason: dup.reason,
-  };
+  return { content: polishMergedReply(merged.text), mergeStrategy: merged.strategy };
 }
 
+/**
+ * The route of a reply: only a reply the model was cut in (finish_reason "length") that does not already end on a sentence mark is
+ * continued. Everything else, including a reply that stopped by itself without a mark, goes out as it is.
+ */
 export function classifyInitialRoute(
   content: string,
   finishReason?: string | null
 ): CompletionRoute {
-  if (isPublishableReply(content)) return "normal_publishable";
-  if (needsAutoContinue(content, finishReason)) return "length_truncation_continue";
-  if (needsStopNotPublishableRepair(content, finishReason)) {
-    return "stop_not_publishable_repair";
+  if (needsAutoContinue(content, finishReason ?? undefined) && !isPublishableReply(content)) {
+    return "length_truncation_continue";
   }
   return "normal_publishable";
 }
@@ -239,8 +143,6 @@ export interface RunReplyRecoveryRoutesInput {
   firstSegment: { content: string; finishReason?: string | null };
   baseModelMessages: RecoveryChatMessage[];
   unavailableMessage: string;
-  /** Used only for stop+not_publishable fail-closed; defaults to unavailableMessage */
-  replyNotRecoveredMessage?: string;
   callModel: RecoveryModelCall;
   onSegmentMerge?: (meta: SegmentMergeHookMeta) => void;
 }
@@ -264,7 +166,7 @@ export interface RunReplyRecoveryRoutesResult {
 
 /**
  * Orchestrates reply recovery routes after the first provider segment.
- * Length truncation may continue+merge; stop+not_publishable uses repair/retry/fail — never merge.
+ * Length truncation may continue+merge; a reply that stopped by itself is never repaired, merged or generated again.
  */
 export async function runReplyRecoveryRoutes(
   input: RunReplyRecoveryRoutesInput
@@ -272,7 +174,6 @@ export async function runReplyRecoveryRoutes(
   const {
     baseModelMessages,
     unavailableMessage,
-    replyNotRecoveredMessage = unavailableMessage,
     callModel,
     onSegmentMerge,
   } = input;
@@ -362,14 +263,6 @@ export async function runReplyRecoveryRoutes(
       lastMergeStrategy = merged.mergeStrategy;
       lastOverlapWords = 0;
       mergeStrategies.push(merged.mergeStrategy);
-      if (merged.duplicateClosureDetected) {
-        recoveryDiagnostics.duplicateClosureDetected = true;
-      }
-      if (merged.duplicateClosureRepaired) {
-        recoveryDiagnostics.duplicateClosureRepaired = true;
-        recoveryDiagnostics.duplicateClosureRepairReason =
-          merged.duplicateClosureRepairReason;
-      }
       recoveryDiagnostics.mergeStrategy = merged.mergeStrategy;
       recoveryDiagnostics.mergedContentLength = merged.content.length;
 
@@ -387,47 +280,10 @@ export async function runReplyRecoveryRoutes(
       content = merged.content;
       finishReason = retry.finishReason ?? finishReason;
     }
-  } else if (initialRoute === "stop_not_publishable_repair") {
-    recoveryDiagnostics.stopNotPublishableReasons =
-      recoveryDiagnostics.segment1?.publishabilityFailReasons ?? [];
-
-    const repaired = applyLocalStructuralRepair(firstSegmentContent);
-    if (isPublishableReply(repaired)) {
-      content = repaired;
-      recoveryDiagnostics.repairApplied = true;
-      recoveryDiagnostics.mergedContentLength = repaired.length;
-    } else {
-      // Retry whole: same base context as initial request — no rejected segment1.
-      const retryWhole = await callModel(baseModelMessages, "retry_whole");
-      recoveryDiagnostics.segmentCount = 2;
-      recoveryDiagnostics.segment2 = snapshotSegment(
-        retryWhole.content?.trim() ?? "",
-        retryWhole.finishReason
-      );
-
-      const retryBody = retryWhole.content?.trim() ?? "";
-      if (
-        retryBody &&
-        retryBody !== unavailableMessage &&
-        retryBody !== replyNotRecoveredMessage &&
-        isPublishableReply(retryBody)
-      ) {
-        content = retryBody;
-        finishReason = retryWhole.finishReason ?? finishReason;
-        recoveryDiagnostics.completionRoute = "stop_not_publishable_retry_whole";
-        recoveryDiagnostics.retryWholeUsed = true;
-        recoveryDiagnostics.mergedContentLength = retryBody.length;
-        wasTruncated = retryWhole.finishReason === "length";
-      } else {
-        content = replyNotRecoveredMessage;
-        recoveryDiagnostics.completionRoute = "stop_not_publishable_fail_closed";
-        recoveryDiagnostics.failClosedUsed = true;
-      }
-    }
   }
 
-  // Finalize is only allowed after real length-continuation. For stop+not_publishable,
-  // use repair/retry/fail-closed; never append a second model call to a stopped segment.
+  // Finalize is only allowed after a real length continuation that was itself cut; never append a second model call to a segment
+  // the model finished on its own.
   while (
     content &&
     wasAutoContinued &&
@@ -501,4 +357,4 @@ export async function runReplyRecoveryRoutes(
   };
 }
 
-export { needsAutoContinue, needsStopNotPublishableRepair };
+export { needsAutoContinue };
