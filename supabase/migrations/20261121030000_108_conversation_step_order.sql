@@ -53,7 +53,7 @@ DECLARE v_user uuid:=auth.uid(); v_order uuid[]; v_index integer; v_neighbor int
 BEGIN
  IF p_direction IS NULL OR p_direction NOT IN ('up','down') THEN RAISE EXCEPTION 'invalid_direction'; END IF;
  PERFORM 1 FROM public.user_usage_tiers WHERE user_id=v_user FOR UPDATE;
- IF NOT FOUND OR NOT public.conversation_full_access_for(v_user) OR NOT EXISTS(
+ IF NOT FOUND OR NOT public.conversation_paid_features_for(v_user) OR NOT EXISTS(
   SELECT 1 FROM public.conversations WHERE id=p_conversation_id AND user_id=v_user AND is_active IS TRUE)
  THEN RAISE EXCEPTION 'conversation_locked'; END IF;
  v_order:=public.normalized_conversation_order(v_user);
@@ -67,6 +67,20 @@ BEGIN
  -- not freeze the previous top while accepting the new order.
  UPDATE public.user_usage_tiers SET conversation_order=v_order,free_conversation_id=v_order[1] WHERE user_id=v_user;
  RETURN true;
+END;
+$$;
+
+-- Older app builds retain their move-top RPC, but a reading-only override is
+-- not permission to reorder (nor to choose another free archive anchor).
+CREATE OR REPLACE FUNCTION public.move_my_conversation_to_top(p_conversation_id uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v_count integer;
+BEGIN
+ PERFORM 1 FROM public.user_usage_tiers WHERE user_id=auth.uid() FOR UPDATE;
+ IF NOT FOUND OR NOT public.conversation_paid_features_for(auth.uid()) THEN RAISE EXCEPTION 'conversation_locked'; END IF;
+ UPDATE public.conversations SET manual_sort_at=clock_timestamp()
+ WHERE id=p_conversation_id AND user_id=auth.uid() AND is_active IS TRUE;
+ GET DIAGNOSTICS v_count=ROW_COUNT; RETURN v_count=1;
 END;
 $$;
 

@@ -1,11 +1,10 @@
 // Isolated PostgreSQL fixture, never reads env or connects to an external DB.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-const { PGlite } = await import(new URL('../../tmp/robokassa-test/runtime/node_modules/@electric-sql/pglite/dist/index.js', import.meta.url).href);
 export const uid='11111111-1111-4111-8111-111111111111', other='22222222-2222-4222-8222-222222222222';
 export const oldest='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', middle='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', top='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const dir=new URL('../../supabase/migrations/',import.meta.url);
 export async function archiveDatabase(database) {
- const db=database??new PGlite();
+ const db=database??new (await import(new URL('../../tmp/robokassa-test/runtime/node_modules/@electric-sql/pglite/dist/index.js',import.meta.url).href)).PGlite();
  await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
  CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO authenticated;
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;

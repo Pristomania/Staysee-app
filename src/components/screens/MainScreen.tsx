@@ -70,13 +70,13 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
   const limitTimerRef = useRef<number | undefined>(undefined);
 
   const fetchConversations = useCallback(async () => {
-    if (!userId||!planLoaded) return;
+    if (!userId||!planLoaded) return false;
     const version=++fetchVersion.current;
     try{
      const data=await client.list(userId);
-     if(currentKey.current!==identityKey||version!==fetchVersion.current)return;
-     setConversations(data);setListKey(identityKey);setError('');
-    }catch{if(currentKey.current===identityKey)setError('Не удалось загрузить беседы. Попробуйте ещё раз.');}
+     if(currentKey.current!==identityKey||version!==fetchVersion.current)return false;
+     setConversations(data);setListKey(identityKey);setError('');return true;
+    }catch{if(currentKey.current===identityKey)setError('Не удалось загрузить беседы. Попробуйте ещё раз.');return false;}
     finally{if(currentKey.current===identityKey)setLoading(false);}
   }, [client,identityKey,planLoaded,setConversations,userId]);
 
@@ -201,15 +201,29 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
    const neighbor=conversations[index+(direction==='up'?-1:1)];
    if(index<0||!neighbor)return;
    const ticket={key:identityKey};moveTicket.current=ticket;setBusy(true);setError('');
-   try{await client.moveStep(id,direction,neighbor.id);if(currentKey.current===ticket.key&&moveTicket.current===ticket)await fetchConversations();}
+   try{
+    await client.moveStep(id,direction,neighbor.id);
+    if(currentKey.current===ticket.key&&moveTicket.current===ticket){
+     const refreshed=await fetchConversations();
+     if(!refreshed&&currentKey.current===ticket.key&&moveTicket.current===ticket){setListKey('');setPreviews({});}
+    }
+   }
    catch(err){
     if(currentKey.current===ticket.key&&moveTicket.current===ticket){
-     if(err instanceof Error&&err.message==='conversation_locked')setOrderingId(null);
-     await fetchConversations();
-     if(currentKey.current===ticket.key&&moveTicket.current===ticket)setError(err instanceof Error&&err.message==='conversation_order_changed'
-      ?'Порядок бесед изменился. Список обновлён — выберите направление ещё раз.'
-      :err instanceof Error&&err.message==='conversation_locked'?'Перестановка доступна только с действующим тарифом. Ваши данные сохранены.'
-      :'Не удалось сохранить порядок. Проверьте список и попробуйте ещё раз.');
+     // A refused/uncertain mutation revokes the old list authority immediately,
+     // including previews. A failed refresh must never leave stale readable rows.
+     setListKey('');setPreviews({});
+     const locked=err instanceof Error&&err.message==='conversation_locked';
+     if(locked){setOrderingId(null);void onRetryPlan();}
+     const refreshed=await fetchConversations();
+     if(currentKey.current===ticket.key&&moveTicket.current===ticket){
+      if(locked)setError('Перестановка доступна только с действующим тарифом. Ваши данные сохранены.'+(refreshed?'':' Не удалось обновить список.'));
+      else if(err instanceof Error&&err.message==='conversation_order_changed')setError(refreshed
+       ?'Порядок бесед изменился. Список обновлён — выберите направление ещё раз.'
+       :'Порядок бесед мог измениться. Не удалось обновить список. Нажмите «Обновить список».');
+      else setError(refreshed?'Не удалось подтвердить перемещение. Список обновлён — проверьте порядок.'
+       :'Не удалось подтвердить перемещение и обновить список. Нажмите «Обновить список».');
+     }
     }
    }
    finally{if(moveTicket.current===ticket){moveTicket.current=null;if(currentKey.current===ticket.key)setBusy(false);}}

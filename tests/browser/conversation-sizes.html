@@ -3,12 +3,18 @@ document.querySelector('#run').onclick=async()=>{
  const results=[];const pause=()=>new Promise(r=>setTimeout(r,100));
  try{for(const frame of document.querySelectorAll('iframe')){
   const doc=frame.contentDocument;
-  const click=text=>{const button=[...doc.querySelectorAll('button')].find(b=>b.textContent===text);if(!button)throw Error('missing '+text);button.click();};
+  const click=text=>{const button=[...doc.querySelectorAll('button')].find(b=>b.textContent===text||b.getAttribute('aria-label')===text);if(!button)throw Error('missing '+text);button.click();};
   for(const label of ['1 беседа','3 беседы','30 бесед']){
    click(label);await pause();click('Замер');await pause();
    const r=JSON.parse(doc.querySelector('#result').textContent);
    results.push({viewport:r.viewport,count:r.order.length,height:r.height,lastBottom:Math.round(r.lastBottom),pass:r.height<=Math.max(r.viewport[1],r.lastBottom+64)});
   }
+  click('Меню беседы «Тестовая беседа 15»');await pause();click('Изменить порядок');await pause();
+  doc.querySelector('[aria-label="Порядок беседы"]').scrollIntoView({block:'center',behavior:'instant'});await pause();click('Замер');await pause();
+  const before=JSON.parse(doc.querySelector('#result').textContent);
+  for(let n=0;n<4;n++){click('Переместить беседу на одну позицию вверх');await pause();click('Переместить беседу на одну позицию вниз');await pause();}
+  click('Замер');await pause();const after=JSON.parse(doc.querySelector('#result').textContent);
+  results.push({phase:'after8moves',viewport:after.viewport,height:after.height,lastBottom:Math.round(after.lastBottom),beforeScroll:before.scroll,afterScroll:after.scroll,pass:after.height===before.height&&after.height<=Math.max(after.viewport[1],after.lastBottom+64)&&Math.abs(after.scroll-before.scroll)<=1});
  }}catch(error){results.push({error:String(error)});}
  document.querySelector('#results').textContent=JSON.stringify(results,null,2);
 };

@@ -77,3 +77,14 @@ test('a move accepted under the account lock freezes its chosen top even when ex
   assert.deepEqual((await rpc(db,'list_my_conversations')).filter(r=>r.can_read).map(r=>r.id),[B]);
  }finally{await db.close();}
 });
+for(const [name,args] of [['move_my_conversation_step',[B,'up',C]],['move_my_conversation_to_top',[B]]]){
+ test(`${name}: free multiroom reading override does not grant paid reorder rights`,async()=>{
+  const db=await fixture();try{
+   await db.query("UPDATE user_usage_tiers SET tier='free',access_source='manual',paid_access_until=NULL,max_conversations_override=5 WHERE user_id=$1",[uid]);
+   assert.equal((await rpc(db,'list_my_conversations')).filter(r=>r.can_read).length,3);
+   assert.equal((await rpc(db,'get_my_conversation_access',[B])).paidFeatures,false);
+   await assert.rejects(rpc(db,name,args),/conversation_locked/);
+   assert.deepEqual(await ids(db),[C,B,A]);
+  }finally{await db.close();}
+ });
+}

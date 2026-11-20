@@ -22,15 +22,28 @@ async function locked(mutator,second){
  const child=spawn('docker',['exec','-i','--user','postgres',container,'psql','-h','/tmp','-U','postgres','-d','postgres','-qAt','-v','ON_ERROR_STOP=1'],{stdio:['pipe','pipe','pipe']});
  let output='',error='';child.stdout.on('data',data=>{output+=data;if(output.includes('LOCKED'))release();});child.stderr.on('data',data=>{error+=data;});
  const completed=new Promise(resolve=>child.on('close',code=>resolve({code,error})));
- child.stdin.end(`BEGIN; SET statement_timeout='5s'; SELECT 1 FROM user_usage_tiers WHERE user_id='${uid}' FOR UPDATE; ${mutator} SELECT 'LOCKED'; SELECT pg_sleep(0.4); COMMIT;`);
+ child.stdin.write(`BEGIN; SET statement_timeout='10s'; SELECT 1 FROM user_usage_tiers WHERE user_id='${uid}' FOR UPDATE; ${mutator} SELECT 'LOCKED';\n`);
  const timer=setTimeout(()=>release(),6000);await ready;clearTimeout(timer);
  assert.ok(output.includes('LOCKED'),'first transaction failed before lock: '+error);
- const result=await connection(`SET statement_timeout='5s'; ${auth(second)}`);
- assert.equal((await completed).code,0,error);return result;
+ const name=`step-order-second-${process.pid}`;
+ const result=connection(`SET application_name='${name}'; SET statement_timeout='10s'; ${auth(second)}`);
+ try{
+  let observed=false;
+  for(let i=0;i<40;i++){
+   observed=psql(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name='${name}' AND wait_event_type='Lock');`)==='t';
+   if(observed)break;await new Promise(r=>setTimeout(r,25));
+  }
+  assert.ok(observed,'second backend must actually wait on the first transaction before COMMIT');
+  // Commit ONLY after observing overlap. Delay also lands the expiry case past its deadline.
+  child.stdin.end('SELECT pg_sleep(0.2); COMMIT;\n');
+  assert.equal((await completed).code,0,error);return await result;
+ }finally{if(!child.stdin.writableEnded)child.stdin.end('ROLLBACK;\n');}
 }
 test('independent PostgreSQL sessions serialize adjacent moves, expiry, activity and deletion',async()=>{
  let created=false;
  try{
+  // Refuse a missing image instead of silently downloading a large dependency.
+  execFileSync('docker',['image','inspect',image,'--format','{{.Id}}'],{stdio:['ignore','pipe','pipe'],timeout:10000});
   // Bypass Supabase's account/bootstrap scripts: this fixture supplies its own schema/roles.
   execFileSync('docker',['run','-d','--name',container,'--network','none','--memory','512m','--user','postgres','--entrypoint','/bin/sh',image,'-c',"initdb -D /tmp/step-order-db --auth=trust && exec postgres -D /tmp/step-order-db -c shared_preload_libraries='' -c unix_socket_directories=/tmp -c listen_addresses='' -c max_connections=10 -c shared_buffers=16MB"],{stdio:['ignore','pipe','pipe'],timeout:30000});created=true;
   let ready=false,lastError='';for(let n=0;n<70;n++){try{psql('SELECT 1;');ready=true;break;}catch(error){lastError=String(error.stderr??error.message);await new Promise(r=>setTimeout(r,200));}}
