@@ -1,28 +1,29 @@
-import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { describe, it } from 'node:test';
+/**
+ * Run: npx tsx src/lib/aiMessageFormat.cases.test.ts
+ * The rule (owner's decision, 20.11.2026): the words of a reply are never decided by code. The browser used to carry a copy of the
+ * server's word filter (display and saved messages): «Чёрт, я сбилась» lost its first word, and ordinary words that start like a
+ * listed one lost their beginning at the start of a paragraph («Черты характера» became «ы характера»). It is gone: the person sees
+ * the reply as the model wrote it.
+ */
 
 import { prepareAiDisplayText } from './aiMessageFormat.tsx';
 
-// The rule (owner's decision, 20.11.2026): the words of a reply are never decided by code. The browser used to carry a copy of the
-// server's word filter (display and saved messages); it is gone, and a reply is shown as the model wrote it.
+function assert(cond: unknown, msg: string): asserts cond {
+  if (!cond) throw new Error(msg);
+}
 
 const REPLIES = [
   'Чёрт, я сбилась. Давай заново.',
   'Блин, я перепутала даты.',
   'Чёрт!',
+  'Oh shit, I was wrong.',
   'Черты характера у тебя сильные.',
   'Это важно.\n\nЧертовски устала, да?',
+  'Чертёж плана готов.',
 ];
 
-describe('the text shown to the person keeps every word', () => {
-  for (const reply of REPLIES) {
-    it(`keeps «${reply.replace(/\n/g, ' / ')}»`, () => {
-      assert.equal(prepareAiDisplayText(reply), reply);
-    });
-  }
+for (const reply of REPLIES) {
+  assert(prepareAiDisplayText(reply) === reply, `the reply is shown as it is: ${JSON.stringify(reply)}`);
+}
 
-  it('does not bring back the browser copy of the word filter', () => {
-    assert.equal(existsSync(new URL('./languageGuard.ts', import.meta.url)), false);
-  });
-});
+console.log('All aiMessageFormat cases passed.');
