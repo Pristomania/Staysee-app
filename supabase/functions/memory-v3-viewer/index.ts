@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { resolveVerifiedChatUser } from "../_shared/authUser.ts";
 import { makeServiceClient } from "../_shared/cost.ts";
+import { checkConversationAccess } from "../_shared/conversationAccess.ts";
 import { resolveMemoryV3DialogueEligibility } from "../_shared/memoryV3/dialogueMode.ts";
 import {
   projectMemoryV3ViewerItems,
@@ -119,6 +120,15 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Commercial lock only for reads/exports; own delete actions above remain available.
+    const accessClient = createClient(supabaseUrl,supabaseAnonKey,{
+      global:{headers:{Authorization:`Bearer ${verifiedUser.authToken}`}},
+      auth:{persistSession:false,autoRefreshToken:false},
+    });
+    const access = await checkConversationAccess(accessClient,body.conversationId?.trim() || null);
+    if (!access?.paidFeatures || (body.conversationId && !access.allowed)) return new Response(JSON.stringify({error:access ? 'not_in_plan' : 'access_check_unavailable'}),{
+      status:access ? 403 : 503,headers:{...corsHeaders,'Content-Type':'application/json'},
+    });
     if (body.action === "export") {
       const { data: lifecycleRaw, error: lifecycleError } = await svc.rpc(
         "load_memory_v3_lifecycle_viewer_items",

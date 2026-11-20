@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { checkConversationAccess } from "../_shared/conversationAccess.ts";
 import {
   hasRecallIntent,
   searchConversationArchive,
@@ -763,6 +764,13 @@ Deno.serve(async (req: Request) => {
     const rateLimitResult = await checkRateLimit(userSupabase, userId);
     userTier = rateLimitResult.tier;
 
+    if (conversationId) {
+      const access = await checkConversationAccess(userSupabase, conversationId);
+      if (!access?.allowed) return new Response(JSON.stringify({error:access ? 'conversation_locked' : 'access_check_unavailable',userMessage:'Беседа сейчас недоступна. Вернись к списку бесед.'}), {
+        status:access ? 403 : 503,headers:{...corsHeaders,'Content-Type':'application/json'},
+      });
+    }
+
     if (!rateLimitResult.allowed) {
       const mapped = mapQuotaDenyResponse(rateLimitResult.reason, {
         suspended: CALM_ERRORS.suspended,
@@ -896,13 +904,16 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const reserveResult = await reserveAiRequest(quotaServiceClient, userId);
+    const reserveResult = await reserveAiRequest(quotaServiceClient, userId, conversationId);
     if (!reserveResult.allowed) {
+      if (reserveResult.reason === 'conversation_locked') return new Response(JSON.stringify({error:'conversation_locked',userMessage:'Беседа будет доступна после оплаты.'}), {
+        status:403,headers:{...corsHeaders,'Content-Type':'application/json'},
+      });
       const mapped = mapQuotaDenyResponse(reserveResult.reason, {
         suspended: CALM_ERRORS.suspended,
         rateLimit: CALM_ERRORS.rateLimit,
-        freeUsedUp: CALM_ERRORS.freeUsedUp,
-        monthUsedUp: CALM_ERRORS.monthUsedUp,
+        freeUsedUp: reserveResult.canRenewMessages === false ? CALM_ERRORS.balanceUsedUp : CALM_ERRORS.freeUsedUp,
+        monthUsedUp: reserveResult.canRenewMessages === false ? CALM_ERRORS.balanceUsedUp : CALM_ERRORS.monthUsedUp,
       }, reserveResult.tier);
       console.warn(
         `[staysee-chat] atomic reserve deny for user ${userId}: ${reserveResult.reason}`,
@@ -912,6 +923,9 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // The atomic guard may have settled expiry after the preliminary check.
+    userTier = reserveResult.tier;
 
     // Durable memory corrections by word patterns were removed here on 20.11.2026 (owner's rule: no decisions by words in app code).
     // The table memory_corrections never got a single row; a wrong remembered fact is the job of the memory itself (Memory V3).

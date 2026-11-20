@@ -45,7 +45,7 @@ describe("the chat", () => {
 
   it("warns from ten messages left and refreshes the counter after every answered message", () => {
     assert.match(chat, /counter && counter\.warn && !counter\.unlimited && \(\s*<LowMessagesNotice counter=\{counter\} \/>/);
-    const save = chat.indexOf(".update({ last_message_at: now })");
+    const save = chat.indexOf("await conversationClient.touch(convId)");
     const refresh = chat.indexOf("void refreshPlan();", save);
     assert.ok(save > 0 && refresh > save, "the counter is read again after the turn is saved");
   });
@@ -77,18 +77,24 @@ describe("the cabinet", () => {
 });
 
 describe("what the audit found", () => {
-  it("a failed read of the plan keeps what is known instead of unlocking everything", () => {
-    const context = src("context/PlanContext.tsx");
-    assert.match(context, /if \(next\) setRow\(next\);/);
-    assert.doesNotMatch(context, /setRow\(await fetchUsageRow/);
+  it("a failed read of the plan keeps known rights until their verified deadline", async () => {
+    const {BillingSnapshotController}=await import('../../../src/lib/billingSnapshot.ts');
+    let failed=false;
+    const model=new BillingSnapshotController('own',async()=>{
+      if(failed)throw Error('offline');
+      return {version:1,userId:'own',serverNow:'2026-11-20T12:00:00Z',usage:{tier:'basic',period_requests_used:0,period_started_at:'2026-11-01T00:00:00Z',last_request_at:null,unlimited_usage:false,max_conversations_override:null,access_source:'manual',paid_access_until:null,first_real_purchase_at:null},packs:[]};
+    });
+    try {await model.refresh();failed=true;await model.refresh();assert.equal(model.state.tier,'basic');assert.equal(model.state.loaded,true);}finally{model.dispose();}
   });
 
-  it("the number of conversations comes from the database (the plan or a number given by hand), not from a list in the app", () => {
+  it("the number of conversations comes from the database (the plan or a number given by hand), not from a list in the app", async () => {
     const rooms = src("lib/roomLimits.ts");
     assert.doesNotMatch(rooms, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, "no person's id in the app");
     assert.match(src("context/PlanContext.tsx"), /getMaxRooms\(tier, row\?\.max_conversations_override\)/);
     const main = src("components/screens/MainScreen.tsx");
-    assert.match(main, /canCreateRoom\(conversations\.length, maxConversations\)/);
+    const {canCreateFromConversationList}=await import('../../../src/lib/roomLimits.ts');
+    assert.equal(canCreateFromConversationList([{can_read:false}],1),true,'closed archives do not consume new free slot');
+    assert.equal(canCreateFromConversationList([{can_read:true}],1),false,'one live free slot remains bounded');
     assert.doesNotMatch(main, /hasUnlimitedRooms/);
   });
 
@@ -115,7 +121,7 @@ describe("what the audit found", () => {
     const main = src("components/screens/MainScreen.tsx");
     assert.match(main, /limitTimerRef/);
     assert.match(main, /window\.clearTimeout\(limitTimerRef\.current\)/);
-    assert.equal((main.match(/setTimeout\(/g) ?? []).length, 1, "one timer, not one per tap");
+    assert.equal((main.match(/limitTimerRef\.current\s*=\s*window\.setTimeout\(/g) ?? []).length, 1, "one managed limit-notice timer; independent hold gesture has its own timer");
   });
 
   it("no document or text sends anybody to the policy address that never existed", () => {

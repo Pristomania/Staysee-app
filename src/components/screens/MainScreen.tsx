@@ -4,17 +4,19 @@ import { usePlan } from '../../context/PlanContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { User, Plus } from 'lucide-react';
+import { User, Plus, Lock, ArrowUp } from 'lucide-react';
+import {conversationClient} from '../../lib/conversationAccessBrowser';
+import type {PlanId} from '../../lib/plans';
+import type {Message} from '../../types';
+import {createHoldToReorder} from '../../lib/holdToReorder';
 import type { Conversation } from '../../types';
 import { GREETING } from './ChatScreen';
 import { FIRST_CONTACT_MESSAGE, isFirstConversation } from '../../lib/firstContact';
 import { insertChatMessage } from '../../lib/chatMessages';
 import { formatRelativeTime } from '../../lib/chatPresentation';
 import { AppContainer } from '../layout';
-import { filterVisibleConversations } from '../../lib/conversationFilters';
 import {
-  canCreateRoom,
-  getConversationFetchLimit,
+  canCreateFromConversationList,
   roomLimitNotice,
 } from '../../lib/roomLimits';
 
@@ -25,8 +27,23 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
-  const { tier, loaded: planLoaded, maxConversations } = usePlan();
+  const { tier, loaded: planLoaded, maxConversations,accessRevision } = usePlan();
   const { navigateTo, setMessages, conversations, setConversations } = useApp();
+  return <ConversationListScreen userId={user?.id??null} tier={tier} planLoaded={planLoaded} maxConversations={maxConversations}
+   revision={accessRevision} navigateTo={navigateTo} setMessages={setMessages} conversations={conversations} setConversations={setConversations}/>;
+}
+async function createBrowserRoom(userId:string):Promise<Conversation>{
+ const {data,error}=await supabase.from('conversations').insert({user_id:userId,title:''}).select('id,user_id,title,is_active,created_at,last_message_at').maybeSingle();
+ if(error||!data)throw Error(error?.message??'room_create_failed');return {...data,can_read:true};
+}
+/** Explicit application boundaries support production and isolated acceptance without live accounts. */
+export function ConversationListScreen({userId,tier,planLoaded,maxConversations,revision='',navigateTo,setMessages,conversations,setConversations,client=conversationClient,createRoom=createBrowserRoom}:{
+ userId:string|null;tier:PlanId;planLoaded:boolean;maxConversations:number;
+ revision?:string;
+ navigateTo:ReturnType<typeof useApp>['navigateTo'];setMessages:React.Dispatch<React.SetStateAction<Message[]>>;
+ conversations:Conversation[];setConversations:(rows:Conversation[])=>void;
+ client?:typeof conversationClient;createRoom?:(userId:string)=>Promise<Conversation>;
+}){
   const { theme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [limitReached, setLimitReached] = useState(false);
@@ -34,42 +51,45 @@ export function MainScreen() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [error,setError]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [listKey,setListKey]=useState('');
+  const identityKey=`${userId}:${tier}:${planLoaded}:${maxConversations}:${revision}`;
+  const currentKey=useRef(identityKey);currentKey.current=identityKey;
+  const fetchVersion=useRef(0);
+  useEffect(()=>{setBusy(false);setModal(null);setOpenMenuId(null);setError('');},[identityKey]);
   const menuRef = useRef<HTMLDivElement>(null);
   const limitTimerRef = useRef<number | undefined>(undefined);
 
   const fetchConversations = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('last_message_at', { ascending: false })
-      .limit(getConversationFetchLimit(maxConversations));
-    setConversations(filterVisibleConversations(data || []));
-    setLoading(false);
-  }, [maxConversations, setConversations, user]);
+    if (!userId||!planLoaded) return;
+    const version=++fetchVersion.current;
+    try{
+     const data=await client.list(userId);
+     if(currentKey.current!==identityKey||version!==fetchVersion.current)return;
+     setConversations(data);setListKey(identityKey);setError('');
+    }catch{if(currentKey.current===identityKey)setError('Не удалось загрузить беседы. Попробуйте ещё раз.');}
+    finally{if(currentKey.current===identityKey)setLoading(false);}
+  }, [client,identityKey,planLoaded,setConversations,userId]);
 
   useEffect(() => {
     void fetchConversations();
+    return()=>{fetchVersion.current+=1;};
   }, [fetchConversations]);
 
   useEffect(() => {
-    if (!conversations.length) return;
+    setPreviews({});
+    if (!planLoaded||listKey!==identityKey||!conversations.length) return;
+    let active=true;
     (async () => {
       // One round trip for every conversation's preview instead of one
       // query per conversation -- see load_conversation_last_messages
       // (migration 063) for why.
-      const { data, error } = await supabase.rpc('load_conversation_last_messages', {
-        p_conversation_ids: conversations.map((conv) => conv.id),
-      });
-      if (error) {
-        console.error('[main] load_conversation_last_messages:', error.message);
-        return;
-      }
-      setPreviews((data ?? {}) as Record<string, string>);
+      const data=await client.previews(conversations.filter(conv=>conv.can_read===true).map(conv=>conv.id)).catch(()=>({}));
+      if(active&&currentKey.current===identityKey)setPreviews((data ?? {}) as Record<string, string>);
     })();
-  }, [conversations]);
+    return()=>{active=false;};
+  }, [client,conversations,planLoaded,listKey,identityKey]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -94,6 +114,8 @@ export function MainScreen() {
   }
 
   async function openRoom(conv: Conversation) {
+    if(suppressClickRef.current){suppressClickRef.current=false;return;}
+    if(conv.can_read!==true){setError('Ваши данные сохранены. Беседа будет доступна после оплаты.');return;}
     navigateTo('chat', { conversation: conv });
   }
 
@@ -106,68 +128,89 @@ export function MainScreen() {
   }
 
   async function createNewRoom() {
-    // Until the plan is read the server decides: it refuses a place above the number of the plan.
-    if (planLoaded && !canCreateRoom(conversations.length, maxConversations)) {
+    if(!userId||!planLoaded||busy||listKey!==identityKey)return;
+    if (!canCreateFromConversationList(conversations, maxConversations)) {
       showLimitNotice();
       return;
     }
-    const { data, error } = await supabase
-      .from('conversations')
-      .insert({ user_id: user!.id, title: '' })
-      .select()
-      .maybeSingle();
-    if (error && /conversation_limit_reached/.test(error.message)) {
-      showLimitNotice();
-      return;
-    }
-    if (data) {
+    setBusy(true);setError('');const key=identityKey;
+    try{const data=await createRoom(userId);
+      if(currentKey.current!==key)return;
       if (!loading && isFirstConversation(conversations.length)) {
         // The very first conversation of the account opens with the introduction, saved as a message of Stacy: it is shown like
         // any message and the model reads it as history with the first answer.
-        const introduction = await insertChatMessage(data.id, 'ai', FIRST_CONTACT_MESSAGE, { userId: user!.id });
+        const introduction = await insertChatMessage(data.id, 'ai', FIRST_CONTACT_MESSAGE, { userId });
+        if(currentKey.current!==key)return;
         setMessages([introduction.message ?? greetingFor(data.id)]);
       } else {
         setMessages([greetingFor(data.id)]);
       }
       navigateTo('chat', { conversation: data });
-    }
+    }catch(err){if(currentKey.current===key){if(err instanceof Error&&/conversation_limit_reached/.test(err.message))showLimitNotice();else setError('Не удалось создать беседу. Попробуйте ещё раз.');}}
+    finally{if(currentKey.current===key)setBusy(false);}
   }
 
   function openMenu(e: React.MouseEvent, conv: Conversation) {
     e.stopPropagation();
+    if(busy)return;
     setOpenMenuId(openMenuId === conv.id ? null : conv.id);
   }
 
   function startRename(conv: Conversation) {
+    if(busy)return;setError('');
     setRenameValue(conv.title || '');
     setModal({ type: 'rename', conv });
     setOpenMenuId(null);
   }
 
   function startDelete(conv: Conversation) {
+    if(busy)return;setError('');
     setModal({ type: 'delete', conv });
     setOpenMenuId(null);
   }
 
   async function confirmRename() {
-    if (!modal || modal.type !== 'rename') return;
+    if (!modal || modal.type !== 'rename'||busy) return;
     const title = renameValue.trim() || 'Новая беседа';
-    await supabase.from('conversations').update({ title }).eq('id', modal.conv.id);
-    setConversations(conversations.map(c => c.id === modal.conv.id ? { ...c, title } : c));
-    setModal(null);
+    setBusy(true);setError('');const key=identityKey;
+    try{await client.rename(modal.conv.id,title);if(currentKey.current===key){setModal(null);await fetchConversations();}}
+    catch{if(currentKey.current===key)setError('Не удалось переименовать беседу. Попробуйте ещё раз.');}
+    finally{if(currentKey.current===key)setBusy(false);}
   }
 
   async function confirmDelete() {
-    if (!modal || modal.type !== 'delete') return;
+    if (!modal || modal.type !== 'delete'||busy) return;
     const id = modal.conv.id;
-    // Permanently delete messages first, then the conversation (cascade also handles it, but explicit is safer)
-    await supabase.from('messages').delete().eq('conversation_id', id);
-    await supabase.from('conversations').delete().eq('id', id);
-    setConversations(conversations.filter(c => c.id !== id));
-    setModal(null);
+    setBusy(true);setError('');const key=identityKey;
+    try{await client.remove(id);if(currentKey.current===key){setConversations(conversations.filter(c=>c.id!==id));setModal(null);await fetchConversations();}}
+    catch{if(currentKey.current===key)setError('Не удалось удалить беседу. Она остаётся в списке. Попробуйте ещё раз.');}
+    finally{if(currentKey.current===key)setBusy(false);}
   }
 
-  if (loading) {
+  const canReorder=planLoaded&&tier!=='free';
+  const topRoomRef=useRef<HTMLDivElement|null>(null);
+  const suppressClickRef=useRef(false);
+  const [heldId,setHeldId]=useState<string|null>(null);
+  const moveRef=useRef(moveTop);moveRef.current=moveTop;
+  const hold=useRef<ReturnType<typeof createHoldToReorder>|null>(null);
+  if(!hold.current)hold.current=createHoldToReorder({
+   schedule:fn=>window.setTimeout(fn,350),cancel:id=>window.clearTimeout(id),onArmed:setHeldId,
+   isTop:y=>{const rect=topRoomRef.current?.getBoundingClientRect();return !!rect&&y>=rect.top-24&&y<=rect.bottom+24;},
+   onMove:id=>void moveRef.current(id),
+  });
+  useEffect(()=>{
+   const prevent=(event:TouchEvent)=>{if(hold.current?.isArmed())event.preventDefault();};
+   document.addEventListener('touchmove',prevent,{passive:false});
+   return()=>{hold.current?.cancel();document.removeEventListener('touchmove',prevent);};
+  },[]);
+  async function moveTop(id:string){
+   if(!canReorder||busy)return;setBusy(true);setError('');const key=identityKey;
+   try{await client.moveTop(id);if(currentKey.current===key){setOpenMenuId(null);await fetchConversations();}}
+   catch{if(currentKey.current===key)setError('Не удалось переместить беседу. Попробуйте ещё раз.');}
+   finally{if(currentKey.current===key)setBusy(false);}
+  }
+
+  if ((loading||listKey!==identityKey)&&!error||!planLoaded) {
     return (
       <div className={`min-h-screen ${theme.bg} flex items-center justify-center`}>
         <div className={`w-5 h-5 border-2 ${theme.spinnerBorder} ${theme.spinnerTop} rounded-full animate-spin`} />
@@ -194,6 +237,11 @@ export function MainScreen() {
         </div>
 
       {/* Limit notice */}
+      {error&&!modal&&<div role="alert" className={`mb-4 text-sm ${theme.textSecondary}`}><p>{error}</p>
+       {!modal&&<button type="button" className="underline p-2" onClick={()=>void fetchConversations()}>Обновить список</button>}
+       {error.includes('после оплаты')&&<button type="button" className="underline p-2" onClick={()=>navigateTo('tariffs')}>Посмотреть тарифы</button>}
+      </div>}
+      {canReorder&&<p className={`mb-4 text-xs ${theme.textMuted}`}>После окончания оплаты останется доступна верхняя беседа. Переместите наверх ту, которую хотите оставить.</p>}
       {limitReached && (
         <div className={`mb-4 px-5 py-3.5 rounded-xl border ${theme.surface} ${theme.border}`}>
           <p className={`${theme.textSecondary} text-sm font-light leading-relaxed`}>
@@ -204,12 +252,13 @@ export function MainScreen() {
 
       {/* List */}
       <div className="flex-1 pb-8">
-        {conversations.length === 0 ? (
+        {listKey!==identityKey ? <p className={`${theme.textMuted} text-sm`}>Список бесед пока недоступен.</p> : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full pb-16">
             <p className={`${theme.textSecondary} text-lg font-light mb-2`}>Здесь пока тихо.</p>
             <p className={`${theme.textMuted} text-sm font-light mb-10`}>Начните беседу, когда будете готовы.</p>
             <button
               onClick={createNewRoom}
+              disabled={busy}
               className={`px-8 py-3.5 rounded-lg border transition-all duration-300 ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover}`}
             >
               <span className={`${theme.btnText} font-light text-sm tracking-wide`}>Начать беседу</span>
@@ -217,15 +266,22 @@ export function MainScreen() {
           </div>
         ) : (
           <div className="space-y-1.5 w-full">
-            {conversations.map((conv, index) => {
-              const preview = previews[conv.id];
+            {(listKey===identityKey?conversations:[]).map((conv, index) => {
+              const preview = conv.can_read===true?previews[conv.id]:null;
               const title = conv.title || 'Новая беседа';
               const time = formatRelativeTime(conv.last_message_at);
               const isMenuOpen = openMenuId === conv.id;
               const isRecent = index === 0;
 
               return (
-                <div key={conv.id} className="relative">
+                <div key={conv.id} ref={index===0?topRoomRef:undefined} className={`relative ${heldId===conv.id?'ring-2 ring-[#c9a96e] rounded-xl':''}`} draggable={canReorder&&!busy}
+                  onPointerDown={event=>{if(event.pointerType==='touch'&&canReorder&&!busy&&!(event.target as HTMLElement).closest('[aria-label^="Меню"]'))hold.current?.start(conv.id,event.clientX,event.clientY,true);}}
+                  onPointerMove={event=>hold.current?.move(event.clientX,event.clientY)}
+                  onPointerUp={event=>{if(hold.current?.end(event.clientY)){event.preventDefault();suppressClickRef.current=true;}}}
+                  onPointerCancel={()=>hold.current?.cancel()}
+                  onDragStart={event=>event.dataTransfer.setData('text/plain',conv.id)}
+                  onDragOver={event=>{if(index===0&&canReorder)event.preventDefault();}}
+                  onDrop={event=>{if(index===0&&canReorder){event.preventDefault();const id=event.dataTransfer.getData('text/plain');if(conversations.some(c=>c.id===id))void moveTop(id);}}}>
                   <button
                     onClick={() => openRoom(conv)}
                     className={`
@@ -236,7 +292,7 @@ export function MainScreen() {
                   >
                     <div className="flex items-start justify-between gap-2 pr-8">
                       <p className={`${theme.textPrimary} font-light text-[15px] leading-snug flex-1 min-w-0 truncate`}>
-                        {title}
+                        {conv.can_read!==true&&<Lock className="inline w-3.5 h-3.5 mr-2" aria-label="Беседа закрыта"/>}{title}
                       </p>
                       <span className={`${theme.textMuted} text-xs font-light flex-shrink-0 mt-0.5`}>{time}</span>
                     </div>
@@ -245,11 +301,14 @@ export function MainScreen() {
                         {preview}
                       </p>
                     )}
+                    {conv.can_read!==true&&<p className={`${theme.textMuted} text-xs mt-1.5 pr-8`}>Данные сохранены. Доступно после оплаты.</p>}
                   </button>
 
                   {/* Menu trigger */}
                   <button
                     onClick={(e) => openMenu(e, conv)}
+                    type="button" aria-label={`Меню беседы «${title}»`}
+                    aria-expanded={isMenuOpen}
                     className={`
                       absolute right-2 top-2.5
                       w-9 h-9 flex items-center justify-center
@@ -279,6 +338,7 @@ export function MainScreen() {
                       >
                         Переименовать
                       </button>
+                      {canReorder&&index>0&&<button type="button" disabled={busy} onClick={()=>void moveTop(conv.id)} className={`w-full text-left px-4 py-3 text-sm ${theme.textSecondary}`}><ArrowUp className="inline w-3.5 h-3.5 mr-1"/>Переместить наверх</button>}
                       <div className={`h-px ${theme.divider}`} />
                       <button
                         onClick={() => startDelete(conv)}
@@ -296,6 +356,7 @@ export function MainScreen() {
               <button
                 type="button"
                 onClick={createNewRoom}
+                disabled={busy}
                 className={`
                   w-full flex items-center justify-center gap-2 py-4 rounded-xl border mt-1.5
                   transition-all duration-300 active:scale-[0.99]
@@ -314,7 +375,8 @@ export function MainScreen() {
 
       {/* Modals */}
       {modal && (
-        <ModalOverlay onClose={() => setModal(null)}>
+        <ModalOverlay onClose={() => {if(!busy)setModal(null);}}>
+          {error&&<p role="alert" className="text-red-300 bg-[#16221d] rounded p-3 mb-2 text-sm">{error}</p>}
           {modal.type === 'rename' ? (
             <div className={`w-full max-w-xs mx-auto rounded-2xl border px-6 py-7 ${theme.surface} ${theme.border}`}
               style={{ boxShadow: '0 16px 48px rgba(0,0,0,0.24)' }}
@@ -323,6 +385,7 @@ export function MainScreen() {
               <input
                 autoFocus
                 value={renameValue}
+                maxLength={200}
                 onChange={e => setRenameValue(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && confirmRename()}
                 className={`w-full border rounded-lg py-3 px-4 outline-none text-sm font-light transition-colors duration-200 mb-5
@@ -332,12 +395,14 @@ export function MainScreen() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setModal(null)}
+                  disabled={busy}
                   className={`flex-1 py-2.5 rounded-lg border text-sm font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textMuted}`}
                 >
                   Отмена
                 </button>
                 <button
                   onClick={confirmRename}
+                  disabled={busy}
                   className={`flex-1 py-2.5 rounded-lg border text-sm font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover} ${theme.btnText}`}
                 >
                   Сохранить
@@ -355,12 +420,14 @@ export function MainScreen() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setModal(null)}
+                  disabled={busy} autoFocus
                   className={`flex-1 py-2.5 rounded-lg border text-sm font-light transition-colors duration-200 ${theme.btnBg} ${theme.btnBorder} ${theme.textSecondary}`}
                 >
                   Отмена
                 </button>
                 <button
                   onClick={confirmDelete}
+                  disabled={busy}
                   className={`flex-1 py-2.5 rounded-lg border text-sm font-light transition-colors duration-200 border-red-400/20 bg-red-400/5 hover:bg-red-400/10 text-red-400/70`}
                 >
                   Удалить
@@ -377,9 +444,19 @@ export function MainScreen() {
 function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div
+      role="dialog" aria-modal="true" aria-label="Действие с беседой"
       className="fixed inset-0 z-30 flex items-center justify-center px-6"
       style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}
+      onKeyDown={event=>{
+        if(event.key==='Escape'){event.stopPropagation();onClose();}
+        if(event.key==='Tab'){
+          const nodes=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled)'));
+          const first=nodes[0],last=nodes[nodes.length-1];
+          if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+          else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+        }
+      }}
     >
       <div onClick={e => e.stopPropagation()} className="w-full animate-fade-in">
         {children}

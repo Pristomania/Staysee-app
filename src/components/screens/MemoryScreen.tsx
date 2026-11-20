@@ -12,6 +12,7 @@ import { CrossMemoryToggle } from '../CrossMemoryToggle';
 import { ConversationCrossMemoryToggle } from '../ConversationCrossMemoryToggle';
 import { LockedMemoryPanel } from '../LockedPanels';
 import { usePlan } from '../../context/PlanContext';
+import {useConversationLease} from '../../context/ConversationLeaseContext';
 import { REFLECTION_COPY } from '../../lib/reflectionCopy';
 import { isCrossMemoryEnabled } from '../../lib/profileSettings';
 import { ScreenBackHeader, StickyScreenLayout, useSectionLabelClass } from '../layout';
@@ -303,6 +304,7 @@ function CollapsibleMemoryDisplaySection({
 
 export function MemoryScreen() {
   const { user, profile } = useAuth();
+  const lease=useConversationLease();
   const crossMemoryOn = isCrossMemoryEnabled(profile);
   const showLegacyCompatibility = isLegacyMemoryCompatibilityEnabled(profile);
   const [memoryV3AccountWide, setMemoryV3AccountWide] = useState<MemoryV3ViewerItem[]>([]);
@@ -399,6 +401,7 @@ export function MemoryScreen() {
           .eq('is_active', true)
           .order('last_message_at', { ascending: false });
         if (conversationsError) throw conversationsError;
+        if(lease?.isCurrent()===false)return;
         list = (convs ?? []) as ConvOption[];
         setConvOptions(list);
         convId = selectedConvId && list.some((conversation) => conversation.id === selectedConvId)
@@ -422,6 +425,7 @@ export function MemoryScreen() {
           .eq('user_id', user.id)
           .maybeSingle();
         if (error) throw error;
+        if(lease?.isCurrent()===false)return;
         if (!data && memoryReturnScreen === 'chat') {
           navigateBack();
           return;
@@ -514,12 +518,9 @@ export function MemoryScreen() {
       const payload = next && memoryHasContent(next)
         ? serializeConversationMemory(next)
         : null;
-      const { error } = await supabase
-        .from('conversations')
-        .update({ conversation_summary: payload })
-        .eq('id', selectedConvId)
-        .eq('user_id', user.id);
+      const { data,error } = await supabase.rpc('save_my_conversation_summary',{p_conversation_id:selectedConvId,p_summary:payload});
       if (error) throw error;
+      if(data!==true)throw Error('summary_not_saved');
       setConvMemory(next && memoryHasContent(next) ? next : emptyMemory());
       setLegacyRaw(null);
       setConvSave('saved');
@@ -549,18 +550,20 @@ export function MemoryScreen() {
   }
 
   async function handleExport(format: 'json' | 'pdf') {
+    if(lease?.isCurrent()===false)return;
     setExportBusy(true);
     setExportError(null);
     try {
       const result = await exportMemoryV3Data();
+      if(lease?.isCurrent()===false)return;
       if (result.error) {
         setExportError('Не удалось сохранить. Нажмите ещё раз.');
         return;
       }
       if (format === 'json') {
-        downloadMemoryV3ExportAsJson(result);
+        downloadMemoryV3ExportAsJson(result,()=>lease?.isCurrent()!==false);
       } else {
-        await downloadMemoryV3ExportAsPdf(result);
+        await downloadMemoryV3ExportAsPdf(result,()=>lease?.isCurrent()!==false);
       }
       setExportChoiceOpen(false);
     } catch {

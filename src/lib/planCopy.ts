@@ -32,10 +32,12 @@ export interface PlanRow {
 }
 
 /** The rows of a plan's card: what it gives first, then the things that are open or closed. */
-export function planRows(plan: Plan): PlanRow[] {
+export function planRows(plan: Plan, options?: {freeRenewable?: boolean | null}): PlanRow[] {
   const messages =
     plan.periodDays === null
-      ? `${group(plan.messages)} ${pluralMessages(plan.messages)}, новые через ${monthsPhrase(plan.renewAfterIdleMonths ?? 3)} после последнего`
+      ? options?.freeRenewable === false ? 'Бесплатные сообщения не возобновляются после покупки'
+        : options?.freeRenewable === null ? 'Проверяем доступные сообщения'
+        : `${group(plan.messages)} ${pluralMessages(plan.messages)}, новые через ${monthsPhrase(plan.renewAfterIdleMonths ?? 3)} после последнего`
       : `${group(plan.messages)} ${pluralMessages(plan.messages)} на ${plan.periodDays} дней`;
   // The good voice input is mentioned only once it exists.
   const voiceLevel = voiceInputFor(plan.id);

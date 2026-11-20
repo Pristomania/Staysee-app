@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { checkConversationAccess } from "../_shared/conversationAccess.ts";
 import { checkRateLimit, CALM_ERRORS } from "../_shared/cost.ts";
 import { resolveApprovedUtilityModel } from "../_shared/approvedModels.ts";
 import { generateWeeklyReflectionText } from "../_shared/weeklyReflection.ts";
@@ -84,6 +85,10 @@ Deno.serve(async (req) => {
     });
 
     const rate = await checkRateLimit(userSupabase, userId);
+    const access = await checkConversationAccess(userSupabase,conversationId);
+    if (!access?.allowed || !access.paidFeatures) return new Response(JSON.stringify({error:access ? 'not_in_plan' : 'access_check_unavailable',text:null}),{
+      status:access ? 403 : 503,headers:{...corsHeaders,'Content-Type':'application/json'},
+    });
     if (!rate.allowed) {
       return new Response(
         JSON.stringify({ error: rate.reason ?? "rate_limit", text: null }),

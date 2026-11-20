@@ -18,6 +18,7 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { APPROVED_MODEL_GPT4O } from "./approvedModels.ts";
 import { PLANS, monthsPhrase } from "./plans.ts";
 import { buildUsageLogRow, logOpenRouterUsage } from "./usageAnalytics.ts";
+import { effectivePaidTier } from './paidAccess.ts';
 
 // ── Tier definitions ──────────────────────────────────────────────────────────
 
@@ -179,6 +180,7 @@ export function makeRequestKey(userId: string, message: string): string {
 // ── Rate limit check (DB-backed) ─────────────────────────────────────────────
 
 export interface RateLimitResult {
+  canRenewMessages?: boolean;
   allowed: boolean;
   tier: UsageTier;
   reason?: string;
@@ -198,7 +200,7 @@ export async function checkRateLimit(
   if (error) return { allowed: false, tier: "free", reason: "limit_check_error" };
   if (!data) return { allowed: false, tier: "free", reason: "missing_tier" };
 
-  const tier = (data.tier as UsageTier) ?? "free";
+  const tier = effectivePaidTier(data);
 
   if (data.is_suspended) {
     return { allowed: false, tier, reason: "suspended" };
@@ -215,7 +217,9 @@ export async function checkRateLimit(
   const dayExpired = now.getTime() - dayReset.getTime() > 24 * 60 * 60 * 1000;
 
   const usedToday = dayExpired ? 0 : (data.daily_requests_used ?? 0);
-  const limit = data.daily_request_limit ?? TIER_CONFIG[tier].dailyRequestLimit;
+  const limit = data.access_source === 'purchase' && tier !== data.tier
+    ? TIER_CONFIG[tier].dailyRequestLimit
+    : data.daily_request_limit ?? TIER_CONFIG[tier].dailyRequestLimit;
 
   if (usedToday >= limit) {
     return { allowed: false, tier, reason: "daily_limit" };
@@ -243,6 +247,7 @@ export async function incrementUsage(
 
 const RESERVE_ALLOWED_TIERS = new Set<UsageTier>(["free", "basic", "premium"]);
 const RESERVE_DENY_REASONS = new Set([
+  "conversation_locked",
   "suspended",
   "daily_limit",
   "missing_tier",
@@ -258,13 +263,15 @@ function failClosedLimitCheck(): RateLimitResult {
 export async function reserveAiRequest(
   supabase: SupabaseClient,
   userId: string,
+  conversationId?: string,
 ): Promise<RateLimitResult> {
   let data: unknown;
   let error: { message: string } | null = null;
 
   try {
-    const response = await supabase.rpc("reserve_ai_request", {
+    const response = await supabase.rpc(conversationId ? "reserve_ai_request_for_conversation" : "reserve_ai_request", {
       p_user_id: userId,
+      ...(conversationId ? {p_conversation_id:conversationId} : {}),
     });
     data = response.data;
     error = response.error;
@@ -278,6 +285,7 @@ export async function reserveAiRequest(
   }
 
   const payload = data as {
+    can_renew_messages?: unknown;
     allowed?: unknown;
     tier?: unknown;
     reason?: unknown;
@@ -290,10 +298,13 @@ export async function reserveAiRequest(
     return failClosedLimitCheck();
   }
   const tier = payload.tier as UsageTier;
+  const canRenewMessages = payload.can_renew_messages;
+  if (canRenewMessages !== undefined && typeof canRenewMessages !== 'boolean') return failClosedLimitCheck();
+  const renewalPolicy = typeof canRenewMessages === 'boolean' ? {canRenewMessages} : {};
 
   if (payload.allowed === true) {
     if (payload.reason !== undefined) return failClosedLimitCheck();
-    return { allowed: true, tier };
+    return { allowed: true, tier, ...renewalPolicy };
   }
 
   if (payload.allowed !== false) return failClosedLimitCheck();
@@ -304,7 +315,7 @@ export async function reserveAiRequest(
     return failClosedLimitCheck();
   }
 
-  return { allowed: false, tier, reason: payload.reason };
+  return { allowed: false, tier, reason: payload.reason, ...renewalPolicy };
 }
 
 export async function recordTokenUsage(
@@ -409,6 +420,7 @@ export function makeServiceClient(): SupabaseClient {
 // ── Calm user-facing error messages ─────────────────────────────────────────
 
 export const CALM_ERRORS = {
+  balanceUsedUp: 'Сообщения закончились. Беседа сохранена.',
   unavailable: "Сейчас не могу ответить. Попробуй немного позже.",
   /** stop+not_publishable when repair and retry whole both fail — not a provider outage */
   replyNotRecovered:

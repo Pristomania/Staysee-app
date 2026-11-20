@@ -1,90 +1,90 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAuth } from './AuthContext';
-import { fetchPackRows, fetchUsageRow } from '../lib/usageTier';
-import { messageCounter, type MessageCounter, type PackRow, type UsageRow } from '../lib/messageCounter';
+import { fetchBillingSnapshot } from '../lib/usageTier';
+import { BillingSnapshotController, type BillingSnapshotState } from '../lib/billingSnapshot';
+import {createAccessGeneration} from '../lib/accessGeneration';
+import type { MessageCounter } from '../lib/messageCounter';
 import { getMaxRooms } from '../lib/roomLimits';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
 
 interface PlanContextType {
-  /** The plan of the person; "free" until it is known and for anyone not signed in. */
+  ownerId: string | null;
+  accessRevision: string;
   tier: PlanId;
   plan: Plan;
-  /** False until the plan has been read. While false the app does not lock anything: the server decides. */
+  /** Verified current session only; unknown/sleep-unverified never opens paid features. */
   loaded: boolean;
-  /** True when the plan includes the feature; also true while the plan is not known yet (see `loaded`). */
   has: (feature: PlanFeature) => boolean;
-  /** The messages left, worked out from the person's usage row; null while it is not known. */
   counter: MessageCounter | null;
-  /** How many conversations the person may have: the plan's number, or the one given by hand. */
   maxConversations: number;
-  /** Reads the plan and the counter again (after every answered message, and when the person comes back). */
+  freeRenewable: boolean;
+  verificationError: boolean;
+  checking: boolean;
   refresh: () => Promise<void>;
 }
-
 const PlanContext = createContext<PlanContextType | null>(null);
 
 export function PlanProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const userId = user?.id;
-  const [row, setRow] = useState<UsageRow | null>(null);
-  const [packs, setPacks] = useState<PackRow[]>([]);
-  const currentUserRef = useRef(userId);
-
-  useEffect(() => {
-    currentUserRef.current = userId;
-  }, [userId]);
-
-  const refresh = useCallback(async () => {
-    if (!userId) {
-      setRow(null);
-      return;
-    }
-    const [next, nextPacks] = await Promise.all([fetchUsageRow(userId), fetchPackRows(userId)]);
-    // Somebody else signed in while this was being read: their plan is not this answer.
-    if (currentUserRef.current !== userId) return;
-    // A failed read must not wipe what is known: a network blip would unlock everything and hide the counter until the
-    // next read. Only a successful read replaces the row (and the same for the bought messages).
-    if (next) setRow(next);
-    if (nextPacks) setPacks(nextPacks);
-  }, [userId]);
-
-  useEffect(() => {
-    // Another person (or nobody): forget the previous person's row before reading.
-    setRow(null);
-    setPacks([]);
-    void refresh();
-  }, [refresh]);
-
-  // The plan and the counter change outside this tab too (another tab, a renewed period): read them again when the
-  // person comes back to this one.
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [refresh]);
-
-  const value = useMemo<PlanContextType>(() => {
-    const loaded = row !== null;
-    const tier = normalizePlanId(row?.tier);
-    return {
-      tier,
-      plan: planFor(tier),
-      loaded,
-      has: (feature) => !loaded || isFeatureAvailable(tier, feature),
-      counter: messageCounter(row, new Date(), packs),
-      maxConversations: getMaxRooms(tier, row?.max_conversations_override),
-      refresh,
-    };
-  }, [row, packs, refresh]);
-
-  return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
+  return <PlanStateProvider userId={user?.id ?? null} readSnapshot={fetchBillingSnapshot}>{children}</PlanStateProvider>;
 }
 
+/** Session-bound state provider. Injected read boundary also supports isolated staging without authentication writes. */
+export function PlanStateProvider({userId,readSnapshot,children}:{
+  userId:string|null;readSnapshot:(signal:AbortSignal)=>Promise<unknown>;children:ReactNode;
+}) {
+  const [state,setState]=useState<(BillingSnapshotState&{generation:number})|null>(null);
+  const generation=useRef(createAccessGeneration());
+  const currentUserRef=useRef(userId);
+  currentUserRef.current=userId;
+  const modelRef=useRef<BillingSnapshotController|null>(null);
+  const refresh=useCallback(async()=>{
+    const model=modelRef.current;
+    if(model&&model.userId===userId)await model.refresh();
+  },[userId]);
+  useEffect(()=>{
+    setState(null);
+    if(!userId)return;
+    const model=new BillingSnapshotController(userId,readSnapshot);
+    modelRef.current=model;
+    const unsubscribe=model.subscribe(next=>{
+      if (currentUserRef.current !== userId) return;
+      const authority=JSON.stringify([next.userId,next.loaded,next.tier,next.row?.access_source,next.row?.paid_access_until,next.row?.unlimited_usage,next.row?.max_conversations_override]);
+      setState({...next,generation:generation.current.observe(authority)});
+    });
+    void model.refresh();
+    const verify=()=>{void model.refresh({requireFresh:true});};
+    const visible=()=>{if(document.visibilityState==='visible')verify();};
+    document.addEventListener('visibilitychange',visible);
+    window.addEventListener('focus',verify);window.addEventListener('pageshow',verify);window.addEventListener('online',verify);
+    return ()=>{
+      unsubscribe();model.dispose();
+      if(modelRef.current===model)modelRef.current=null;
+      document.removeEventListener('visibilitychange',visible);
+      window.removeEventListener('focus',verify);window.removeEventListener('pageshow',verify);window.removeEventListener('online',verify);
+    };
+  },[userId,readSnapshot]);
+  const value=useMemo<PlanContextType>(()=>{
+    // This synchronous check prevents even one render of the previous person's plan.
+    const current=state?.userId===userId?state:null;
+    const row=current?.row ?? null;
+    const loaded=current?.loaded ?? false;
+    const tier=normalizePlanId(row?.tier);
+    return {ownerId:userId,accessRevision:String(current?.generation??0),tier,plan:planFor(tier),loaded,
+      has:feature=>loaded&&isFeatureAvailable(tier,feature),
+      counter:current?.counter??null,
+      maxConversations:getMaxRooms(tier, row?.max_conversations_override),
+      freeRenewable:current?.freeRenewable??false,
+      verificationError:current?.error??false,
+      checking:current?.checking??!!userId,
+      refresh,
+    };
+  },[state,userId,refresh]);
+  return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
+}
 export function usePlan(): PlanContextType {
-  const context = useContext(PlanContext);
-  if (!context) throw new Error('usePlan must be used inside PlanProvider');
+  const context=useContext(PlanContext);
+  if(!context)throw new Error('usePlan must be used inside PlanProvider');
   return context;
 }

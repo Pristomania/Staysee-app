@@ -15,6 +15,8 @@ export interface Profile {
 }
 
 export interface Conversation {
+  /** Only safe-list RPC is authoritative; never infer access from list position. */
+  can_read?: boolean;
   id: string;
   user_id: string;
   title: string;

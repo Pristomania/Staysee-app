@@ -63,6 +63,9 @@ import { VoiceDictationBar } from '../chat/VoiceDictationBar';
 import { VoiceDownloadConsent } from '../chat/VoiceDownloadConsent';
 import { VoicePreparingBar } from '../chat/VoicePreparingBar';
 import { usePlan } from '../../context/PlanContext';
+import {useConversationLease} from '../../context/ConversationLeaseContext';
+import {conversationClient} from '../../lib/conversationAccessBrowser';
+import {readIfCurrent,commitIfCurrent,requirePersistedTurn} from '../../lib/accessGeneration';
 import { usePaywall } from '../../context/PaywallContext';
 import { LowMessagesNotice } from '../LowMessagesNotice';
 import { exhaustedReply } from '../../lib/messageCounter';
@@ -162,8 +165,10 @@ export function ChatScreen() {
   const { theme } = useTheme();
   const { has, tier, counter, refresh: refreshPlan } = usePlan();
   const { openPaywall } = usePaywall();
+  const lease=useConversationLease();
 
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState(()=>currentConversation?lease?.getDraft(currentConversation.id)??'':'');
+  useEffect(()=>{if(currentConversation)lease?.setDraft(currentConversation.id,inputValue);},[lease,currentConversation?.id,inputValue]);
   // One message is at most 10,000 characters: the count shows near the limit, and a longer text is not sent.
   const lengthState = messageLengthState(inputValue);
   // Each time the text goes over the maximum, its length (never the text) is reported once, so that over
@@ -274,11 +279,12 @@ export function ChatScreen() {
   streamActiveRef.current = stream.isStreaming;
 
   const applyMessages = useCallback((next: Message[]) => {
+    if(lease?.isCurrent()===false)return;
     const deduped = dedupeMessages(next);
     roomMessagesRef.current = deduped;
     setRoomMessages(deduped);
     setMessages(deduped);
-  }, [setMessages]);
+  }, [setMessages,lease]);
 
   const patchMessages = useCallback((fn: (prev: Message[]) => Message[]) => {
     applyMessages(fn(roomMessagesRef.current));
@@ -290,7 +296,7 @@ export function ChatScreen() {
 
   const leaveChatFor = useCallback(
     (screen: 'conversation-notes' | 'memory' | 'conversation-dynamics') => {
-      syncMessagesToApp();
+      if(lease?.isCurrent()!==false)syncMessagesToApp();
       navigateTo(screen, {
         notesReturnScreen: 'chat',
         memoryReturnScreen: 'chat',
@@ -369,9 +375,9 @@ export function ChatScreen() {
       pendingScrollAdjustRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
     }
 
-    const { messages: older, reachedLimit, error } = await fetchMessagesBefore(
-      convId, oldest.created_at, MESSAGE_PAGE_SIZE,
-    );
+    const result=await readIfCurrent(()=>fetchMessagesBefore(convId,oldest.created_at,MESSAGE_PAGE_SIZE),()=>activeConvIdRef.current===convId&&lease?.isCurrent()!==false);
+    if(!result)return;
+    const {messages:older,reachedLimit,error}=result;
 
     if (activeConvIdRef.current !== convId) {
       loadingMoreHistoryRef.current = false;
@@ -393,7 +399,7 @@ export function ChatScreen() {
     }
     loadingMoreHistoryRef.current = false;
     setLoadingMoreHistory(false);
-  }, [hasMoreHistory, patchMessages]);
+  }, [hasMoreHistory, patchMessages,lease]);
 
   /** In-dialog search filters whatever is already loaded (see
    * findMatchingMessageIds) -- a paginated open must not let it silently
@@ -407,11 +413,13 @@ export function ChatScreen() {
 
     loadingMoreHistoryRef.current = true;
     setLoadingMoreHistory(true);
-    const { messages: older, error } = await collectOlderMessageHistory(
+    const result=await readIfCurrent(()=>collectOlderMessageHistory(
       oldest.created_at,
       MESSAGE_PAGE_SIZE,
-      (beforeIso, limit) => fetchMessagesBefore(convId, beforeIso, limit),
-    );
+      (beforeIso, limit) => activeConvIdRef.current===convId&&lease?.isCurrent()!==false?fetchMessagesBefore(convId,beforeIso,limit):Promise.resolve({messages:[],reachedLimit:false,error:'access_changed'}),
+    ),()=>activeConvIdRef.current===convId&&lease?.isCurrent()!==false);
+    if(!result)return;
+    const {messages:older,error}=result;
 
     if (activeConvIdRef.current !== convId) {
       loadingMoreHistoryRef.current = false;
@@ -430,7 +438,7 @@ export function ChatScreen() {
     }
     loadingMoreHistoryRef.current = false;
     setLoadingMoreHistory(false);
-  }, [hasMoreHistory, patchMessages]);
+  }, [hasMoreHistory, patchMessages,lease]);
 
   // ── Effects ───────────────────────────────────────────────────────────────────
 
@@ -552,7 +560,7 @@ export function ChatScreen() {
       setLoading(false);
     })();
 
-    return () => { active = false; };
+    return () => { active = false;activeConvIdRef.current=null; };
   }, [user, currentConversation?.id, currentScreen, applyMessages, setCurrentScreen]);
 
   useEffect(() => {
@@ -585,10 +593,10 @@ export function ChatScreen() {
     return () => {
       if (streamTimerRef.current) clearTimeout(streamTimerRef.current);
       if (captureNudgeTimerRef.current) clearTimeout(captureNudgeTimerRef.current);
-      syncMessagesToApp();
+      if(lease?.isCurrent()!==false)syncMessagesToApp();
       // Do not abort in-flight AI — user may open notes/memory mid-reply; send finishes in background.
     };
-  }, [syncMessagesToApp]);
+  }, [syncMessagesToApp,lease]);
 
   useEffect(() => {
     if (captureNudgeTimerRef.current) clearTimeout(captureNudgeTimerRef.current);
@@ -758,6 +766,9 @@ export function ChatScreen() {
     const epoch = ++generationEpochRef.current;
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    const revoke=()=>{lease?.setDraft(convId,pendingDraftRef.current||content);generationEpochRef.current+=1;abortController.abort();if(streamTimerRef.current)clearTimeout(streamTimerRef.current);};
+    if(lease?.signal.aborted||lease?.isCurrent()===false)return;
+    lease?.signal.addEventListener('abort',revoke,{once:true});
 
     pendingDraftRef.current = content;
     setSendError(null);
@@ -853,7 +864,7 @@ export function ChatScreen() {
 
         if (!isAiSendSuccess(aiResult)) {
           // A refusal because the messages are spent says the day they come back (the server's own text is the fallback).
-          const dated = aiResult.status === 'rate_limit' && counter ? exhaustedReply(counter, tier) : null;
+          const dated = aiResult.status === 'rate_limit' && counter ? exhaustedReply(counter, tier, undefined, aiResult.userMessage) : null;
           failSend(
             dated ??
               aiResult.userMessage ??
@@ -877,12 +888,11 @@ export function ChatScreen() {
 
       if (isNewRoom) {
         const title = generateTitle(content);
-        await supabase.from('conversations').update({ title }).eq('id', convId);
-        setCurrentConversation({ ...currentConversation, title });
-        setIsNewRoom(false);
+        const renamed=await conversationClient.rename(convId,title).then(()=>true,()=>false);
+        if(epoch!==generationEpochRef.current)return;
+        if(renamed){setCurrentConversation({ ...currentConversation, title });setIsNewRoom(false);}
       }
 
-      const now = new Date().toISOString();
       const turnOpts = { userId: user.id, clientMessageId: turnId };
 
       const { message: savedUserRow, error: userSaveErr } = await insertChatMessage(
@@ -894,6 +904,8 @@ export function ChatScreen() {
       if (userSaveErr) {
         console.error('[chat] user message not saved:', userSaveErr);
       }
+      if(userSaveErr||!savedUserRow)throw Error('turn_not_saved');
+      if(epoch!==generationEpochRef.current||lease?.isCurrent()===false)return;
 
       const { message: aiSavedRow, error: aiSaveErr } = await insertChatMessage(
         convId,
@@ -904,6 +916,7 @@ export function ChatScreen() {
       if (aiSaveErr) {
         console.error('[chat] ai message not saved:', aiSaveErr);
       }
+      const savedTurn=requirePersistedTurn({message:savedUserRow,error:userSaveErr},{message:aiSavedRow,error:aiSaveErr});
 
       persistedTurnRef.current = {
         userId: savedUserRow?.id,
@@ -933,10 +946,8 @@ export function ChatScreen() {
         return;
       }
 
-      await supabase
-        .from('conversations')
-        .update({ last_message_at: now })
-        .eq('id', convId);
+      await conversationClient.touch(convId).catch(()=>{});
+      if(epoch!==generationEpochRef.current||lease?.isCurrent()===false)return;
 
       // The counter and the warning follow every answered message.
       void refreshPlan();
@@ -947,31 +958,15 @@ export function ChatScreen() {
       setSendError(null);
       abortControllerRef.current = null;
 
-      const savedUser: Message =
-        savedUserRow ??
-        persistedTurn.user ?? {
-          ...tempMsg,
-          id: `user-${Date.now()}`,
-        };
-      const userTs = new Date(savedUser.created_at).getTime();
-      const streamCreatedAt = new Date(Math.max(userTs + 1, Date.now())).toISOString();
-      const finalAiMsg: Message =
-        aiSavedRow ??
-        persistedTurn.ai ?? {
-          id: `ai-${Date.now()}`,
-          conversation_id: convId,
-          sender: 'ai',
-          content: aiText,
-          created_at: streamCreatedAt,
-          client_message_id: turnId,
-        };
+      const savedUser: Message = savedTurn.user;
+      const finalAiMsg: Message = savedTurn.ai;
 
       scrollFollowRef.current = true;
 
-      patchMessages((prev) => [
+      commitIfCurrent(null,()=>epoch===generationEpochRef.current&&lease?.isCurrent()!==false,()=>patchMessages((prev) => [
         ...prev.filter((m) => m.id !== tempId && m.id !== 'greeting'),
         savedUser,
-      ]);
+      ]));
       followTailAfterPaint();
 
       if (shouldAnimateReveal(aiText)) {
@@ -992,8 +987,9 @@ export function ChatScreen() {
         return;
       }
       console.error('[chat] send failed:', err);
-      failSend('Сейчас не могу ответить. Попробуй ещё раз.');
+      failSend(err instanceof Error&&err.message==='turn_not_saved'?'Ответ не удалось сохранить. Текст сообщения возвращён в поле ввода. Попробуй ещё раз.':'Сейчас не могу ответить. Попробуй ещё раз.');
     } finally {
+      lease?.signal.removeEventListener('abort',revoke);
       if (epoch === generationEpochRef.current) {
         setSending(false);
         sendLockRef.current = false;

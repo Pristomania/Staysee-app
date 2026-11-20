@@ -7,6 +7,8 @@ import { counterLine, renewalLine } from '../../lib/messageCounter';
 import { PACK_TITLE, PAYMENT_STATUS_LINE, packPriceLine, packRows, planRows, priceLine } from '../../lib/planCopy';
 import { PLANS, type PlanId } from '../../lib/plans';
 import { ScreenBackHeader, StickyScreenLayout } from '../layout';
+import { PaymentTestEntry } from '../payments/PaymentTestEntry';
+import { BillingCheckNotice } from '../payments/BillingCheckNotice';
 
 const ORDER: PlanId[] = ['free', 'basic', 'premium'];
 
@@ -17,7 +19,7 @@ const ORDER: PlanId[] = ['free', 'basic', 'premium'];
 export function TariffsScreen() {
   const { navigateBack } = useApp();
   const { theme } = useTheme();
-  const { tier, plan: current, counter } = usePlan();
+  const { tier, plan: current, counter, loaded, freeRenewable, verificationError, checking, refresh } = usePlan();
 
   const card = `rounded-xl border ${theme.surface} ${theme.border}`;
 
@@ -33,6 +35,7 @@ export function TariffsScreen() {
         />
       )}
     >
+      {(!loaded || verificationError) && <BillingCheckNotice checking={checking} error={verificationError} onRetry={() => void refresh()} />}
       {counter && (
         <div className={`${card} mb-6 px-4 py-3`}>
           <p className={`${theme.textSecondary} text-sm font-light`}>
@@ -45,9 +48,10 @@ export function TariffsScreen() {
       )}
 
       <div className="space-y-4 pb-8">
+        <PaymentTestEntry />
         {ORDER.map((id) => {
           const plan = PLANS[id];
-          const isCurrent = id === tier;
+          const isCurrent = loaded && id === tier;
           return (
             <section
               key={id}
@@ -61,7 +65,7 @@ export function TariffsScreen() {
               <p className={`${theme.textSecondary} mb-4 text-sm font-light`}>{priceLine(plan)}</p>
 
               <ul className="mb-4 space-y-2">
-                {planRows(plan).map((row) => (
+                {planRows(plan, {freeRenewable:loaded ? freeRenewable : null}).map((row) => (
                   <li key={row.text} className="flex items-start gap-2.5">
                     {row.included ? (
                       <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#c9a96e]" strokeWidth={1.8} />

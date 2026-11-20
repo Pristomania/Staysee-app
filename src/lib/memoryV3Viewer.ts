@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { resolveSupabasePublicConfig } from './supabaseEnv';
+import {commitIfCurrent} from './accessGeneration';
 
 export interface MemoryV3ViewerItem {
   memoryKey: string;
@@ -107,7 +108,8 @@ export async function exportMemoryV3Data(): Promise<
   return { ...result, error: null };
 }
 
-export function downloadMemoryV3ExportAsJson(data: MemoryV3ExportData): void {
+export function downloadMemoryV3ExportAsJson(data: MemoryV3ExportData,canSave:()=>boolean=()=>true): void {
+  if(!canSave())return;
   const payload: MemoryV3ExportData = {
     accountWide: data.accountWide,
     dialogue: data.dialogue,
@@ -119,7 +121,7 @@ export function downloadMemoryV3ExportAsJson(data: MemoryV3ExportData): void {
   link.href = url;
   link.download = `staysee-memory-export-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(link);
-  link.click();
+  commitIfCurrent(link,canSave,link=>link.click());
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
