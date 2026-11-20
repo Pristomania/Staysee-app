@@ -5,6 +5,7 @@ import {
   FEEDBACK_COPY,
   pressThumb,
   saveComment,
+  type FeedbackCopy,
   type FeedbackDeps,
   type FeedbackRating,
   type FeedbackState,
@@ -18,6 +19,9 @@ const PROMPT_VISIBLE_MS = 10_000;
  * Thumbs under an answer of Stacy. Small and quiet: two icons next to the time. Pressing one saves the mark at once;
  * then one line offers a short note ("if you want"), and only if the person presses "Написать" does a small box
  * open. Nothing is required, and the line goes away by itself.
+ *
+ * The same pair of thumbs serves the weekly "Динамика" too: there `messageId` is the id of the dynamics, `deps` are the steps against
+ * dynamics_feedback, and `copy` / `groupLabel` carry the words of the dynamics (see dynamicsFeedbackDeps.ts).
  */
 export function MessageFeedback(props: {
   conversationId: string;
@@ -26,8 +30,11 @@ export function MessageFeedback(props: {
   onChange(next: FeedbackState | null): void;
   deps: FeedbackDeps;
   theme: ReturnType<typeof useTheme>['theme'];
+  copy?: FeedbackCopy;
+  groupLabel?: string;
 }) {
-  const { conversationId, messageId, state, onChange, deps, theme } = props;
+  const { conversationId, messageId, state, onChange, deps, theme, copy, groupLabel } = props;
+  const words: FeedbackCopy = copy ?? FEEDBACK_COPY;
   const [prompting, setPrompting] = useState(false);
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState('');
@@ -83,16 +90,16 @@ export function MessageFeedback(props: {
   const iconClass = 'h-3.5 w-3.5';
   const buttonBase = `rounded-md p-1.5 -m-1 transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-[#c9a96e]/60 ${theme.textMuted}`;
   const pressed = (rating: FeedbackRating) => state?.rating === rating;
-  const ask = state?.rating === -1 ? FEEDBACK_COPY.askBad : FEEDBACK_COPY.askGood;
-  const placeholder = state?.rating === -1 ? FEEDBACK_COPY.placeholderBad : FEEDBACK_COPY.placeholderGood;
+  const ask = state?.rating === -1 ? words.askBad : words.askGood;
+  const placeholder = state?.rating === -1 ? words.placeholderBad : words.placeholderGood;
 
   return (
     <div className="mt-1" data-feedback-for={messageId}>
-      <div role="group" aria-label="Оценка ответа" className="flex items-center gap-2">
+      <div role="group" aria-label={groupLabel ?? 'Оценка ответа'} className="flex items-center gap-2">
         <button
           type="button"
-          aria-label={FEEDBACK_COPY.good}
-          title={FEEDBACK_COPY.good}
+          aria-label={words.good}
+          title={words.good}
           aria-pressed={pressed(1)}
           disabled={busy}
           onClick={() => void onThumb(1)}
@@ -102,8 +109,8 @@ export function MessageFeedback(props: {
         </button>
         <button
           type="button"
-          aria-label={FEEDBACK_COPY.bad}
-          title={FEEDBACK_COPY.bad}
+          aria-label={words.bad}
+          title={words.bad}
           aria-pressed={pressed(-1)}
           disabled={busy}
           onClick={() => void onThumb(-1)}
@@ -121,7 +128,7 @@ export function MessageFeedback(props: {
             onClick={() => setWriting(true)}
             className="underline underline-offset-2 decoration-[#c9a96e]/50 hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#c9a96e]/60 rounded-sm"
           >
-            {FEEDBACK_COPY.write}
+            {words.write}
           </button>
         </p>
       )}
@@ -145,7 +152,7 @@ export function MessageFeedback(props: {
               onClick={() => void onSend()}
               className={`${theme.btnText} underline underline-offset-2 decoration-[#c9a96e]/50 disabled:opacity-40 hover:opacity-80`}
             >
-              {FEEDBACK_COPY.send}
+              {words.send}
             </button>
             <button
               type="button"
@@ -156,7 +163,7 @@ export function MessageFeedback(props: {
               }}
               className={`${theme.textMuted} hover:opacity-80`}
             >
-              {FEEDBACK_COPY.skip}
+              {words.skip}
             </button>
           </div>
         </div>
@@ -164,13 +171,13 @@ export function MessageFeedback(props: {
 
       {noted && !writing && (
         <p className={`mt-1 text-[12px] font-light ${theme.textMuted}`} role="status">
-          {FEEDBACK_COPY.thanksNote}
+          {words.thanksNote}
         </p>
       )}
 
       {failed && (
         <p className={`mt-1 text-[12px] font-light ${theme.textMuted}`} role="alert">
-          {FEEDBACK_COPY.failed}
+          {words.failed}
         </p>
       )}
     </div>

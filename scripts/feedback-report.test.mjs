@@ -22,8 +22,9 @@ const row = {
 
 describe("the feedback report", () => {
   it("reads the options and keeps them in bounds", () => {
-    assert.deepEqual(parseArgs([]), { bad: false, limit: DEFAULT_LIMIT, since: null });
-    assert.deepEqual(parseArgs(["--bad", "--limit=50", "--since=2026-11-17"]), { bad: true, limit: 50, since: "2026-11-17" });
+    assert.deepEqual(parseArgs([]), { bad: false, limit: DEFAULT_LIMIT, since: null, dynamics: false });
+    assert.deepEqual(parseArgs(["--bad", "--limit=50", "--since=2026-11-17"]), { bad: true, limit: 50, since: "2026-11-17", dynamics: false });
+    assert.equal(parseArgs(["--dynamics"]).dynamics, true);
     assert.equal(parseArgs(["--limit=100000"]).limit, MAX_LIMIT);
     assert.equal(parseArgs(["--limit=abc"]).limit, DEFAULT_LIMIT);
     assert.equal(parseArgs(["--since=вчера"]).since, null);
@@ -32,6 +33,35 @@ describe("the feedback report", () => {
   it("asks only for what was wanted, newest first", () => {
     assert.equal(buildQuery({ bad: false, limit: 30, since: null }), "message_feedback_review?select=*&order=created_at.desc&limit=30");
     assert.equal(buildQuery({ bad: true, limit: 5, since: "2026-11-17" }), "message_feedback_review?select=*&order=created_at.desc&limit=5&rating=eq.-1&created_at=gte.2026-11-17");
+  });
+
+  it("reads the feedback on the weekly dynamics from its own view when asked", () => {
+    assert.equal(buildQuery({ bad: false, limit: 30, since: null, dynamics: true }), "dynamics_feedback_review?select=*&order=created_at.desc&limit=30");
+    assert.equal(buildQuery({ bad: true, limit: 5, since: "2026-11-20", dynamics: true }), "dynamics_feedback_review?select=*&order=created_at.desc&limit=5&rating=eq.-1&created_at=gte.2026-11-20");
+  });
+
+  it("shows a dynamics report: who, which dynamics, what the person wrote, address masked", () => {
+    const dynamicsRow = {
+      created_at: "2026-11-20T12:00:00Z",
+      rating: 1,
+      comment: "очень точно",
+      user_id: "a1b2c3d4-0000-0000-0000-000000000000",
+      email: "anna@example.com",
+      tier: "premium",
+      conversation_id: "c1000000-0000-0000-0000-00000000000a",
+      entry_id: "22222222-0000-0000-0000-000000000003",
+      entry_date: "2026-11-16",
+      dynamics_excerpt: "На этой неделе\nстало легче.",
+    };
+    const text = formatReport([dynamicsRow, { ...dynamicsRow, rating: -1, comment: null, email: null }], { dynamics: true });
+    assert.match(text, /Отзывы на «Динамику»: показано 2 \(плохих 1, хороших 1\)/);
+    assert.match(text, /\[ХОРОШО\] .*аккаунт a1b2c3d4 \(a\*\*\*@example\.com, тариф premium\)/);
+    assert.match(text, /Динамика \(неделя от 2026-11-16\): «На этой неделе \/ стало легче\.»/);
+    assert.match(text, /Написал\(а\): «очень точно»/);
+    assert.match(text, /\[ПЛОХО\] .*почта неизвестна/);
+    assert.match(text, /беседа c1000000, динамика 22222222/);
+    assert.doesNotMatch(text, /anna@example\.com/, "the full address is never printed");
+    assert.doesNotMatch(text, /модель:/, "no model guess for a dynamics");
   });
 
   it("shows who, which answer, what was asked and what the person wrote, with the address masked", () => {

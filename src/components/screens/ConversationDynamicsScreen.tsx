@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Pencil, X } from 'lucide-react';
 import { ConfirmDeleteButton } from '../ConfirmDeleteButton';
+import { MessageFeedback } from '../chat/MessageFeedback';
+import { loadFeedback, type FeedbackState } from '../../lib/messageFeedback';
+import { DYNAMICS_FEEDBACK_COPY, DYNAMICS_FEEDBACK_GROUP_LABEL } from '../../lib/dynamicsFeedbackDeps';
+import { supabaseDynamicsFeedbackDeps } from '../../lib/dynamicsFeedbackClient';
 import { ConversationHubNav } from '../ConversationHubNav';
 import { LockedFeaturePanel } from '../LockedPanels';
 import { usePlan } from '../../context/PlanContext';
@@ -201,6 +205,7 @@ function WeeklyEntryCard({
   cardClass,
   theme,
   defaultOpen,
+  feedback,
   onSave,
   onDelete,
 }: {
@@ -209,6 +214,8 @@ function WeeklyEntryCard({
   cardClass: string;
   theme: ReturnType<typeof useTheme>['theme'];
   defaultOpen?: boolean;
+  /** The thumbs for this dynamics, shown under the text when the card is open. */
+  feedback?: ReactNode;
   onSave: (content: string) => void;
   onDelete: () => void;
 }) {
@@ -280,6 +287,7 @@ function WeeklyEntryCard({
               <ConfirmDeleteButton theme={theme} onConfirm={onDelete} />
             </div>
           )}
+          {!editing && feedback ? <div className="mt-2">{feedback}</div> : null}
         </div>
       )}
     </div>
@@ -420,6 +428,44 @@ export function ConversationDynamicsScreen() {
 
   const latestWeekly = weeklies[0] ?? null;
   const historyWeeklies = weeklies.slice(1);
+
+  // Thumbs under every weekly dynamics (table dynamics_feedback, migration 096). The marks already given are read again after a
+  // reload; a failed read just leaves the thumbs unmarked.
+  const [feedbackMarks, setFeedbackMarks] = useState<Record<string, FeedbackState>>({});
+  useEffect(() => {
+    const ids = weeklies.map((entry) => entry.id);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    void loadFeedback(supabaseDynamicsFeedbackDeps, ids).then((found) => {
+      if (!cancelled && Object.keys(found).length > 0) setFeedbackMarks((prev) => ({ ...found, ...prev }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [weeklies]);
+
+  function dynamicsThumbs(entry: ProgressEntry) {
+    if (!convId) return null;
+    return (
+      <MessageFeedback
+        conversationId={convId}
+        messageId={entry.id}
+        state={feedbackMarks[entry.id] ?? null}
+        onChange={(next) =>
+          setFeedbackMarks((prev) => {
+            const marks = { ...prev };
+            if (next) marks[entry.id] = next;
+            else delete marks[entry.id];
+            return marks;
+          })
+        }
+        deps={supabaseDynamicsFeedbackDeps}
+        theme={theme}
+        copy={DYNAMICS_FEEDBACK_COPY}
+        groupLabel={DYNAMICS_FEEDBACK_GROUP_LABEL}
+      />
+    );
+  }
 
   function toggleSection(key: keyof typeof openSections) {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -593,7 +639,10 @@ export function ConversationDynamicsScreen() {
             theme={theme}
           >
             {latestWeekly ? (
-              <TextCard text={latestWeekly.content} theme={theme} />
+              <>
+                <TextCard text={latestWeekly.content} theme={theme} />
+                <div className="mt-2 px-1">{dynamicsThumbs(latestWeekly)}</div>
+              </>
             ) : (
               <p className={`${theme.textMuted} text-sm font-light`}>{DYNAMICS_COPY.emptyLatest}</p>
             )}
@@ -616,6 +665,7 @@ export function ConversationDynamicsScreen() {
                     busy={busyId === entry.id}
                     cardClass={cardBase}
                     theme={theme}
+                    feedback={dynamicsThumbs(entry)}
                     onSave={(content) => void handleUpdateWeekly(entry.id, content)}
                     onDelete={() => void handleDeleteWeekly(entry.id)}
                   />
