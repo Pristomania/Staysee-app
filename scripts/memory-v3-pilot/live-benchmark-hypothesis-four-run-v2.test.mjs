@@ -101,13 +101,15 @@ describe('hypothesis-four run wrapper', () => {
     assert.equal(nameGetterCalls, 0);
   });
 
-  it('imports only profiles-v2 and shared run', () => {
+  it('imports only profiles-v2, shared run and the cost log of calls made outside the app', () => {
     const source = readFileSync(
       fileURLToPath(new URL('./live-benchmark-hypothesis-four-run-v2.mjs', import.meta.url)),
       'utf8',
     );
     const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]);
-    assert.deepEqual(imports, [
+    // The cost log is the one addition allowed: a paid run must write its cost down (see scripts/lib/off-app-usage-log.mjs).
+    assert.ok(imports.includes('../lib/off-app-usage-log.mjs'), 'a paid run writes its cost down');
+    assert.deepEqual(imports.filter((name) => name !== '../lib/off-app-usage-log.mjs'), [
       'node:fs/promises',
       'node:url',
       './live-benchmark-profiles-v2.mjs',

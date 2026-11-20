@@ -57,7 +57,8 @@ export interface AdminCosts {
   totals: { user_usd: number | string; technical_usd: number | string };
   by_day: Array<{ day: string; cost_class: CostClass; usd: number | string }>;
   by_kind: AdminCostKind[];
-  by_person: Array<{ user_id: string; email: string | null; cost_class: CostClass; usd: number | string }>;
+  /** who: a person ('account'), all the deleted accounts together ('deleted') or all the calls made outside the app together ('off_app'); the last two have no user_id and no e-mail. */
+  by_person: Array<{ user_id: string | null; email: string | null; who: 'account' | 'deleted' | 'off_app'; cost_class: CostClass; usd: number | string }>;
 }
 
 export interface AdminPersonCard {

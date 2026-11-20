@@ -3,6 +3,7 @@
  * Tests inject all IO. Direct execution supplies explicit platform defaults.
  */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -432,7 +433,7 @@ async function runDirect() {
       argv: process.argv.slice(2),
       profileId: 'six-category-v2',
       readFileImpl: readFile,
-      fetchImpl: globalThis.fetch.bind(globalThis),
+      fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-benchmark-v2'),
       writeStdout: (chunk) => writeProcessStream(process.stdout, chunk),
       writeStderr: (chunk) => writeProcessStream(process.stderr, chunk),
       writeFileImpl: writeFile,

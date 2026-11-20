@@ -75,6 +75,7 @@ same(costKindTitle('memory_dialogue_reconciler'), 'Память: сверка ф
 same(costKindTitle('legacy_conversation_summary'), 'Пересказ беседы (старая память)', 'the old summary');
 same(costKindTitle('image_description'), 'Описание картинок', 'images');
 same(costKindTitle('a_kind_nobody_named_yet'), 'a_kind_nobody_named_yet', 'an unknown kind is shown as it is, never hidden');
+same(costKindTitle('offapp:stacy-eval'), 'Вне приложения: stacy-eval', 'a call made outside the app says so and keeps what it was for');
 console.log('✓ plain words for what a call was for');
 
 // ── costs as two tabs: only the class that was asked for ────────────────────────────────────────────────
@@ -91,8 +92,11 @@ const costs: AdminCosts = {
     { cost_class: 'user', kind: 'memory_dialogue_extractor', calls: 2, usd: '0.5' },
   ],
   by_person: [
-    { user_id: 'a', email: 'anna@example.invalid', cost_class: 'technical', usd: 24 },
-    { user_id: 'b', email: null, cost_class: 'user', usd: 3.5 },
+    { user_id: 'a', email: 'anna@example.invalid', who: 'account', cost_class: 'technical', usd: 24 },
+    { user_id: 'b', email: null, who: 'account', cost_class: 'user', usd: 3.5 },
+    { user_id: null, email: null, who: 'deleted', cost_class: 'user', usd: 1.5 },
+    { user_id: null, email: null, who: 'deleted', cost_class: 'technical', usd: 8 },
+    { user_id: null, email: null, who: 'off_app', cost_class: 'technical', usd: 4.25 },
   ],
 };
 same(
@@ -108,7 +112,10 @@ same(
       { day: '19.11.2026', usd: '2,50 $' },
       { day: '18.11.2026', usd: '1,00 $' },
     ],
-    people: [{ email: '—', usd: '3,50 $' }],
+    people: [
+      { email: '—', usd: '3,50 $' },
+      { email: 'Удалённые аккаунты', usd: '1,50 $' },
+    ],
   },
   'the user tab holds user rows only, newest day first',
 );
@@ -119,9 +126,13 @@ same(
     empty: false,
     kinds: [{ kind: 'Ответы Стейси', calls: 10, usd: '24,00 $' }],
     days: [{ day: '19.11.2026', usd: '24,00 $' }],
-    people: [{ email: 'anna@example.invalid', usd: '24,00 $' }],
+    people: [
+      { email: 'anna@example.invalid', usd: '24,00 $' },
+      { email: 'Удалённые аккаунты', usd: '8,00 $' },
+      { email: 'Вне приложения (проверки и тесты)', usd: '4,25 $' },
+    ],
   },
-  'the technical tab holds technical rows only',
+  'the technical tab holds technical rows only: the deleted accounts and the calls made outside the app are lines of their own',
 );
 same(
   costsForClass({ totals: { user_usd: 0, technical_usd: 0 }, by_day: [], by_kind: [], by_person: [] }, 'technical'),

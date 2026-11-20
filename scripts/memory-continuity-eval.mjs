@@ -30,6 +30,7 @@ import {
   seedMessage,
 } from './lib/prod-test-env.mjs';
 import { getTechnicalUserAccessToken } from './lib/prod-test-session.mjs';
+import { wrapForOffAppUsage } from './lib/off-app-usage-log.mjs';
 import { hasPendingConflictRetry } from './lib/memory-v3-prod-smoke-checks.mjs';
 import {
   PROBES,
@@ -222,8 +223,12 @@ async function runVariant(label, userId) {
   }
 }
 
+// The judge talks to the provider directly, not through the app, so its cost is written down here (the app writes the cost of the chat
+// calls itself).
+const judgeFetch = wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-continuity-judge');
+
 async function judge(probe, reply) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await judgeFetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${openrouterKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

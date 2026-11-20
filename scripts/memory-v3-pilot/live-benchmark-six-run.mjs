@@ -4,6 +4,7 @@
  * No process.env, dotenv, extra fetch, or filesystem results file.
  */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { buildSixCaseSemanticReviewPacket } from './live-benchmark-six.mjs';
@@ -256,7 +257,7 @@ async function runDirect() {
     await main({
       argv: process.argv.slice(2),
       readFileImpl: readFile,
-      fetchImpl: globalThis.fetch.bind(globalThis),
+      fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-six-case'),
       writeStdout: (chunk) => writeProcessStream(process.stdout, chunk),
       writeStderr: (chunk) => writeProcessStream(process.stderr, chunk),
     });

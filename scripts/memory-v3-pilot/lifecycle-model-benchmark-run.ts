@@ -1,5 +1,6 @@
 /** Import-safe composition root for the synthetic lifecycle model benchmark. */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -317,7 +318,7 @@ async function runDirect() {
     writeFileImpl: (path, data, options) => writeFile(path, data, options),
     linkImpl: link,
     unlinkImpl: unlink,
-    fetchImpl: globalThis.fetch.bind(globalThis),
+    fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-lifecycle-benchmark'),
     writeStdout: (text) => { process.stdout.write(text); },
     writeStderr: (text) => { process.stderr.write(text); },
   });

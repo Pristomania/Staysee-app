@@ -1,5 +1,6 @@
 /** Import-safe filesystem and process composition root for historical backfill. */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -367,7 +368,7 @@ async function runDirect() {
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       }),
     ),
-    fetchImpl: globalThis.fetch.bind(globalThis),
+    fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-lifecycle-backfill'),
     nowMs: Date.now(),
     writeStdout: (text) => { process.stdout.write(text); },
     writeStderr: (text) => { process.stderr.write(text); },

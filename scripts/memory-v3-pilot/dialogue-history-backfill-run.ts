@@ -1,6 +1,7 @@
 /** Import-safe filesystem and process composition root for the Memory V3
  * dialogue-scope historical backfill. */
 
+import { wrapForOffAppUsage } from '../lib/off-app-usage-log.mjs';
 import { access, link, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -412,7 +413,7 @@ async function runDirect() {
       });
       return { reader: createLifecycleHistorySupabaseReader(client), revisionClient: client };
     },
-    fetchImpl: globalThis.fetch.bind(globalThis),
+    fetchImpl: wrapForOffAppUsage(globalThis.fetch.bind(globalThis), 'memory-dialogue-backfill'),
     nowMs: Date.now(),
     writeStdout: (text) => { process.stdout.write(text); },
     writeStderr: (text) => { process.stderr.write(text); },
