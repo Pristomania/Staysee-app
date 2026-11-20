@@ -7,7 +7,6 @@
  */
 
 import { getPromptAuditVersion } from "../aiAuditVersions.ts";
-import { isFlatCoreV2OrdinaryRuntime } from "../flatCoreV2Runtime.ts";
 import { resolveChatModel } from "../modelRouter.ts";
 import { APPROVED_MODEL_GPT4O } from "../approvedModels.ts";
 import {
@@ -163,23 +162,10 @@ for (const doc of [docNone, docLegacy, docUnknown]) {
   assert(getPromptCoreMode(envV2) === "v2", "core mode stays v2 for any doc value");
 }
 
+const routeFlat = resolveChatModel({});
 assert(
-  isFlatCoreV2OrdinaryRuntime("normal", envV2) === true,
-  "flat ordinary runtime active under v2 (doc flag orthogonal)",
-);
-assert(
-  isFlatCoreV2OrdinaryRuntime("crisis", envV2) === false,
-  "crisis not flat ordinary under v2",
-);
-
-const routeFlat = resolveChatModel({
-  depth: "deep",
-  safetyCategory: "normal",
-  flatOrdinary: true,
-});
-assert(
-  routeFlat.model === APPROVED_MODEL_GPT4O && routeFlat.source === "flat_ordinary",
-  "model router flat ordinary unchanged (gpt-4o) — no doc dependency",
+  routeFlat.model === APPROVED_MODEL_GPT4O && routeFlat.source === "configured",
+  "model router: the configured model (gpt-4o by default) — no doc dependency",
 );
 
 console.log("✓ E. flat runtime / router / budget unaffected by doc flag");
@@ -463,17 +449,9 @@ assert(
 
 // default gpts-source unchanged with clean flag; runtime/model orthogonal
 assert(getPromptCoreMode(envV2) === "v2", "core mode stays v2 with clean flag");
+const routeClean = resolveChatModel({});
 assert(
-  isFlatCoreV2OrdinaryRuntime("normal", envV2) === true,
-  "flat ordinary runtime active with clean flag (orthogonal)",
-);
-const routeClean = resolveChatModel({
-  depth: "deep",
-  safetyCategory: "normal",
-  flatOrdinary: true,
-});
-assert(
-  routeClean.model === APPROVED_MODEL_GPT4O && routeClean.source === "flat_ordinary",
+  routeClean.model === APPROVED_MODEL_GPT4O && routeClean.source === "configured",
   "model router unchanged with clean flag (gpt-4o)",
 );
 assert(

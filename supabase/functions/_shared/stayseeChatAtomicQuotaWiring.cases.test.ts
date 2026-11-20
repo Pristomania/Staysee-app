@@ -108,12 +108,12 @@ export function validateAtomicQuotaWiring(source: string): void {
     "preliminary checkRateLimit must appear before atomic reserve",
   );
 
-  // ── 3. Free guards before reserve ─────────────────────────────────────────
+  // ── 3. No free guard reads the words of the message ───────────────────────
+  // (owner's rule, 20.11.2026: nothing is decided by the words of the message, so no answer is made without the model before the reserve)
 
-  const beforeReserve = handler.slice(0, reservePos);
   assert(
-    /safety\.immediateResponse/.test(beforeReserve),
-    "safety immediate-response check must appear before atomic reserve",
+    !/immediateResponse/.test(handler),
+    "no immediate response (an answer without the model, chosen by the words of the message) may exist",
   );
 
   // ── 4. All provider-backed seams after reserve (eager summary first) ──────

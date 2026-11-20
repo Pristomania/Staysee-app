@@ -68,7 +68,7 @@ assert(JSON.stringify(buildChatModelProviderRoute("openai/gpt-6.1-sol")).include
 
 console.log("\n=== the reserve model ===\n");
 for (const key of Object.keys(env)) delete env[key];
-const flat = { depth: "brief", safetyCategory: "normal", flatOrdinary: true } as const;
+const flat = {} as const;
 env.STAYSEE_CHAT_MODEL = APPROVED_MODEL_DEEPSEEK_V4_PRO;
 let route = resolveChatModel(flat);
 assert(route.model === APPROVED_MODEL_DEEPSEEK_V4_PRO && route.fallbackModel === APPROVED_MODEL_KIMI_K26, "main DeepSeek V4 Pro: the reserve is Kimi K2.6");
@@ -83,12 +83,10 @@ env.STAYSEE_CHAT_MODEL_FALLBACK = APPROVED_MODEL_SONNET;
 route = resolveChatModel(flat);
 assert(route.fallbackModel === APPROVED_MODEL_SONNET, "STAYSEE_CHAT_MODEL_FALLBACK sets the reserve by hand");
 delete env.STAYSEE_CHAT_MODEL_FALLBACK;
-route = resolveChatModel({ depth: "deep", safetyCategory: "normal" });
-assert(route.model === APPROVED_MODEL_DEEPSEEK_V4_PRO && route.fallbackModel === APPROVED_MODEL_KIMI_K26, "also on the depth routes the reserve is the other one of the two");
 env.STAYSEE_CHAT_MODEL = APPROVED_MODEL_GPT4O;
 route = resolveChatModel(flat);
 assert(route.model === APPROVED_MODEL_GPT4O && route.fallbackModel === APPROVED_MODEL_SONNET, "any other model keeps its own reserve");
-route = resolveChatModel({ depth: "brief", safetyCategory: "normal", requestModel: APPROVED_MODEL_KIMI_K26 });
+route = resolveChatModel({ requestModel: APPROVED_MODEL_KIMI_K26 });
 assert(route.model === APPROVED_MODEL_KIMI_K26 && route.source === "request", "a model may be asked in the request (dev and tests)");
 
 console.log("\n=== the cost ===\n");

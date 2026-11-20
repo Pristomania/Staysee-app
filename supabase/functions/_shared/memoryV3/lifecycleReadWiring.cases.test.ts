@@ -395,7 +395,7 @@ describe("Memory V3 lifecycle read context wiring", () => {
     const start = STAYSEE_CHAT_SOURCE.indexOf(
       "STAYSEE_MEMORY_V3_LIFECYCLE_READ_MODE",
     );
-    const end = STAYSEE_CHAT_SOURCE.indexOf("// ── L5: Safety check", start);
+    const end = STAYSEE_CHAT_SOURCE.indexOf("const currentDateTimePrompt = buildCurrentDateTimePrompt(timeGap);", start);
     assert.notEqual(start, -1);
     assert.notEqual(end, -1);
     const readComposition = STAYSEE_CHAT_SOURCE.slice(start, end);
