@@ -3,7 +3,6 @@
  * Cyrillic-safe: full-word overlap, partial-word continuation, list dedupe.
  */
 
-import { sanitizeProfanityInReply } from "./languageGuard.ts";
 
 function normalizeForCompare(s: string): string {
   return s.toLowerCase().replace(/\s+/g, " ").trim();
@@ -323,10 +322,9 @@ export function normalizeLongReplyParagraphs(text: string): string {
   return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** Normal path: profanity filter + optional long-reply paragraph normalization. */
+/** Normal path: only the paragraph layout of a long reply is normalized; no word is ever removed or replaced. */
 export function polishAssistantOutput(text: string): string {
-  const cleaned = sanitizeProfanityInReply(text.trim());
-  return normalizeLongReplyParagraphs(cleaned);
+  return normalizeLongReplyParagraphs(text.trim());
 }
 
 /** Dedupe continuation paragraphs only when next clearly extends previous. */

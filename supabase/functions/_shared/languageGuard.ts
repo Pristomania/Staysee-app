@@ -40,45 +40,8 @@ export const LANGUAGE_BOUNDARY_GUIDANCE = `
 - Вернись к сути беседы одним спокойным вопросом или заземлением, если уместно.
 `.trim();
 
-const PROFANITY_REPLACEMENTS: Array<{ pattern: RegExp; replace: string }> = [
-  { pattern: /^[\s]*[Чч][ёе]рт(?:\s+возьми)?[,.!…—–-]*\s*/gimu, replace: "" },
-  { pattern: /(?:^|\n)[\s]*[Чч][ёе]рт[,.!…—–-]*\s*/gimu, replace: "\n" },
-  { pattern: /\b[Чч][ёе]рт(?:\s+возьми)?\b[,.!…]?\s*/giu, replace: "" },
-  { pattern: /\bблин\b[,.!…]?\s*/giu, replace: "" },
-  { pattern: /\b[Ёё]-?моё\b[,.!…]?\s*/giu, replace: "" },
-  { pattern: /\bёб\b/giu, replace: "" },
-  { pattern: /\bбляд\w*\b/giu, replace: "" },
-  { pattern: /\bхер\b[,.!…]?\s*/giu, replace: "" },
-  { pattern: /\bхрен\b[,.!…]?\s*/giu, replace: "" },
-  { pattern: /\bfuck\w*\b/giu, replace: "" },
-  { pattern: /\bshit\b/giu, replace: "" },
-  { pattern: /\bdamn\b/giu, replace: "" },
-  { pattern: /\bhell\b/giu, replace: "" },
-];
-
-function tidyAfterRemoval(text: string): string {
-  return text
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/^\s*[,.!…—–-]+\s*/gm, "")
-    .trim();
-}
-
-/** Strip profanity from model output before sending to the user. */
-export function sanitizeProfanityInReply(text: string): string {
-  if (!text?.trim()) return text;
-  let out = text;
-  for (const { pattern, replace } of PROFANITY_REPLACEMENTS) {
-    pattern.lastIndex = 0;
-    out = out.replace(pattern, replace);
-  }
-  out = tidyAfterRemoval(out);
-  if (!out && text.trim()) {
-    return "Поняла — я сбилась. Давай продолжим с того, что для тебя сейчас важно.";
-  }
-  return out;
-}
+// There is deliberately NO code here that deletes or replaces words in a reply (owner's decision, 20.11.2026: nothing about a reply
+// is decided by the words in it). The only protection against swearing is LANGUAGE_GUARD_PROMPT above, i.e. the instruction to the model.
 
 export function userSignalsLanguageBoundary(message: string): boolean {
   return LANGUAGE_BOUNDARY_USER_PATTERNS.some((p) => p.test(message));
