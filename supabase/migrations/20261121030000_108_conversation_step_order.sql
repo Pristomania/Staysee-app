@@ -62,8 +62,10 @@ BEGIN
  IF p_expected_neighbor IS NULL OR v_neighbor<1 OR v_neighbor>cardinality(v_order)
   OR v_order[v_neighbor] IS DISTINCT FROM p_expected_neighbor THEN RAISE EXCEPTION 'conversation_order_changed'; END IF;
  v_order[v_index]:=p_expected_neighbor; v_order[v_neighbor]:=p_conversation_id;
- UPDATE public.user_usage_tiers SET conversation_order=v_order WHERE user_id=v_user;
- PERFORM public.refresh_conversation_anchor(v_user);
+ -- Authorization happened under this lock. Persist the corresponding anchor in
+ -- the SAME write: a deadline between this write and a second rights check must
+ -- not freeze the previous top while accepting the new order.
+ UPDATE public.user_usage_tiers SET conversation_order=v_order,free_conversation_id=v_order[1] WHERE user_id=v_user;
  RETURN true;
 END;
 $$;

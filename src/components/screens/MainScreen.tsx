@@ -8,7 +8,7 @@ import { User, Plus, Lock, ArrowUp } from 'lucide-react';
 import {conversationClient} from '../../lib/conversationAccessBrowser';
 import type {PlanId} from '../../lib/plans';
 import type {Message} from '../../types';
-import {createHoldToReorder} from '../../lib/holdToReorder';
+import {ConversationOrderControls} from '../ConversationOrderControls';
 import type { Conversation } from '../../types';
 import { GREETING } from './ChatScreen';
 import { FIRST_CONTACT_MESSAGE, isFirstConversation } from '../../lib/firstContact';
@@ -56,10 +56,16 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
   const [listKey,setListKey]=useState('');
+  const [orderingId,setOrderingId]=useState<string|null>(null);
+  const moveTicket=useRef<{key:string}|null>(null);
   const identityKey=`${userId}:${tier}:${planLoaded}:${maxConversations}:${revision}`;
   const currentKey=useRef(identityKey);currentKey.current=identityKey;
   const fetchVersion=useRef(0);
-  useEffect(()=>{setBusy(false);setModal(null);setOpenMenuId(null);setError('');},[identityKey]);
+  useEffect(()=>{
+   setBusy(false);setModal(null);setOpenMenuId(null);setOrderingId(null);setError('');moveTicket.current=null;
+   return()=>{moveTicket.current=null;};
+  },[identityKey]);
+  useEffect(()=>{if(orderingId&&!conversations.some(c=>c.id===orderingId))setOrderingId(null);},[conversations,orderingId]);
   const menuRef = useRef<HTMLDivElement>(null);
   const limitTimerRef = useRef<number | undefined>(undefined);
 
@@ -116,7 +122,6 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
   }
 
   async function openRoom(conv: Conversation) {
-    if(suppressClickRef.current){suppressClickRef.current=false;return;}
     if(conv.can_read!==true){setError('Ваши данные сохранены. Беседа будет доступна после оплаты.');return;}
     navigateTo('chat', { conversation: conv });
   }
@@ -190,26 +195,24 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
   }
 
   const canReorder=planLoaded&&tier!=='free';
-  const topRoomRef=useRef<HTMLDivElement|null>(null);
-  const suppressClickRef=useRef(false);
-  const [heldId,setHeldId]=useState<string|null>(null);
-  const moveRef=useRef(moveTop);moveRef.current=moveTop;
-  const hold=useRef<ReturnType<typeof createHoldToReorder>|null>(null);
-  if(!hold.current)hold.current=createHoldToReorder({
-   schedule:fn=>window.setTimeout(fn,350),cancel:id=>window.clearTimeout(id),onArmed:setHeldId,
-   isTop:y=>{const rect=topRoomRef.current?.getBoundingClientRect();return !!rect&&y>=rect.top-24&&y<=rect.bottom+24;},
-   onMove:id=>void moveRef.current(id),
-  });
-  useEffect(()=>{
-   const prevent=(event:TouchEvent)=>{if(hold.current?.isArmed())event.preventDefault();};
-   document.addEventListener('touchmove',prevent,{passive:false});
-   return()=>{hold.current?.cancel();document.removeEventListener('touchmove',prevent);};
-  },[]);
-  async function moveTop(id:string){
-   if(!canReorder||busy)return;setBusy(true);setError('');const key=identityKey;
-   try{await client.moveTop(id);if(currentKey.current===key){setOpenMenuId(null);await fetchConversations();}}
-   catch{if(currentKey.current===key)setError('Не удалось переместить беседу. Попробуйте ещё раз.');}
-   finally{if(currentKey.current===key)setBusy(false);}
+  async function moveStep(id:string,direction:'up'|'down'){
+   if(!canReorder||busy||listKey!==identityKey||moveTicket.current?.key===identityKey)return;
+   const index=conversations.findIndex(c=>c.id===id);
+   const neighbor=conversations[index+(direction==='up'?-1:1)];
+   if(index<0||!neighbor)return;
+   const ticket={key:identityKey};moveTicket.current=ticket;setBusy(true);setError('');
+   try{await client.moveStep(id,direction,neighbor.id);if(currentKey.current===ticket.key&&moveTicket.current===ticket)await fetchConversations();}
+   catch(err){
+    if(currentKey.current===ticket.key&&moveTicket.current===ticket){
+     if(err instanceof Error&&err.message==='conversation_locked')setOrderingId(null);
+     await fetchConversations();
+     if(currentKey.current===ticket.key&&moveTicket.current===ticket)setError(err instanceof Error&&err.message==='conversation_order_changed'
+      ?'Порядок бесед изменился. Список обновлён — выберите направление ещё раз.'
+      :err instanceof Error&&err.message==='conversation_locked'?'Перестановка доступна только с действующим тарифом. Ваши данные сохранены.'
+      :'Не удалось сохранить порядок. Проверьте список и попробуйте ещё раз.');
+    }
+   }
+   finally{if(moveTicket.current===ticket){moveTicket.current=null;if(currentKey.current===ticket.key)setBusy(false);}}
   }
 
   if (!planLoaded) return <PlanVerificationNotice key={userId??'guest'} failed={planFailed} onRetry={onRetryPlan}/>;
@@ -278,14 +281,7 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
               const isRecent = index === 0;
 
               return (
-                <div key={conv.id} ref={index===0?topRoomRef:undefined} className={`relative ${heldId===conv.id?'ring-2 ring-[#c9a96e] rounded-xl':''}`} draggable={canReorder&&!busy}
-                  onPointerDown={event=>{if(event.pointerType==='touch'&&canReorder&&!busy&&!(event.target as HTMLElement).closest('[aria-label^="Меню"]'))hold.current?.start(conv.id,event.clientX,event.clientY,true);}}
-                  onPointerMove={event=>hold.current?.move(event.clientX,event.clientY)}
-                  onPointerUp={event=>{if(hold.current?.end(event.clientY)){event.preventDefault();suppressClickRef.current=true;}}}
-                  onPointerCancel={()=>hold.current?.cancel()}
-                  onDragStart={event=>event.dataTransfer.setData('text/plain',conv.id)}
-                  onDragOver={event=>{if(index===0&&canReorder)event.preventDefault();}}
-                  onDrop={event=>{if(index===0&&canReorder){event.preventDefault();const id=event.dataTransfer.getData('text/plain');if(conversations.some(c=>c.id===id))void moveTop(id);}}}>
+                <div key={conv.id} className={`relative ${orderingId===conv.id?'ring-1 ring-[#c9a96e] rounded-xl':''}`}>
                   <button
                     onClick={() => openRoom(conv)}
                     className={`
@@ -342,7 +338,7 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
                       >
                         Переименовать
                       </button>
-                      {canReorder&&index>0&&<button type="button" disabled={busy} onClick={()=>void moveTop(conv.id)} className={`w-full text-left px-4 py-3 text-sm ${theme.textSecondary}`}><ArrowUp className="inline w-3.5 h-3.5 mr-1"/>Переместить наверх</button>}
+                      {canReorder&&conversations.length>1&&<button type="button" disabled={busy} onClick={()=>{setOrderingId(conv.id);setOpenMenuId(null);}} className={`w-full text-left px-4 py-3 text-sm ${theme.textSecondary}`}><ArrowUp className="inline w-3.5 h-3.5 mr-1"/>Изменить порядок</button>}
                       <div className={`h-px ${theme.divider}`} />
                       <button
                         onClick={() => startDelete(conv)}
@@ -352,6 +348,7 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
                       </button>
                     </div>
                   )}
+                  {canReorder&&orderingId===conv.id&&<div className={theme.textSecondary}><ConversationOrderControls first={index===0} last={index===conversations.length-1} saving={busy} onMove={direction=>void moveStep(conv.id,direction)} onDone={()=>setOrderingId(null)}/></div>}
                 </div>
               );
             })}

@@ -42,6 +42,13 @@ export function createConversationClient(rpc:Rpc){
    return mutate('rename_my_conversation',id,{p_title:title});
   },
   moveTop:(id:string)=>mutate('move_my_conversation_to_top',id),
+  async moveStep(id:string,direction:'up'|'down',expectedNeighbor:string){
+   if(!uuid.test(id)||!uuid.test(expectedNeighbor)||id===expectedNeighbor||!['up','down'].includes(direction))throw Error('conversation_operation_failed');
+   const {data,error}=await rpc('move_my_conversation_step',{p_conversation_id:id,p_direction:direction,p_expected_neighbor:expectedNeighbor});
+   if(error&&typeof error==='object'&&'message' in error&&String(error.message).includes('conversation_order_changed'))throw Error('conversation_order_changed');
+   if(error&&typeof error==='object'&&'message' in error&&String(error.message).includes('conversation_locked'))throw Error('conversation_locked');
+   if(error||data!==true)throw Error('conversation_operation_failed');
+  },
   touch:(id:string)=>mutate('touch_my_conversation',id),
   async removeAll(owner:string){if(!uuid.test(owner))throw Error('account_changed');const {error}=await rpc('delete_all_my_conversations',{p_expected_user_id:owner});if(error)throw Error('conversation_operation_failed');},
  };

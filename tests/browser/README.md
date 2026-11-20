@@ -1,5 +1,13 @@
 # Browser regression checks
 
+## Conversation order and locked routes (21.11)
+
+`conversation-order.html` mounts the real ConversationListScreen with a controlled external RPC boundary. Click «Запустить регрессии» and wait for the explicit `All browser regressions PASS` (ten lines); an intermediate screen is not a pass. Covers measured44px targets, adjacent moves/edges, repeated moves, no optimistic network-failure success, rapid clicks, remount, stale entitlement-generation/unmounted completion, server expiry and free actions/locks. The driver is not evidence of a real database connection.
+
+`conversation-sizes.html` embeds that same component in actual390×844,375×812 and844×390 iframe viewports. Wait for all frames to load, click «Проверить все размеры», then require nine rows with matching measured viewport and pass=true. This is Chromium layout coverage, not physical iOS/Android touch acceptance. `locked-routes.html` uses the complete App and actual local Supabase; enter only a disposable local fixture conversation UUID, then use the visible route buttons. They drive ordinary application history rather than bypassing its gates. Never point this QA entry at production.
+
+Database ordering runs separately: `node --test scripts/conversation-step-order.dbtest.mjs` (isolated PGlite), and `node --test scripts/conversation-step-order-concurrency.dbtest.mjs` (Docker, already-installed PostgreSQL image, independent connections, no network, disposable container removed afterward). The latter must never reuse a shared DB/container. The existing archive/creation/upgrade fixture also applies migration108. Full local Supabase acceptance of that migration remains required before release; do not apply it to another agent's shared stack casually.
+
 `recovery-regressions.html` exercises the real AuthProvider, ConversationListScreen and ConversationAccessGate with React StrictMode. Only the external Supabase auth/profile boundary is controlled by the tests. No real password, registration, chat message, model call or payment is used.
 
 Start the existing Vite dev server with the normal public local Supabase URL/anon configuration, open `/tests/browser/recovery-regressions.html`, and click **Запустить регрессии**. The final visible JSON must show PASS for every case. The slow-plan cases use real8-second timers; the cache consumer case uses real19/21-second waits. CSS onset starts from a MutationObserver notification and samples computed ancestor opacity every50ms (rAF is paint-throttled in some embedded browsers). This page does not run as part of `test:offline`; browser execution must be reported separately. Do not edit source during the run: Vite HMR can reload the page and discard results.

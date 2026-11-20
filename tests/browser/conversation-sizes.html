@@ -1,0 +1,15 @@
+<!doctype html><html lang="ru"><head><meta charset="UTF-8"><title>Размеры списка бесед</title></head><body><h1>Реальные размеры вложенных экранов</h1><p>Chromium, не физические устройства. В каждом экране кнопка «Замер» показывает его фактический viewport.</p><button id="run">Проверить все размеры</button><pre id="results"></pre><iframe title="390 на 844" width="390" height="844" src="/tests/browser/conversation-order.html" style="border:0"></iframe><iframe title="375 на 812" width="375" height="812" src="/tests/browser/conversation-order.html" style="border:0"></iframe><iframe title="844 на 390" width="844" height="390" src="/tests/browser/conversation-order.html" style="border:0"></iframe><script type="module">
+document.querySelector('#run').onclick=async()=>{
+ const results=[];const pause=()=>new Promise(r=>setTimeout(r,100));
+ try{for(const frame of document.querySelectorAll('iframe')){
+  const doc=frame.contentDocument;
+  const click=text=>{const button=[...doc.querySelectorAll('button')].find(b=>b.textContent===text);if(!button)throw Error('missing '+text);button.click();};
+  for(const label of ['1 беседа','3 беседы','30 бесед']){
+   click(label);await pause();click('Замер');await pause();
+   const r=JSON.parse(doc.querySelector('#result').textContent);
+   results.push({viewport:r.viewport,count:r.order.length,height:r.height,lastBottom:Math.round(r.lastBottom),pass:r.height<=Math.max(r.viewport[1],r.lastBottom+64)});
+  }
+ }}catch(error){results.push({error:String(error)});}
+ document.querySelector('#results').textContent=JSON.stringify(results,null,2);
+};
+</script></body></html>
