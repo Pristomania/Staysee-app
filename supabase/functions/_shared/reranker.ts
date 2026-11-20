@@ -34,6 +34,8 @@ export interface RerankConfig {
   url?: string;
   /** Called once per call to the provider (the money is spent either way): the chat writes it into the cost log. */
   onUsage?: (usage: RerankUsage) => void | Promise<void>;
+  /** Called when the provider refuses the key (401, 403) or has no money (402): the chat raises the alert. */
+  onRefusal?: (status: 401 | 402 | 403) => void | Promise<void>;
 }
 
 /** One score per document, in the order of the documents; null when the answer is not what is expected. */
@@ -76,6 +78,13 @@ export async function rerankLines(
           });
           if (!response.ok) {
             console.warn(`[reranker] HTTP ${response.status}`);
+            if (config.onRefusal && (response.status === 401 || response.status === 402 || response.status === 403)) {
+              try {
+                await config.onRefusal(response.status);
+              } catch (e) {
+                console.warn("[reranker] refusal handler failed:", e);
+              }
+            }
             return null;
           }
           const data = await response.json();

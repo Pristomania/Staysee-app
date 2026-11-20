@@ -89,4 +89,29 @@ describe("the reranker that sorts the found lines", () => {
     const odd = (async () => ({ ok: true, status: 200, json: async () => ({ answer: "?" }) })) as never;
     assert.equal(await rerankLines("q", ["a"], { apiKey: "k", fetchImpl: odd }), null);
   });
+
+  it("tells the caller when the provider refuses the key or has no money, and only then; a failing handler never breaks the search", async () => {
+    const seen: number[] = [];
+    for (const status of [401, 402, 403]) {
+      const refusing = (async () => ({ ok: false, status, json: async () => ({}) })) as never;
+      assert.equal(await rerankLines("q", ["a"], { apiKey: "k", fetchImpl: refusing, onRefusal: (s) => void seen.push(s) }), null);
+    }
+    assert.deepEqual(seen, [401, 402, 403]);
+
+    const failing = (async () => ({ ok: false, status: 503, json: async () => ({}) })) as never;
+    await rerankLines("q", ["a"], { apiKey: "k", fetchImpl: failing, onRefusal: (s) => void seen.push(s) });
+    assert.deepEqual(seen, [401, 402, 403], "a 503 is not a refusal");
+
+    const refusing = (async () => ({ ok: false, status: 401, json: async () => ({}) })) as never;
+    assert.equal(
+      await rerankLines("q", ["a"], {
+        apiKey: "k",
+        fetchImpl: refusing,
+        onRefusal: () => {
+          throw new Error("alert down");
+        },
+      }),
+      null,
+    );
+  });
 });
