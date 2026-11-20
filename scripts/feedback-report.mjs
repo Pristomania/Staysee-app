@@ -1,9 +1,11 @@
 /**
- * What people said about Stacy's answers (thumbs up / down, migration 095), for the owner of the product.
- * Reads the view message_feedback_review with the service key, read only. Nothing is written or saved to a file: the text
- * of the answers and of the notes is shown in the terminal and nowhere else.
+ * What people said about Stacy's answers (thumbs up / down, migration 095) and about the weekly "Динамика" (migration 096),
+ * for the owner of the product. Reads the view message_feedback_review (or dynamics_feedback_review with --dynamics) with the
+ * service key, read only. Nothing is written or saved to a file: the text of the answers, of the dynamics and of the notes is
+ * shown in the terminal and nowhere else.
  *
- *   npm run feedback:report                   the last 30, newest first
+ *   npm run feedback:report                   the last 30 on answers, newest first
+ *   npm run feedback:report -- --dynamics     the same for the weekly dynamics
  *   npm run feedback:report -- --bad          only the "not good" ones
  *   npm run feedback:report -- --limit=100    more of them (up to 200)
  *   npm run feedback:report -- --since=2026-11-17
@@ -15,9 +17,10 @@ export const DEFAULT_LIMIT = 30;
 export const MAX_LIMIT = 200;
 
 export function parseArgs(argv) {
-  const options = { bad: false, limit: DEFAULT_LIMIT, since: null };
+  const options = { bad: false, limit: DEFAULT_LIMIT, since: null, dynamics: false };
   for (const arg of argv) {
     if (arg === "--bad") options.bad = true;
+    else if (arg === "--dynamics") options.dynamics = true;
     else if (arg.startsWith("--limit=")) {
       const n = Number(arg.slice("--limit=".length));
       if (Number.isInteger(n) && n >= 1) options.limit = Math.min(n, MAX_LIMIT);
@@ -33,7 +36,7 @@ export function buildQuery(options) {
   const parts = ["select=*", "order=created_at.desc", `limit=${options.limit}`];
   if (options.bad) parts.push("rating=eq.-1");
   if (options.since) parts.push(`created_at=gte.${options.since}`);
-  return `message_feedback_review?${parts.join("&")}`;
+  return `${options.dynamics ? "dynamics_feedback_review" : "message_feedback_review"}?${parts.join("&")}`;
 }
 
 export function maskEmail(email) {
@@ -50,11 +53,22 @@ export function formatWhen(iso) {
   return date.toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export function formatReport(rows) {
+export function formatReport(rows, options = {}) {
   const bad = rows.filter((row) => row.rating === -1).length;
-  const lines = [`Отзывы на ответы Стейси: показано ${rows.length} (плохих ${bad}, хороших ${rows.length - bad}). Новые сверху, время московское.`];
+  const subject = options.dynamics ? "на «Динамику»" : "на ответы Стейси";
+  const lines = [`Отзывы ${subject}: показано ${rows.length} (плохих ${bad}, хороших ${rows.length - bad}). Новые сверху, время московское.`];
   if (rows.length === 0) lines.push("", "Пока ничего нет.");
   for (const row of rows) {
+    if (options.dynamics) {
+      lines.push(
+        "",
+        `[${row.rating === -1 ? "ПЛОХО" : "ХОРОШО"}] ${formatWhen(row.created_at)} | аккаунт ${String(row.user_id ?? "").slice(0, 8)} (${maskEmail(row.email)}, тариф ${row.tier ?? "?"})`,
+        `  Динамика (неделя от ${row.entry_date ?? "?"}): «${oneLine(row.dynamics_excerpt)}»`,
+      );
+      if (row.comment) lines.push(`  Написал(а): «${oneLine(row.comment)}»`);
+      lines.push(`  беседа ${String(row.conversation_id).slice(0, 8)}, динамика ${String(row.entry_id).slice(0, 8)}`);
+      continue;
+    }
     lines.push(
       "",
       `[${row.rating === -1 ? "ПЛОХО" : "ХОРОШО"}] ${formatWhen(row.created_at)} | аккаунт ${String(row.user_id ?? "").slice(0, 8)} (${maskEmail(row.email)}, тариф ${row.tier ?? "?"}) | модель: ${row.model_guess ?? "?"} | промпт: ${row.prompt_version_guess ?? "?"} (по журналу, примерно)`,
@@ -80,15 +94,19 @@ async function main() {
   const response = await fetch(`${baseUrl}/rest/v1/${buildQuery(options)}`, { headers: makeServiceHeaders(serviceKey) });
   const text = await response.text();
   if (!response.ok) {
-    if (response.status === 404 || /message_feedback_review|PGRST205/.test(text)) {
-      console.error("Таблица отзывов ещё не создана на боевой базе (миграция 095 не выложена).");
+    if (response.status === 404 || /(?:message|dynamics)_feedback_review|PGRST205/.test(text)) {
+      console.error(
+        options.dynamics
+          ? "Таблица отзывов на динамику ещё не создана на боевой базе (миграция 096 не выложена)."
+          : "Таблица отзывов ещё не создана на боевой базе (миграция 095 не выложена).",
+      );
     } else {
       console.error(`Не удалось прочитать отзывы: HTTP ${response.status}`);
     }
     process.exitCode = 1;
     return;
   }
-  console.log(formatReport(text ? JSON.parse(text) : []));
+  console.log(formatReport(text ? JSON.parse(text) : [], options));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

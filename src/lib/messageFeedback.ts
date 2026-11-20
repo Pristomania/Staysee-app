@@ -52,6 +52,9 @@ export const FEEDBACK_COPY = {
   failed: 'Не получилось сохранить. Попробуй ещё раз.',
 } as const;
 
+/** The words of one pair of thumbs: under an answer (FEEDBACK_COPY) or under a weekly dynamics (dynamicsFeedbackDeps.ts). */
+export type FeedbackCopy = { readonly [K in keyof typeof FEEDBACK_COPY]: string };
+
 /** The note as it is stored: trimmed, cut to the limit, and null when nothing is left. */
 export function normalizeFeedbackComment(text: string | null | undefined): string | null {
   const trimmed = (text ?? '').trim().slice(0, FEEDBACK_COMMENT_MAX).trim();
