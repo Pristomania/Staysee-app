@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { signUpConsentMetadata, type SignUpConsents } from '../lib/consents';
 import { supabase } from '../lib/supabase';
 import { ensureUserProfile } from '../lib/ensureProfile';
@@ -7,7 +7,6 @@ import {
   clearPasswordRecoveryPending,
   clearRecoveryCallbackFromUrl,
   getAuthCallbackTypeFromUrl,
-  getPasswordRecoveryOwner,
   hasAuthCallbackInUrl,
   markPasswordRecoveryPending,
   shouldStartInPasswordRecovery,
@@ -19,14 +18,6 @@ import type { Profile } from '../types';
 import type { User } from '@supabase/supabase-js';
 
 const AUTH_LOADING_TIMEOUT_MS = 8000;
-const DELETED_OWNERS_KEY = 'staysee:deleted-room-owners';
-
-function readDeletedOwners(): Set<string> {
-  try {
-    const stored: unknown = JSON.parse(sessionStorage.getItem(DELETED_OWNERS_KEY) ?? '[]');
-    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []);
-  } catch { return new Set(); }
-}
 
 export type SignUpStatus = 'session' | 'confirm_email' | 'already_registered' | 'error';
 
@@ -61,28 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [passwordRecoveryPending, setPasswordRecoveryPending] = useState(
     () => shouldStartInPasswordRecovery(),
   );
-  const identityRef = useRef<{ownerId:string|null;revision:number}>({ownerId:null,revision:0});
-  const recoveryOwnerRef = useRef<string|null>(getPasswordRecoveryOwner());
-  const recoveryRevisionRef = useRef(0);
-  const deletedOwnersRef = useRef<Set<string>>(readDeletedOwners());
 
-  const clearAuthView = useCallback(() => {
-    identityRef.current.ownerId = null;
-    identityRef.current.revision += 1;
-    setUser(null);
-    setProfile(null);
-  }, []);
-
-  const rejectDeletedOwner = useCallback((ownerId: string, availableFrom: string | null | undefined) => {
-    deletedOwnersRef.current.add(ownerId);
-    try { sessionStorage.setItem(DELETED_OWNERS_KEY, JSON.stringify([...deletedOwnersRef.current])); } catch { /* in-memory rejection still applies */ }
-    rememberRoomDeletedNotice(availableFrom);
-    clearPasswordRecoveryPending();
-    recoveryOwnerRef.current = null;
-    recoveryRevisionRef.current += 1;
-    setPasswordRecoveryPending(false);
-    clearAuthView();
-  }, [clearAuthView]);
+  const initialRestoreDoneRef = useRef(false);
 
   // Must run before getSession() finishes — PASSWORD_RECOVERY is easy to miss otherwise.
   useEffect(() => {
@@ -97,39 +68,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else if (callbackType) {
       // signup / magiclink / invite — not a forced password change
       clearPasswordRecoveryPending();
-      recoveryOwnerRef.current = null;
       setPasswordRecoveryPending(false);
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'INITIAL_SESSION') return;
-      if (session?.user && deletedOwnersRef.current.has(session.user.id)) {
-        clearPasswordRecoveryPending();
-        recoveryOwnerRef.current = null;
-        setPasswordRecoveryPending(false);
-        return;
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
-        recoveryRevisionRef.current += 1;
-        recoveryOwnerRef.current = session?.user.id ?? null;
-        markPasswordRecoveryPending(recoveryOwnerRef.current);
+        markPasswordRecoveryPending();
         setPasswordRecoveryPending(true);
         return;
       }
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'SIGNED_IN') {
         // Let in: nothing more to tell the person about the link.
         forgetAuthCallbackNotice();
         const urlType = getAuthCallbackTypeFromUrl();
-        const incomingOwner = session?.user.id ?? null;
-        const pending = shouldStartInPasswordRecovery();
-        if (pending && incomingOwner && recoveryOwnerRef.current === null && identityRef.current.ownerId === null) {
-          recoveryOwnerRef.current = incomingOwner;
-          markPasswordRecoveryPending(incomingOwner);
-        }
-        const sameRecovery = pending && incomingOwner !== null && recoveryOwnerRef.current === incomingOwner;
-        if (urlType !== 'recovery' && !sameRecovery) {
+        if (urlType !== 'recovery') {
           clearPasswordRecoveryPending();
-          recoveryOwnerRef.current = null;
           setPasswordRecoveryPending(false);
           if (hasAuthCallbackInUrl()) {
             clearAuthCallbackFromUrl();
@@ -137,7 +90,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (event === 'SIGNED_OUT') {
-        recoveryOwnerRef.current = null;
         clearPasswordRecoveryPending();
         setPasswordRecoveryPending(false);
       }
@@ -149,18 +101,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     let authSubscription: { unsubscribe: () => void } | null = null;
-    // Live events supersede the snapshot read started at mount.
-    const identity = identityRef.current;
 
     const finishLoading = () => {
       if (!cancelled) setLoading(false);
     };
 
-    // A stalled session read must not block the sign-in screen indefinitely.
+    // Hard cap: loading must never stay true past 5 seconds.
     const loadingTimeoutId = window.setTimeout(finishLoading, AUTH_LOADING_TIMEOUT_MS);
 
-    async function loadProfileSafe(userId: string, revision: number) {
-      const isCurrent = () => !cancelled && identity.ownerId === userId && identity.revision === revision;
+    async function safeLocalSignOut() {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore
+      }
+    }
+
+    async function loadProfileSafe(userId: string) {
       try {
         const { data, error } = await supabase
           .from('profiles')
@@ -168,21 +125,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .eq('id', userId)
           .maybeSingle();
 
-        if (!isCurrent()) return;
+        if (cancelled) return;
         if (error) throw error;
         if (data) {
           if (data.room_deletion_requested_at) {
             // Note the message first: by now the sign-in screen is usually gone, and the person must be told why.
-            rejectDeletedOwner(userId, data.room_purge_after);
+            rememberRoomDeletedNotice(data.room_purge_after);
+            await safeLocalSignOut();
+            if (!cancelled) {
+              setUser(null);
+              setProfile(null);
+            }
             return;
           }
           setProfile(data);
           return;
         }
         const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (!isCurrent() || authUser?.id !== userId) return;
         const ensured = await ensureUserProfile(userId, authUser?.email ?? null);
-        if (!isCurrent()) return;
+        if (cancelled) return;
         if (!ensured.ok) {
           setProfile(null);
           return;
@@ -192,29 +153,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select('*')
           .eq('id', userId)
           .maybeSingle();
-        if (isCurrent()) setProfile(refetched);
+        if (!cancelled) setProfile(refetched);
       } catch {
-        if (isCurrent()) setProfile(null);
+        if (!cancelled) setProfile(null);
       }
     }
 
     function subscribeToAuthChanges() {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        // getSession owns the initial snapshot. A queued INITIAL_SESSION must not
-        // overwrite a later SIGNED_IN/SIGNED_OUT event.
-        if (cancelled || _event === 'INITIAL_SESSION') return;
+        // Only handle auth updates after the initial getSession() restore finished.
+        if (cancelled || !initialRestoreDoneRef.current) return;
 
-        const revision = ++identity.revision;
         const nextUser = session?.user ?? null;
-        if (nextUser && deletedOwnersRef.current.has(nextUser.id)) {
-          clearAuthView();
-          finishLoading();
-          return;
-        }
-        if (identity.ownerId !== (nextUser?.id ?? null)) setProfile(null);
-        identity.ownerId = nextUser?.id ?? null;
         setUser(nextUser);
-        finishLoading();
 
         if (!nextUser) {
           setProfile(null);
@@ -223,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Defer Supabase calls — awaiting inside this callback can deadlock auth restore.
         window.setTimeout(() => {
-          if (!cancelled && identity.revision === revision) void loadProfileSafe(nextUser.id, revision);
+          if (!cancelled) void loadProfileSafe(nextUser.id);
         }, 0);
       });
 
@@ -232,66 +183,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function restoreSession() {
       setLoading(true);
-      const revision = identity.revision;
 
       try {
         const { data, error } = await supabase.auth.getSession();
-        if (cancelled || identity.revision !== revision) return;
+        if (cancelled) return;
 
         if (error) {
-          // A failed read does not identify an owner we may log out. SDK signOut
-          // acts on mutable session state and could revoke a newer successful login.
-          clearAuthView();
+          await safeLocalSignOut();
+          setUser(null);
+          setProfile(null);
           return;
         }
 
         const session = data.session;
         if (!session?.user) {
-          identity.ownerId = null;
           setUser(null);
           setProfile(null);
           return;
         }
 
         const expiresAt = session.expires_at;
-        if (deletedOwnersRef.current.has(session.user.id)) {
-          clearPasswordRecoveryPending();
-          recoveryOwnerRef.current = null;
-          setPasswordRecoveryPending(false);
-          clearAuthView();
-          return;
-        }
         if (expiresAt && expiresAt * 1000 < Date.now()) {
-          clearAuthView();
+          await safeLocalSignOut();
+          setUser(null);
+          setProfile(null);
           return;
         }
 
-        identity.ownerId = session.user.id;
-        if (shouldStartInPasswordRecovery()) {
-          if (recoveryOwnerRef.current === null) {
-            recoveryOwnerRef.current = session.user.id;
-            markPasswordRecoveryPending(session.user.id);
-          } else if (recoveryOwnerRef.current !== session.user.id) {
-            clearPasswordRecoveryPending();
-            recoveryOwnerRef.current = null;
-            setPasswordRecoveryPending(false);
-          }
-        }
         setUser(session.user);
         // Profile loads in background — must not block render.
-        void loadProfileSafe(session.user.id, revision);
+        void loadProfileSafe(session.user.id);
       } catch {
-        if (cancelled || identity.revision !== revision) return;
-        clearAuthView();
+        await safeLocalSignOut();
+        if (cancelled) return;
+        setUser(null);
+        setProfile(null);
       } finally {
         if (!cancelled) {
+          initialRestoreDoneRef.current = true;
           finishLoading();
+          subscribeToAuthChanges();
         }
       }
     }
 
-    // No gap without a listener, including StrictMode's effect cleanup/replay.
-    subscribeToAuthChanges();
     void restoreSession();
 
     return () => {
@@ -299,35 +234,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(loadingTimeoutId);
       authSubscription?.unsubscribe();
     };
-  }, [clearAuthView, rejectDeletedOwner]);
+  }, []);
 
   async function signIn(email: string, password: string) {
-    const recoveryRevision = recoveryRevisionRef.current;
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error };
 
-    const identity = identityRef.current;
-    const revision = identity.revision;
-    const signedIn = data.user;
-    const isCurrent = () => !!signedIn && !deletedOwnersRef.current.has(signedIn.id) && identity.revision === revision && identity.ownerId === signedIn.id && recoveryRevisionRef.current === recoveryRevision;
-    if (!isCurrent()) return { error: new Error('auth_state_changed') };
+    const { data: { user: signedIn } } = await supabase.auth.getUser();
     if (signedIn) {
       const { data: prof } = await supabase
         .from('profiles')
         .select('room_deletion_requested_at, room_purge_after')
         .eq('id', signedIn.id)
         .maybeSingle();
-      if (!isCurrent()) return { error: new Error('auth_state_changed') };
       if (prof?.room_deletion_requested_at) {
         // The listener has already let the person in, so the app may have left the sign-in screen: note the message too.
-        rejectDeletedOwner(signedIn.id, prof.room_purge_after);
+        rememberRoomDeletedNotice(prof.room_purge_after);
+        await supabase.auth.signOut();
+        setUser(null);
+        setProfile(null);
         // The day the address opens again goes with the error, so the sign-in screen can show it.
         return { error: Object.assign(new Error('room_deleted'), { availableFrom: prof.room_purge_after ?? null }) };
       }
     }
 
     clearPasswordRecoveryPending();
-    recoveryOwnerRef.current = null;
     clearRecoveryCallbackFromUrl();
     setPasswordRecoveryPending(false);
     return { error: null };
@@ -379,14 +310,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function completePasswordRecovery() {
     clearPasswordRecoveryPending();
-    recoveryOwnerRef.current = null;
     clearRecoveryCallbackFromUrl();
     setPasswordRecoveryPending(false);
   }
 
   async function abandonPasswordRecovery() {
     clearPasswordRecoveryPending();
-    recoveryOwnerRef.current = null;
     clearRecoveryCallbackFromUrl();
     setPasswordRecoveryPending(false);
     try {
@@ -394,15 +323,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-    clearAuthView();
+    setUser(null);
+    setProfile(null);
   }
 
   async function refreshProfile() {
-    const identity = identityRef.current;
-    const revision = identity.revision;
-    if (!user || identity.ownerId !== user.id) return;
+    if (!user) return;
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-    if (data && identity.ownerId === user.id && identity.revision === revision) setProfile(data);
+    if (data) setProfile(data);
   }
 
   async function emergencyResetAuth() {
@@ -419,8 +347,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     clearPasswordRecoveryPending();
     setPasswordRecoveryPending(false);
-    recoveryOwnerRef.current = null;
-    clearAuthView();
+    setUser(null);
+    setProfile(null);
     setLoading(false);
   }
 

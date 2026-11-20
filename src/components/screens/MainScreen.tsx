@@ -15,7 +15,6 @@ import { FIRST_CONTACT_MESSAGE, isFirstConversation } from '../../lib/firstConta
 import { insertChatMessage } from '../../lib/chatMessages';
 import { formatRelativeTime } from '../../lib/chatPresentation';
 import { AppContainer } from '../layout';
-import { PlanVerificationNotice } from '../PlanVerificationNotice';
 import {
   canCreateFromConversationList,
   roomLimitNotice,
@@ -28,20 +27,19 @@ interface Modal {
 
 export function MainScreen() {
   const { user } = useAuth();
-  const { tier, loaded: planLoaded, maxConversations,accessRevision,verificationError,refresh } = usePlan();
+  const { tier, loaded: planLoaded, maxConversations,accessRevision } = usePlan();
   const { navigateTo, setMessages, conversations, setConversations } = useApp();
   return <ConversationListScreen userId={user?.id??null} tier={tier} planLoaded={planLoaded} maxConversations={maxConversations}
-   revision={accessRevision} planFailed={verificationError} onRetryPlan={refresh} navigateTo={navigateTo} setMessages={setMessages} conversations={conversations} setConversations={setConversations}/>;
+   revision={accessRevision} navigateTo={navigateTo} setMessages={setMessages} conversations={conversations} setConversations={setConversations}/>;
 }
 async function createBrowserRoom(userId:string):Promise<Conversation>{
  const {data,error}=await supabase.from('conversations').insert({user_id:userId,title:''}).select('id,user_id,title,is_active,created_at,last_message_at').maybeSingle();
  if(error||!data)throw Error(error?.message??'room_create_failed');return {...data,can_read:true};
 }
 /** Explicit application boundaries support production and isolated acceptance without live accounts. */
-export function ConversationListScreen({userId,tier,planLoaded,maxConversations,revision='',planFailed=false,onRetryPlan=()=>{},navigateTo,setMessages,conversations,setConversations,client=conversationClient,createRoom=createBrowserRoom}:{
+export function ConversationListScreen({userId,tier,planLoaded,maxConversations,revision='',navigateTo,setMessages,conversations,setConversations,client=conversationClient,createRoom=createBrowserRoom}:{
  userId:string|null;tier:PlanId;planLoaded:boolean;maxConversations:number;
  revision?:string;
- planFailed?:boolean;onRetryPlan?:()=>void;
  navigateTo:ReturnType<typeof useApp>['navigateTo'];setMessages:React.Dispatch<React.SetStateAction<Message[]>>;
  conversations:Conversation[];setConversations:(rows:Conversation[])=>void;
  client?:typeof conversationClient;createRoom?:(userId:string)=>Promise<Conversation>;
@@ -212,9 +210,7 @@ export function ConversationListScreen({userId,tier,planLoaded,maxConversations,
    finally{if(currentKey.current===key)setBusy(false);}
   }
 
-  if (!planLoaded) return <PlanVerificationNotice key={userId??'guest'} failed={planFailed} onRetry={onRetryPlan}/>;
-
-  if ((loading||listKey!==identityKey)&&!error) {
+  if ((loading||listKey!==identityKey)&&!error||!planLoaded) {
     return (
       <div className={`min-h-screen ${theme.bg} flex items-center justify-center`}>
         <div className={`w-5 h-5 border-2 ${theme.spinnerBorder} ${theme.spinnerTop} rounded-full animate-spin`} />
