@@ -5,11 +5,23 @@
 import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
 import { readEmbeddingUsage, type EmbeddingUsage } from "./embeddingUsage.ts";
 
-export const EMBEDDING_MODEL =
-  Deno.env.get("STAYSEE_EMBEDDING_MODEL")?.trim() ||
-  "openai/text-embedding-3-small";
+/**
+ * The model that makes the vectors for the search by meaning. An open-weights model on purpose: it can be moved to another
+ * host (Cloud.ru, a machine of our own) and make the SAME vectors there, so nothing has to be recomputed when the host changes.
+ * Every vector is stored with the name of the model that made it, and only vectors of the current model are ever compared.
+ */
+export const DEFAULT_EMBEDDING_MODEL = "baai/bge-m3";
 
-export const EMBEDDING_DIMENSIONS = 1536;
+function readEmbeddingModelFromEnv(): string | undefined {
+  // The tests run in Node, where there is no Deno: the default is used there.
+  if (typeof Deno === "undefined") return undefined;
+  return Deno.env.get("STAYSEE_EMBEDDING_MODEL")?.trim() || undefined;
+}
+
+export const EMBEDDING_MODEL = readEmbeddingModelFromEnv() ?? DEFAULT_EMBEDDING_MODEL;
+
+/** The length of one vector of the model above (bge-m3: 1024). A vector of any other length is refused, never stored. */
+export const EMBEDDING_DIMENSIONS = 1024;
 
 const MAX_EMBED_CHARS = 6_000;
 

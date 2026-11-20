@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
 
 const EMBEDDING_MODEL =
-  process.env.STAYSEE_EMBEDDING_MODEL ?? "openai/text-embedding-3-small";
+  process.env.STAYSEE_EMBEDDING_MODEL ?? "baai/bge-m3";
 const BATCH = 20;
 
 function loadEnvFile(path) {
@@ -87,20 +87,38 @@ function embedLabel(sender, content) {
 }
 
 async function backfillConversation(supabase, conv, apiKey) {
-  const { data: messages } = await supabase
-    .from("messages")
-    .select("id, sender, content, created_at")
-    .eq("conversation_id", conv.id)
-    .order("created_at", { ascending: true });
+  // Every page of the conversation (the database hands out at most 1000 rows at a time).
+  const messages = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error: pageError } = await supabase
+      .from("messages")
+      .select("id, sender, content, created_at")
+      .eq("conversation_id", conv.id)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (pageError) throw pageError;
+    messages.push(...(page ?? []));
+    if ((page ?? []).length < 1000) break;
+  }
 
-  if (!messages?.length) return 0;
+  if (!messages.length) return 0;
 
-  const { data: existing } = await supabase
-    .from("message_embeddings")
-    .select("message_id")
-    .eq("conversation_id", conv.id);
-
-  const have = new Set((existing ?? []).map((r) => r.message_id));
+  // Only vectors of the CURRENT model count: a message with a vector of another model is missing for this model.
+  const have = new Set();
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error: pageError } = await supabase
+      .from("message_embeddings")
+      .select("message_id")
+      .eq("conversation_id", conv.id)
+      .eq("embedding_model", EMBEDDING_MODEL)
+      .not("embedding_1024", "is", null)
+      .order("message_id", { ascending: true })
+      .range(from, from + 999);
+    if (pageError) throw pageError;
+    for (const r of page ?? []) have.add(r.message_id);
+    if ((page ?? []).length < 1000) break;
+  }
   const missing = messages.filter((m) => m.content?.trim() && !have.has(m.id));
   if (!missing.length) return 0;
 
@@ -116,7 +134,8 @@ async function backfillConversation(supabase, conv, apiKey) {
       conversation_id: conv.id,
       user_id: conv.user_id,
       sender: m.sender,
-      embedding: vectors[idx],
+      embedding_model: EMBEDDING_MODEL,
+      embedding_1024: vectors[idx],
     }));
     const { error } = await supabase.from("message_embeddings").upsert(rows, {
       onConflict: "message_id",
@@ -162,7 +181,7 @@ for (const conv of convs ?? []) {
   } catch (e) {
     console.error(`  failed: ${e.message}`);
     if (e.message.includes("message_embeddings")) {
-      console.error("  Run: npx supabase db push (migration 015_message_embeddings)");
+      console.error("  Run: npx supabase db push (migration 107_embeddings_by_model)");
     }
   }
 }

@@ -26,6 +26,8 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   // below would be used and overstate the cost fifty times.
   "openai/text-embedding-3-small": { inputPer1M: 0.02, outputPer1M: 0 },
   "openai/text-embedding-3-large": { inputPer1M: 0.13, outputPer1M: 0 },
+  // The model of the search by meaning (open weights, 1024 numbers). OpenRouter, 20.11.2026: $0.01 per 1M input tokens.
+  "baai/bge-m3": { inputPer1M: 0.01, outputPer1M: 0 },
   // OpenRouter, 19.11.2026.
   "deepseek/deepseek-v4-pro": { inputPer1M: 0.9, outputPer1M: 1.5 },
   "moonshotai/kimi-k2.6": { inputPer1M: 0.65, outputPer1M: 3.41 },

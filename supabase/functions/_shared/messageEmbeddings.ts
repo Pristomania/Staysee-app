@@ -1,42 +1,65 @@
 /**
  * Store and search message embeddings — scoped to one conversation_id only.
+ *
+ * A vector is stored together with the name of the model that made it (embedding_model), and a search reads only the
+ * vectors of the current model: vectors of two models never meet. The search covers the WHOLE conversation: the database
+ * does the comparing (migration 107), nothing is cut to "the first 400 messages".
  */
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   createEmbeddings,
   createQueryEmbedding,
+  EMBEDDING_MODEL,
   type EmbeddingApiConfig,
 } from "./embeddings.ts";
 import type { ArchiveExcerpt } from "./conversationRetrieval.ts";
 import {
   isAssistantMessage,
   isUserMessage,
-  normalizeMessageRole,
   toDbSender,
   type MessageRoleFields,
 } from "./messageRole.ts";
 
 const ENSURE_BATCH = 20;
 const MAX_ENSURE_PER_REQUEST = 40;
-const SEMANTIC_MATCH_COUNT = 12;
-const SEMANTIC_THRESHOLD = 0.24;
+const MAX_ENSURE_HARD = 80;
+export const SEMANTIC_MATCH_COUNT = 12;
 
-interface MessageRow {
+/**
+ * How close in meaning a past message must be to count as a hit. Measured on bge-m3 (20.11.2026, made-up Russian phrases):
+ * the same meaning in other words 0.64–0.80, an unrelated phrase 0.44–0.52, so 0.58 sits between them. It is a starting
+ * value, to be tuned on a copy of a long real conversation; STAYSEE_SEMANTIC_THRESHOLD changes it without a deploy of code.
+ */
+export const DEFAULT_SEMANTIC_THRESHOLD = 0.58;
+
+export function resolveSemanticThreshold(raw: string | undefined | null): number {
+  const value = Number(raw);
+  if (raw && Number.isFinite(value) && value >= 0.3 && value <= 0.95) return value;
+  return DEFAULT_SEMANTIC_THRESHOLD;
+}
+
+function semanticThreshold(): number {
+  if (typeof Deno === "undefined") return DEFAULT_SEMANTIC_THRESHOLD;
+  return resolveSemanticThreshold(Deno.env.get("STAYSEE_SEMANTIC_THRESHOLD"));
+}
+
+interface MissingMessageRow extends MessageRoleFields {
   id: string;
-  conversation_id: string;
-  sender?: string | null;
-  role?: string | null;
   content: string;
   created_at: string;
 }
 
 function embedTextForMessage(row: MessageRoleFields, content: string): string {
-  const label = normalizeMessageRole(row) === "user" ? "Пользователь" : "StaySee";
+  const label = isUserMessage(row) ? "Пользователь" : "StaySee";
   return `${label}: ${content.replace(/\s+/g, " ").trim()}`;
 }
 
-/** Embed messages in this conversation that lack vectors (service role). */
+/**
+ * Embed the newest messages of this conversation that have no vector of the current model yet (service role).
+ * Called after every reply (a few messages) and, when someone asks to remember, with a larger number — a long conversation
+ * is caught up in a few turns, newest first.
+ */
 export async function ensureConversationEmbeddings(
   supabaseSvc: SupabaseClient,
   params: {
@@ -46,31 +69,20 @@ export async function ensureConversationEmbeddings(
     maxMessages?: number;
   }
 ): Promise<number> {
-  const limit = Math.min(params.maxMessages ?? MAX_ENSURE_PER_REQUEST, 80);
+  const limit = Math.max(1, Math.min(params.maxMessages ?? MAX_ENSURE_PER_REQUEST, MAX_ENSURE_HARD));
 
-  const { data: messages, error } = await supabaseSvc
-    .from("messages")
-    .select("id, conversation_id, sender, role, content, created_at")
-    .eq("conversation_id", params.conversationId)
-    .order("created_at", { ascending: true })
-    .limit(400);
+  const { data, error } = await supabaseSvc.rpc("messages_missing_embeddings", {
+    p_conversation_id: params.conversationId,
+    p_model: EMBEDDING_MODEL,
+    p_limit: limit,
+  });
 
-  if (error || !messages?.length) {
-    if (error) console.warn("[messageEmbeddings] fetch:", error.message);
+  if (error) {
+    console.warn("[messageEmbeddings] missing lookup:", error.message);
     return 0;
   }
 
-  const { data: existing } = await supabaseSvc
-    .from("message_embeddings")
-    .select("message_id")
-    .eq("conversation_id", params.conversationId);
-
-  const have = new Set((existing ?? []).map((r) => r.message_id as string));
-
-  const missing = (messages as MessageRow[])
-    .filter((m) => m.content?.trim() && !have.has(m.id))
-    .slice(-limit);
-
+  const missing = (Array.isArray(data) ? data : []) as MissingMessageRow[];
   if (!missing.length) return 0;
 
   let embedded = 0;
@@ -86,7 +98,8 @@ export async function ensureConversationEmbeddings(
         conversation_id: params.conversationId,
         user_id: params.userId,
         sender: toDbSender(m),
-        embedding: vectors[idx],
+        embedding_model: EMBEDDING_MODEL,
+        embedding_1024: vectors[idx],
       }));
 
       const { error: insErr } = await supabaseSvc
@@ -106,49 +119,45 @@ export async function ensureConversationEmbeddings(
 
   if (embedded > 0) {
     console.log(
-      `[messageEmbeddings] embedded=${embedded} conversation=${params.conversationId}`
+      `[messageEmbeddings] embedded=${embedded} model=${EMBEDDING_MODEL} conversation=${params.conversationId}`
     );
   }
 
   return embedded;
 }
 
-function rowsToExcerpts(
-  hits: Array<{
-    message_id: string;
-    sender?: string | null;
-    role?: string | null;
-    content: string;
-    created_at: string;
-    similarity: number;
-  }>,
-  allMessages: MessageRow[]
-): ArchiveExcerpt[] {
-  const byTime = [...allMessages].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+interface SemanticHitRow extends MessageRoleFields {
+  message_id: string;
+  content: string;
+  created_at: string;
+  similarity: number;
+  reply_sender?: string | null;
+  reply_role?: string | null;
+  reply_content?: string | null;
+}
 
+function clip(text: string, max: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : t.slice(0, max - 1) + "…";
+}
+
+export function semanticRowsToExcerpts(hits: SemanticHitRow[], maxChars: number): ArchiveExcerpt[] {
   const excerpts: ArchiveExcerpt[] = [];
   const seen = new Set<string>();
 
   for (const hit of hits) {
     if (!isUserMessage(hit)) continue;
-    const key = hit.message_id;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(hit.message_id)) continue;
+    seen.add(hit.message_id);
 
-    let assistantText: string | null = null;
-    const idx = byTime.findIndex((m) => m.id === hit.message_id);
-    if (idx >= 0) {
-      const next = byTime[idx + 1];
-      if (next && isAssistantMessage(next)) {
-        assistantText = next.content?.trim() ?? null;
-      }
-    }
+    const replyText = hit.reply_content?.trim() ?? "";
+    const replyIsAssistant =
+      replyText.length > 0 &&
+      isAssistantMessage({ sender: hit.reply_sender, role: hit.reply_role });
 
     excerpts.push({
-      userText: hit.content.trim(),
-      assistantText,
+      userText: clip(hit.content, maxChars),
+      assistantText: replyIsAssistant ? clip(replyText, maxChars) : null,
       createdAt: hit.created_at,
       score: hit.similarity + 10,
     });
@@ -157,15 +166,16 @@ function rowsToExcerpts(
   return excerpts;
 }
 
-/** Semantic similarity search — current conversation only. */
+/** Semantic similarity search — current conversation only, whole history, current model only. */
 export async function searchSemanticConversationArchive(
   supabaseUser: SupabaseClient,
   params: {
     conversationId: string;
     query: string;
-    excludeTailCount: number;
+    /** Only messages older than this are searched (the latest ones are already in the prompt). */
+    beforeCreatedAt: string | null;
     embedConfig: EmbeddingApiConfig;
-    allMessages: MessageRow[];
+    maxExcerptChars: number;
   }
 ): Promise<ArchiveExcerpt[]> {
   const query = params.query.trim();
@@ -179,31 +189,17 @@ export async function searchSemanticConversationArchive(
     return [];
   }
 
-  const sorted = [...params.allMessages].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
-  const tail = Math.max(0, params.excludeTailCount);
-  const cutoff =
-    tail > 0 && sorted.length > tail
-      ? sorted[sorted.length - tail].created_at
-      : null;
-
-  const { data, error } = await supabaseUser.rpc(
-    "match_conversation_message_embeddings",
-    {
-      p_conversation_id: params.conversationId,
-      query_embedding: queryVector,
-      match_count: SEMANTIC_MATCH_COUNT,
-      match_threshold: SEMANTIC_THRESHOLD,
-      p_before_created_at: cutoff,
-    }
-  );
+  const { data, error } = await supabaseUser.rpc("match_conversation_embeddings_by_model", {
+    p_conversation_id: params.conversationId,
+    p_model: EMBEDDING_MODEL,
+    query_embedding: queryVector,
+    match_count: SEMANTIC_MATCH_COUNT,
+    match_threshold: semanticThreshold(),
+    p_before_created_at: params.beforeCreatedAt,
+  });
 
   if (error) {
-    if (
-      error.message.includes("message_embeddings") ||
-      error.message.includes("match_conversation")
-    ) {
+    if (error.message.includes("match_conversation") || error.message.includes("message_embeddings")) {
       console.warn("[messageEmbeddings] RPC unavailable (migration?):", error.message);
     } else {
       console.warn("[messageEmbeddings] search:", error.message);
@@ -211,18 +207,13 @@ export async function searchSemanticConversationArchive(
     return [];
   }
 
-  const hits = (data ?? []) as Array<{
-    message_id: string;
-    sender: string;
-    content: string;
-    created_at: string;
-    similarity: number;
-  }>;
-
-  const excerpts = rowsToExcerpts(hits, params.allMessages);
+  const excerpts = semanticRowsToExcerpts(
+    (Array.isArray(data) ? data : []) as SemanticHitRow[],
+    params.maxExcerptChars
+  );
   if (excerpts.length) {
     console.log(
-      `[messageEmbeddings] semantic hits=${excerpts.length} conversation=${params.conversationId}`
+      `[messageEmbeddings] semantic hits=${excerpts.length} model=${EMBEDDING_MODEL} conversation=${params.conversationId}`
     );
   }
   return excerpts;
