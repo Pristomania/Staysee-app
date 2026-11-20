@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { fetchBillingSnapshot } from '../lib/usageTier';
 import { BillingSnapshotController, type BillingSnapshotState } from '../lib/billingSnapshot';
 import {createAccessGeneration} from '../lib/accessGeneration';
+import {planRetryDelayMs} from '../lib/accessGate';
 import type { MessageCounter } from '../lib/messageCounter';
 import { getMaxRooms } from '../lib/roomLimits';
 import { isFeatureAvailable, normalizePlanId, planFor, type Plan, type PlanFeature, type PlanId } from '../lib/plans';
@@ -65,6 +66,17 @@ export function PlanStateProvider({userId,readSnapshot,children}:{
       window.removeEventListener('focus',verify);window.removeEventListener('pageshow',verify);window.removeEventListener('online',verify);
     };
   },[userId,readSnapshot]);
+  // A plan read that failed or timed out is tried again by itself (2, 4, 8, 16, then every 30 seconds): a screen that waits for the plan
+  // must recover from one bad request without the person having to do anything.
+  const failures=useRef(0);
+  useEffect(()=>{
+    if(!userId||!state||state.userId!==userId)return;
+    if(state.loaded){failures.current=0;return;}
+    if(!state.error)return;
+    const timer=setTimeout(()=>{void modelRef.current?.refresh();},planRetryDelayMs(failures.current));
+    failures.current+=1;
+    return()=>clearTimeout(timer);
+  },[state,userId]);
   const value=useMemo<PlanContextType>(()=>{
     // This synchronous check prevents even one render of the previous person's plan.
     const current=state?.userId===userId?state:null;

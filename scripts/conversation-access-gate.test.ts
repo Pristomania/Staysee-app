@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {readFileSync} from 'node:fs';
 import {createElement} from 'react';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
@@ -19,7 +20,7 @@ test('protected content never renders before fresh access check or while billing
 
 // ── No flash when moving between the screens of one conversation ────────────────────────────────────────────
 // The gate used to show a dark "Проверяем доступ…" screen on EVERY move (chat → memory → chat), until the server answered.
-import {accessGateKey,forgetAccessYes,gateView,isAccessRemembered,rememberAccessYes,shouldApplyAccessResult} from '../src/lib/accessGate';
+import {accessGateKey,forgetAccessYes,gateView,isAccessRemembered,planRetryDelayMs,rememberAccessYes,shouldApplyAccessResult} from '../src/lib/accessGate';
 
 const yes={allowed:true,paidFeatures:true,fullAccess:true};
 const free={allowed:true,paidFeatures:false,fullAccess:false};
@@ -83,4 +84,35 @@ test('a failed re-check does not throw out a person who was just let in, but a r
  assert.equal(shouldApplyAccessResult(null,false),true,'network trouble with no earlier yes: say so');
  assert.equal(shouldApplyAccessResult(locked,true),true,'a real no is always applied');
  assert.equal(shouldApplyAccessResult(yes,true),true);
+});
+
+// ── The gate never hangs on "Проверяем доступ…" ──────────────────────────────────────────────────────────────
+// While the plan snapshot is not loaded the gate used to say "checking" for ever: a slow or failed snapshot gave no message and no retry.
+test('a failed plan check is said out loud with a retry, not shown as endless checking',()=>{
+ const base={conversationId:'room-f',requirePaid:false,current:null,remembered:false};
+ assert.equal(gateView({...base,verified:false,planFailed:false}),'checking','still loading: checking');
+ assert.equal(gateView({...base,verified:false,planFailed:true}),'error','the plan could not be read: error with a retry');
+ assert.equal(gateView({...base,verified:false,planFailed:true,remembered:true}),'error','a memory never opens an unverified plan');
+ assert.equal(gateView({...base,verified:true,planFailed:true}),'checking','a verified plan with a stale error flag is not an error');
+});
+
+test('the plan is re-read by itself after a failure, with growing but bounded pauses',()=>{
+ assert.equal(planRetryDelayMs(0),2_000);
+ assert.equal(planRetryDelayMs(1),4_000);
+ assert.equal(planRetryDelayMs(2),8_000);
+ assert.equal(planRetryDelayMs(3),16_000);
+ assert.equal(planRetryDelayMs(4),30_000,'capped');
+ assert.equal(planRetryDelayMs(50),30_000,'and stays capped');
+});
+
+test('the gate source shows the slow hint and wires the retry of the plan',()=>{
+ const gate=readFileSync(new URL('../src/components/ConversationAccessGate.tsx',import.meta.url),'utf8');
+ assert.match(gate,/planFailed/,'the gate takes the plan failure');
+ assert.match(gate,/onRetryPlan/,'and a way to read the plan again');
+ assert.match(gate,/дольше обычного/,'it says when the check is slow');
+ const wrapper=readFileSync(new URL('../src/components/ProtectedConversationScreen.tsx',import.meta.url),'utf8');
+ assert.match(wrapper,/verificationError/,'the wrapper passes the plan failure on');
+ assert.match(wrapper,/refresh/,'and the plan refresh');
+ const plan=readFileSync(new URL('../src/context/PlanContext.tsx',import.meta.url),'utf8');
+ assert.match(plan,/planRetryDelayMs/,'the plan provider retries a failed read by itself');
 });
