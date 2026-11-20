@@ -1,5 +1,5 @@
 /**
- * Near-integration tests for reply recovery route orchestration.
+ * Near-integration tests for reply recovery route orchestration (a reply the model finished is left alone; one cut by length is continued).
  * Run: npx tsx supabase/functions/_shared/replyRecoveryRoutes.cases.test.ts
  */
 
@@ -9,7 +9,7 @@ import {
   type RecoveryModelCallKind,
 } from "./replyRecovery.ts";
 
-const REJECTED = "REJECTED_SEGMENT_SHOULD_NOT_APPEAR";
+const MARKER = "MARKER_AT_THE_END";
 const BASE_MESSAGES: RecoveryChatMessage[] = [
   { role: "user", content: "Как мне с этим быть?" },
 ];
@@ -18,57 +18,29 @@ function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
 }
 
-// Case A: stop + not publishable → retry whole replaces, no merge, no rejected segment in retry input
+// Case A: a reply that stopped by itself and has no mark at the end is left exactly as it is:
+// no repair, no second generation, no error text.
 {
-  let retryWholeMessages: RecoveryChatMessage[] | null = null;
   let callCount = 0;
+  const reply = `Это цельный ответ, который закончился на слове ${MARKER}`;
 
   const out = await runReplyRecoveryRoutes({
-    firstSegment: {
-      content: `${REJECTED} and`,
-      finishReason: "stop",
-    },
+    firstSegment: { content: reply, finishReason: "stop" },
     baseModelMessages: BASE_MESSAGES,
     unavailableMessage: "UNAVAILABLE",
-    replyNotRecoveredMessage: "NOT_RECOVERED",
-    callModel: async (messages, kind) => {
+    callModel: async (_messages, kind) => {
       callCount++;
-      if (kind === "retry_whole") {
-        retryWholeMessages = messages;
-        return { content: "Это новый цельный ответ.", finishReason: "stop" };
-      }
       throw new Error(`unexpected call kind: ${kind}`);
     },
   });
 
-  assert(callCount === 1, "Case A: exactly one retry_whole call");
+  assert(callCount === 0, "Case A: no model call at all");
+  assert(out.diagnostics.completionRoute === "normal_publishable", "Case A: normal route");
+  assert(out.content === reply, "Case A: the reply comes out unchanged");
   assert(
-    out.diagnostics.completionRoute === "stop_not_publishable_retry_whole",
-    "Case A: route retry_whole"
+    !out.wasAutoContinued && !out.diagnostics.retryWholeUsed && !out.diagnostics.failClosedUsed && !out.diagnostics.repairApplied,
+    "Case A: nothing was repaired, retried or failed"
   );
-  assert(!out.wasAutoContinued, "Case A: auto_continue_used false");
-  assert(out.diagnostics.retryWholeUsed, "Case A: retry_whole_used");
-  assert(
-    out.content === "Это новый цельный ответ.",
-    "Case A: final output is retry only"
-  );
-  assert(!out.content.includes(REJECTED), "Case A: rejected phrase absent from output");
-  assert(
-    out.diagnostics.mergeStrategy === null,
-    "Case A: no merge strategy"
-  );
-
-  assert(retryWholeMessages !== null, "Case A: retry_whole was called");
-  const serialized = JSON.stringify(retryWholeMessages);
-  assert(!serialized.includes(REJECTED), "Case A: rejected phrase absent from retry input");
-  assert(
-    serialized === JSON.stringify(BASE_MESSAGES),
-    "Case A: retry input equals base messages only"
-  );
-
-  for (const m of retryWholeMessages!) {
-    assert(m.role !== "assistant", "Case A: no assistant message in retry input");
-  }
 }
 
 // Case B: length truncation → continue + merge

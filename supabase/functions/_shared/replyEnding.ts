@@ -1,148 +1,61 @@
 /**
  * Reply ending helpers — pure logic, no Deno/Supabase imports (Node-testable).
+ *
+ * The rule (owner's decision, 20.11.2026): an ending is a sentence mark (. ? ! …, possibly followed by a closing quote or bracket) or an
+ * emoji. Nothing here looks at WORDS (no lists of connectors, closures or phrases) and nothing cuts a reply by its length. Whether a
+ * reply that stopped without a mark is complete is not decided here: a reply the model finished on its own is complete (see
+ * completeReply.ts); only a reply the model was cut in (finish_reason "length") is ever trimmed, to its last sentence mark.
  */
 
 const LEGACY_GRACEFUL_TAIL_RE =
   /\n*\(Мысль ещё не закончилась[^)]*\)\s*$/i;
 
-/** Max length for a complete short closure/acknowledgement without terminal punctuation. */
-const MAX_SHORT_COMPLETE_UTTERANCE_CHARS = 140;
+/** A sentence mark at the end, with closing quotes or brackets after it: «да.», "ладно.", (так.) */
+const TERMINAL_MARK_RE = /[.!?…]["'»”’)\]]*\s*$/u;
 
-/** Obvious unfinished analytical / connector tails — not warm closure. */
-const UNFINISHED_TRAILING_PHRASE_RE =
-  /(?:^|[\s,—–-])(?:и|а|но|что|как|если|когда|где|чтобы|тогда|потому(?:\s+что)?|как\s+будто|о\s+том,?\s+что|про\s+то,?\s+что|это|то|про|о|который|которая|которые|которое|похоже,?)\s*$/iu;
+/** An emoji at the end (a warm reply may end with one instead of a mark). */
+const TRAILING_EMOJI_RE = /[\p{Emoji_Presentation}\p{Extended_Pictographic}️]\s*$/u;
 
-/** Incomplete substantive fragments (not closure-shaped). */
-const INCOMPLETE_SUBSTANTIVE_FRAGMENT_RES: RegExp[] = [
-  /^ты\s+(?:сегодня\s+)?(?:смогла|смог|могла|мог)\s*$/iu,
-  /^ты\s+говоришь\s+о\s+том,\s+что\s*$/iu,
-];
+/** A mark that cuts the text off: a sentence that was broken off at a dash, colon, comma or semicolon. No word is looked at. */
+const CUT_AT_MARK_RE = /[,:;—–-]\s*$/u;
 
-/** Warm closure / acknowledgement shapes valid without a final period. */
-const CLOSURE_COMPLETE_UTTERANCE_RES: RegExp[] = [
-  /^спокойной\s+ночи$/iu,
-  /^приятных\s+снов$/iu,
-  /^доброй\s+ночи$/iu,
-  /^хорошо[.!]?\s+спокойной\s+ночи$/iu,
-  /^хорошо[.!]?\s+спи\b[\s\S]{0,100}$/iu,
-  /^хорошо[.!]?\s+спи\s+[—–-]\s+это\s+сейчас\s+правильно\.?$/iu,
-  /^спасибо,?\s+что\s+[а-яё]{3,}$/iu,
-  /^спасибо\b[\s\S]{0,80}$/iu,
-  /^хорошо,?\s+что\s+полегче\.?$/iu,
-];
+/** A sentence mark with its closing quotes/brackets, followed by a space or the end (not the dot inside 3.5 or a.b). */
+const SENTENCE_MARK_IN_TEXT_RE = /[.!?…]["'»”’)\]]*(?=\s|$)/gu;
 
-function stripTrailingEmoji(text: string): { core: string; hadEmoji: boolean } {
-  const m = text.match(
-    /^([\s\S]*?)(?:\s*[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F])+$/u
-  );
-  if (!m?.[1]) return { core: text, hadEmoji: false };
-  return { core: m[1].trimEnd(), hadEmoji: true };
-}
+/** Shortest text kept when trimming to the last mark: never trim a reply down to a stub. */
+const MIN_TRIMMED_CHARS = 12;
 
-function hasObviousUnfinishedTail(text: string): boolean {
-  if (UNFINISHED_TRAILING_PHRASE_RE.test(text)) return true;
-  return INCOMPLETE_SUBSTANTIVE_FRAGMENT_RES.some((re) => re.test(text));
-}
-
-function matchesClosureOrAcknowledgementShape(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  if (CLOSURE_COMPLETE_UTTERANCE_RES.some((re) => re.test(t))) return true;
-
-  const parts = t.split(/(?<=[.!?…])\s+/u).filter(Boolean);
-  if (parts.length >= 2 && parts.length <= 3) {
-    const last = parts[parts.length - 1]!.trim();
-    if (last.length <= 80 && CLOSURE_COMPLETE_UTTERANCE_RES.some((re) => re.test(last))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isLongSubstantiveWithoutBoundary(text: string): boolean {
-  const t = text.trim();
-  if (t.length <= MAX_SHORT_COMPLETE_UTTERANCE_CHARS) return false;
-  if (/[.!?…]/u.test(t)) return false;
-  return true;
-}
-
-/** Short warm closure / acknowledgement without terminal punctuation or emoji tail. */
-export function isCompleteShortUtteranceWithoutTerminalPunctuation(
-  text: string
-): boolean {
-  const t = text.trim();
-  if (!t || t.length > MAX_SHORT_COMPLETE_UTTERANCE_CHARS) return false;
-  if (/[.!?…]["')\]]*\s*$/u.test(t)) return false;
-  if (hasObviousUnfinishedTail(t)) return false;
-  if (isLongSubstantiveWithoutBoundary(t)) return false;
-  return matchesClosureOrAcknowledgementShape(t);
-}
-
-function endsWithEmojiAfterCompleteShortPhrase(text: string): boolean {
-  const { core, hadEmoji } = stripTrailingEmoji(text);
-  if (!hadEmoji || !core) return false;
-  if (/[.!?…]["')\]]*\s*$/u.test(core)) return true;
-  return isCompleteShortUtteranceWithoutTerminalPunctuation(core);
-}
-
-/** Trailing word fragment from token limit (e.g. «…в этом мол»). */
+/** A dash, colon, comma or semicolon at the very end: the sentence was cut at a mark. */
 export function hasBrokenEnding(text: string): boolean {
   const t = text.replace(LEGACY_GRACEFUL_TAIL_RE, "").trimEnd();
-  if (!t || endsAtSentenceBoundary(t)) return false;
-  if (/[—–-]\s*$/u.test(t)) return true;
-  if (/\s[а-яёa-z]{1,5}$/iu.test(t)) return true;
-  if (/[,:;—–-]\s*[^\s.!?…]{1,12}$/u.test(t)) return true;
-  return false;
+  if (!t) return false;
+  return CUT_AT_MARK_RE.test(t);
 }
 
-/** True if text ends on a sentence boundary (RU/EN punctuation). */
+/** True if the text ends on a sentence mark (RU/EN punctuation, closers allowed) or on an emoji. */
 export function endsAtSentenceBoundary(text: string): boolean {
   const t = text.trimEnd();
   if (!t) return true;
-  if (/[.!?…]["')\]]*\s*$/.test(t)) return true;
-  if (endsWithEmojiAfterCompleteShortPhrase(t)) return true;
-  if (isCompleteShortUtteranceWithoutTerminalPunctuation(t)) return true;
-  return false;
+  return TERMINAL_MARK_RE.test(t) || TRAILING_EMOJI_RE.test(t);
 }
 
-/** Trim trailing fragment after the last complete sentence. */
+/** Trim the fragment after the last sentence mark. Unchanged when there is no mark, or the text before it would be a stub. */
 export function trimToLastCompleteSentence(text: string): string {
   const t = text.trimEnd();
-  const m = t.match(/^([\s\S]*?[.!?…])(?:\s+[^\s.!?……]*)?$/);
-  if (m?.[1] && m[1].length >= 12) {
-    return m[1].trimEnd();
+  let end = -1;
+  for (const match of t.matchAll(SENTENCE_MARK_IN_TEXT_RE)) {
+    end = (match.index ?? 0) + match[0].length;
   }
+  if (end >= MIN_TRIMMED_CHARS) return t.slice(0, end).trimEnd();
   return t;
 }
 
-/** Remove «Вопрос?» + orphan «Да.» / «Нет.» self-dialogue at the end. */
-function stripSelfAnswerTail(text: string): string {
-  let t = text.trim();
-  for (let i = 0; i < 2; i++) {
-    const m = t.match(/^([\s\S]+?)\n+(Да|Нет|Так|Да,)\.?\s*$/iu);
-    if (!m?.[1]) break;
-    const head = m[1].trimEnd();
-    if (/[?…]\s*$/u.test(head)) t = head;
-    else break;
-  }
-  return t;
-}
-
+/** Clean the ending of a reply that was cut: to its last sentence mark; nothing else about the text is judged. */
 export function cleanReplyEnding(text: string): string {
-  const body = stripSelfAnswerTail(text.replace(LEGACY_GRACEFUL_TAIL_RE, "")).trim();
+  const body = text.replace(LEGACY_GRACEFUL_TAIL_RE, "").trim();
   if (!body) return body;
   if (endsAtSentenceBoundary(body)) return body;
-
-  const trimmed = trimToLastCompleteSentence(body);
-  if (endsAtSentenceBoundary(trimmed)) return trimmed;
-
-  const withoutFragment = body
-    .replace(/\s+[^\s.!?…,]{1,6}$/u, "")
-    .trimEnd();
-  if (endsAtSentenceBoundary(withoutFragment)) return withoutFragment;
-
-  if (trimmed.length >= 40) return trimmed;
-  return withoutFragment.length >= 40 ? withoutFragment : trimmed;
+  return trimToLastCompleteSentence(body);
 }
 
 /** After length limit: clean ending only (no meta «дальше»). */
