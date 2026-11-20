@@ -160,3 +160,19 @@
 .animate-capture-chip-in {
   animation: captureChipIn 0.38s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+/* The "checking access" page of a conversation screen. It is invisible for the first moments and fades in only if the check is slow,
+   so a fast check (the usual case) is never seen as a flash when moving between screens. The words stay in the page for a screen reader. */
+@keyframes gateDelayedIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.gate-delayed {
+  opacity: 0;
+  animation: gateDelayedIn 0.15s ease-out 0.45s forwards;
+}
