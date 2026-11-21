@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { formatArchiveExcerptsForPrompt, formatUserEvidenceForPrompt } from "./conversationRetrieval.ts";
-import { RECALL_TURN_TEMPERATURE, buildRecallGroundingPrompt } from "./recallGrounding.ts";
+import { RECALL_STRICT_RULE, RECALL_TURN_TEMPERATURE, RECALL_USER_NOTE, buildRecallGroundingPrompt, withRecallUserNote } from "./recallGrounding.ts";
 
 const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
 const quote = [{ createdAt: "2026-05-12T10:00:00Z", text: "я переехала в другой город" }];
@@ -63,5 +63,32 @@ describe("a question about what was said before is answered from the lines, not 
     const context = readFileSync(new URL("./context.ts", import.meta.url), "utf8");
     assert.match(context, /БЛИЗКИЕ РЕПЛИКИ/);
     assert.doesNotMatch(context, /ПОДТВЕРЖДЁННЫЕ СЛОВА/);
+  });
+
+  it("the strict rule is in the instruction for every recall turn, and the note goes to the end of the person's last message for the model only", () => {
+    for (const counts of [{ evidenceCount: 0, archiveCount: 0 }, { evidenceCount: 3, archiveCount: 2 }]) {
+      assert.ok(buildRecallGroundingPrompt(counts).includes(RECALL_STRICT_RULE));
+    }
+    assert.match(RECALL_STRICT_RULE, /ТОЛЬКО по репликам выше/);
+    assert.match(RECALL_STRICT_RULE, /Не опирайся на то, как ты отвечала раньше/);
+    assert.match(RECALL_USER_NOTE, /не упоминай её/);
+
+    const history = [
+      { role: "user", content: "привет" },
+      { role: "assistant", content: "Привет." },
+      { role: "user", content: "вспомни, как зовут мою собаку" },
+    ];
+    const sent = withRecallUserNote(history);
+    assert.equal(sent.length, 3);
+    assert.equal(sent[2].content, `вспомни, как зовут мою собаку\n\n${RECALL_USER_NOTE}`);
+    assert.equal(history[2].content, "вспомни, как зовут мою собаку", "the saved message is not touched");
+    assert.deepEqual(sent.slice(0, 2), history.slice(0, 2));
+    const endsWithAnswer = [{ role: "user", content: "а" }, { role: "assistant", content: "б" }];
+    assert.equal(withRecallUserNote(endsWithAnswer), endsWithAnswer, "no user message at the end: nothing is added");
+    assert.deepEqual(withRecallUserNote([]), []);
+  });
+
+  it("the chat gives the model the note only on a recall turn", () => {
+    assert.match(chat, /const modelMessages = recallTurn \? withRecallUserNote\(messages\) : messages;/);
   });
 });

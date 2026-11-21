@@ -146,7 +146,7 @@ export function buildMemoryContinuityPrompt(options: {
   return lines.join("\n");
 }
 
-export { RECALL_TURN_TEMPERATURE, buildRecallGroundingPrompt } from "./recallGrounding.ts";
+export { RECALL_TURN_TEMPERATURE, buildRecallGroundingPrompt, withRecallUserNote } from "./recallGrounding.ts";
 
 const ACUTE_RISK_RE = [
   /суицид/i,
