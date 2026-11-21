@@ -1188,6 +1188,10 @@ Deno.serve(async (req: Request) => {
               }
             : undefined,
           rerankThreshold: resolveRerankThreshold(Deno.env.get("STAYSEE_RERANK_THRESHOLD")),
+          // A failure of the search by meaning must not stay silent (it did on 21.11.2026): the founder is told in Telegram.
+          onSemanticFailure: async () => {
+            await sendProviderAlertSafely("search_failed");
+          },
           userId,
           embedConfig: embedApiKey
             ? {

@@ -566,6 +566,8 @@ interface ArchiveSearchParams {
   /** The reranker; without it the threshold on the vectors is used. */
   rerank?: RerankConfig;
   rerankThreshold?: number;
+  /** Called when the search by meaning could not run (the chat raises an alert); the search by words goes on. */
+  onSemanticFailure?: () => void | Promise<void>;
 }
 
 /** The person asked to remember (the small model says so): the phrase to search for, candidates by meaning and by words, the reranker chooses. */
@@ -596,6 +598,7 @@ async function searchRecallPrecise(
         maxExcerptChars: CANDIDATE_TEXT_CHARS,
         matchCount: RERANK_SEMANTIC_CANDIDATES,
         threshold: params.rerank ? RERANK_CANDIDATE_FLOOR : undefined,
+        onFailure: params.onSemanticFailure,
       });
     } catch (e) {
       console.warn("[retrieval] semantic path failed:", e);
@@ -722,6 +725,7 @@ export async function searchConversationArchive(
         beforeCreatedAt: cutoff,
         embedConfig: params.embedConfig,
         maxExcerptChars: RETRIEVAL_MAX_EXCERPT_CHARS,
+        onFailure: params.onSemanticFailure,
       });
     } catch (e) {
       console.warn("[retrieval] semantic path failed:", e);

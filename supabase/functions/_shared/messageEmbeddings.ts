@@ -186,8 +186,17 @@ export async function searchSemanticConversationArchive(
     /** How many lines to ask for (default 12) and how close they must be (default: the measured threshold). */
     matchCount?: number;
     threshold?: number;
+    /** Called once when the search could not run (the vector of the question failed or the database answered with an error): the chat raises an alert. */
+    onFailure?: () => void | Promise<void>;
   }
 ): Promise<ArchiveExcerpt[]> {
+  const fail = async () => {
+    try {
+      await params.onFailure?.();
+    } catch (e) {
+      console.warn("[messageEmbeddings] failure handler failed:", e);
+    }
+  };
   const query = params.query.trim();
   if (query.length < 3) return [];
 
@@ -196,6 +205,7 @@ export async function searchSemanticConversationArchive(
     queryVector = await createQueryEmbedding(query, params.embedConfig);
   } catch (e) {
     console.warn("[messageEmbeddings] query embed failed:", e);
+    await fail();
     return [];
   }
 
@@ -215,6 +225,7 @@ export async function searchSemanticConversationArchive(
     } else {
       console.warn("[messageEmbeddings] search:", error.message);
     }
+    await fail();
     return [];
   }
 

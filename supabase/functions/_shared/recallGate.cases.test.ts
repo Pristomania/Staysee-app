@@ -142,6 +142,7 @@ describe("a refused key or an empty balance of the small model is told to the ow
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 }), true);
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 2_000 }), false, "the same kind again inside the window");
     assert.equal(await sendProviderAlertSafely("search_balance_empty", { ...options, now: 2_000 }), true, "another kind is not held back");
+    assert.equal(await sendProviderAlertSafely("search_failed", { ...options, now: 2_000 }), true, "the failure of the search by meaning is its own kind");
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 + PROVIDER_ALERT_WINDOW_MS + 1 }), true);
     assert.match(sent[0], /CLOUDRU_API_KEY/);
     assert.match(sent[0], /15\.02\.2027/, "the date the key ends is in the alert");
