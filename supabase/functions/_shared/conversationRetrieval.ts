@@ -18,7 +18,8 @@ import {
 } from "./messageEmbeddings.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import type { RecallDecision } from "./recallGate.ts";
-import { DEFAULT_RERANK_THRESHOLD, rerankLines, type RerankConfig } from "./reranker.ts";
+import { DEFAULT_RERANK_THRESHOLD, type OpenRouterRerankConfig, type RankedLines, type RerankConfig, rerankWithFallback } from "./reranker.ts";
+import { FALLBACK_RERANK_THRESHOLD } from "./searchProviders.ts";
 
 /** The newest messages read for the search by words when the person did not ask to remember. */
 export const RETRIEVAL_RECENT_WINDOW = 400;
@@ -578,9 +579,14 @@ interface ArchiveSearchParams {
   supabaseService?: SupabaseClient;
   /** What the small model decided about this message (null: it was not asked or did not answer; then the old rule by words applies). */
   decision?: RecallDecision | null;
-  /** The reranker; without it the threshold on the vectors is used. */
+  /** The reranker; without it (and without the reserve) the threshold on the vectors is used. */
   rerank?: RerankConfig;
   rerankThreshold?: number;
+  /** The reserve reranker on OpenRouter, asked when Cloud.ru refuses; its scores are on another scale, so it has its own threshold. */
+  rerankFallback?: OpenRouterRerankConfig;
+  rerankFallbackThreshold?: number;
+  /** Called once after the lines were scored (or could not be): who scored them, and whether Cloud.ru refused. The chat raises the alerts by it. */
+  onRerankOutcome?: (outcome: { provider: RankedLines["provider"]; refusedStatus?: RankedLines["refusedStatus"]; switchedBecause?: RankedLines["switchedBecause"] }) => void | Promise<void>;
   /** Called when the search by meaning could not run (the chat raises an alert); the search by words goes on. */
   onSemanticFailure?: () => void | Promise<void>;
 }
@@ -612,7 +618,7 @@ async function searchRecallPrecise(
         embedConfig: params.embedConfig,
         maxExcerptChars: CANDIDATE_TEXT_CHARS,
         matchCount: RERANK_SEMANTIC_CANDIDATES,
-        threshold: params.rerank ? RERANK_CANDIDATE_FLOOR : undefined,
+        threshold: params.rerank || params.rerankFallback ? RERANK_CANDIDATE_FLOOR : undefined,
         onFailure: params.onSemanticFailure,
       });
     } catch (e) {
@@ -633,19 +639,34 @@ async function searchRecallPrecise(
   }
   const lines = dedupeEqualTexts(pool);
 
-  const scores = params.rerank && lines.length ? await rerankLines(phrase, lines.map((e) => e.userText), params.rerank) : null;
+  const ranked: RankedLines | null =
+    (params.rerank || params.rerankFallback) && lines.length
+      ? await rerankWithFallback(phrase, lines.map((e) => e.userText), { cloudru: params.rerank, openrouter: params.rerankFallback })
+      : null;
+  if (ranked && params.onRerankOutcome) {
+    try {
+      await params.onRerankOutcome({ provider: ranked.provider, refusedStatus: ranked.refusedStatus, switchedBecause: ranked.switchedBecause });
+    } catch (e) {
+      console.warn("[retrieval] rerank outcome handler failed:", e);
+    }
+  }
+  const scores = ranked?.scores ?? null;
 
   let picked: ArchiveExcerpt[];
   let how: string;
   if (scores) {
-    const threshold = params.rerankThreshold ?? DEFAULT_RERANK_THRESHOLD;
+    // The two hosts score on different scales: each has the threshold that was measured for it.
+    const threshold =
+      ranked?.provider === "openrouter"
+        ? params.rerankFallbackThreshold ?? FALLBACK_RERANK_THRESHOLD
+        : params.rerankThreshold ?? DEFAULT_RERANK_THRESHOLD;
     picked = lines
       .map((ex, i) => ({ ex, s: scores[i] }))
       .filter((x) => x.s > threshold)
       .sort((a, b) => b.s - a.s)
       .slice(0, RECALL_FINAL_CAP)
       .map(({ ex, s }) => ({ ...ex, score: s }));
-    how = "reranked";
+    how = ranked?.provider === "openrouter" ? "reranked-reserve" : "reranked";
   } else {
     // No reranker (not configured, or it did not answer): the closeness of the vectors, as before, and the lines that carry two words of the phrase.
     const close = semantic.filter((ex) => ex.score - 10 > semanticThreshold()).slice(0, 8);

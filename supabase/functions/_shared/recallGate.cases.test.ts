@@ -153,9 +153,9 @@ describe("a refused key or an empty balance of the small model is told to the ow
     resetProviderAlertsForTests();
   });
 
-  it("the chat raises both alerts, and awaits them (they are sent only when something is refused)", () => {
+  it("the chat raises the alert by the outcome of the small model and of the reranker (the calm one when the reserve answered, the old ones when nobody did), and awaits it", () => {
     const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
-    assert.match(chat, /if \(recallGate\?\.refusedStatus\) \{\s*await sendProviderAlertSafely\(recallGate\.refusedStatus === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
-    assert.match(chat, /onRefusal: async \(status\) => \{\s*await sendProviderAlertSafely\(status === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
+    assert.match(chat, /const kind = searchAlertKind\(\{\s*served: recallGate\.decision !== null \|\| !recallGate\.failure,[\s\S]*?if \(kind\) await sendProviderAlertSafely\(kind\);/);
+    assert.match(chat, /onRerankOutcome: async \(outcome\) => \{\s*const kind = searchAlertKind\([\s\S]*?if \(kind\) await sendProviderAlertSafely\(kind\);/);
   });
 });

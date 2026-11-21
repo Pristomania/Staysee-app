@@ -48,11 +48,16 @@ describe("the private route for model requests", () => {
     );
   });
 
-  it("the small model of the recall search goes to Cloud.ru only, never to OpenRouter", () => {
+  it("the small model and the reranker of the recall search go to Cloud.ru first; the reserve on OpenRouter is asked only through the private route", () => {
     const gate = read("_shared/recallGate.ts");
     assert.match(gate, /CLOUDRU_BASE_URL/);
-    assert.doesNotMatch(gate, /openrouter/i);
-    assert.doesNotMatch(read("_shared/reranker.ts"), /openrouter/i);
+    assert.match(gate, /provider: OPENROUTER_PRIVATE_ROUTE/);
+    const reranker = read("_shared/reranker.ts");
+    assert.match(reranker, /RERANK_URL/);
+    assert.match(reranker, /provider: OPENROUTER_PRIVATE_ROUTE/);
+    // every place that names the OpenRouter address in these two files sits next to the route
+    assert.equal((gate.match(/OPENROUTER_BASE_URL\}\/chat\/completions/g) ?? []).length, 1);
+    assert.equal((reranker.match(/OPENROUTER_RERANK_URL/g) ?? []).length, 2, "the import and the one request");
   });
 
   it("is on the long-message summary, whose request is built in another file", () => {

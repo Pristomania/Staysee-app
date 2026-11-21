@@ -328,7 +328,7 @@ describe("the chat function uses the decision of the small model and counts ever
   const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
 
   it("starts the small model early, awaits it before the search, and passes its decision on", () => {
-    const start = chat.indexOf("askRecallGate(message, { apiKey: cloudruKey })");
+    const start = chat.indexOf("askRecallGateWithFallback(message, {");
     const build = chat.indexOf("const builtPacket = await buildContextPacket");
     const wait = chat.indexOf("await recallGatePromise");
     const search = chat.indexOf("await searchConversationArchive(userSupabase");
@@ -342,8 +342,9 @@ describe("the chat function uses the decision of the small model and counts ever
   it("writes the cost of the small model and of the reranker into the cost log, under their own kinds", () => {
     assert.match(chat, /callKind: "recall_gate"/);
     assert.match(chat, /callKind: "recall_rerank"/);
-    assert.match(chat, /model: RECALL_GATE_MODEL/);
+    assert.match(chat, /model: onReserve \? `\$\{RECALL_GATE_MODEL\}@openrouter` : RECALL_GATE_MODEL/);
     assert.match(chat, /model: RERANK_MODEL/);
+    assert.match(chat, /model: FALLBACK_RERANK_MODEL/);
   });
 
   it("the recall instruction follows the same decision, and the key is never written to the log", () => {
