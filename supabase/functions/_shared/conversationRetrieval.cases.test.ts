@@ -15,7 +15,7 @@ import {
 } from "./conversationRetrieval.ts";
 
 const source = readFileSync(new URL("./conversationRetrieval.ts", import.meta.url), "utf8");
-const memorySource = readFileSync(new URL("./memory.ts", import.meta.url), "utf8");
+const memorySource = readFileSync(new URL("./recallGrounding.ts", import.meta.url), "utf8");
 
 interface Row {
   id: string;
@@ -131,7 +131,7 @@ describe("nothing in the search is written for one story", () => {
   });
 
   it("the recall block has no topic written into it", () => {
-    const block = memorySource.slice(memorySource.indexOf("export function buildRecallGroundingPrompt"), memorySource.indexOf("const ACUTE_RISK_RE"));
+    const block = memorySource.slice(memorySource.indexOf("export function buildRecallGroundingPrompt"));
     for (const word of ["ссор", "сын", "мужчин"]) {
       assert.ok(!block.includes(word), `the recall block must not contain "${word}"`);
     }

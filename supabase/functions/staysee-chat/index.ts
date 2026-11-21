@@ -15,6 +15,7 @@ import { fetchConversationCrossMemoryEnabled } from "../_shared/profilePrefs.ts"
 import {
   buildMemoryContinuityPrompt,
   buildRecallGroundingPrompt,
+  RECALL_TURN_TEMPERATURE,
   collectMemoryCorrectionHints,
   fetchTranscriptForSummary,
   getConversationSummary,
@@ -889,6 +890,9 @@ Deno.serve(async (req: Request) => {
     let systemPrompt = BASE_PROMPT;
     let historyMessages: ChatMessage[] = [];
     let memoryItemIds: string[] = [];
+    // A turn where the person asks what they said before: the instruction for it stands last in the prompt, and the answer is given colder.
+    let recallTurn = false;
+    let recallGroundingBlock = "";
     // Carry packet out of block for background summary task
     let packetForSummary: Awaited<ReturnType<typeof buildContextPacket>> | null = null;
     const smokeDiagSnapshot: Record<string, unknown> = {};
@@ -1279,7 +1283,8 @@ Deno.serve(async (req: Request) => {
             evidenceCount: trimmedPacket.userEvidenceQuotes?.length ?? 0,
             archiveCount: trimmedPacket.archiveExcerpts?.length ?? 0,
           });
-          systemPrompt = [systemPrompt, recallGrounding].join("\n\n");
+          recallTurn = true;
+          recallGroundingBlock = recallGrounding;
           console.log(
             `[staysee-chat] recall grounding evidence=${trimmedPacket.userEvidenceQuotes?.length ?? 0} ` +
               `archive=${trimmedPacket.archiveExcerpts?.length ?? 0}`
@@ -1318,6 +1323,12 @@ Deno.serve(async (req: Request) => {
       systemPrompt = [systemPrompt, timeGapPrompt].join("\n\n");
     }
     console.log(`[staysee-chat] time-gap tier: ${gapTier}`);
+
+    // Last, so that it is the freshest thing the model reads before the person's message.
+    if (recallGroundingBlock) {
+      systemPrompt = [systemPrompt, recallGroundingBlock].join("\n\n");
+    }
+    const turnTemperature = recallTurn ? Math.min(tierCfg.temperature, RECALL_TURN_TEMPERATURE) : tierCfg.temperature;
 
     // ── Build message list ───────────────────────────────────────────────────
 
@@ -1361,7 +1372,7 @@ Deno.serve(async (req: Request) => {
       modelMessages,
       systemPrompt,
       outputBudget,
-      tierCfg.temperature,
+      turnTemperature,
       turnModel,
       modelRoute.fallbackModel,
       turnImages
@@ -1395,7 +1406,7 @@ Deno.serve(async (req: Request) => {
           messages,
           systemPrompt,
           tokenBudget,
-          tierCfg.temperature,
+          turnTemperature,
           turnModel,
           modelRoute.fallbackModel
         );
