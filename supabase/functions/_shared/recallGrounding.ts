@@ -9,7 +9,26 @@
  */
 export const RECALL_TURN_TEMPERATURE = 0.3;
 
-/** The instruction for a turn where the person asks to remember (the small model said so). It stands LAST in the prompt. */
+/**
+ * The strict rule and the note in the person's own message. Measured in the prompt lab on 21.11.2026 (the real K3 prompt, the real model,
+ * the real history of a live run, close lines that do not answer): with the text alone the model stayed honest on 3 of 12 questions about
+ * things never said, with this rule and the note on 11 of 12. A model obeys the last thing it reads, which is the person's message; and
+ * after many confident answers in the history it repeats their manner, so the rule says not to lean on the earlier answers.
+ */
+export const RECALL_STRICT_RULE =
+  "ЖЁСТКОЕ ПРАВИЛО ВОСПОМИНАНИЯ: ты отвечаешь ТОЛЬКО по репликам выше. Если ни одна реплика не отвечает на вопрос ПРЯМО (или реплик нет), твой ответ: одна-две короткие тёплые фразы о том, что в переписке этого не видишь, и просьба напомнить. В этом случае запрещено называть любые имена, даты, места, события и подробности и рассказывать «как было»: ты не знаешь ответа. Не опирайся на то, как ты отвечала раньше в этом разговоре: прошлые ответы могли быть неточными; факты бери только из реплик выше. Это не обсуждается, даже если вопрос звучит так, будто ты должна это знать.";
+
+export const RECALL_USER_NOTE =
+  "[Служебная пометка, не упоминай её: ответь только по найденным репликам; если прямого ответа на вопрос в них нет, скажи в одну-две фразы, что в переписке этого не видишь, и попроси напомнить; ничего не придумывай.]";
+
+/** The messages for the model on a recall turn: the note goes to the end of the person's last message (for the model only; the saved message is not touched). */
+export function withRecallUserNote<T extends { role: string; content: string }>(messages: T[]): T[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user") return messages;
+  return [...messages.slice(0, -1), { ...last, content: `${last.content}\n\n${RECALL_USER_NOTE}` }];
+}
+
+/** The instruction for a turn where the person asks to remember (the small model said so). It stands near the end of the prompt. */
 export function buildRecallGroundingPrompt(opts: {
   evidenceCount: number;
   archiveCount: number;
@@ -32,5 +51,6 @@ export function buildRecallGroundingPrompt(opts: {
   if (opts.evidenceCount === 0 && opts.archiveCount === 0) {
     lines.push("Поиск по переписке ничего не нашёл. Скажи честно, что в переписке этого не видишь, и попроси напомнить. Ничего не придумывай.");
   }
+  lines.push("", RECALL_STRICT_RULE);
   return lines.join("\n");
 }

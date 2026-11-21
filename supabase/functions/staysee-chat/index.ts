@@ -16,6 +16,7 @@ import {
   buildMemoryContinuityPrompt,
   buildRecallGroundingPrompt,
   RECALL_TURN_TEMPERATURE,
+  withRecallUserNote,
   collectMemoryCorrectionHints,
   fetchTranscriptForSummary,
   getConversationSummary,
@@ -1337,7 +1338,8 @@ Deno.serve(async (req: Request) => {
         ? historyMessages
         : [...historyMessages, { role: "user", content: message }];
 
-    const modelMessages = messages;
+    // On a recall turn the person's last message gets the note for the model (not saved, not shown): see recallGrounding.ts.
+    const modelMessages = recallTurn ? withRecallUserNote(messages) : messages;
 
     // ── L7: Response budget + model call ─────────────────────────────────────
     // Nothing here is decided by the words of the message: the reply may be as long as the tier allows, and the model is the one
