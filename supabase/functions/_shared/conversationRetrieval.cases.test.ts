@@ -188,7 +188,7 @@ describe("the search by meaning gets the question alone", () => {
     const search = user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model");
     assert.ok(search, "the search by meaning ran, as the user");
     assert.equal(search.args.p_conversation_id, "c1", "in this conversation only");
-    assert.equal(search.args.p_min_chars, 10);
+    assert.equal(search.args.p_min_chars, 6);
     assert.equal(service.rpcCalls[0].name, "messages_missing_embeddings");
   });
 
@@ -328,7 +328,7 @@ describe("the chat function uses the decision of the small model and counts ever
   const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
 
   it("starts the small model early, awaits it before the search, and passes its decision on", () => {
-    const start = chat.indexOf("askRecallGate(message, { apiKey: cloudruKey })");
+    const start = chat.indexOf("askRecallGateWithFallback(message, {");
     const build = chat.indexOf("const builtPacket = await buildContextPacket");
     const wait = chat.indexOf("await recallGatePromise");
     const search = chat.indexOf("await searchConversationArchive(userSupabase");
@@ -342,13 +342,68 @@ describe("the chat function uses the decision of the small model and counts ever
   it("writes the cost of the small model and of the reranker into the cost log, under their own kinds", () => {
     assert.match(chat, /callKind: "recall_gate"/);
     assert.match(chat, /callKind: "recall_rerank"/);
-    assert.match(chat, /model: RECALL_GATE_MODEL/);
+    assert.match(chat, /model: onReserve \? `\$\{RECALL_GATE_MODEL\}@openrouter` : RECALL_GATE_MODEL/);
     assert.match(chat, /model: RERANK_MODEL/);
+    assert.match(chat, /model: FALLBACK_RERANK_MODEL/);
   });
 
   it("the recall instruction follows the same decision, and the key is never written to the log", () => {
     assert.match(chat, /if \(recallDecision \? recallDecision\.recall : hasRecallIntent\(message\)\)/);
     const logLines = chat.split("\n").filter((line) => /console\.(log|warn|error|info)\(/.test(line));
     for (const line of logLines) assert.doesNotMatch(line, /cloudruKey/, line);
+  });
+});
+
+describe("equal lines take one place, and short facts are not cut off", () => {
+  const line = (userText: string, createdAt: string) => ({ userText, assistantText: null, createdAt, score: 0 });
+
+  it("dedupeEqualTexts keeps the newest day of a text written several times, ignores case and spaces, and keeps the order", () => {
+    const out = retrieval.dedupeEqualTexts([
+      line("мне тяжело", "2026-04-10T10:00:00Z"),
+      line("Йога по вторникам", "2026-02-01T10:00:00Z"),
+      line("мне  тяжело", "2026-07-09T10:00:00Z"),
+      line("МНЕ ТЯЖЕЛО", "2026-05-18T10:00:00Z"),
+    ]);
+    assert.deepEqual(
+      out.map((x) => [x.userText, x.createdAt]),
+      [["Йога по вторникам", "2026-02-01T10:00:00Z"], ["мне  тяжело", "2026-07-09T10:00:00Z"]],
+    );
+  });
+
+  it("on a recall turn the reranker is asked about the same text once, and the newest day of it wins", async () => {
+    const rows = conversation(60, {
+      20: "мне тяжело",
+      22: "мне тяжело",
+      24: "Мне тяжело",
+      30: "я хожу на йогу по вторникам и мне там спокойно",
+    });
+    const rerankDocuments: string[][] = [];
+    globalThis.fetch = (async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      if (String(url).endsWith("/rerank")) {
+        rerankDocuments.push(body.documents);
+        const results = body.documents.map((text: string, index: number) => ({ index, relevance_score: text.includes("йог") ? 0.9 : 0.5 }));
+        return { ok: true, status: 200, json: async () => ({ usage: { total_tokens: 10 }, results }), text: async () => "" };
+      }
+      return { ok: true, status: 200, text: async () => "", json: async () => ({ data: body.input.map((_: string, index: number) => ({ index, embedding: Array(1024).fill(0.01) })), usage: { prompt_tokens: 5, total_tokens: 5, cost: 0 } }) };
+    }) as never;
+    const hit = (row: Row, similarity: number) => ({ message_id: row.id, sender: row.sender, role: null, content: row.content, created_at: row.created_at, similarity, reply_sender: null, reply_role: null, reply_content: null });
+    const user = fakeMessagesClient(rows, { rpc: () => ({ data: [hit(rows[30], 0.7), hit(rows[20], 0.6), hit(rows[22], 0.6), hit(rows[24], 0.6)], error: null }) });
+    const result = await searchConversationArchive(user.client, {
+      conversationId: "c1", query: "как мне было в то время?", excludeTailCount: 6, userId: "u1", embedConfig: { apiKey: "key" },
+      supabaseService: fakeMessagesClient([]).client, decision: { recall: true, query: "тяжело" }, rerank: { apiKey: "cloudru-key" },
+    });
+    const documents = rerankDocuments.flat();
+    assert.equal(documents.filter((d) => d.toLowerCase() === "мне тяжело").length, 1, "three equal lines, one place");
+    const heavy = result.excerpts.filter((e) => e.userText.toLowerCase() === "мне тяжело");
+    assert.equal(heavy.length, 1);
+    assert.equal(heavy[0].createdAt, rows[24].created_at, "the newest day");
+  });
+
+  it("the shortest line that can be found is 6 characters: «Я левша.» (8) can be found, «ок» and «ну да» cannot", async () => {
+    const { SEMANTIC_MIN_LINE_CHARS } = await import("./messageEmbeddings.ts");
+    assert.equal(SEMANTIC_MIN_LINE_CHARS, 6);
+    assert.ok("Я левша.".length >= SEMANTIC_MIN_LINE_CHARS);
+    assert.ok("ну да".length < SEMANTIC_MIN_LINE_CHARS && "ок".length < SEMANTIC_MIN_LINE_CHARS);
   });
 });
