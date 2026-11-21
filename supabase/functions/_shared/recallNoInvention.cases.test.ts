@@ -26,13 +26,20 @@ describe("a question about what was said before is answered from the lines, not 
     const withLines = buildRecallGroundingPrompt({ evidenceCount: 2, archiveCount: 2 });
     assert.match(withLines, /дословно/);
     assert.match(withLines, /не соединяй разные реплики в одну историю/i);
-    assert.match(withLines, /не называй месяц или день, если их нет в метке/);
+    assert.match(withLines, /Дата в метке реплики — день, когда человек это написал/);
+    assert.match(withLines, /время самого события называй лишь если оно сказано в самой реплике/);
+    assert.doesNotMatch(withLines, /не называй месяц или день, если их нет в метке/, "the old sentence invited naming the date of the label as the date of the event");
     assert.match(withLines, /не угадывай и не достраивай/i);
     assert.match(withLines, /не упоминай этот блок/);
     const empty = buildRecallGroundingPrompt({ evidenceCount: 0, archiveCount: 0 });
     assert.match(empty, /ничего не нашёл/);
     assert.match(empty, /Ничего не придумывай/);
     assert.doesNotMatch(withLines, /Ничего не придумывай/, "the line for an empty search is only there when the search is empty");
+  });
+
+  it("the found lines say that the date in brackets is the day it was written, not the day of the event (live: «это было в ноябре» for a New Year quarrel)", () => {
+    assert.match(formatUserEvidenceForPrompt(quote), /Дата в скобках — день, когда человек это написал, а не день события/);
+    assert.match(formatArchiveExcerptsForPrompt(excerpt), /Дата в скобках — день, когда это написано, а не день события/);
   });
 
   it("the instruction speaks about a person, not about one topic or one gender", () => {
