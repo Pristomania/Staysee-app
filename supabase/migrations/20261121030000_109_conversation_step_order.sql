@@ -80,7 +80,14 @@ BEGIN
  IF NOT FOUND OR NOT public.conversation_paid_features_for(auth.uid()) THEN RAISE EXCEPTION 'conversation_locked'; END IF;
  UPDATE public.conversations SET manual_sort_at=clock_timestamp()
  WHERE id=p_conversation_id AND user_id=auth.uid() AND is_active IS TRUE;
- GET DIAGNOSTICS v_count=ROW_COUNT; RETURN v_count=1;
+ GET DIAGNOSTICS v_count=ROW_COUNT;
+ -- The order trigger has promoted this room. Honor the authorization already
+ -- accepted under the usage lock even if the deadline passed inside the trigger.
+ -- Both writes belong to this transaction; a reader cannot see a partial move.
+ IF v_count=1 THEN
+  UPDATE public.user_usage_tiers SET free_conversation_id=p_conversation_id WHERE user_id=auth.uid();
+ END IF;
+ RETURN v_count=1;
 END;
 $$;
 

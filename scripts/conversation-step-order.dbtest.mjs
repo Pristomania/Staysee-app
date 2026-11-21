@@ -71,7 +71,8 @@ test('normalization removes duplicates and foreign/deleted ids, appending missin
   await assert.rejects(rpc(db,'move_my_conversation_step',[A,null,B]),/invalid_direction/);
  }finally{await db.close();}
 });
-test('a move accepted under the account lock freezes its chosen top even when expiry lands during the order write',async()=>{
+for(const [move,args] of [['move_my_conversation_step',[B,'up',C]],['move_my_conversation_to_top',[B]]]){
+test(`${move}: a move accepted under the account lock freezes its chosen top even when expiry lands during the order write`,async()=>{
  const db=await fixture();try{
   await db.query("UPDATE user_usage_tiers SET access_source='purchase',paid_access_until=clock_timestamp()+interval '1 day' WHERE user_id=$1",[uid]);
   // Deterministically land the deadline at the write boundary, not by flaky wall-clock sleep.
@@ -79,11 +80,12 @@ test('a move accepted under the account lock freezes its chosen top even when ex
    NEW.paid_access_until:=clock_timestamp()-interval '1 second';RETURN NEW;END;$$;
    CREATE TRIGGER expire_at_order_write BEFORE UPDATE OF conversation_order ON user_usage_tiers
    FOR EACH ROW EXECUTE FUNCTION expire_at_order_write();`);
-  assert.equal(await rpc(db,'move_my_conversation_step',[B,'up',C]),true);
+  assert.equal(await rpc(db,move,args),true);
   assert.deepEqual(await ids(db),[B,C,A]);
   assert.deepEqual((await rpc(db,'list_my_conversations')).filter(r=>r.can_read).map(r=>r.id),[B]);
  }finally{await db.close();}
 });
+}
 for(const [name,args] of [['move_my_conversation_step',[B,'up',C]],['move_my_conversation_to_top',[B]]]){
  test(`${name}: free multiroom reading override does not grant paid reorder rights`,async()=>{
   const db=await fixture();try{
