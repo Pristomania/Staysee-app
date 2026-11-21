@@ -147,6 +147,7 @@ describe("a refused key or an empty balance of the small model is told to the ow
     assert.match(sent[0], /CLOUDRU_API_KEY/);
     assert.match(sent[0], /15\.02\.2027/, "the date the key ends is in the alert");
     assert.match(sent[0], /хуже вспоминает/);
+    assert.match(sent[0], /баланс[\s\S]*Project not found[\s\S]*CLOUDRU_API_KEY/, "an empty balance answers 403 «Project not found» (21.11.2026): the alert says to look at the balance first, then at the secret");
     assert.match(sent[1], /402/);
     assert.ok(sent.every((text) => !text.includes("123456789:")), "the bot token is never in the text");
     resetProviderAlertsForTests();

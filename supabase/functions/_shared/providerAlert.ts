@@ -10,12 +10,12 @@ export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balan
 const TEXT: Record<ProviderAlertKind, string> = {
   balance_empty:
     "⚠️ StaySee: на Cloud.ru закончились деньги (ответ 402). Ответы идут на запасную модель; если и она недоступна, люди видят «Сейчас не могу ответить». Нужно пополнить баланс.",
-  key_rejected: "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403). Проверь секрет CLOUDRU_API_KEY.",
+  key_rejected: "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403). Сначала проверь баланс в кабинете Cloud.ru: при пустом балансе (21.11.2026) пришёл именно 403 «Project not found». Потом проверь секрет CLOUDRU_API_KEY.",
   // The small model and the reranker of the search in the past (the chat itself is not touched: it goes on, only the remembering gets worse).
   search_balance_empty:
     "⚠️ StaySee: на Cloud.ru закончились деньги (ответ 402) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Нужно пополнить баланс.",
   search_key_rejected:
-    "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Проверь секрет CLOUDRU_API_KEY: ключ создан 17.11.2026 на 90 дней, до 15.02.2027.",
+    "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Сначала проверь баланс в кабинете Cloud.ru: при пустом балансе (21.11.2026) пришёл именно 403 «Project not found». Потом проверь секрет CLOUDRU_API_KEY: ключ создан 17.11.2026 на 90 дней, до 15.02.2027.",
   // The search by meaning in the conversation failed (the database refused or the vector of the question could not be made): the answer goes on,
   // but the person's past is found by literal words only. It was silent on 21.11.2026 (a statement timeout under the person's own rights).
   search_failed:
