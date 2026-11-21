@@ -12,9 +12,9 @@
 
 ## Execution status 21.11.2026
 
-Tasks1/2 implemented locally; Task3 local component/layout and existing-stack archive acceptance completed, release acceptance remains open. Independent whole-branch review found three Important issues; all reproduced and fixed in one pass. Evidence:3008 offline tests,45 isolated DB scenarios, real two-session lock waits in four races,13 browser component scenarios and12 geometry measurements including repeated moves. Typecheck/build/smoke pass; lint0errors/11documented warnings.
+Tasks1/2 implemented locally; Task3 separate real-stack browser acceptance completed on21.11, release acceptance remains open. Independent whole-branch review found three Important issues; all reproduced and fixed in one pass. Updated evidence after rebasing:3047 offline tests,46 isolated DB scenarios (actual107/108 before109), real two-session lock waits in four races,13 browser component scenarios and12 geometry measurements including repeated moves. Typecheck/build/smoke pass; lint0errors/11documented warnings. Exact revisions and final reruns are recorded in the external acceptance report.
 
-Plan rulings: the planned tests/db file is replaced by an actually executed network-isolated PostgreSQL driver, since shared8100 must not receive108. Real controls are tested in the browser rather than a static controls snapshot. Paid-only ordering uses paid_features, not the broader multiroom reading exception. Order and chosen free anchor are committed atomically after authorization. Old list authority and previews are invalidated on uncertain/refused moves; failed refresh never claims success. Full Auth/PostgREST+108 and physical-phone acceptance are NOT passed; no production migration, push or deployment performed. The original task checklists below remain the planned contract, not a blanket completion claim.
+Plan rulings: the planned tests/db file is replaced by an actually executed network-isolated PostgreSQL driver, since shared8100 must not receive109. Real controls are tested in the browser rather than a static controls snapshot. Paid-only ordering uses paid_features, not the broader multiroom reading exception. Order and chosen free anchor are committed atomically after authorization. Old list authority and previews are invalidated on uncertain/refused moves; failed refresh never claims success. Full separate Auth/PostgREST+109 acceptance covers reload/relogin, two-tab stale adjacency, HTTP503, expiry, direct locked routes, export removal, locked deletion and empty replacement. The owned disposable stack/users/cache were removed; shared8100 was preserved. Physical-phone acceptance and the reported iPhone blank space are NOT closed. No production migration or deployment; only a draft PR is authorized. The original task checklists below remain the planned contract; this status and the external report are the execution ledger.
 
 ## Global Constraints
 
@@ -22,7 +22,7 @@ Plan rulings: the planned tests/db file is replaced by an actually executed netw
 - Renaming/manual moves never alter message text or last-message timestamps. New activity still promotes its conversation.
 - Preserve first-row access on expiry, frozen free anchor, locked-row deletion and empty replacement; do not reopen archives by deletion/reordering.
 - No production DB writes, migrations, model calls, payments or new messages during implementation. Use isolated fixtures; do not reset/stop shared8100.
-- Preserve other agent's work. Dedicated worktree from fresh origin/main; check migration numbering before publishing. Current intended migration108 must not collide with another agent.
+- Preserve other agent's work. Dedicated worktree from fresh origin/main; check migration numbering before publishing. Current intended migration109 must not collide with another agent.
 
 ## Review Focus
 
@@ -36,7 +36,7 @@ Plan rulings: the planned tests/db file is replaced by an actually executed netw
 
 ### Task 1: Authoritative adjacent ordering and compatibility
 
-**Files:** Create `supabase/migrations/20261121030000_108_conversation_step_order.sql`, `scripts/conversation-step-order.dbtest.mjs`, `tests/db/conversationStepOrder.dbtest.ts`; reuse isolated fixture helpers without reading production env.
+**Files:** Create `supabase/migrations/20261121030000_109_conversation_step_order.sql`, `scripts/conversation-step-order.dbtest.mjs`, `tests/db/conversationStepOrder.dbtest.ts`; reuse isolated fixture helpers without reading production env.
 
 **Interfaces:** RPC `move_my_conversation_step(p_conversation_id uuid,p_direction text,p_expected_neighbor uuid) RETURNS boolean`. `p_direction` exactly `up`/`down`; success true; changed neighbor raises `conversation_order_changed`; unauthorized owner/access raises a non-disclosing refusal. List shape stays exactly7 keys per row. Private helpers revoked from PUBLIC/anon/authenticated.
 

@@ -7,6 +7,13 @@ async function fixture(){
  return db;
 }
 const ids=async db=>(await rpc(db,'list_my_conversations')).map(r=>r.id);
+
+test('fixture includes actual recall migrations107/108 before ordering109',async()=>{
+ const db=await fixture();try{
+  assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.columns WHERE table_schema='public' AND table_name='message_embeddings' AND column_name IN ('embedding_model','embedding_1024')")).rows[0].n,2);
+  assert.ok((await db.query("SELECT to_regprocedure('public.match_conversation_embeddings_by_model(uuid,text,vector,integer,double precision,timestamp with time zone,integer)') IS NOT NULL AS present")).rows[0].present);
+ }finally{await db.close();}
+});
 test('adjacent swaps persist without rewriting historical dates or message content',async()=>{
  const db=await fixture();try{
   const before=(await db.query('SELECT id,last_message_at,manual_sort_at FROM conversations ORDER BY id')).rows;

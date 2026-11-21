@@ -1,4 +1,4 @@
--- Adjacent ordering is server-owned. Do not rewrite message/activity timestamps.
+-- 109: Adjacent ordering is server-owned. Do not rewrite message/activity timestamps.
 ALTER TABLE public.user_usage_tiers ADD COLUMN conversation_order uuid[] NOT NULL DEFAULT '{}';
 
 CREATE FUNCTION public.normalized_conversation_order(p_user uuid) RETURNS uuid[]

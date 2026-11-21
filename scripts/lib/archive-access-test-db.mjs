@@ -4,8 +4,14 @@ export const uid='11111111-1111-4111-8111-111111111111', other='22222222-2222-42
 export const oldest='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', middle='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', top='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const dir=new URL('../../supabase/migrations/',import.meta.url);
 export async function archiveDatabase(database) {
- const db=database??new (await import(new URL('../../tmp/robokassa-test/runtime/node_modules/@electric-sql/pglite/dist/index.js',import.meta.url).href)).PGlite();
- await db.exec(`CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
+ let db=database;
+ if(!db){
+  const {PGlite}=await import(new URL('../../tmp/robokassa-test/runtime/node_modules/@electric-sql/pglite/dist/index.js',import.meta.url).href);
+  const {vector}=await import(new URL('../../tmp/robokassa-test/runtime/node_modules/@electric-sql/pglite-pgvector/dist/index.js',import.meta.url).href);
+  db=new PGlite({extensions:{vector}});
+ }
+ await db.exec(`CREATE EXTENSION IF NOT EXISTS vector;
+ CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
  CREATE SCHEMA auth; GRANT USAGE ON SCHEMA auth TO authenticated;
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  CREATE TABLE auth.users(id uuid PRIMARY KEY);
@@ -15,7 +21,7 @@ export async function archiveDatabase(database) {
  CREATE TABLE messages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),conversation_id uuid REFERENCES conversations ON DELETE CASCADE,sender text DEFAULT 'user',content text,created_at timestamptz DEFAULT now());
  CREATE TABLE user_memory(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid,content text);
  CREATE TABLE progress_entries(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),user_id uuid,conversation_id uuid REFERENCES conversations ON DELETE SET NULL,entry_type text DEFAULT 'note',content text,entry_date date DEFAULT CURRENT_DATE,created_at timestamptz DEFAULT now());
- CREATE TABLE message_embeddings(message_id uuid REFERENCES messages ON DELETE CASCADE,conversation_id uuid,user_id uuid);
+ CREATE TABLE message_embeddings(message_id uuid REFERENCES messages ON DELETE CASCADE,conversation_id uuid,user_id uuid,embedding vector(1536) NOT NULL);
  CREATE TABLE ai_usage_logs(user_id uuid,cost numeric,created_at timestamptz DEFAULT now());
  CREATE VIEW v_analytics_cost_by_user AS SELECT 1 AS n; CREATE VIEW v_analytics_top_conversations AS SELECT 1 AS n;
  INSERT INTO auth.users VALUES('${uid}'),('${other}'); INSERT INTO profiles(id) SELECT id FROM auth.users; INSERT INTO user_usage_tiers(user_id,tier) SELECT id,'premium' FROM auth.users;
@@ -48,7 +54,7 @@ export async function archiveDatabase(database) {
  await db.query("UPDATE user_usage_tiers SET tier='premium',access_source='purchase',paid_access_until=clock_timestamp()-interval '1 day' WHERE user_id=$1",[uid]);
  const archive=new URL('20261120190000_103_conversation_archive_access.sql',dir);
  if(existsSync(archive))await db.exec(readFileSync(archive,'utf8'));
- for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql','20261121030000_108_conversation_step_order.sql']){
+ for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql','20261121000000_107_embeddings_by_model.sql','20261121010000_108_match_user_lines_min_length.sql','20261121030000_109_conversation_step_order.sql']){
   const file=new URL(name,dir); if(existsSync(file))await db.exec(readFileSync(file,'utf8'));
  }
  return db;
