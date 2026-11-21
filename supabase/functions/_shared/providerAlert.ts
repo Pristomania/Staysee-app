@@ -5,7 +5,7 @@
  * The bot and the chat are the ones of the Memory V3 alerts (the same secrets).
  */
 
-export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected";
+export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed";
 
 const TEXT: Record<ProviderAlertKind, string> = {
   balance_empty:
@@ -16,6 +16,10 @@ const TEXT: Record<ProviderAlertKind, string> = {
     "⚠️ StaySee: на Cloud.ru закончились деньги (ответ 402) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Нужно пополнить баланс.",
   search_key_rejected:
     "⚠️ StaySee: Cloud.ru не принимает ключ (ответ 401 или 403) для поиска по прошлым сообщениям. Ответы идут, но Стейси хуже вспоминает прежнее. Проверь секрет CLOUDRU_API_KEY: ключ создан 17.11.2026 на 90 дней, до 15.02.2027.",
+  // The search by meaning in the conversation failed (the database refused or the vector of the question could not be made): the answer goes on,
+  // but the person's past is found by literal words only. It was silent on 21.11.2026 (a statement timeout under the person's own rights).
+  search_failed:
+    "⚠️ StaySee: поиск по смыслу в беседе не отработал (ошибка базы или векторов вопроса). Ответы идут, но Стейси находит прошлое только по буквальным словам. Нужно смотреть журнал функции staysee-chat.",
 };
 
 const BOT_TOKEN = /^\d{5,20}:[A-Za-z0-9_-]{20,100}$/;
