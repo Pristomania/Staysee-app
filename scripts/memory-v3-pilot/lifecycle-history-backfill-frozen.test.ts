@@ -20,9 +20,9 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 const EXPECTED_SHA256 = Object.freeze({
   'supabase/functions/_shared/memoryV3/lifecycleContract.ts':
-    // 22.11.2026: the digest below moved on purpose: lifecycleContract.ts now names the live model of the memory (DeepSeek V4.1 Flash).
+    // 22.11.2026: the digest below moved on purpose (twice): lifecycleContract.ts names the live model of the memory (DeepSeek V4.1 Flash, then gpt-oss-120b).
     // The backfill profile itself stays pinned to Gemini (see lifecycle-history-backfill-profile.ts); nothing else in this file changed.
-    'F622982AC51050DBF4E5F80B35DD66C978405B4D7B8B5DA732F5ABF84A5C4E1B',
+    'C6A151EBE37DA35531496ABDB159CF2EBFBB74079FFF4BD93B6FBAE1639D80F8',
   'supabase/functions/_shared/memoryV3/lifecyclePrompt.ts':
     '10F3BD2656DA99610FCF20899DF57E02167FD532EBF2C56ED6873342AC742521',
   'supabase/functions/_shared/memoryV3/lifecycleReducer.ts':

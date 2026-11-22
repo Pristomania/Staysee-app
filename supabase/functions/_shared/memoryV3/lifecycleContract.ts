@@ -4,7 +4,7 @@ export const MEMORY_V3_LIFECYCLE_SCHEMA_VERSION = "memory-v3-lifecycle-state-v1"
 export const MEMORY_V3_LIFECYCLE_PIPELINE_VERSION = "memory-v3-lifecycle-shadow-v1";
 export const MEMORY_V3_LIFECYCLE_RECONCILER_VERSION = "memory-v3-lifecycle-reconciler-v1";
 /** The model the lifecycle (between conversations) memory runs on: see modelRoute.ts. Until 22.11.2026 it was google/gemini-3.7-flash. */
-export const MEMORY_V3_LIFECYCLE_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash";
+export const MEMORY_V3_LIFECYCLE_MODEL = "openai/gpt-oss-120b";
 export const MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES = 60;
 export const MEMORY_V3_LIFECYCLE_MAX_CANDIDATES = 100;
 export const MEMORY_V3_LIFECYCLE_MAX_CANDIDATE_EVIDENCE = 500;

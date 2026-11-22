@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { calculateCostFromTokens } from "../openRouterPricing.ts";
@@ -13,18 +13,35 @@ const migration = read("../../../migrations/20261122000000_112_memory_v3_model_a
 const code = migration.replace(/\/\*[\s\S]*?\*\//, "");
 const chat = read("../../staysee-chat/index.ts");
 
-describe("the model of the background memory (22.11.2026: DeepSeek V4.1 Flash, Cloud.ru first, OpenRouter as the reserve)", () => {
+describe("the model of the background memory (22.11.2026: gpt-oss-120b of the own placement of Cloud.ru, DeepSeek V4.1 Flash on OpenRouter as the reserve)", () => {
   it("both pipelines write the same host-neutral name into their runs, and the profiles agree with the constants", () => {
-    assert.equal(MEMORY_V3_DIALOGUE_MODEL, "deepseek-ai/DeepSeek-V4.1-Flash");
-    assert.equal(MEMORY_V3_LIFECYCLE_MODEL, "deepseek-ai/DeepSeek-V4.1-Flash");
+    assert.equal(MEMORY_V3_DIALOGUE_MODEL, "openai/gpt-oss-120b");
+    assert.equal(MEMORY_V3_LIFECYCLE_MODEL, "openai/gpt-oss-120b");
     for (const pipeline of ["dialogue", "lifecycle"] as const) {
       const profile = MEMORY_V3_MODEL_PROFILES[pipeline];
-      assert.equal(profile.recordedModel, "deepseek-ai/DeepSeek-V4.1-Flash");
-      assert.equal(profile.cloudru.model, "deepseek-ai/DeepSeek-V4.1-Flash");
-      assert.deepEqual(profile.cloudru.priceUsdPer1M, { input: 0.7216, output: 2.1646 }, "the price of the catalog of 22.11.2026, not the V4 Flash one");
-      assert.deepEqual(profile.cloudru.extra, { reasoning_effort: "none" }, "the reasoning stays off: with it 12 of 29 runs broke the contract");
-      assert.equal(profile.openrouter.model, "deepseek/deepseek-v4.1-flash");
+      assert.equal(profile.recordedModel, "openai/gpt-oss-120b");
+      assert.equal(profile.cloudru.model, "openai/gpt-oss-120b", "a model Cloud.ru places itself (\"Внутренняя\"): health data must not leave it");
+      assert.deepEqual(profile.cloudru.priceUsdPer1M, { input: 0.1762, output: 0.6778 }, "15.86 and 61 roubles with VAT at 90 a dollar (catalog of 22.11.2026)");
+      assert.deepEqual(profile.cloudru.extra, { reasoning_effort: "low" });
+      assert.equal(profile.openrouter.model, "deepseek/deepseek-v4.1-flash", "the reserve is another model: gpt-oss on the private route of OpenRouter gave garbage");
       assert.deepEqual(profile.openrouter.extra, { reasoning: { effort: "none" } });
+    }
+  });
+
+  it("the reconciler addendum is only on Cloud.ru, says create/confirm/revise/ignore the way the reconciler knows them, and repeats no fact of the test conversation", () => {
+    for (const pipeline of ["dialogue", "lifecycle"] as const) {
+      const profile = MEMORY_V3_MODEL_PROFILES[pipeline];
+      const text = profile.cloudru.reconcilerAddendum ?? "";
+      assert.match(text, /Дополнительные правила сверки/);
+      assert.match(text, /тип create/);
+      assert.match(text, /ignore допустим только для повтора/);
+      assert.match(text, /confirm/);
+      assert.match(text, /revise/);
+      assert.match(text, /Не отвечай ignore на все кандидаты подряд/);
+      assert.equal(Object.hasOwn(profile.openrouter, "reconcilerAddendum"), false, "the reserve keeps the plain reconciler");
+      for (const fact of ["пенициллин", "Ксени", "Ксюш", "Казан", "в Туле", "Муся", "14 марта", "дизайнер", "Байкал", "Андре", "левш", "Ирин", "Лен", "мелисс", "йог", "переезд", "увольн"]) {
+        assert.equal(text.includes(fact), false, `${pipeline}: «${fact}»`);
+      }
     }
   });
 
@@ -50,9 +67,9 @@ describe("the model of the background memory (22.11.2026: DeepSeek V4.1 Flash, C
     }
   });
 
-  it("the cost of a call is known for both hosts (Cloud.ru: 64.94 / 194.81 roubles for 1M with VAT at 90 roubles a dollar, OpenRouter by its price list)", () => {
-    const onCloudru = calculateCostFromTokens("deepseek-ai/DeepSeek-V4.1-Flash", 2900, 350);
-    assert.ok(onCloudru > 0.0027 && onCloudru < 0.0030, String(onCloudru));
+  it("the cost of a call is known for both hosts (Cloud.ru: 15.86 / 61 roubles for 1M with VAT at 90 roubles a dollar, OpenRouter by its price list)", () => {
+    const onCloudru = calculateCostFromTokens("openai/gpt-oss-120b", 2900, 350);
+    assert.ok(onCloudru > 0.0007 && onCloudru < 0.0008, String(onCloudru));
     const onReserve = calculateCostFromTokens("deepseek/deepseek-v4.1-flash", 2900, 350);
     assert.ok(onReserve > 0.0001 && onReserve < 0.0003, String(onReserve));
   });
@@ -130,5 +147,39 @@ describe("migration 112: the database accepts the new model next to the old one,
     for (const forbidden of [/DROP\s+TABLE/i, /TRUNCATE/i, /DELETE\s+FROM\s+public\.memory_v3_\w+_runs/i, /DROP\s+COLUMN/i, /UPDATE\s+public\.memory_v3_(dialogue|lifecycle)_(runs|shadow_runs)/i]) {
       assert.doesNotMatch(code, forbidden);
     }
+  });
+});
+
+describe("migration 114: the database accepts gpt-oss-120b as the third name, and nothing else changes", () => {
+  const m114 = read("../../../migrations/20261122000500_114_memory_v3_model_allowlist_gptoss.sql");
+  const code114 = m114.replace(/\/\*[\s\S]*?\*\//, "");
+  const THREE = "('google/gemini-3.7-flash', 'deepseek-ai/DeepSeek-V4.1-Flash', 'openai/gpt-oss-120b')";
+  const TWO = "('google/gemini-3.7-flash', 'deepseek-ai/DeepSeek-V4.1-Flash')";
+
+  it("lists the three names in both CHECK constraints and both reserve functions", () => {
+    assert.equal((code114.match(/CHECK \(model IN \('google\/gemini-3\.7-flash', 'deepseek-ai\/DeepSeek-V4\.1-Flash', 'openai\/gpt-oss-120b'\)\)/g) ?? []).length, 2);
+    assert.equal((code114.match(/p_model NOT IN \('google\/gemini-3\.7-flash', 'deepseek-ai\/DeepSeek-V4\.1-Flash', 'openai\/gpt-oss-120b'\)/g) ?? []).length, 2);
+    assert.equal(code114.includes(TWO), false, "no place still lists only two names");
+    assert.equal((code114.match(/CREATE OR REPLACE FUNCTION/g) ?? []).length, 2);
+  });
+
+  it("is migration 112 with the list widened and nothing else: the functions are the live texts, the rule of 10 new messages is kept", () => {
+    const from = "ALTER TABLE public.memory_v3_dialogue_runs DROP CONSTRAINT";
+    const body112 = migration.slice(migration.indexOf(from)).replaceAll(TWO, THREE);
+    assert.equal(m114.slice(m114.indexOf(from)), body112);
+    assert.equal((code114.match(/v_new_message_count < 10/g) ?? []).length, 2);
+  });
+
+  it("deletes and rewrites no data", () => {
+    for (const forbidden of [/DROP\s+TABLE/i, /TRUNCATE/i, /DELETE\s+FROM/i, /DROP\s+COLUMN/i, /UPDATE\s+public\./i]) {
+      assert.doesNotMatch(code114, forbidden);
+    }
+  });
+
+  it("is dated after 112 and before the migration of the arrows of the conversations (113, 22.11.2026 01:00), so that one still goes in after it", () => {
+    const names = readdirSync(new URL("../../../migrations/", import.meta.url));
+    const mine = names.find((n) => n.includes("_114_memory_v3_model_allowlist_gptoss"));
+    assert.ok(mine && mine > "20261122000000_112" && mine < "20261122010000_113", String(mine));
+    assert.equal(names.filter((n) => /_114_/.test(n)).length, 1, "114 is taken once");
   });
 });

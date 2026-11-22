@@ -34,11 +34,16 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   // Cloud.ru (Russia), exact capitals: 183 / 732 and 175.68 / 725.9 roubles per 1M tokens, counted at 90 roubles per dollar.
   "deepseek-ai/DeepSeek-V4-Pro": { inputPer1M: 2.033, outputPer1M: 8.133 },
   "moonshotai/Kimi-K2.6": { inputPer1M: 1.952, outputPer1M: 8.066 },
-  // Cloud.ru tariff 261029 (20.11.2026), roubles without VAT per 1M tokens counted at 90 roubles per dollar: the model of the vectors
-  // (0.50), the reranker that sorts the found lines (0.20), and a small chat model for short checks (13 in / 50 out).
-  "BAAI/bge-m3": { inputPer1M: 0.0056, outputPer1M: 0 },
-  "BAAI/bge-reranker-v2-m3": { inputPer1M: 0.0022, outputPer1M: 0 },
-  "openai/gpt-oss-120b": { inputPer1M: 0.1444, outputPer1M: 0.5556 },
+  // Cloud.ru tariff 261029 (20.11.2026) and the catalog of 22.11.2026, roubles WITH VAT (22%) per 1M tokens counted at 90 roubles per dollar:
+  // the model of the vectors (0.50 + VAT = 0.61), the reranker that sorts the found lines (0.20 + VAT = 0.244), and a small chat model for short
+  // checks (15.86 in / 61 out). Until 22.11.2026 these three lines held the prices WITHOUT VAT (13 / 50 and so on), while the money is taken with
+  // VAT (the catalog shows the same figure as the tariff "с НДС"): the cost of the search was 22% too low, and the lines above were with VAT.
+  "BAAI/bge-m3": { inputPer1M: 0.0068, outputPer1M: 0 },
+  "BAAI/bge-reranker-v2-m3": { inputPer1M: 0.0027, outputPer1M: 0 },
+  "openai/gpt-oss-120b": { inputPer1M: 0.1762, outputPer1M: 0.6778 },
+  // Models measured for the background memory (22.11.2026), the catalog of Cloud.ru with VAT: 73.03 / 176.39 and 96.22 / 288.6 roubles.
+  "GigaChat/GigaChat-3-Pro": { inputPer1M: 0.8114, outputPer1M: 1.9599 },
+  "ai-sage/GigaChat3.5-432B-A28B": { inputPer1M: 1.0691, outputPer1M: 3.2067 },
   // The reserve of the search on OpenRouter (the host states the cost itself; these are for when it does not): 21.11.2026.
   "openai/gpt-oss-120b@openrouter": { inputPer1M: 0.09, outputPer1M: 0.36 },
   "qwen/qwen3-reranker-8b": { inputPer1M: 0.2, outputPer1M: 0 },
