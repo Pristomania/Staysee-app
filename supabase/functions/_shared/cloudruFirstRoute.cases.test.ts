@@ -73,18 +73,21 @@ const send = (fetchImpl: typeof fetch, body: unknown, signal?: AbortSignal) =>
 beforeEach(() => resetSearchProvidersForTests());
 
 describe("pictures and long messages: Cloud.ru first, the model of its own placement", () => {
-  it("both jobs ask Qwen3.6-35B-A3B with the reasoning off, at the catalog price with VAT, and leave the reserve time", () => {
+  it("both jobs ask models of the own placement with the reasoning off, at the catalog price with VAT, and leave the reserve time", () => {
+    assert.equal(AUX_MODEL_PROFILES.summary.model, "Qwen/Qwen3.6-35B-A3B", "the short version of a text has no speakers to mix up");
+    assert.deepEqual(AUX_MODEL_PROFILES.summary.priceUsdPer1M, { input: 2.44, output: 3.66 }, "219.6 and 329.4 roubles with VAT at 90 a dollar");
+    assert.equal(AUX_MODEL_PROFILES.image.model, "Qwen/Qwen3.5-397B-A17B", "the small one swapped the speakers of a chat with replies, 5 of 5 on a real screenshot");
+    assert.deepEqual(AUX_MODEL_PROFILES.image.priceUsdPer1M, { input: 10.17, output: 12.06 }, "915 and 1,085.8 roubles with VAT at 90 a dollar");
     for (const kind of ["image", "summary"] as const) {
-      const profile = AUX_MODEL_PROFILES[kind];
-      assert.equal(profile.model, "Qwen/Qwen3.6-35B-A3B");
-      assert.deepEqual(profile.extra, { reasoning_effort: "none" }, "without it 700-800 tokens go to thinking");
-      assert.deepEqual(profile.priceUsdPer1M, { input: 2.44, output: 3.66 }, "219.6 and 329.4 roubles with VAT at 90 a dollar");
+      assert.deepEqual(AUX_MODEL_PROFILES[kind].extra, { reasoning_effort: "none" }, "without it the tokens go to thinking");
     }
     assert.ok(AUX_MODEL_PROFILES.image.timeoutMs < 25_000, "less than the 25 s the describer gives a try");
     assert.ok(AUX_MODEL_PROFILES.summary.timeoutMs < 18_000, "less than the 18 s the chat gives the short version");
     assert.match(read("../staysee-chat/index.ts"), /timeoutMs: 18_000/);
-    const cost = calculateCostFromTokens("Qwen/Qwen3.6-35B-A3B", 1262, 136);
-    assert.ok(cost > 0.0035 && cost < 0.0038, String(cost));
+    const cost = calculateCostFromTokens("Qwen/Qwen3.5-397B-A17B", 1167, 169);
+    assert.ok(cost > 0.0135 && cost < 0.0145, `${cost}: about 1.25 roubles a picture, not the default price`);
+    const small = calculateCostFromTokens("Qwen/Qwen3.6-35B-A3B", 1262, 136);
+    assert.ok(small > 0.0035 && small < 0.0038, String(small));
   });
 
   it("only the summary carries the addendum about the size (counted in words, the model keeps to it), the picture does not", () => {
@@ -210,6 +213,17 @@ describe("the describer and the summarizer keep their requests and pass the answ
     });
     assert.equal(await cut({ mime: "image/png", data: "AAAA" }), null);
     assert.deepEqual(seen, ["Qwen/Qwen3.6-35B-A3B", "Qwen/Qwen3.6-35B-A3B"], "both tries are billed to the model that answered");
+  });
+
+  it("the prompt teaches who is who in a chat screenshot: the person on the right, the name in a frame is the author of the QUOTED message, no pronouns, say when unsure", () => {
+    assert.match(IMAGE_DESCRIPTION_PROMPT, /Человек, приславший картинку, — тот, чьи сообщения стоят справа/);
+    assert.match(IMAGE_DESCRIPTION_PROMPT, /Имя в рамке — это автор ЦИТИРУЕМОГО сообщения, а не автор текста под рамкой/);
+    assert.match(IMAGE_DESCRIPTION_PROMPT, /Не приписывай ответ автору цитаты/);
+    assert.match(IMAGE_DESCRIPTION_PROMPT, /без «он» и «она»/);
+    assert.match(IMAGE_DESCRIPTION_PROMPT, /Если не уверен, чья реплика, так и напиши/);
+    for (const name of ["Егор", "Анастасия", "Ремантадин", "Хирург"]) {
+      assert.equal(IMAGE_DESCRIPTION_PROMPT.includes(name), false, `no word of the screenshot that showed the mistake in the prompt: «${name}»`);
+    }
   });
 
   it("the prompt keeps the names as written and hides phones, addresses, mail, cards, documents, logins and passwords (the owner's decision of 22.11.2026)", () => {

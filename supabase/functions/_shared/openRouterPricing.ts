@@ -46,6 +46,8 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   "ai-sage/GigaChat3.5-432B-A28B": { inputPer1M: 1.0691, outputPer1M: 3.2067 },
   // Models that see pictures, Cloud.ru own placement, catalog of 22.11.2026 with VAT (219.6 / 329.4 roubles): for the description of pictures and short versions of long messages.
   "Qwen/Qwen3.6-35B-A3B": { inputPer1M: 2.44, outputPer1M: 3.66 },
+  // The larger one that reads chat screenshots (915 / 1,085.8 roubles with VAT). Until 23.11.2026 it had no line here and a call was counted at the default price.
+  "Qwen/Qwen3.5-397B-A17B": { inputPer1M: 10.17, outputPer1M: 12.06 },
   // The reserve of the search on OpenRouter (the host states the cost itself; these are for when it does not): 21.11.2026.
   "openai/gpt-oss-120b@openrouter": { inputPer1M: 0.09, outputPer1M: 0.36 },
   "qwen/qwen3-reranker-8b": { inputPer1M: 0.2, outputPer1M: 0 },
