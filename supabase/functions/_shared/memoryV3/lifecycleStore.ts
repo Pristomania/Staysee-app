@@ -32,7 +32,7 @@ export interface MemoryV3LifecycleReservationInput {
   pipelineVersion: "memory-v3-lifecycle-shadow-v1";
   extractorVersion: string;
   reconcilerVersion: string;
-  model: "google/gemini-3.7-flash";
+  model: typeof MEMORY_V3_LIFECYCLE_MODEL;
   inputHash: string;
   sourceLastMessageId: string;
   sourceLastCreatedAt: string;

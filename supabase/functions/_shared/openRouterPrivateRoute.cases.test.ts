@@ -42,10 +42,18 @@ describe("the private route for model requests", () => {
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
     // The small model that reads a message before the search in the past is asked of Cloud.ru only (checked below): there is no OpenRouter route to carry.
     assert.deepEqual(
-      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts"),
+      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts" && path !== "_shared/memoryV3/modelRoute.ts"),
       [],
       "these files send a request without the private route",
     );
+  });
+
+  it("the memory route sends OpenRouter the very body of the adapter (with the private route it carries), never a body of its own", () => {
+    const route = read("_shared/memoryV3/modelRoute.ts");
+    assert.match(route, /const reserveBody = \{\s*\.\.\.body,/);
+    for (const adapter of ["_shared/memoryV3/transport.ts", "_shared/memoryV3/dialogueTransport.ts", "_shared/memoryV3/lifecycleTransport.ts"]) {
+      assert.match(read(adapter), /data_collection: "deny",\s*zdr: true/, adapter);
+    }
   });
 
   it("the small model and the reranker of the recall search go to Cloud.ru first; the reserve on OpenRouter is asked only through the private route", () => {

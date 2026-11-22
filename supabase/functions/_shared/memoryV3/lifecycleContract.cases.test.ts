@@ -181,7 +181,7 @@ describe("Memory V3 lifecycle constants", () => {
       schema: "memory-v3-lifecycle-state-v1",
       pipeline: "memory-v3-lifecycle-shadow-v1",
       reconciler: "memory-v3-lifecycle-reconciler-v1",
-      model: "google/gemini-3.7-flash",
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
       sourceMessages: 60,
       candidates: 100,
       candidateEvidence: 500,

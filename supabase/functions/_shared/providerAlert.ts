@@ -7,7 +7,7 @@
 
 import type { SwitchReason } from "./searchProviders.ts";
 
-export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed" | "search_switched";
+export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed" | "search_switched" | "memory_switched";
 
 const TEXT: Record<ProviderAlertKind, string> = {
   balance_empty:
@@ -24,6 +24,10 @@ const TEXT: Record<ProviderAlertKind, string> = {
   // a calm message, the money is to be put on Cloud.ru; the app returns to it by itself within minutes of it answering.
   search_switched:
     "⚠️ StaySee: Cloud.ru не принимает запросы поиска по прошлым сообщениям (ответ 402 или 403, чаще всего закончился баланс). Поиск «вспомни» продолжает работать полноценно через запасной баланс на OpenRouter, расход идёт оттуда. Пополни Cloud.ru: приложение само вернётся на него в течение нескольких минут.",
+  // The memory in the background (what Stacy keeps about the person) has Cloud.ru as its host too: when it refuses (an empty balance answers
+  // 403) the same model on OpenRouter writes the memory instead. A calm message: the money is to be put on Cloud.ru.
+  memory_switched:
+    "⚠️ StaySee: Cloud.ru не принимает запросы фоновой памяти (ответ 402 или 403, чаще всего закончился баланс). Память продолжает записываться через запасной баланс на OpenRouter, расход идёт оттуда. Пополни Cloud.ru: приложение само вернётся на него в течение нескольких минут.",
   search_failed:
     "⚠️ StaySee: поиск по смыслу в беседе не отработал (ошибка базы или векторов вопроса). Ответы идут, но Стейси находит прошлое только по буквальным словам. Нужно смотреть журнал функции staysee-chat.",
 };

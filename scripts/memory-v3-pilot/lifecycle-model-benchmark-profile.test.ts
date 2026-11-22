@@ -122,7 +122,9 @@ describe('lifecycle model benchmark frozen profile', () => {
     const profile = getLifecycleModelBenchmarkProfile(
       'lifecycle-reconciler-critical-twelve-v1',
     );
-    assert.equal(profile.model, MEMORY_V3_LIFECYCLE_MODEL);
+    // The benchmark stays frozen on the model it was measured on (Gemini); the live memory moved to DeepSeek V4.1 Flash on 22.11.2026.
+    assert.equal(profile.model, 'google/gemini-3.7-flash');
+    assert.notEqual(profile.model, MEMORY_V3_LIFECYCLE_MODEL);
     assert.equal(profile.reconcilerVersion, MEMORY_V3_LIFECYCLE_RECONCILER_VERSION);
     assert.equal(
       profile.maxPromptRequestBytesPerCase,

@@ -145,7 +145,7 @@ describe('history backfill profile', () => {
       pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
       extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
       reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
-      model: MEMORY_V3_LIFECYCLE_MODEL,
+      model: 'google/gemini-3.7-flash', // frozen: the live memory moved to DeepSeek V4.1 Flash on 22.11.2026
       modelRoute: [PRIMARY_MODEL, FALLBACK_MODEL],
       maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
       maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,

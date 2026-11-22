@@ -42,6 +42,9 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   // The reserve of the search on OpenRouter (the host states the cost itself; these are for when it does not): 21.11.2026.
   "openai/gpt-oss-120b@openrouter": { inputPer1M: 0.09, outputPer1M: 0.36 },
   "qwen/qwen3-reranker-8b": { inputPer1M: 0.2, outputPer1M: 0 },
+  // The background memory (22.11.2026). Cloud.ru: the price of the V4 Flash with VAT at 90 roubles a dollar (to be confirmed for the V4.1 in the cabinet).
+  "deepseek-ai/DeepSeek-V4.1-Flash": { inputPer1M: 0.4811, outputPer1M: 0.962 },
+  "deepseek/deepseek-v4.1-flash": { inputPer1M: 0.05, outputPer1M: 0.199 },
 };
 
 const DEFAULT_PRICING: ModelPricing = { inputPer1M: 1.0, outputPer1M: 3.0 };
