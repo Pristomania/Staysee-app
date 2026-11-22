@@ -8,9 +8,10 @@
  */
 
 // After its first run, a conversation's dialogue memory should send the model a small
-// window (about 5 messages of context plus the new ones), never the whole conversation.
-// A run that lags behind a few exchanges still fits well inside this bound.
-export const DELTA_WINDOW_MAX = 14;
+// window (5 messages of context plus the new ones), never the whole conversation.
+// Since migration 112 (22.11.2026) a run is reserved only after 10 new messages, so the window is about 15
+// (measured live: 12 and 15); the bound leaves room for a run that lags a message or two.
+export const DELTA_WINDOW_MAX = 18;
 // Only judge the window once the conversation is clearly longer than that bound.
 export const DELTA_MIN_TOTAL = 20;
 // A run still "reserved" after this long was started and never finished.
