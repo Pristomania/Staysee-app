@@ -196,3 +196,49 @@ describe("the memory model route: Cloud.ru first", () => {
     assert.equal("refusal" in shaped.choices[0].message, false, "a null refusal is not passed on");
   });
 });
+
+describe("the memory model route: the addendum of the reconciler (Cloud.ru only)", () => {
+  const WITH_RECON: MemoryModelProfile = {
+    ...PROFILE,
+    cloudru: { ...PROFILE.cloudru, reconcilerAddendum: "\nДОБАВКА ДЛЯ СВЕРКИ" },
+  };
+  const routedWith = (profile: MemoryModelProfile, cloudru: ReturnType<typeof host> | null, openrouter: ReturnType<typeof host>) =>
+    createMemoryV3RoutedFetch({
+      profile,
+      ...(cloudru ? { cloudru: { apiKey: "cloudru-key", fetchImpl: cloudru.fetchImpl } } : {}),
+      openrouter: { fetchImpl: openrouter.fetchImpl },
+    });
+  const systemOf = (call: Call) => ((call.body.messages as Array<{ role: string; content: string }>)[0]).content;
+
+  it("the reconciler on Cloud.ru gets the addendum after its own text, the extractor gets only its own addendum", async () => {
+    const cloudru = host([chatAnswer("{}")]);
+    const openrouter = host([{}]);
+    const fetchImpl = routedWith(WITH_RECON, cloudru, openrouter);
+    await send(fetchImpl, reconcilerBody());
+    await send(fetchImpl, extractorBody());
+    assert.equal(systemOf(cloudru.calls[0]), "СИСТЕМНЫЙ ТЕКСТ\nДОБАВКА ДЛЯ СВЕРКИ");
+    assert.equal(systemOf(cloudru.calls[1]), "СИСТЕМНЫЙ ТЕКСТ\nДОБАВКА ДЛЯ ИЗВЛЕЧЕНИЯ");
+    assert.equal(openrouter.calls.length, 0, "nothing went to the reserve");
+  });
+
+  it("the user text of the reconciler is not touched", async () => {
+    const cloudru = host([chatAnswer("{}")]);
+    const fetchImpl = routedWith(WITH_RECON, cloudru, host([{}]));
+    await send(fetchImpl, reconcilerBody());
+    assert.equal((cloudru.calls[0].body.messages as Array<{ content: string }>)[1].content, "{}");
+  });
+
+  it("the reserve never gets the addendum of Cloud.ru's reconciler (it was measured for another model)", async () => {
+    const openrouter = host([chatAnswer("{}")]);
+    const fetchImpl = routedWith(WITH_RECON, null, openrouter);
+    await send(fetchImpl, reconcilerBody());
+    assert.equal(systemOf(openrouter.calls[0]), "СИСТЕМНЫЙ ТЕКСТ");
+  });
+
+  it("a profile without the addendum sends the reconciler exactly as the adapter built it", async () => {
+    const cloudru = host([chatAnswer("{}")]);
+    const fetchImpl = routedWith(PROFILE, cloudru, host([{}]));
+    await send(fetchImpl, reconcilerBody());
+    assert.equal(systemOf(cloudru.calls[0]), "СИСТЕМНЫЙ ТЕКСТ");
+  });
+});

@@ -3,8 +3,8 @@ import type { MemoryV3Extraction } from "./contract.ts";
 export const MEMORY_V3_DIALOGUE_SCHEMA_VERSION = "memory-v3-dialogue-state-v1";
 export const MEMORY_V3_DIALOGUE_PIPELINE_VERSION = "memory-v3-dialogue-v1";
 export const MEMORY_V3_DIALOGUE_RECONCILER_VERSION = "memory-v3-dialogue-reconciler-v1";
-/** The model the dialogue memory runs on (Cloud.ru, with the same model on OpenRouter as the reserve): see modelRoute.ts. Until 22.11.2026 it was google/gemini-3.7-flash. */
-export const MEMORY_V3_DIALOGUE_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash";
+/** The model the dialogue memory runs on (Cloud.ru, own placement; DeepSeek V4.1 Flash on OpenRouter is the reserve): see modelRoute.ts. Until 22.11.2026 it was google/gemini-3.7-flash. */
+export const MEMORY_V3_DIALOGUE_MODEL = "openai/gpt-oss-120b";
 export const MEMORY_V3_DIALOGUE_MAX_SOURCE_MESSAGES = 60;
 export const MEMORY_V3_DIALOGUE_MAX_CANDIDATES = 100;
 export const MEMORY_V3_DIALOGUE_MAX_CANDIDATE_EVIDENCE = 500;

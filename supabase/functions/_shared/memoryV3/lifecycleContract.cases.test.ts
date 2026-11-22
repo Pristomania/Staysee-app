@@ -181,7 +181,7 @@ describe("Memory V3 lifecycle constants", () => {
       schema: "memory-v3-lifecycle-state-v1",
       pipeline: "memory-v3-lifecycle-shadow-v1",
       reconciler: "memory-v3-lifecycle-reconciler-v1",
-      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+      model: "openai/gpt-oss-120b",
       sourceMessages: 60,
       candidates: 100,
       candidateEvidence: 500,

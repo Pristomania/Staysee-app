@@ -31,30 +31,43 @@ export type MemoryPipeline = "dialogue" | "lifecycle";
 export interface MemoryModelProfile {
   /** The id written into the runs table: the same whichever host answered. */
   recordedModel: string;
-  cloudru: { model: string; extra: Record<string, unknown>; priceUsdPer1M: { input: number; output: number } };
+  cloudru: {
+    model: string;
+    extra: Record<string, unknown>;
+    priceUsdPer1M: { input: number; output: number };
+    /** Appended to the system text of the reconciler on Cloud.ru only (the reserve keeps the plain text the adapter sends). */
+    reconcilerAddendum?: string;
+  };
   openrouter: { model: string; extra: Record<string, unknown> };
   /** Appended to the system text of the extractor (never to the reconciler). */
   extractorAddendum: string;
 }
 
 /**
- * The model of the memory, the same for both pipelines (DeepSeek V4.1 Flash), with a short addendum of its own for each.
- * Chosen on 22.11.2026 on the real pipeline of the app over the made-up conversation of nine months (23 facts to keep), the memory run
- * every 5 turns as in the database:
- *   - the dialogue memory: 22 of 23 facts (Gemini 3.7 Flash: 20-21), 0 failed runs of 101, 0.35 roubles a run (Gemini 0.85);
- *   - the memory between conversations: 8 facts in 10 items (Gemini: 7 in 8), 0 failed runs, 0.18 roubles a run (Gemini 0.46).
- * Rejected on the same data: gpt-oss-120b (the reconciler sometimes ignores everything: 0 items in a whole conversation), Kimi K2.6 (14 of 29
- * runs broke the contract), DeepSeek V4 Pro (2.3 roubles a run), Qwen 3.6 35B, GigaChat 10B. The reasoning of the model stays OFF: with it
- * 12 of 29 runs broke the contract. The reserve on OpenRouter (deepseek/deepseek-v4.1-flash, about 8 times cheaper) keeps the memory going
- * when Cloud.ru does not answer; its facts are a little fewer (19 of 23 in the dialogue).
+ * The model of the memory, the same for both pipelines: gpt-oss-120b on Cloud.ru, a model of the OWN placement of Cloud.ru ("Внутренняя" in its
+ * documentation: it works inside the infrastructure of Cloud.ru, the data are neither logged nor stored there, nothing leaves it).
+ * The memory holds what people tell about their health and their families, so it must not go to an "external" model (the documentation says
+ * the data of those leave Cloud.ru, and names neither the operator nor the country); the rules of protection of Cloud.ru mask only phones,
+ * e-mails, numbers of documents and cards, keys and IPs, not names or health, so they are no help here.
  *
- * The addendum exists because the model otherwise writes dates as «2026-07» (the contract wants YYYY-MM-DD or null): that alone broke
- * every run whose window held a month named without a day (found by running each item of a failed answer alone through the real normalizer).
+ * Chosen on 22.11.2026 on the real pipeline of the app (its runners, contracts and this route) over the made-up conversation of nine months
+ * (23 facts to keep), the memory run after every 10 new messages as in the database, 3 repeats:
+ *   - both memories together keep 22, 22 and 21-22 of 23 facts (DeepSeek V4.1 Flash, which is NOT of the own placement of Cloud.ru: 23 of 23);
+ *   - 1-2 failed runs of 31 (the same as V4.1 Flash: 2 of 32); the cost of the memory about 0.06 roubles a turn (V4.1 Flash 0.19, V4 Pro about 0.74).
+ * Rejected on the same data: GigaChat-3-Pro (more than half of the runs broke the contract, 1 item kept), GigaChat 3.5-432B (half of the
+ * runs broke the contract), Qwen3-Coder-Next (it misses the facts a person asks to remember, 6.5 times dearer), Kimi K2.6 and V4 Pro (about 0.7
+ * roubles a turn). The reasoning of the model is set to "low" (the lowest the host takes).
+ *
+ * Two addenda make it keep the contract and the facts. The extractor addendum: the model otherwise writes dates as «2026-07» (the contract
+ * wants YYYY-MM-DD or null). The reconciler addendum (Cloud.ru only): without it gpt-oss answers "ignore" to nearly every candidate (0 items in a
+ * whole conversation, as in the first measurements); with it the memory is kept, and an event with close people is not dropped as a trifle.
+ * The reserve on OpenRouter stays DeepSeek V4.1 Flash (gpt-oss on the private route of OpenRouter gave garbage answers and "ignore" again).
  */
-const CLOUDRU_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash";
+const CLOUDRU_MODEL = "openai/gpt-oss-120b";
 const OPENROUTER_MODEL = "deepseek/deepseek-v4.1-flash";
-/** Roubles with VAT from the catalog of Cloud.ru of 22.11.2026 (64.94 and 194.81 for 1M tokens) at 90 roubles a dollar. */
-const CLOUDRU_PRICE_USD_PER_1M = { input: 0.7216, output: 2.1646 };
+/** Roubles with VAT from the catalog of Cloud.ru of 22.11.2026 (15.86 and 61 for 1M tokens) at 90 roubles a dollar. */
+const CLOUDRU_PRICE_USD_PER_1M = { input: 0.1762, output: 0.6778 };
+const CLOUDRU_RECONCILER_ADDENDUM = "\n\nДополнительные правила сверки:\n- Кандидат, который сообщает новый устойчивый факт о человеке (имя, возраст, город, работа, здоровье, близкие люди, привычки, планы, важные события жизни), а среди существующих записей нет такого же по смыслу, нужно записать: тип create. Тип ignore допустим только для повтора уже записанного, мелочи одного дня или догадки без опоры на слова человека.\n- Событие, которое касается близких людей или переломов в жизни (ссоры, потери, болезни, расставания, важные решения), не мелочь и не повод для ignore: это create, даже если оно рассказано один раз и с сильными эмоциями.\n- Если такая запись уже есть и кандидат повторяет её, это confirm; если кандидат уточняет или меняет её, это revise.\n- Не отвечай ignore на все кандидаты подряд: разбери каждого отдельно.";
 
 const DIALOGUE_ADDENDUM = "\nДополнительные правила записи памяти:\n- Формулировки claim пиши ТОЛЬКО по-русски, сжато, одним предложением, в безличной форме («Имеется непереносимость лактозы», «Брата зовут Иван, он живёт в Омске»). Английские слова и слово «User» недопустимы.\n- Сохраняй только то, что стоит помнить долго: имена и отношения с близкими, возраст, место жительства, работа и профессия, здоровье и режим, привычки и занятия, планы и цели, значимые события и решения, ссоры и примирения с важными людьми, даты. Не сохраняй мелочи одного дня: что съел, погоду, очередь на почте, головную боль, сон, настроение, покупки, случайные бытовые дела, отдельные эмоции без события.\n- Не копируй реплику дословно: перескажи суть. Если фактов нет, верни пустой результат.\n- Поля eventTimeStart и eventTimeEnd заполняй только полной датой ГГГГ-ММ-ДД, когда человек назвал и месяц, и день. Если известен только месяц, сезон или год («в июле», «весной», «в прошлом году»), оставь поле null: неполные даты вроде «2026-07» или «2026» недопустимы.";
 const LIFECYCLE_ADDENDUM = "\nДополнительные правила записи памяти:\n- Формулировки claim пиши ТОЛЬКО по-русски, сжато, одним предложением, в безличной форме. Английские слова и слово «User» недопустимы.\n- Сквозная память нужна всем будущим беседам с человеком. Записывай устойчивые факты о нём и его жизни, каждый отдельной записью: имена и роли близких людей и питомцев, возраст, город, профессию и работу, здоровье и ограничения, привычки и постоянные занятия, цели и планы, важные отношения и события, даты. Если человек просит запомнить что-то, запиши это.\n- Примеры: «Собаку зовут Рекс», «Живёт в Самаре», «Не переносит лактозу», «Дочери восемь лет», «Работает врачом в поликлинике», «Собирается в августе в отпуск к родителям».\n- Не записывай мелочи одного дня, настроение и случайные желания.\n- Поля eventTimeStart и eventTimeEnd заполняй только полной датой ГГГГ-ММ-ДД, когда человек назвал и месяц, и день. Если известен только месяц, сезон или год («в июле», «весной», «в прошлом году»), оставь поле null: неполные даты вроде «2026-07» или «2026» недопустимы.";
@@ -62,13 +75,13 @@ const LIFECYCLE_ADDENDUM = "\nДополнительные правила зап
 export const MEMORY_V3_MODEL_PROFILES: Record<MemoryPipeline, MemoryModelProfile> = {
   dialogue: {
     recordedModel: CLOUDRU_MODEL,
-    cloudru: { model: CLOUDRU_MODEL, extra: { reasoning_effort: "none" }, priceUsdPer1M: CLOUDRU_PRICE_USD_PER_1M },
+    cloudru: { model: CLOUDRU_MODEL, extra: { reasoning_effort: "low" }, priceUsdPer1M: CLOUDRU_PRICE_USD_PER_1M, reconcilerAddendum: CLOUDRU_RECONCILER_ADDENDUM },
     openrouter: { model: OPENROUTER_MODEL, extra: { reasoning: { effort: "none" } } },
     extractorAddendum: DIALOGUE_ADDENDUM,
   },
   lifecycle: {
     recordedModel: CLOUDRU_MODEL,
-    cloudru: { model: CLOUDRU_MODEL, extra: { reasoning_effort: "none" }, priceUsdPer1M: CLOUDRU_PRICE_USD_PER_1M },
+    cloudru: { model: CLOUDRU_MODEL, extra: { reasoning_effort: "low" }, priceUsdPer1M: CLOUDRU_PRICE_USD_PER_1M, reconcilerAddendum: CLOUDRU_RECONCILER_ADDENDUM },
     openrouter: { model: OPENROUTER_MODEL, extra: { reasoning: { effort: "none" } } },
     extractorAddendum: LIFECYCLE_ADDENDUM,
   },
@@ -191,7 +204,7 @@ export function createMemoryV3RoutedFetch(options: MemoryRoutedFetchOptions): ty
         headers: { Authorization: `Bearer ${options.cloudru.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: profile.cloudru.model,
-          messages: extractor ? withAddendum(body.messages, profile.extractorAddendum) : body.messages,
+          messages: withAddendum(body.messages, extractor ? profile.extractorAddendum : profile.cloudru.reconcilerAddendum ?? ""),
           stream: false,
           max_tokens: body.max_tokens,
           response_format: body.response_format,
