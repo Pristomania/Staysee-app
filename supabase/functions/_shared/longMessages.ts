@@ -67,6 +67,8 @@ export function compactExpiredLongMessages<T extends HistoryRow>(
 export interface LongMessageSummaryResult {
   summary: string;
   usage?: { promptTokens: number; completionTokens: number; costUsd: number } | null;
+  /** The model that answered, as the answer names it (Cloud.ru's or the reserve's): the cost log writes this one. */
+  model?: string;
 }
 
 export interface LongMessageDeps {
@@ -169,5 +171,10 @@ export function parseLongMessageSummaryResponse(body: unknown): LongMessageSumma
   if (choice?.finish_reason === "length") return null;
   if (summary.length > SUMMARY_MAX_CHARS) summary = cutBackToLastSentence(summary.slice(0, SUMMARY_MAX_CHARS));
   if (summary.length > SUMMARY_MAX_CHARS) summary = summary.slice(0, SUMMARY_MAX_CHARS);
-  return { summary, usage: readUsage((body as { usage?: unknown }).usage) };
+  const answeredBy = (body as { model?: unknown }).model;
+  return {
+    summary,
+    usage: readUsage((body as { usage?: unknown }).usage),
+    ...(typeof answeredBy === "string" && answeredBy.trim() !== "" ? { model: answeredBy.trim() } : {}),
+  };
 }
