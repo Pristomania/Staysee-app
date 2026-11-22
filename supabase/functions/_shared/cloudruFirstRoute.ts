@@ -39,13 +39,19 @@ export interface CloudruFirstProfile {
 
 /** Roubles with VAT from the catalog of Cloud.ru of 22.11.2026 (219.6 and 329.4 for 1M tokens) at 90 roubles a dollar. */
 const QWEN_PRICE_USD_PER_1M = { input: 2.44, output: 3.66 };
+/** The larger Qwen3.5-397B-A17B: 915 and 1,085.8 roubles with VAT. */
+const QWEN_LARGE_PRICE_USD_PER_1M = { input: 10.17, output: 12.06 };
 
 export const AUX_MODEL_PROFILES = {
+  // 23.11.2026: on a real screenshot of a Telegram chat with replies (a blue frame with the name of the author of the QUOTED message above the text of
+  // the reply) Qwen3.6-35B-A3B gave the answers of the son to the mother and the questions of the mother to the son in 5 of 5 descriptions, and with the
+  // rules about frames added to the prompt still in 4 of 5. The larger Qwen3.5-397B-A17B (17B active) with the rules read it right 3 of 3 (and 6 of 6 on
+  // a made-up chat of the same kind); without the rules it made the same mistake. It costs about 1.25 roubles a picture (Qwen3.6 0.32, Gemini about 0.2).
   image: {
-    model: "Qwen/Qwen3.6-35B-A3B",
+    model: "Qwen/Qwen3.5-397B-A17B",
     extra: { reasoning_effort: "none" },
-    priceUsdPer1M: QWEN_PRICE_USD_PER_1M,
-    timeoutMs: 10_000,
+    priceUsdPer1M: QWEN_LARGE_PRICE_USD_PER_1M,
+    timeoutMs: 15_000,
   },
   summary: {
     model: "Qwen/Qwen3.6-35B-A3B",
