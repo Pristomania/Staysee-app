@@ -35,6 +35,11 @@ function Harness(){
    reset(3);await pause();await click('Меню беседы «Тестовая беседа 2»');await click('Изменить порядок');
    const targets=[...document.querySelectorAll('#fixture [aria-label="Порядок беседы"] button')].map(b=>b.getBoundingClientRect());
    check(targets.length===3&&targets.every(r=>r.width>=44&&r.height>=44),'touch target smaller than44px');results.push('44px touch targets PASS');
+   const controls=document.querySelector<HTMLElement>('#fixture [aria-label="Порядок беседы"]')!;
+   const icons=[...controls.querySelectorAll('svg')];
+   check([...controls.querySelectorAll('button')].every(b=>getComputedStyle(b).borderTopWidth==='0px'),'quiet controls still have visible button borders');
+   check(icons.length===2&&icons.every(i=>i.getBoundingClientRect().width===14&&getComputedStyle(i).strokeWidth==='1.5px'),'quiet arrows are not thin14px icons');
+   check(getComputedStyle(button('Готово')!).fontSize==='12px'&&controls.getBoundingClientRect().height<=46,'quiet controls remain visually bulky');results.push('borderless compact presentation PASS');
    button('Переместить беседу на одну позицию вверх')!.focus();await click('Переместить беседу на одну позицию вверх');
    check(document.querySelector('#fixture [aria-label="Порядок беседы"]')?.contains(document.activeElement),'reorder lost keyboard focus');check(document.activeElement?.getAttribute('aria-label')==='Переместить беседу на одну позицию вниз','edge focus did not choose the enabled direction');results.push('focus retained after DOM reorder PASS');
    check(JSON.stringify(order())===JSON.stringify(['Тестовая беседа 2','Тестовая беседа 1','Тестовая беседа 3']),'one-step up');check(button('Переместить беседу на одну позицию вверх')?.disabled,'first up enabled');check(document.querySelector('#fixture')?.getAttribute('data-opened')==='none','arrow opened chat');results.push('up/first edge/no chat propagation PASS');
