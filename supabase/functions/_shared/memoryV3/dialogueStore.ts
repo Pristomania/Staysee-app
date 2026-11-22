@@ -1,6 +1,7 @@
 import type { MemoryV3Extraction } from "./contract.ts";
 import type { MemoryV3SourceCursor } from "./messages.ts";
 import {
+  MEMORY_V3_DIALOGUE_MODEL,
   MEMORY_V3_DIALOGUE_MAX_CANDIDATES,
   MEMORY_V3_DIALOGUE_MAX_CANDIDATE_EVIDENCE,
   MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
@@ -31,7 +32,7 @@ export interface MemoryV3DialogueReservationInput {
   pipelineVersion: "memory-v3-dialogue-v1";
   extractorVersion: string;
   reconcilerVersion: string;
-  model: "google/gemini-3.7-flash";
+  model: typeof MEMORY_V3_DIALOGUE_MODEL;
   inputHash: string;
   sourceLastMessageId: string;
   sourceLastCreatedAt: string;
@@ -450,7 +451,7 @@ export function createMemoryV3DialogueStore(clientValue: MemoryV3DialogueRpcClie
       } catch {
         throw failReserve("invalid_input");
       }
-      if (typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.conversationId !== "string" || !UUID.test(input.conversationId) || input.pipelineVersion !== MEMORY_V3_DIALOGUE_PIPELINE_VERSION || !nonEmpty(input.extractorVersion) || !nonEmpty(input.reconcilerVersion) || input.model !== "google/gemini-3.7-flash" || typeof input.inputHash !== "string" || !SHA256.test(input.inputHash) || typeof input.sourceLastMessageId !== "string" || !UUID.test(input.sourceLastMessageId) || !isoDateTime(input.sourceLastCreatedAt) || !Number.isSafeInteger(input.messageCount) || (input.messageCount as number) < 1 || (input.messageCount as number) > 60 || !Number.isSafeInteger(input.userMessageCount) || (input.userMessageCount as number) < 1 || (input.userMessageCount as number) > (input.messageCount as number)) throw failReserve("invalid_input");
+      if (typeof input.userId !== "string" || !UUID.test(input.userId) || typeof input.conversationId !== "string" || !UUID.test(input.conversationId) || input.pipelineVersion !== MEMORY_V3_DIALOGUE_PIPELINE_VERSION || !nonEmpty(input.extractorVersion) || !nonEmpty(input.reconcilerVersion) || input.model !== MEMORY_V3_DIALOGUE_MODEL || typeof input.inputHash !== "string" || !SHA256.test(input.inputHash) || typeof input.sourceLastMessageId !== "string" || !UUID.test(input.sourceLastMessageId) || !isoDateTime(input.sourceLastCreatedAt) || !Number.isSafeInteger(input.messageCount) || (input.messageCount as number) < 1 || (input.messageCount as number) > 60 || !Number.isSafeInteger(input.userMessageCount) || (input.userMessageCount as number) < 1 || (input.userMessageCount as number) > (input.messageCount as number)) throw failReserve("invalid_input");
       let data: unknown;
       try {
         data = await callRpc(client, "reserve_memory_v3_dialogue_run", {

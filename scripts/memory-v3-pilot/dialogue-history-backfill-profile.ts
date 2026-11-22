@@ -5,13 +5,18 @@ import {
   MEMORY_V3_DIALOGUE_MAX_SOURCE_MESSAGES,
   MEMORY_V3_DIALOGUE_MAX_STATE_EVIDENCE,
   MEMORY_V3_DIALOGUE_MAX_STATE_ITEMS,
-  MEMORY_V3_DIALOGUE_MODEL,
   MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
   MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
   MEMORY_V3_DIALOGUE_RESERVED_INPUT_TOKENS_PER_CALL,
   MEMORY_V3_DIALOGUE_SCHEMA_VERSION,
 } from '../../supabase/functions/_shared/memoryV3/dialogueContract.ts';
 import { HISTORY_BACKFILL_MODEL_ROUTE } from './history-backfill-provider-profile.ts';
+
+/**
+ * The frozen profile of the history backfill stays on the model it was measured and budgeted on (Gemini 3.7 Flash).
+ * The live memory moved to DeepSeek V4.1 Flash on 22.11.2026 (see _shared/memoryV3/modelRoute.ts); this profile is not that memory.
+ */
+const LEGACY_BACKFILL_MODEL = 'google/gemini-3.7-flash' as const;
 
 export const DIALOGUE_HISTORY_BACKFILL_PROFILE_ID = 'memory-v3-dialogue-history-backfill-v1' as const;
 export const DIALOGUE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES = 40_000 as const;
@@ -23,7 +28,7 @@ export interface DialogueHistoryBackfillProfile {
   pipelineVersion: typeof MEMORY_V3_DIALOGUE_PIPELINE_VERSION;
   extractorVersion: typeof MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION;
   reconcilerVersion: typeof MEMORY_V3_DIALOGUE_RECONCILER_VERSION;
-  model: typeof MEMORY_V3_DIALOGUE_MODEL;
+  model: 'google/gemini-3.7-flash';
   modelRoute: typeof HISTORY_BACKFILL_MODEL_ROUTE;
   maxMessagesPerChunk: 60;
   maxExtractorRequestBytes: 40_000;
@@ -43,7 +48,7 @@ const PROFILE = Object.freeze<DialogueHistoryBackfillProfile>({
   pipelineVersion: MEMORY_V3_DIALOGUE_PIPELINE_VERSION,
   extractorVersion: MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
   reconcilerVersion: MEMORY_V3_DIALOGUE_RECONCILER_VERSION,
-  model: MEMORY_V3_DIALOGUE_MODEL,
+  model: LEGACY_BACKFILL_MODEL,
   modelRoute: HISTORY_BACKFILL_MODEL_ROUTE,
   maxMessagesPerChunk: MEMORY_V3_DIALOGUE_MAX_SOURCE_MESSAGES,
   maxExtractorRequestBytes: DIALOGUE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,

@@ -145,6 +145,7 @@ import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel, isOwnModelOnOpenRouter } from "../_shared/modelHost.ts";
 import { searchAlertKind, sendProviderAlertSafely } from "../_shared/providerAlert.ts";
+import { MEMORY_V3_MODEL_PROFILES, createMemoryV3RoutedFetch, type MemoryPipeline } from "../_shared/memoryV3/modelRoute.ts";
 import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
 import {
   ensurePublishableReply,
@@ -201,6 +202,21 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
+
+/**
+ * The background memory asks Cloud.ru (DeepSeek V4.1 Flash) and, when Cloud.ru refuses or does not answer, the same model on OpenRouter
+ * through the private route; see _shared/memoryV3/modelRoute.ts. A refusal (the balance) is told to the owner once in half an hour.
+ */
+function memoryRoutedFetch(pipeline: MemoryPipeline): typeof fetch {
+  const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV);
+  return createMemoryV3RoutedFetch({
+    profile: MEMORY_V3_MODEL_PROFILES[pipeline],
+    ...(cloudruKey ? { cloudru: { apiKey: cloudruKey } } : {}),
+    onSwitch: async ({ reason }) => {
+      if (reason === "refused" || reason === "paused") await sendProviderAlertSafely("memory_switched");
+    },
+  });
+}
 
 // ── Provider registry ────────────────────────────────────────────────────────
 
@@ -1835,14 +1851,14 @@ Deno.serve(async (req: Request) => {
                   extractorAdapterFactory: (apiKey) => withOneTransientRetry(
                     createMemoryV3OpenRouterAdapter({
                       apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
+                      fetchImpl: memoryRoutedFetch("dialogue"),
                     }),
                     projectSafeMemoryV3TransportDiagnostic,
                   ),
                   reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
                     createMemoryV3DialogueOpenRouterAdapter({
                       apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
+                      fetchImpl: memoryRoutedFetch("dialogue"),
                     }),
                     projectSafeMemoryV3DialogueTransportDiagnostic,
                   ),
@@ -1876,14 +1892,14 @@ Deno.serve(async (req: Request) => {
                     extractorAdapterFactory: (apiKey) => withOneTransientRetry(
                       createMemoryV3OpenRouterAdapter({
                         apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
+                        fetchImpl: memoryRoutedFetch("lifecycle"),
                       }),
                       projectSafeMemoryV3TransportDiagnostic,
                     ),
                     reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
                       createMemoryV3LifecycleOpenRouterAdapter({
                         apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
+                        fetchImpl: memoryRoutedFetch("lifecycle"),
                       }),
                       projectSafeMemoryV3LifecycleTransportDiagnostic,
                     ),

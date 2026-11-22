@@ -105,6 +105,15 @@ describe('dialogue memory runs in production', () => {
     assert.match(result.problems.join('\n'), /delta windowing/);
   });
 
+  it('accepts the windows of the 10-message rhythm measured live on 22.11.2026 (12 and 15 messages of a 28-message conversation)', () => {
+    const runs = [
+      run({ message_count: 1, created_at: minutesAgo(30) }),
+      run({ message_count: 12, created_at: minutesAgo(20) }),
+      run({ message_count: 15, created_at: minutesAgo(10) }),
+    ];
+    assert.deepEqual(checkDialogueRuns(runs, { totalMessages: 28, now: NOW }).problems, []);
+  });
+
   it('allows the very first run to read the whole (short) conversation', () => {
     const runs = [run({ message_count: 24, created_at: minutesAgo(30) }), run({ message_count: 6, created_at: minutesAgo(10) })];
     assert.deepEqual(checkDialogueRuns(runs, { totalMessages: 28, now: NOW }).problems, []);
