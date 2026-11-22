@@ -70,6 +70,7 @@ import {
   IMAGE_DESCRIBE_MODEL,
 } from "../_shared/imageDescriber.ts";
 import { createLongMessageSummarizer } from "../_shared/longMessageSummarizer.ts";
+import { AUX_MODEL_PROFILES, createCloudruFirstFetch, type AuxKind } from "../_shared/cloudruFirstRoute.ts";
 import { waitForUserMessageSaved } from "../_shared/turnMessageWait.ts";
 import {
   runMemoryV3Shadow,
@@ -204,8 +205,9 @@ const corsHeaders = {
 };
 
 /**
- * The background memory asks Cloud.ru (DeepSeek V4.1 Flash) and, when Cloud.ru refuses or does not answer, the same model on OpenRouter
- * through the private route; see _shared/memoryV3/modelRoute.ts. A refusal (the balance) is told to the owner once in half an hour.
+ * The background memory asks Cloud.ru (gpt-oss-120b, a model of its own placement) and, when Cloud.ru refuses or does not answer,
+ * DeepSeek V4.1 Flash on OpenRouter through the private route; see _shared/memoryV3/modelRoute.ts. A refusal (the balance) is told to the
+ * owner once in half an hour.
  */
 function memoryRoutedFetch(pipeline: MemoryPipeline): typeof fetch {
   const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV);
@@ -214,6 +216,22 @@ function memoryRoutedFetch(pipeline: MemoryPipeline): typeof fetch {
     ...(cloudruKey ? { cloudru: { apiKey: cloudruKey } } : {}),
     onSwitch: async ({ reason }) => {
       if (reason === "refused" || reason === "paused") await sendProviderAlertSafely("memory_switched");
+    },
+  });
+}
+
+/**
+ * The description of pictures and the short version of long messages ask Cloud.ru (Qwen3.6-35B-A3B, a model of its own placement that sees
+ * pictures) and, when Cloud.ru refuses or does not answer, Gemini on OpenRouter as before; see _shared/cloudruFirstRoute.ts. A refusal (the
+ * balance) is told to the owner once in half an hour.
+ */
+function auxRoutedFetch(kind: AuxKind): typeof fetch {
+  const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV);
+  return createCloudruFirstFetch({
+    profile: AUX_MODEL_PROFILES[kind],
+    ...(cloudruKey ? { cloudru: { apiKey: cloudruKey } } : {}),
+    onSwitch: async ({ reason }) => {
+      if (reason === "refused" || reason === "paused") await sendProviderAlertSafely("aux_switched");
     },
   });
 }
@@ -823,26 +841,30 @@ Deno.serve(async (req: Request) => {
       // Short codes of why a try failed (never the answer or the picture) and the usage of failed tries the
       // provider billed anyway.
       const failureCodes: string[] = [];
-      const billedFailures: Array<{ promptTokens: number; completionTokens: number; costUsd: number }> = [];
+      const billedFailures: Array<{ promptTokens: number; completionTokens: number; costUsd: number; model?: string }> = [];
       const described = await describeImages(
         turnImages,
         createImageDescriber({
           apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-          fetchImpl: globalThis.fetch.bind(globalThis),
+          fetchImpl: auxRoutedFetch("image"),
           model: imageModel,
-          onFailure: (code, usage) => {
+          onFailure: (code, usage, answeredBy) => {
             failureCodes.push(code);
-            if (usage) billedFailures.push(usage);
+            if (usage) billedFailures.push({ ...usage, ...(answeredBy ? { model: answeredBy } : {}) });
           },
         }),
       );
       // Every call the provider billed is recorded (and so counted against the daily limit), a failed try too.
-      const usages = [...described.paid.map((entry) => entry.usage), ...billedFailures];
-      for (const usage of usages) {
+      const usages = [
+        ...described.paid.map((entry) => ({ usage: entry.usage, model: entry.model })),
+        ...billedFailures.map((entry) => ({ usage: entry, model: entry.model })),
+      ];
+      for (const { usage, model: answeredBy } of usages) {
         EdgeRuntime.waitUntil(logOpenRouterUsage(imageClient, buildUsageLogRow({
           userId,
           conversationId,
-          model: imageModel,
+          // The model that really answered (Cloud.ru's, or Gemini when the reserve did): the cost log is not to name the wrong one.
+          model: answeredBy ?? imageModel,
           promptTokens: usage?.promptTokens ?? 0,
           completionTokens: usage?.completionTokens ?? 0,
           usage: { cost: usage?.costUsd ?? 0 },
@@ -958,7 +980,9 @@ Deno.serve(async (req: Request) => {
           const compactionClient = makeServiceClient();
           const summarizeLongMessage = createLongMessageSummarizer({
             apiKey: Deno.env.get("OPENROUTER_API_KEY"),
-            fetchImpl: globalThis.fetch.bind(globalThis),
+            fetchImpl: auxRoutedFetch("summary"),
+            // Cloud.ru gets 6 s of it, the reserve the rest.
+            timeoutMs: 18_000,
           });
           packet = {
             ...packet,
@@ -970,7 +994,7 @@ Deno.serve(async (req: Request) => {
                   EdgeRuntime.waitUntil(logOpenRouterUsage(compactionClient, buildUsageLogRow({
                     userId,
                     conversationId,
-                    model: SUMMARY_MODEL,
+                    model: made.model ?? SUMMARY_MODEL,
                     promptTokens: made.usage.promptTokens,
                     completionTokens: made.usage.completionTokens,
                     usage: { cost: made.usage.costUsd },

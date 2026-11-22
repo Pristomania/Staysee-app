@@ -7,7 +7,7 @@
 
 import type { SwitchReason } from "./searchProviders.ts";
 
-export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed" | "search_switched" | "memory_switched";
+export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed" | "search_switched" | "memory_switched" | "aux_switched";
 
 const TEXT: Record<ProviderAlertKind, string> = {
   balance_empty:
@@ -26,6 +26,10 @@ const TEXT: Record<ProviderAlertKind, string> = {
     "⚠️ StaySee: Cloud.ru не принимает запросы поиска по прошлым сообщениям (ответ 402 или 403, чаще всего закончился баланс). Поиск «вспомни» продолжает работать полноценно через запасной баланс на OpenRouter, расход идёт оттуда. Пополни Cloud.ru: приложение само вернётся на него в течение нескольких минут.",
   // The memory in the background (what Stacy keeps about the person) has Cloud.ru as its host too: when it refuses (an empty balance answers
   // 403) the same model on OpenRouter writes the memory instead. A calm message: the money is to be put on Cloud.ru.
+  // The description of pictures and the short version of long messages have Cloud.ru as their host too: when it refuses (an empty balance
+  // answers 403) they go on through the reserve (Gemini on OpenRouter, an "external" model: the data leave Cloud.ru, which the owner must know).
+  aux_switched:
+    "⚠️ StaySee: Cloud.ru не принимает запросы для описания картинок и сжатия длинных сообщений (ответ 402 или 403, чаще всего закончился баланс). Они идут через запасной баланс на OpenRouter (Gemini), то есть картинки сейчас обрабатываются вне Cloud.ru. Пополни Cloud.ru: приложение само вернётся на него в течение нескольких минут.",
   memory_switched:
     "⚠️ StaySee: Cloud.ru не принимает запросы фоновой памяти (ответ 402 или 403, чаще всего закончился баланс). Память продолжает записываться через запасной баланс на OpenRouter, расход идёт оттуда. Пополни Cloud.ru: приложение само вернётся на него в течение нескольких минут.",
   search_failed:

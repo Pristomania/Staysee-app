@@ -65,10 +65,10 @@ describe("pictures are wired into the chat function", () => {
   });
 
   it("records every paid description call (also a failed try the provider billed), under its own kind", () => {
-    const logging = chat.indexOf("for (const usage of usages)");
+    const logging = chat.indexOf("for (const { usage, model: answeredBy } of usages)");
     assert.ok(logging > 0 && logging < chat.indexOf('unprocessable("image_unreadable"'));
     assert.match(chat.slice(logging, logging + 700), /callKind: IMAGE_CALL_KIND/);
-    assert.match(chat, /onFailure: \(code, usage\) =>/);
+    assert.match(chat, /onFailure: \(code, usage, answeredBy\) =>/);
     assert.match(usage, /\| "image_description"/);
   });
 

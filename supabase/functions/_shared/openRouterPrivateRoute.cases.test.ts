@@ -41,8 +41,9 @@ describe("the private route for model requests", () => {
       .map((path) => path.slice(functionsDir.length).split("\\").join("/"));
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
     // The small model that reads a message before the search in the past is asked of Cloud.ru only (checked below): there is no OpenRouter route to carry.
+    // The route of the pictures and of the short versions goes to Cloud.ru and, as the reserve, sends the very request its caller built (checked below).
     assert.deepEqual(
-      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts" && path !== "_shared/memoryV3/modelRoute.ts"),
+      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts" && path !== "_shared/memoryV3/modelRoute.ts" && path !== "_shared/cloudruFirstRoute.ts"),
       [],
       "these files send a request without the private route",
     );
@@ -54,6 +55,14 @@ describe("the private route for model requests", () => {
     for (const adapter of ["_shared/memoryV3/transport.ts", "_shared/memoryV3/dialogueTransport.ts", "_shared/memoryV3/lifecycleTransport.ts"]) {
       assert.match(read(adapter), /data_collection: "deny",\s*zdr: true/, adapter);
     }
+  });
+
+  it("the route of the pictures and of the short versions sends the reserve the very request of its caller (with the private route it carries), never a request of its own", () => {
+    const route = read("_shared/cloudruFirstRoute.ts");
+    assert.match(route, /return await sendFetch\(url, init\);/);
+    assert.doesNotMatch(route, /provider:\s*\{/, "no body of its own for OpenRouter is built there");
+    assert.match(read("_shared/imageDescriber.ts"), /provider: \{ allow_fallbacks: true, data_collection: "deny", zdr: true \}/);
+    assert.match(read("_shared/longMessages.ts"), /data_collection: "deny", zdr: true/);
   });
 
   it("the small model and the reranker of the recall search go to Cloud.ru first; the reserve on OpenRouter is asked only through the private route", () => {
