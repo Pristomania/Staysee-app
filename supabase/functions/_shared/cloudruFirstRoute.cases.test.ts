@@ -226,6 +226,16 @@ describe("the describer and the summarizer keep their requests and pass the answ
     }
   });
 
+  it("the last rule of the prompt forbids every number of a phone or card and every address of mail, even made-up ones and «for example» (the larger model copied them in 3 of 6 descriptions without it, 0 of 6 with it)", () => {
+    const lines = IMAGE_DESCRIPTION_PROMPT.split("\n");
+    const at = lines.findIndex((line) => line.startsWith("- ВАЖНО, без исключений"));
+    assert.ok(at > 0, "the rule is there");
+    assert.equal(at, lines.findIndex((line) => line.startsWith("- Только описание")) + 1, "right after the rule about the form, the last place the model weighs most");
+    assert.match(lines[at] + " " + lines[at + 1], /ни одной цифры телефона, адреса электронной почты, номера карты или документа, адреса, логина или пароля/);
+    assert.match(lines[at + 1], /даже вымышленных и даже «для примера»/);
+    assert.equal(lines.length, at + 2, "it is the last rule");
+  });
+
   it("the prompt keeps the names as written and hides phones, addresses, mail, cards, documents, logins and passwords (the owner's decision of 22.11.2026)", () => {
     assert.match(IMAGE_DESCRIPTION_PROMPT, /Имена людей оставляй так, как они написаны/);
     assert.match(IMAGE_DESCRIPTION_PROMPT, /Не переписывай телефоны, адреса, почту, номера карт и документов, логины и пароли/);
