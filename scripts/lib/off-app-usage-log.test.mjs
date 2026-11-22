@@ -208,8 +208,8 @@ describe("a chat call made through the wrapped fetch", () => {
     assert.equal(inserts.length, 1, "written, not skipped as free");
     assert.equal(inserts[0].row.prompt_tokens, 100000);
     assert.equal(inserts[0].row.completion_tokens, 0);
-    // 100000 tokens * 0.0022 dollars per million
-    assert.equal(inserts[0].row.cost, 0.00022);
+    // 100000 tokens * 0.0027 dollars per million (0.20 roubles + VAT at 90 roubles a dollar)
+    assert.equal(inserts[0].row.cost, 0.00027);
     assert.equal(inserts[0].row.error_code, null);
     assert.equal(inserts[0].row.model, "BAAI/bge-reranker-v2-m3");
   });
@@ -218,7 +218,7 @@ describe("a chat call made through the wrapped fetch", () => {
     const answer = { model: "BAAI/bge-m3", usage: { prompt_tokens: 1000000, total_tokens: 1000000 }, data: [{ embedding: [0.1] }] };
     const { wrapped, inserts } = setup({ provider: async () => jsonResponse(answer) });
     await wrapped("https://foundation-models.api.cloud.ru/v1/embeddings", post({ model: "BAAI/bge-m3", input: "x" }));
-    assert.equal(inserts[0].row.cost, 0.0056);
+    assert.equal(inserts[0].row.cost, 0.0068);
   });
 
   it("a request that is not a paid call is passed on untouched and not written", async () => {

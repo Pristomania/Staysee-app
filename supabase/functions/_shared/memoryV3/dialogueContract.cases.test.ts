@@ -213,7 +213,7 @@ describe("Memory V3 dialogue constants", () => {
       schema: "memory-v3-dialogue-state-v1",
       pipeline: "memory-v3-dialogue-v1",
       reconciler: "memory-v3-dialogue-reconciler-v1",
-      model: "deepseek-ai/DeepSeek-V4.1-Flash",
+      model: "openai/gpt-oss-120b",
       sourceMessages: 60,
       candidates: 100,
       candidateEvidence: 500,
