@@ -54,7 +54,8 @@ export async function archiveDatabase(database) {
  await db.query("UPDATE user_usage_tiers SET tier='premium',access_source='purchase',paid_access_until=clock_timestamp()-interval '1 day' WHERE user_id=$1",[uid]);
  const archive=new URL('20261120190000_103_conversation_archive_access.sql',dir);
  if(existsSync(archive))await db.exec(readFileSync(archive,'utf8'));
- for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql','20261121000000_107_embeddings_by_model.sql','20261121010000_108_match_user_lines_min_length.sql','20261121030000_109_conversation_step_order.sql']){
+ //112 is a Memory V3 model allowlist, unrelated to this archive/order fixture.
+ for(const name of ['20261120200000_104_live_confirmation_clock.sql','20261120210000_105_paid_upgrade.sql','20261121000000_107_embeddings_by_model.sql','20261121010000_108_match_user_lines_min_length.sql','20261121040000_110_match_embeddings_fast_under_user_rights.sql','20261121050000_111_match_embeddings_one_access_check.sql','20261122010000_113_conversation_step_order.sql']){
   const file=new URL(name,dir); if(existsSync(file))await db.exec(readFileSync(file,'utf8'));
  }
  return db;

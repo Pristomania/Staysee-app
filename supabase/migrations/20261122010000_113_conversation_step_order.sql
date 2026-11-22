@@ -1,4 +1,4 @@
--- 109: Adjacent ordering is server-owned. Do not rewrite message/activity timestamps.
+-- 113: Adjacent ordering is server-owned. Do not rewrite message/activity timestamps.
 ALTER TABLE public.user_usage_tiers ADD COLUMN conversation_order uuid[] NOT NULL DEFAULT '{}';
 
 CREATE FUNCTION public.normalized_conversation_order(p_user uuid) RETURNS uuid[]
@@ -6,7 +6,9 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT coalesce(array_agg(c.id ORDER BY array_position(u.conversation_order,c.id) NULLS LAST,
   greatest(c.last_message_at,coalesce(c.manual_sort_at,c.last_message_at)) DESC NULLS LAST,
   c.created_at DESC NULLS LAST,c.id DESC),'{}'::uuid[])
- FROM public.conversations c JOIN public.user_usage_tiers u ON u.user_id=c.user_id
+ -- A missing limits row must not hide existing own rooms; keep legacy ordering.
+ -- Reading/reordering authorization still denies access without that row.
+ FROM public.conversations c LEFT JOIN public.user_usage_tiers u ON u.user_id=c.user_id
  WHERE c.user_id=p_user AND c.is_active IS TRUE;
 $$;
 UPDATE public.user_usage_tiers SET conversation_order=public.normalized_conversation_order(user_id);
@@ -74,20 +76,17 @@ $$;
 -- not permission to reorder (nor to choose another free archive anchor).
 CREATE OR REPLACE FUNCTION public.move_my_conversation_to_top(p_conversation_id uuid) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
-DECLARE v_count integer;
+DECLARE v_user uuid:=auth.uid(); v_order uuid[];
 BEGIN
- PERFORM 1 FROM public.user_usage_tiers WHERE user_id=auth.uid() FOR UPDATE;
- IF NOT FOUND OR NOT public.conversation_paid_features_for(auth.uid()) THEN RAISE EXCEPTION 'conversation_locked'; END IF;
- UPDATE public.conversations SET manual_sort_at=clock_timestamp()
- WHERE id=p_conversation_id AND user_id=auth.uid() AND is_active IS TRUE;
- GET DIAGNOSTICS v_count=ROW_COUNT;
- -- The order trigger has promoted this room. Honor the authorization already
- -- accepted under the usage lock even if the deadline passed inside the trigger.
- -- Both writes belong to this transaction; a reader cannot see a partial move.
- IF v_count=1 THEN
-  UPDATE public.user_usage_tiers SET free_conversation_id=p_conversation_id WHERE user_id=auth.uid();
- END IF;
- RETURN v_count=1;
+ PERFORM 1 FROM public.user_usage_tiers WHERE user_id=v_user FOR UPDATE;
+ IF NOT FOUND OR NOT public.conversation_paid_features_for(v_user) THEN RAISE EXCEPTION 'conversation_locked'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.conversations WHERE id=p_conversation_id AND user_id=v_user AND is_active IS TRUE)
+ THEN RETURN false; END IF;
+ -- Use the same order-only write as the step RPC. Updating a conversation here
+ -- would invert a chat UPDATE's conversation -> usage lock order and deadlock.
+ v_order:=ARRAY[p_conversation_id]||array_remove(public.normalized_conversation_order(v_user),p_conversation_id);
+ UPDATE public.user_usage_tiers SET conversation_order=v_order,free_conversation_id=p_conversation_id WHERE user_id=v_user;
+ RETURN true;
 END;
 $$;
 

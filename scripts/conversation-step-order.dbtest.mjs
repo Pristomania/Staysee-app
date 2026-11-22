@@ -8,10 +8,22 @@ async function fixture(){
 }
 const ids=async db=>(await rpc(db,'list_my_conversations')).map(r=>r.id);
 
-test('fixture includes actual recall migrations107/108 before ordering109',async()=>{
+test('fixture includes actual recall migrations107/108/110/111 before ordering113',async()=>{
  const db=await fixture();try{
   assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.columns WHERE table_schema='public' AND table_name='message_embeddings' AND column_name IN ('embedding_model','embedding_1024')")).rows[0].n,2);
   assert.ok((await db.query("SELECT to_regprocedure('public.match_conversation_embeddings_by_model(uuid,text,vector,integer,double precision,timestamp with time zone,integer)') IS NOT NULL AS present")).rows[0].present);
+  assert.equal((await db.query("SELECT prosecdef FROM pg_proc WHERE oid='public.match_conversation_embeddings_by_model(uuid,text,vector,integer,double precision,timestamp with time zone,integer)'::regprocedure")).rows[0].prosecdef,true);
+ }finally{await db.close();}
+});
+test('missing usage row retains only own active conversations in legacy order without granting access',async()=>{
+ const db=await fixture();try{
+  await db.query('DELETE FROM user_usage_tiers WHERE user_id=$1',[uid]);
+  const rows=await rpc(db,'list_my_conversations');
+  assert.deepEqual(rows.map(r=>r.id),[C,B,A]);
+  assert.ok(rows.every(r=>r.user_id===uid&&r.can_read===false));
+  assert.deepEqual(await rpc(db,'list_my_conversations',[],other),[]);
+  await assert.rejects(rpc(db,'move_my_conversation_step',[B,'up',C]),/conversation_locked/);
+  assert.equal((await db.query('SELECT count(*)::int n FROM user_usage_tiers WHERE user_id=$1',[uid])).rows[0].n,0);
  }finally{await db.close();}
 });
 test('adjacent swaps persist without rewriting historical dates or message content',async()=>{
