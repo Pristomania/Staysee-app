@@ -7,12 +7,17 @@ import {
   MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
   MEMORY_V3_LIFECYCLE_MAX_STATE_EVIDENCE,
   MEMORY_V3_LIFECYCLE_MAX_STATE_ITEMS,
-  MEMORY_V3_LIFECYCLE_MODEL,
   MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
   MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
   MEMORY_V3_LIFECYCLE_RESERVED_INPUT_TOKENS_PER_CALL,
   MEMORY_V3_LIFECYCLE_SCHEMA_VERSION,
 } from '../../supabase/functions/_shared/memoryV3/lifecycleContract.ts';
+
+/**
+ * The frozen profile of the history backfill stays on the model it was measured and budgeted on (Gemini 3.7 Flash).
+ * The live memory moved to DeepSeek V4.1 Flash on 22.11.2026 (see _shared/memoryV3/modelRoute.ts); this profile is not that memory.
+ */
+const LEGACY_BACKFILL_MODEL = 'google/gemini-3.7-flash' as const;
 
 export const LIFECYCLE_HISTORY_BACKFILL_PROFILE_ID =
   'memory-v3-lifecycle-history-backfill-v1' as const;
@@ -145,7 +150,7 @@ const PROFILE = deepFreeze<LifecycleHistoryBackfillProfile>({
   pipelineVersion: MEMORY_V3_LIFECYCLE_PIPELINE_VERSION,
   extractorVersion: MEMORY_V3_LIFECYCLE_EXTRACTOR_VERSION,
   reconcilerVersion: MEMORY_V3_LIFECYCLE_RECONCILER_VERSION,
-  model: MEMORY_V3_LIFECYCLE_MODEL,
+  model: LEGACY_BACKFILL_MODEL,
   modelRoute: LIFECYCLE_HISTORY_MODEL_ROUTE,
   maxMessagesPerChunk: MEMORY_V3_LIFECYCLE_MAX_SOURCE_MESSAGES,
   maxExtractorRequestBytes: LIFECYCLE_HISTORY_BACKFILL_MAX_EXTRACTOR_BYTES,

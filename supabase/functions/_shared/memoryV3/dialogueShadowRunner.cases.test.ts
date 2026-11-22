@@ -270,7 +270,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
       pipelineVersion: "memory-v3-dialogue-v1",
       extractorVersion: MEMORY_V3_DIALOGUE_EXTRACTOR_VERSION,
       reconcilerVersion: "memory-v3-dialogue-reconciler-v1",
-      model: "google/gemini-3.7-flash",
+      model: "deepseek-ai/DeepSeek-V4.1-Flash",
       inputHash: (test.reserveInputs[0] as { inputHash: string }).inputHash,
       sourceLastMessageId: MESSAGE_ID,
       sourceLastCreatedAt: CREATED_AT,
@@ -313,12 +313,12 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     assert.deepEqual(logged, [
       {
         userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "extractor",
-        model: "google/gemini-3.7-flash", promptTokens: 500, completionTokens: 80, costUsd: 0.00021,
+        model: "deepseek-ai/DeepSeek-V4.1-Flash", promptTokens: 500, completionTokens: 80, costUsd: 0.00021,
         pipeline: "dialogue",
       },
       {
         userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "reconciler",
-        model: "google/gemini-3.7-flash", promptTokens: 900, completionTokens: 150, costUsd: 0.00045,
+        model: "deepseek-ai/DeepSeek-V4.1-Flash", promptTokens: 900, completionTokens: 150, costUsd: 0.00045,
         pipeline: "dialogue",
       },
     ]);
@@ -412,7 +412,7 @@ describe("Memory V3 dialogue shadow ordered orchestration", () => {
     });
     assert.deepEqual(logged, [{
       userId: USER_ID, conversationId: CONVERSATION_ID, runId: RUN_ID, stage: "extractor",
-      model: "google/gemini-3.7-flash", promptTokens: 400, completionTokens: 20, costUsd: 0.0001,
+      model: "deepseek-ai/DeepSeek-V4.1-Flash", promptTokens: 400, completionTokens: 20, costUsd: 0.0001,
       pipeline: "dialogue",
     }]);
     assert.deepEqual(test.failInputs, []);

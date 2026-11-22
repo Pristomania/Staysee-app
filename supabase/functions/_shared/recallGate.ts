@@ -10,9 +10,22 @@
  * taken for a request; about 0.4 s and 0.008 roubles a call.
  *
  * A failure of any kind returns null: the caller then goes on without the model (the old rule by words).
+ *
+ * Cloud.ru is the main host. When it refuses (the key, or the balance: an empty balance answers 403) the same model is asked of OpenRouter
+ * (the reserve balance) through the private route, and Cloud.ru is left alone for a few minutes: see searchProviders.ts.
  */
 
 import { CLOUDRU_BASE_URL } from "./modelHost.ts";
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+import {
+  OPENROUTER_BASE_URL,
+  type OpenRouterAccess,
+  type SwitchReason,
+  cloudruIsPaused,
+  cloudruLastRefusalStatus,
+  pauseCloudru,
+  resumeCloudru,
+} from "./searchProviders.ts";
 
 export const RECALL_GATE_MODEL = "openai/gpt-oss-120b";
 const RECALL_GATE_TIMEOUT_MS = 3500;
@@ -43,6 +56,8 @@ export interface RecallGateUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** What the host charged, when it says so (OpenRouter does): the cost log takes it as it is. */
+  costUsd?: number;
 }
 
 export interface RecallGateResult {
@@ -51,6 +66,12 @@ export interface RecallGateResult {
   latencyMs: number;
   /** The provider refused the key (401, 403) or has no money (402): the caller raises the alert. */
   refusedStatus?: 401 | 402 | 403;
+  /** Which host answered (or was the last asked). */
+  provider: "cloudru" | "openrouter";
+  /** The host could not be used: it refused, or it did not answer (a timeout, a server error). */
+  failure?: "refused" | "unavailable";
+  /** Set when the reserve (OpenRouter) was used instead of Cloud.ru, and why. */
+  switchedBecause?: SwitchReason;
 }
 
 /** Reads the answer of the model. Anything that is not the expected JSON is null (never guessed). */
@@ -78,6 +99,17 @@ export function clipForRecallGate(message: string): string {
 
 function wholeNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function readUsage(raw: unknown): RecallGateUsage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const u = raw as { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown; cost?: unknown };
+  return {
+    promptTokens: wholeNumber(u.prompt_tokens),
+    completionTokens: wholeNumber(u.completion_tokens),
+    totalTokens: wholeNumber(u.total_tokens),
+    ...(typeof u.cost === "number" && Number.isFinite(u.cost) && u.cost >= 0 ? { costUsd: u.cost } : {}),
+  };
 }
 
 export async function askRecallGate(
@@ -118,19 +150,112 @@ export async function askRecallGate(
     if (!response.ok) {
       console.warn(`[recallGate] HTTP ${response.status}`);
       const refused = response.status === 401 || response.status === 402 || response.status === 403 ? response.status : undefined;
-      return { decision: null, usage: null, latencyMs: Date.now() - started, ...(refused ? { refusedStatus: refused } : {}) };
+      return {
+        decision: null,
+        usage: null,
+        latencyMs: Date.now() - started,
+        provider: "cloudru",
+        failure: refused ? "refused" : "unavailable",
+        ...(refused ? { refusedStatus: refused } : {}),
+      };
     }
     const data = await response.json();
-    const usage = data?.usage
-      ? {
-          promptTokens: wholeNumber(data.usage.prompt_tokens),
-          completionTokens: wholeNumber(data.usage.completion_tokens),
-          totalTokens: wholeNumber(data.usage.total_tokens),
-        }
-      : null;
-    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content), usage, latencyMs: Date.now() - started };
+    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "cloudru" };
   } catch (e) {
     console.warn("[recallGate] failed:", e instanceof Error ? e.message : "unknown");
-    return { decision: null, usage: null, latencyMs: Date.now() - started };
+    return { decision: null, usage: null, latencyMs: Date.now() - started, provider: "cloudru", failure: "unavailable" };
   }
+}
+
+const OPENROUTER_GATE_TIMEOUT_MS = 5000;
+
+/** The same question to the same model on OpenRouter (the reserve), through the private route. */
+export async function askRecallGateOpenRouter(
+  message: string,
+  access: OpenRouterAccess & { fetchImpl?: typeof fetch; timeoutMs?: number }
+): Promise<RecallGateResult> {
+  const started = Date.now();
+  const fetchImpl = access.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), access.timeoutMs ?? OPENROUTER_GATE_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${access.apiKey}`, "Content-Type": "application/json", ...(access.extraHeaders ?? {}) },
+      body: JSON.stringify({
+        model: RECALL_GATE_MODEL,
+        temperature: 0,
+        max_tokens: 600,
+        reasoning: { effort: "low", exclude: true },
+        usage: { include: true },
+        provider: OPENROUTER_PRIVATE_ROUTE,
+        messages: [
+          { role: "system", content: RECALL_GATE_SYSTEM_PROMPT },
+          { role: "user", content: clipForRecallGate(message) },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      console.warn(`[recallGate] OpenRouter HTTP ${response.status}`);
+      const refused = response.status === 401 || response.status === 402 || response.status === 403 ? response.status : undefined;
+      return {
+        decision: null,
+        usage: null,
+        latencyMs: Date.now() - started,
+        provider: "openrouter",
+        failure: refused ? "refused" : "unavailable",
+        ...(refused ? { refusedStatus: refused } : {}),
+      };
+    }
+    const data = await response.json();
+    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "openrouter" };
+  } catch (e) {
+    console.warn("[recallGate] OpenRouter failed:", e instanceof Error ? e.message : "unknown");
+    return { decision: null, usage: null, latencyMs: Date.now() - started, provider: "openrouter", failure: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Cloud.ru first; when it refuses or does not answer, the reserve on OpenRouter. After a refusal Cloud.ru is left alone for a few minutes
+ * (a refused call costs time), then it is asked again, and a good answer from it ends the pause. An answer that is not the expected JSON
+ * is not a failure of the host: it is returned as it is, without a second call.
+ */
+export async function askRecallGateWithFallback(
+  message: string,
+  config: {
+    cloudru?: { apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string };
+    openrouter?: OpenRouterAccess & { fetchImpl?: typeof fetch; timeoutMs?: number };
+    now?: number;
+  }
+): Promise<RecallGateResult> {
+  const now = config.now ?? Date.now();
+  let switchedBecause: SwitchReason | undefined;
+  let first: RecallGateResult | null = null;
+
+  if (config.cloudru && !cloudruIsPaused(now)) {
+    first = await askRecallGate(message, config.cloudru);
+    if (!first.failure) {
+      resumeCloudru();
+      return first;
+    }
+    if (first.failure === "refused") pauseCloudru(now, first.refusedStatus);
+    switchedBecause = first.failure === "refused" ? "refused" : "unavailable";
+  } else if (config.cloudru) {
+    switchedBecause = "paused";
+  }
+
+  const refusedStatus = first?.refusedStatus ?? (switchedBecause === "paused" ? cloudruLastRefusalStatus() : undefined);
+  if (!config.openrouter) {
+    return first ?? { decision: null, usage: null, latencyMs: 0, provider: "cloudru", failure: "unavailable", ...(refusedStatus ? { refusedStatus } : {}) };
+  }
+  const second = await askRecallGateOpenRouter(message, config.openrouter);
+  return {
+    ...second,
+    ...(refusedStatus ? { refusedStatus } : {}),
+    ...(switchedBecause ? { switchedBecause } : {}),
+    latencyMs: second.latencyMs + (first?.latencyMs ?? 0),
+  };
 }

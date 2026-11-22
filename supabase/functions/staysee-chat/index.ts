@@ -6,7 +6,8 @@ import {
   resolveArchiveRetrievalMode,
   searchConversationArchive,
 } from "../_shared/conversationRetrieval.ts";
-import { RECALL_GATE_MODEL, askRecallGate, resolveRecallGateMode } from "../_shared/recallGate.ts";
+import { RECALL_GATE_MODEL, askRecallGateWithFallback, resolveRecallGateMode } from "../_shared/recallGate.ts";
+import { FALLBACK_RERANK_MODEL, resolveFallbackRerankThreshold } from "../_shared/searchProviders.ts";
 import { RERANK_MODEL, resolveRerankThreshold } from "../_shared/reranker.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { logEmbeddingUsage } from "../_shared/embeddingUsage.ts";
@@ -143,7 +144,8 @@ import {
 import { resolveChatModel } from "../_shared/modelRouter.ts";
 import { APPROVED_MODEL_DEEPSEEK_V4_PRO_CLOUDRU, APPROVED_MODEL_GPT4O, APPROVED_MODEL_SONNET, assertApprovedRuntimeModel, normalizeApprovedModelId } from "../_shared/approvedModels.ts";
 import { CLOUDRU_API_KEY_ENV, CLOUDRU_BASE_URL, hostForModel, isOwnModelOnOpenRouter } from "../_shared/modelHost.ts";
-import { sendProviderAlertSafely } from "../_shared/providerAlert.ts";
+import { searchAlertKind, sendProviderAlertSafely } from "../_shared/providerAlert.ts";
+import { MEMORY_V3_MODEL_PROFILES, createMemoryV3RoutedFetch, type MemoryPipeline } from "../_shared/memoryV3/modelRoute.ts";
 import { buildChatModelParameters, buildChatModelProviderRoute } from "../_shared/chatModelParameters.ts";
 import {
   ensurePublishableReply,
@@ -200,6 +202,21 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
+
+/**
+ * The background memory asks Cloud.ru (DeepSeek V4.1 Flash) and, when Cloud.ru refuses or does not answer, the same model on OpenRouter
+ * through the private route; see _shared/memoryV3/modelRoute.ts. A refusal (the balance) is told to the owner once in half an hour.
+ */
+function memoryRoutedFetch(pipeline: MemoryPipeline): typeof fetch {
+  const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV);
+  return createMemoryV3RoutedFetch({
+    profile: MEMORY_V3_MODEL_PROFILES[pipeline],
+    ...(cloudruKey ? { cloudru: { apiKey: cloudruKey } } : {}),
+    onSwitch: async ({ reason }) => {
+      if (reason === "refused" || reason === "paused") await sendProviderAlertSafely("memory_switched");
+    },
+  });
+}
 
 // ── Provider registry ────────────────────────────────────────────────────────
 
@@ -912,12 +929,16 @@ Deno.serve(async (req: Request) => {
         // asked only when the message has words of asking to remember), always, off. Without an answer the old rule by words applies.
         const cloudruKey = Deno.env.get(CLOUDRU_API_KEY_ENV) ?? undefined;
         const recallGateMode = resolveRecallGateMode(Deno.env.get("STAYSEE_RECALL_GATE_MODE"));
+        // The reserve: when Cloud.ru refuses (an empty balance answers 403), the same small model and an open reranker are asked of
+        // OpenRouter (the reserve balance), through the private route; see _shared/searchProviders.ts.
+        const openrouterKey = Deno.env.get(PROVIDERS.openrouter.envKey) ?? undefined;
+        const openrouterAccess = openrouterKey ? { apiKey: openrouterKey, extraHeaders: PROVIDERS.openrouter.extraHeaders } : undefined;
         const recallGateWanted =
-          !!cloudruKey &&
+          (!!cloudruKey || !!openrouterAccess) &&
           (recallGateMode === "always" ||
             (recallGateMode === "words" && resolveArchiveRetrievalMode(message) === "full"));
         const recallGatePromise = recallGateWanted
-          ? askRecallGate(message, { apiKey: cloudruKey })
+          ? askRecallGateWithFallback(message, { cloudru: cloudruKey ? { apiKey: cloudruKey } : undefined, openrouter: openrouterAccess })
           : Promise.resolve(null);
 
         const builtPacket = await buildContextPacket({
@@ -1140,17 +1161,24 @@ Deno.serve(async (req: Request) => {
         const embedUsageClient = makeServiceClient();
         const recallGate = await recallGatePromise;
         const recallDecision = recallGate?.decision ?? null;
-        if (recallGate?.refusedStatus) {
-          await sendProviderAlertSafely(recallGate.refusedStatus === 402 ? "search_balance_empty" : "search_key_rejected");
+        if (recallGate) {
+          const kind = searchAlertKind({
+            served: recallGate.decision !== null || !recallGate.failure,
+            refusedStatus: recallGate.refusedStatus,
+            switchedBecause: recallGate.switchedBecause,
+          });
+          if (kind) await sendProviderAlertSafely(kind);
         }
         if (recallGate?.usage) {
+          // The reserve is billed by OpenRouter (it states the cost itself); the model is marked so that the spend of the two hosts can be told apart.
+          const onReserve = recallGate.provider === "openrouter";
           EdgeRuntime.waitUntil(logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
             userId,
             conversationId,
-            model: RECALL_GATE_MODEL,
+            model: onReserve ? `${RECALL_GATE_MODEL}@openrouter` : RECALL_GATE_MODEL,
             promptTokens: recallGate.usage.promptTokens,
             completionTokens: recallGate.usage.completionTokens,
-            usage: {},
+            usage: onReserve && recallGate.usage.costUsd !== undefined ? { cost: recallGate.usage.costUsd } : {},
             memoryTokens: 0,
             summaryTokens: 0,
             callKind: "recall_gate",
@@ -1159,7 +1187,8 @@ Deno.serve(async (req: Request) => {
         }
         console.log(
           `[staysee-chat] recall gate mode=${recallGateMode} asked=${recallGateWanted} answered=${recallDecision !== null} ` +
-            `recall=${recallDecision?.recall ?? "-"} ms=${recallGate?.latencyMs ?? "-"}`
+            `recall=${recallDecision?.recall ?? "-"} ms=${recallGate?.latencyMs ?? "-"} host=${recallGate?.provider ?? "-"}` +
+            `${recallGate?.switchedBecause ? ` switched=${recallGate.switchedBecause}` : ""}`
         );
         const archiveSearch = await searchConversationArchive(userSupabase, {
           conversationId,
@@ -1169,9 +1198,6 @@ Deno.serve(async (req: Request) => {
           rerank: cloudruKey
             ? {
                 apiKey: cloudruKey,
-                onRefusal: async (status) => {
-                  await sendProviderAlertSafely(status === 402 ? "search_balance_empty" : "search_key_rejected");
-                },
                 // The reranker is a paid call too: written into the cost log (the owner's rule: all costs).
                 onUsage: (usage) =>
                   logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
@@ -1188,6 +1214,32 @@ Deno.serve(async (req: Request) => {
               }
             : undefined,
           rerankThreshold: resolveRerankThreshold(Deno.env.get("STAYSEE_RERANK_THRESHOLD")),
+          rerankFallback: openrouterAccess
+            ? {
+                ...openrouterAccess,
+                onUsage: (usage) =>
+                  logOpenRouterUsage(embedUsageClient, buildUsageLogRow({
+                    userId,
+                    conversationId,
+                    model: FALLBACK_RERANK_MODEL,
+                    promptTokens: usage.totalTokens,
+                    completionTokens: 0,
+                    usage: usage.costUsd !== undefined ? { cost: usage.costUsd } : {},
+                    memoryTokens: 0,
+                    summaryTokens: 0,
+                    callKind: "recall_rerank",
+                  })),
+              }
+            : undefined,
+          rerankFallbackThreshold: resolveFallbackRerankThreshold(Deno.env.get("STAYSEE_RERANK_THRESHOLD_FALLBACK")),
+          onRerankOutcome: async (outcome) => {
+            const kind = searchAlertKind({ served: outcome.provider !== null, refusedStatus: outcome.refusedStatus, switchedBecause: outcome.switchedBecause });
+            if (kind) await sendProviderAlertSafely(kind);
+          },
+          // A failure of the search by meaning must not stay silent (it did on 21.11.2026): the founder is told in Telegram.
+          onSemanticFailure: async () => {
+            await sendProviderAlertSafely("search_failed");
+          },
           userId,
           embedConfig: embedApiKey
             ? {
@@ -1799,14 +1851,14 @@ Deno.serve(async (req: Request) => {
                   extractorAdapterFactory: (apiKey) => withOneTransientRetry(
                     createMemoryV3OpenRouterAdapter({
                       apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
+                      fetchImpl: memoryRoutedFetch("dialogue"),
                     }),
                     projectSafeMemoryV3TransportDiagnostic,
                   ),
                   reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
                     createMemoryV3DialogueOpenRouterAdapter({
                       apiKey,
-                      fetchImpl: globalThis.fetch.bind(globalThis),
+                      fetchImpl: memoryRoutedFetch("dialogue"),
                     }),
                     projectSafeMemoryV3DialogueTransportDiagnostic,
                   ),
@@ -1840,14 +1892,14 @@ Deno.serve(async (req: Request) => {
                     extractorAdapterFactory: (apiKey) => withOneTransientRetry(
                       createMemoryV3OpenRouterAdapter({
                         apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
+                        fetchImpl: memoryRoutedFetch("lifecycle"),
                       }),
                       projectSafeMemoryV3TransportDiagnostic,
                     ),
                     reconcilerAdapterFactory: (apiKey) => withOneTransientRetry(
                       createMemoryV3LifecycleOpenRouterAdapter({
                         apiKey,
-                        fetchImpl: globalThis.fetch.bind(globalThis),
+                        fetchImpl: memoryRoutedFetch("lifecycle"),
                       }),
                       projectSafeMemoryV3LifecycleTransportDiagnostic,
                     ),

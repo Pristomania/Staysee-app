@@ -42,17 +42,30 @@ describe("the private route for model requests", () => {
     // The long-message summary sends the request that longMessages.ts builds, and that one carries it (checked below).
     // The small model that reads a message before the search in the past is asked of Cloud.ru only (checked below): there is no OpenRouter route to carry.
     assert.deepEqual(
-      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts"),
+      without.filter((path) => path !== "_shared/longMessageSummarizer.ts" && path !== "_shared/recallGate.ts" && path !== "_shared/memoryV3/modelRoute.ts"),
       [],
       "these files send a request without the private route",
     );
   });
 
-  it("the small model of the recall search goes to Cloud.ru only, never to OpenRouter", () => {
+  it("the memory route sends OpenRouter the very body of the adapter (with the private route it carries), never a body of its own", () => {
+    const route = read("_shared/memoryV3/modelRoute.ts");
+    assert.match(route, /const reserveBody = \{\s*\.\.\.body,/);
+    for (const adapter of ["_shared/memoryV3/transport.ts", "_shared/memoryV3/dialogueTransport.ts", "_shared/memoryV3/lifecycleTransport.ts"]) {
+      assert.match(read(adapter), /data_collection: "deny",\s*zdr: true/, adapter);
+    }
+  });
+
+  it("the small model and the reranker of the recall search go to Cloud.ru first; the reserve on OpenRouter is asked only through the private route", () => {
     const gate = read("_shared/recallGate.ts");
     assert.match(gate, /CLOUDRU_BASE_URL/);
-    assert.doesNotMatch(gate, /openrouter/i);
-    assert.doesNotMatch(read("_shared/reranker.ts"), /openrouter/i);
+    assert.match(gate, /provider: OPENROUTER_PRIVATE_ROUTE/);
+    const reranker = read("_shared/reranker.ts");
+    assert.match(reranker, /RERANK_URL/);
+    assert.match(reranker, /provider: OPENROUTER_PRIVATE_ROUTE/);
+    // every place that names the OpenRouter address in these two files sits next to the route
+    assert.equal((gate.match(/OPENROUTER_BASE_URL\}\/chat\/completions/g) ?? []).length, 1);
+    assert.equal((reranker.match(/OPENROUTER_RERANK_URL/g) ?? []).length, 2, "the import and the one request");
   });
 
   it("is on the long-message summary, whose request is built in another file", () => {

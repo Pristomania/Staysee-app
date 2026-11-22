@@ -21,6 +21,7 @@ const migration108 = readFileSync(
   new URL("../../migrations/20261121010000_108_match_user_lines_min_length.sql", import.meta.url),
   "utf8",
 );
+const migration111 = readFileSync(new URL("../../migrations/20261121050000_111_match_embeddings_one_access_check.sql", import.meta.url), "utf8");
 const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
 
 const realFetch = globalThis.fetch;
@@ -161,7 +162,7 @@ describe("the search by meaning covers the whole conversation and reads only vec
     assert.equal(calls[0].args.match_threshold, DEFAULT_SEMANTIC_THRESHOLD);
     assert.equal(calls[0].args.p_before_created_at, "2026-06-01T00:00:00Z");
     assert.equal(calls[0].args.p_min_chars, SEMANTIC_MIN_LINE_CHARS);
-    assert.equal(SEMANTIC_MIN_LINE_CHARS, 10);
+    assert.equal(SEMANTIC_MIN_LINE_CHARS, 6);
     assert.equal((calls[0].args.query_embedding as number[]).length, 1024);
   });
 
@@ -238,5 +239,73 @@ describe("migration 108: only the person's own lines, and not the very short one
     assert.match(code, /me\.conversation_id = p_conversation_id/);
     assert.match(code, /SECURITY INVOKER/);
     assert.doesNotMatch(code, /SECURITY DEFINER/);
+  });
+});
+
+describe("migration 111: the access to the conversation is checked once, and only the signed-in owner can use the search", () => {
+  const code = migration111.replace(/\/\*[\s\S]*?\*\//, "");
+
+  it("asks the question of the conversation locks once, before any line is read", () => {
+    assert.match(code, /SECURITY DEFINER/);
+    assert.match(code, /SET search_path = pg_catalog, public, pg_temp/);
+    assert.match(code, /auth\.uid\(\) IS NULL OR NOT public\.can_read_my_conversation\(p_conversation_id\)/);
+    assert.equal((code.match(/can_read_my_conversation\(/g) ?? []).length, 1, "one check for the whole conversation, never one per line");
+    assert.ok(code.indexOf("can_read_my_conversation(") < code.indexOf("message_embeddings me"), "the check comes before the lines are read");
+  });
+
+  it("reads only the lines of that one conversation, and looks for the next message only for the best few", () => {
+    assert.match(code, /me\.conversation_id = p_conversation_id/);
+    assert.match(code, /m\.conversation_id = p_conversation_id/);
+    assert.match(code, /WITH hits AS MATERIALIZED/);
+    assert.ok(code.indexOf("LIMIT GREATEST(1, LEAST(match_count, 30))") < code.indexOf("LEFT JOIN LATERAL"), "the best lines are cut out before the lookup of the next message");
+  });
+
+  it("is open to signed-in people only (not anon, not PUBLIC, not the service role) and changes no data", () => {
+    assert.match(code, /REVOKE ALL ON FUNCTION public\.match_conversation_embeddings_by_model\([^)]*\) FROM PUBLIC, anon, service_role/);
+    assert.match(code, /GRANT EXECUTE ON FUNCTION public\.match_conversation_embeddings_by_model\([^)]*\) TO authenticated/);
+    assert.doesNotMatch(code, /TO (anon|PUBLIC|service_role)/);
+    for (const forbidden of [/DROP\s+TABLE/i, /TRUNCATE/i, /DELETE\s+FROM/i, /DROP\s+COLUMN/i, /UPDATE\s+public\./i, /ALTER\s+TABLE/i, /INSERT\s+INTO/i]) {
+      assert.doesNotMatch(code, forbidden);
+    }
+  });
+});
+
+describe("a failure of the search by meaning is reported, not swallowed", () => {
+  it("calls onFailure once when the database answers with an error (the statement timeout of 21.11.2026), and still returns nothing", async () => {
+    stubProvider(1024);
+    let failures = 0;
+    const client = { rpc: () => Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout" } }) } as never;
+    const excerpts = await searchSemanticConversationArchive(client, {
+      conversationId: "c1", query: "помнишь про бабушку", beforeCreatedAt: null, embedConfig, maxExcerptChars: 420,
+      onFailure: () => { failures += 1; },
+    });
+    assert.deepEqual(excerpts, []);
+    assert.equal(failures, 1);
+  });
+
+  it("calls onFailure when the vector of the question cannot be made", async () => {
+    globalThis.fetch = (async () => ({ ok: false, status: 500, text: async () => "down" })) as never;
+    let failures = 0;
+    const never = { rpc: () => assert.fail("must not be called without a vector") } as never;
+    await searchSemanticConversationArchive(never, {
+      conversationId: "c1", query: "помнишь про бабушку", beforeCreatedAt: null, embedConfig, maxExcerptChars: 420,
+      onFailure: () => { failures += 1; },
+    });
+    assert.equal(failures, 1);
+  });
+
+  it("stays quiet when the search worked (also when it found nothing), and a broken handler never breaks the search", async () => {
+    stubProvider(1024);
+    let failures = 0;
+    const empty = { rpc: () => Promise.resolve({ data: [], error: null }) } as never;
+    await searchSemanticConversationArchive(empty, { conversationId: "c1", query: "помнишь про бабушку", beforeCreatedAt: null, embedConfig, maxExcerptChars: 420, onFailure: () => { failures += 1; } });
+    assert.equal(failures, 0);
+    const broken = { rpc: () => Promise.resolve({ data: null, error: { message: "boom" } }) } as never;
+    const result = await searchSemanticConversationArchive(broken, { conversationId: "c1", query: "помнишь про бабушку", beforeCreatedAt: null, embedConfig, maxExcerptChars: 420, onFailure: () => { throw new Error("handler broke"); } });
+    assert.deepEqual(result, []);
+  });
+
+  it("the chat raises the alert through the same Telegram path as the other provider alerts", () => {
+    assert.match(chat, /onSemanticFailure: async \(\) => \{\s*await sendProviderAlertSafely\("search_failed"\);/);
   });
 });

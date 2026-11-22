@@ -142,18 +142,20 @@ describe("a refused key or an empty balance of the small model is told to the ow
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 }), true);
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 2_000 }), false, "the same kind again inside the window");
     assert.equal(await sendProviderAlertSafely("search_balance_empty", { ...options, now: 2_000 }), true, "another kind is not held back");
+    assert.equal(await sendProviderAlertSafely("search_failed", { ...options, now: 2_000 }), true, "the failure of the search by meaning is its own kind");
     assert.equal(await sendProviderAlertSafely("search_key_rejected", { ...options, now: 1_000 + PROVIDER_ALERT_WINDOW_MS + 1 }), true);
     assert.match(sent[0], /CLOUDRU_API_KEY/);
     assert.match(sent[0], /15\.02\.2027/, "the date the key ends is in the alert");
     assert.match(sent[0], /хуже вспоминает/);
+    assert.match(sent[0], /баланс[\s\S]*Project not found[\s\S]*CLOUDRU_API_KEY/, "an empty balance answers 403 «Project not found» (21.11.2026): the alert says to look at the balance first, then at the secret");
     assert.match(sent[1], /402/);
     assert.ok(sent.every((text) => !text.includes("123456789:")), "the bot token is never in the text");
     resetProviderAlertsForTests();
   });
 
-  it("the chat raises both alerts, and awaits them (they are sent only when something is refused)", () => {
+  it("the chat raises the alert by the outcome of the small model and of the reranker (the calm one when the reserve answered, the old ones when nobody did), and awaits it", () => {
     const chat = readFileSync(new URL("../staysee-chat/index.ts", import.meta.url), "utf8");
-    assert.match(chat, /if \(recallGate\?\.refusedStatus\) \{\s*await sendProviderAlertSafely\(recallGate\.refusedStatus === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
-    assert.match(chat, /onRefusal: async \(status\) => \{\s*await sendProviderAlertSafely\(status === 402 \? "search_balance_empty" : "search_key_rejected"\)/);
+    assert.match(chat, /const kind = searchAlertKind\(\{\s*served: recallGate\.decision !== null \|\| !recallGate\.failure,[\s\S]*?if \(kind\) await sendProviderAlertSafely\(kind\);/);
+    assert.match(chat, /onRerankOutcome: async \(outcome\) => \{\s*const kind = searchAlertKind\([\s\S]*?if \(kind\) await sendProviderAlertSafely\(kind\);/);
   });
 });

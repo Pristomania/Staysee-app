@@ -7,7 +7,22 @@
  * the merely similar. Cloud.ru, model BAAI/bge-reranker-v2-m3, about 0.2 s a call and a hundredth of a kopeck.
  *
  * A failure of any kind returns null: the caller then falls back to the threshold on the vectors.
+ *
+ * Cloud.ru is the main host. When it refuses (the key, or the balance: an empty balance answers 403) the reserve on OpenRouter is asked
+ * (an open model, through the private route) and Cloud.ru is left alone for a few minutes: see searchProviders.ts.
  */
+
+import { OPENROUTER_PRIVATE_ROUTE } from "./openRouterPrivateRoute.ts";
+import {
+  FALLBACK_RERANK_MODEL,
+  OPENROUTER_RERANK_URL,
+  type OpenRouterAccess,
+  type SwitchReason,
+  cloudruIsPaused,
+  cloudruLastRefusalStatus,
+  pauseCloudru,
+  resumeCloudru,
+} from "./searchProviders.ts";
 
 export const RERANK_MODEL = "BAAI/bge-reranker-v2-m3";
 export const RERANK_URL = "https://foundation-models.api.cloud.ru/rerank";
@@ -25,6 +40,8 @@ export function resolveRerankThreshold(raw: string | undefined | null): number {
 
 export interface RerankUsage {
   totalTokens: number;
+  /** What the host charged, when it says so (OpenRouter does): the cost log takes it as it is. */
+  costUsd?: number;
 }
 
 export interface RerankConfig {
@@ -108,4 +125,120 @@ export async function rerankLines(
     console.warn("[reranker] failed:", e instanceof Error ? e.message : "unknown");
     return null;
   }
+}
+
+
+/** The reserve on OpenRouter: the same chunks and the same shape of the answer, through the private route. */
+export interface OpenRouterRerankConfig extends OpenRouterAccess {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  onUsage?: (usage: RerankUsage) => void | Promise<void>;
+}
+
+const OPENROUTER_RERANK_TIMEOUT_MS = 5000;
+
+export async function rerankViaOpenRouter(
+  query: string,
+  documents: string[],
+  config: OpenRouterRerankConfig
+): Promise<number[] | null> {
+  if (!documents.length) return [];
+  const fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const clipped = documents.map((d) => d.replace(/\s+/g, " ").trim().slice(0, MAX_DOCUMENT_CHARS) || " ");
+  const chunks: string[][] = [];
+  for (let i = 0; i < clipped.length; i += RERANK_CHUNK) chunks.push(clipped.slice(i, i + RERANK_CHUNK));
+
+  try {
+    const parts = await Promise.all(
+      chunks.map(async (chunk) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), config.timeoutMs ?? OPENROUTER_RERANK_TIMEOUT_MS);
+        try {
+          const response = await fetchImpl(OPENROUTER_RERANK_URL, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json", ...(config.extraHeaders ?? {}) },
+            body: JSON.stringify({ model: FALLBACK_RERANK_MODEL, query, documents: chunk, provider: OPENROUTER_PRIVATE_ROUTE }),
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            console.warn(`[reranker] OpenRouter HTTP ${response.status}`);
+            return null;
+          }
+          const data = await response.json();
+          const total = data?.usage?.total_tokens ?? data?.usage?.prompt_tokens;
+          const cost = data?.usage?.cost;
+          if (config.onUsage && ((typeof total === "number" && total > 0) || typeof cost === "number")) {
+            try {
+              await config.onUsage({
+                totalTokens: typeof total === "number" && total > 0 ? Math.round(total) : 0,
+                ...(typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? { costUsd: cost } : {}),
+              });
+            } catch (e) {
+              console.warn("[reranker] usage logger failed:", e);
+            }
+          }
+          return readRerankScores(data, chunk.length);
+        } finally {
+          clearTimeout(timer);
+        }
+      })
+    );
+    if (parts.some((p) => p === null)) return null;
+    return (parts as number[][]).flat();
+  } catch (e) {
+    console.warn("[reranker] OpenRouter failed:", e instanceof Error ? e.message : "unknown");
+    return null;
+  }
+}
+
+export interface RankedLines {
+  /** One score per line, or null when no host could score them (the caller falls back to the threshold on the vectors). */
+  scores: number[] | null;
+  /** Who scored them. The scores of the two hosts are on different scales: the caller picks the threshold by this. */
+  provider: "cloudru" | "openrouter" | null;
+  /** Cloud.ru refused the key or has no money (401, 402, 403). */
+  refusedStatus?: 401 | 402 | 403;
+  /** Set when the reserve scored the lines instead of Cloud.ru, and why. */
+  switchedBecause?: SwitchReason;
+}
+
+/**
+ * Cloud.ru first; when it refuses or does not answer, the reserve on OpenRouter. After a refusal Cloud.ru is left alone for a few minutes,
+ * then asked again; a good answer from it ends the pause.
+ */
+export async function rerankWithFallback(
+  query: string,
+  documents: string[],
+  config: { cloudru?: RerankConfig; openrouter?: OpenRouterRerankConfig; now?: number }
+): Promise<RankedLines> {
+  const now = config.now ?? Date.now();
+  let refusedStatus: 401 | 402 | 403 | undefined;
+  let switchedBecause: SwitchReason | undefined;
+
+  if (config.cloudru && !cloudruIsPaused(now)) {
+    const scores = await rerankLines(query, documents, {
+      ...config.cloudru,
+      onRefusal: async (status) => {
+        refusedStatus = status;
+        await config.cloudru?.onRefusal?.(status);
+      },
+    });
+    if (scores) {
+      resumeCloudru();
+      return { scores, provider: "cloudru" };
+    }
+    if (refusedStatus) pauseCloudru(now, refusedStatus);
+    switchedBecause = refusedStatus ? "refused" : "unavailable";
+  } else if (config.cloudru) {
+    switchedBecause = "paused";
+    refusedStatus = cloudruLastRefusalStatus();
+  }
+
+  if (config.openrouter) {
+    const scores = await rerankViaOpenRouter(query, documents, config.openrouter);
+    if (scores) {
+      return { scores, provider: "openrouter", ...(refusedStatus ? { refusedStatus } : {}), ...(switchedBecause ? { switchedBecause } : {}) };
+    }
+  }
+  return { scores: null, provider: null, ...(refusedStatus ? { refusedStatus } : {}) };
 }

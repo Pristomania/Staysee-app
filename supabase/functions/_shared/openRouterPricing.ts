@@ -39,6 +39,13 @@ export const OPENROUTER_MODEL_PRICING: Record<string, ModelPricing> = {
   "BAAI/bge-m3": { inputPer1M: 0.0056, outputPer1M: 0 },
   "BAAI/bge-reranker-v2-m3": { inputPer1M: 0.0022, outputPer1M: 0 },
   "openai/gpt-oss-120b": { inputPer1M: 0.1444, outputPer1M: 0.5556 },
+  // The reserve of the search on OpenRouter (the host states the cost itself; these are for when it does not): 21.11.2026.
+  "openai/gpt-oss-120b@openrouter": { inputPer1M: 0.09, outputPer1M: 0.36 },
+  "qwen/qwen3-reranker-8b": { inputPer1M: 0.2, outputPer1M: 0 },
+  // The background memory (22.11.2026). Cloud.ru, catalog of 22.11.2026: 64.94 and 194.81 roubles for 1M tokens (VAT included, the same as in the tariff), at 90 roubles a dollar.
+  // Until the evening of 22.11.2026 this line held the price of the V4 Flash (43.30 / 86.58) by mistake: the cost of the memory was 1.5-2 times too low.
+  "deepseek-ai/DeepSeek-V4.1-Flash": { inputPer1M: 0.7216, outputPer1M: 2.1646 },
+  "deepseek/deepseek-v4.1-flash": { inputPer1M: 0.05, outputPer1M: 0.199 },
 };
 
 const DEFAULT_PRICING: ModelPricing = { inputPer1M: 1.0, outputPer1M: 3.0 };

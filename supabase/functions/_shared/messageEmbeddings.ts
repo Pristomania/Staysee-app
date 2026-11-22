@@ -30,8 +30,10 @@ export const SEMANTIC_MATCH_COUNT = 12;
  * conversation of nine months (21.11.2026): fillers like «наверное», «ну да», «устала» are close in meaning to many questions and
  * crowd out the right line, but a cut at 20 characters also lost every short fact («Мне 31 год.», «Живу в Туле.», «Я левша.»:
  * 0 of 5 found). At 10 the short facts are found (4 of 5) and the right line is found in 24 of 28 questions instead of 20.
+ * Since the reranker decides what is kept, 6 is enough to keep the fillers out and let «Я левша.» (8) in: on the real search with the real
+ * model, 26 of 28 right lines reach the answer instead of 24, 25 of 28 answers are right instead of 23, and no answer is invented (21.11.2026).
  */
-export const SEMANTIC_MIN_LINE_CHARS = 10;
+export const SEMANTIC_MIN_LINE_CHARS = 6;
 
 /**
  * How close in meaning a past message must be to count as a hit. Measured on bge-m3 (20.11.2026, made-up Russian phrases):
@@ -186,8 +188,17 @@ export async function searchSemanticConversationArchive(
     /** How many lines to ask for (default 12) and how close they must be (default: the measured threshold). */
     matchCount?: number;
     threshold?: number;
+    /** Called once when the search could not run (the vector of the question failed or the database answered with an error): the chat raises an alert. */
+    onFailure?: () => void | Promise<void>;
   }
 ): Promise<ArchiveExcerpt[]> {
+  const fail = async () => {
+    try {
+      await params.onFailure?.();
+    } catch (e) {
+      console.warn("[messageEmbeddings] failure handler failed:", e);
+    }
+  };
   const query = params.query.trim();
   if (query.length < 3) return [];
 
@@ -196,6 +207,7 @@ export async function searchSemanticConversationArchive(
     queryVector = await createQueryEmbedding(query, params.embedConfig);
   } catch (e) {
     console.warn("[messageEmbeddings] query embed failed:", e);
+    await fail();
     return [];
   }
 
@@ -215,6 +227,7 @@ export async function searchSemanticConversationArchive(
     } else {
       console.warn("[messageEmbeddings] search:", error.message);
     }
+    await fail();
     return [];
   }
 
