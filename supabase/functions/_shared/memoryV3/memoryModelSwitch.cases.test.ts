@@ -21,6 +21,7 @@ describe("the model of the background memory (22.11.2026: DeepSeek V4.1 Flash, C
       const profile = MEMORY_V3_MODEL_PROFILES[pipeline];
       assert.equal(profile.recordedModel, "deepseek-ai/DeepSeek-V4.1-Flash");
       assert.equal(profile.cloudru.model, "deepseek-ai/DeepSeek-V4.1-Flash");
+      assert.deepEqual(profile.cloudru.priceUsdPer1M, { input: 0.7216, output: 2.1646 }, "the price of the catalog of 22.11.2026, not the V4 Flash one");
       assert.deepEqual(profile.cloudru.extra, { reasoning_effort: "none" }, "the reasoning stays off: with it 12 of 29 runs broke the contract");
       assert.equal(profile.openrouter.model, "deepseek/deepseek-v4.1-flash");
       assert.deepEqual(profile.openrouter.extra, { reasoning: { effort: "none" } });
@@ -49,9 +50,9 @@ describe("the model of the background memory (22.11.2026: DeepSeek V4.1 Flash, C
     }
   });
 
-  it("the cost of a call is known for both hosts (Cloud.ru with VAT at 90 roubles, OpenRouter by its price list)", () => {
+  it("the cost of a call is known for both hosts (Cloud.ru: 64.94 / 194.81 roubles for 1M with VAT at 90 roubles a dollar, OpenRouter by its price list)", () => {
     const onCloudru = calculateCostFromTokens("deepseek-ai/DeepSeek-V4.1-Flash", 2900, 350);
-    assert.ok(onCloudru > 0.0017 && onCloudru < 0.0019, String(onCloudru));
+    assert.ok(onCloudru > 0.0027 && onCloudru < 0.0030, String(onCloudru));
     const onReserve = calculateCostFromTokens("deepseek/deepseek-v4.1-flash", 2900, 350);
     assert.ok(onReserve > 0.0001 && onReserve < 0.0003, String(onReserve));
   });
