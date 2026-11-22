@@ -5,6 +5,26 @@ import {checkConversationAccess} from '../supabase/functions/_shared/conversatio
 import {canCreateFromConversationList} from '../src/lib/roomLimits';
 const uid='11111111-1111-4111-8111-111111111111', id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const row={id,user_id:uid,title:'Закрытая беседа',is_active:true,created_at:'2026-01-01T00:00:00Z',last_message_at:'2026-02-01T00:00:00Z',can_read:false};
+const neighbor='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+test('adjacent move validates both ids/direction and sends only the scoped neighbor snapshot',async()=>{
+ const calls:unknown[]=[];
+ const client=createConversationClient(async(name,args)=>{calls.push([name,args]);return {data:true,error:null};});
+ await client.moveStep(id,'up',neighbor);
+ assert.deepEqual(calls,[['move_my_conversation_step',{p_conversation_id:id,p_direction:'up',p_expected_neighbor:neighbor}]]);
+ for(const args of [['bad','up',neighbor],[id,'down','bad'],[id,'up',id],[id,'sideways',neighbor]]){
+  await assert.rejects(client.moveStep(...args as [string,'up',string]),/conversation_operation_failed/);
+ }
+ assert.equal(calls.length,1);
+});
+test('adjacent move never converts false or network error into success; stale order is distinguishable',async()=>{
+ for(const reply of [{data:false,error:null},{data:true,error:{message:'network'}}]){
+  await assert.rejects(createConversationClient(async()=>reply).moveStep(id,'down',neighbor),/conversation_operation_failed/);
+ }
+ await assert.rejects(createConversationClient(async()=>({data:null,error:{message:'conversation_order_changed'}})).moveStep(id,'down',neighbor),/conversation_order_changed/);
+});
+test('expired move has a distinct safe refusal so the list can close ordering mode',async()=>{
+ await assert.rejects(createConversationClient(async()=>({data:null,error:{message:'conversation_locked'}})).moveStep(id,'up',neighbor),/conversation_locked/);
+});
 test('locked archives do not occupy the one free replacement slot; unknown access never permits creation',()=>{
  assert.equal(canCreateFromConversationList([{can_read:false},{can_read:false}],1),true);
  assert.equal(canCreateFromConversationList([{can_read:false},{can_read:true}],1),false);
