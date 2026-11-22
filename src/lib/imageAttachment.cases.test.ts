@@ -4,6 +4,7 @@ import {
   fitToBudget,
   IMAGE_MAX_BASE64_CHARS,
   IMAGE_MAX_COUNT,
+  IMAGE_MAX_EDGE,
   IMAGE_PICK_BYTES_LIMIT,
   imageProblemMessage,
   isImageFile,
@@ -31,11 +32,12 @@ async function main(): Promise<void> {
   same(checkImageBeforeReading({ type: 'image/png', size: 1000 }, 3), 'too_many', 'a fourth picture');
   same(checkImageBeforeReading({ type: 'image/png', size: IMAGE_PICK_BYTES_LIMIT + 1 }, 0), 'too_big_file', 'a huge file');
 
-  // Shrinking: the longest edge fits 2,048, the shape stays, small pictures are not enlarged.
-  same(scaleToFit(4000, 3000), { width: 2048, height: 1536 }, 'a 12 MP landscape photo');
-  same(scaleToFit(1170, 2532), { width: 946, height: 2048 }, 'a tall phone screenshot');
+  // Shrinking: the longest edge fits 1,600, the shape stays, small pictures are not enlarged.
+  same(IMAGE_MAX_EDGE, 1600, 'the cost of a picture grows with its pixels; below about 1,400 the small print of a chat is read wrong');
+  same(scaleToFit(4000, 3000), { width: 1600, height: 1200 }, 'a 12 MP landscape photo');
+  same(scaleToFit(1170, 2532), { width: 739, height: 1600 }, 'a tall phone screenshot');
   same(scaleToFit(800, 600), { width: 800, height: 600 }, 'a small picture stays');
-  same(scaleToFit(1, 5000), { width: 1, height: 2048 }, 'never a zero edge');
+  same(scaleToFit(1, 5000), { width: 1, height: 1600 }, 'never a zero edge');
 
   // Fitting: the first attempt that is small enough wins; none small enough means null.
   const tried: Array<{ scale: number; quality: number }> = [];

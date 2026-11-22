@@ -5,7 +5,12 @@
 
 export const IMAGE_MAX_COUNT = 3;
 export const IMAGE_MAX_BASE64_CHARS = 1_000_000;
-export const IMAGE_MAX_EDGE = 2_048;
+// The longest edge of a picture that is sent. The cost of describing a picture grows with its pixels (Qwen3.5-397B counts about one token
+// for 28x28 pixels, at 915 roubles for 1M): a phone screenshot of 2,048 px cost about 2.6 roubles, of 1,600 px about 1.9, of 1,280 px about 1.5.
+// Measured on 23.11.2026 on chats whose small print is 28-32 px on a 1,080 px screenshot: the sides of the speakers were read right 5 of 5 at 2,048,
+// 1,600 and 1,440 px, but only 3 of 5 at 1,280 px and 1 of 5 at 1,024 px (the larger text of ordinary screenshots held up at 1,280). 1,600 keeps
+// a margin over the point where the small print breaks.
+export const IMAGE_MAX_EDGE = 1_600;
 /** Protects the browser from an enormous file; shrinking is what bounds what is sent. */
 export const IMAGE_PICK_BYTES_LIMIT = 30 * 1024 * 1024;
 export const IMAGE_PREPARE_DEADLINE_MS = 20_000;
