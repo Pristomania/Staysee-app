@@ -33,7 +33,13 @@ const startedMs = Date.now();
 const chatBase = process.env.STAYSEE_LIVE_CHECK_VIA_SITE === "1" ? "https://staysee.ru/supabase" : url;
 console.log(`Chat requests go ${chatBase === url ? "straight to Supabase" : "through the site proxy"}.`);
 
+// The app refuses a message sent less than 4 seconds after the previous one from the same address (and more than 10 a minute): an answer 429
+// that looks like a limit of the account. One send at a time, with a pause, as a person would.
+let lastSentAt = 0;
 async function chat({ message, conversationId, images, tag }) {
+  const wait = 6_000 - (Date.now() - lastSentAt);
+  if (wait > 0) await sleep(wait);
+  lastSentAt = Date.now();
   const started = Date.now();
   const response = await fetch(`${chatBase}/functions/v1/staysee-chat`, {
     method: "POST",
