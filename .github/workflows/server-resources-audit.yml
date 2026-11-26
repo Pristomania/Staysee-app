@@ -1,8 +1,7 @@
-name: Server temporary access (self-hosted database setup)
+name: Server temporary keys (self-hosted database setup)
 
-# BRANCH ONLY (do not merge). Approved by the owner on 26.11.2026: a temporary key for setting up the test copy of the database
-# on the current server, so that conversations go from the owner's computer to the server directly and never through GitHub.
-# Remove it afterwards: sed -i '/staysee-selfhost-tmp-20261126/d' /root/.ssh/authorized_keys
+# BRANCH ONLY (do not merge). Puts the temporary keys (SELFHOST_* secrets, 30 days) into a file readable by root only,
+# for the test copy of the database on the current server. Values are never printed.
 
 on:
   workflow_dispatch:
@@ -15,29 +14,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Add the temporary key and show the public identity of the server
+      - name: Write the keys for the test copy
         uses: appleboy/ssh-action@v1.0.3
         env:
-          PUBKEY: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOltX3iQWQDBPa9fSZRlvfYnCbavXUZR/VaiLSVjRCn1 staysee-selfhost-tmp-20261126"
+          OPENROUTER_API_KEY: ${{ secrets.SELFHOST_OPENROUTER_API_KEY }}
+          CLOUDRU_API_KEY: ${{ secrets.SELFHOST_CLOUDRU_API_KEY }}
+          POSTBOX_SMTP_USER: ${{ secrets.SELFHOST_POSTBOX_SMTP_USER }}
+          POSTBOX_SMTP_PASSWORD: ${{ secrets.SELFHOST_POSTBOX_SMTP_PASSWORD }}
         with:
           host: ${{ secrets.STAYSEE_HOST }}
           username: ${{ secrets.STAYSEE_USER }}
           key: ${{ secrets.STAYSEE_SSH_KEY }}
           port: ${{ secrets.STAYSEE_PORT }}
-          envs: PUBKEY
+          envs: OPENROUTER_API_KEY,CLOUDRU_API_KEY,POSTBOX_SMTP_USER,POSTBOX_SMTP_PASSWORD
           script: |
             set -eu
-            install -d -m 700 "$HOME/.ssh"
-            touch "$HOME/.ssh/authorized_keys"
-            chmod 600 "$HOME/.ssh/authorized_keys"
-            [ -z "$(tail -c1 "$HOME/.ssh/authorized_keys")" ] || echo >> "$HOME/.ssh/authorized_keys"
-            if grep -qF 'staysee-selfhost-tmp-20261126' "$HOME/.ssh/authorized_keys"; then
-              echo "temporary key: already there"
-            else
-              printf '%s\n' "$PUBKEY" >> "$HOME/.ssh/authorized_keys"
-              echo "temporary key: added"
-            fi
-            echo "keys in the file: $(grep -cE '^(ssh|ecdsa)' "$HOME/.ssh/authorized_keys")"
-            echo "===== public host keys of the server ====="
-            cat /etc/ssh/ssh_host_*_key.pub
-            echo ACCESS_DONE
+            umask 077
+            cd /opt/staysee-selfhost/deploy/supabase-selfhost
+            : > functions.secrets.env
+            for name in OPENROUTER_API_KEY CLOUDRU_API_KEY POSTBOX_SMTP_USER POSTBOX_SMTP_PASSWORD; do
+              eval "value=\${$name:-}"
+              value=$(printf '%s' "$value" | tr -d '\r\n')
+              [ -n "$value" ] || { echo "empty: $name"; exit 1; }
+              case "$value" in *\'*) echo "unexpected quote in $name"; exit 1 ;; esac
+              printf "%s='%s'\n" "$name" "$value" >> functions.secrets.env
+              echo "written: $name"
+            done
+            cat functions.switches.env functions.hook.env functions.secrets.env > functions.env
+            chmod 600 functions.env functions.secrets.env
+            echo "lines in functions.env: $(wc -l < functions.env)"
+            echo KEYS_DONE
