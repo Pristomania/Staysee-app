@@ -1,0 +1,6 @@
+.env
+functions.env
+functions-build/
+smoke-report.txt
+prod-schema*.sql
+restore.log

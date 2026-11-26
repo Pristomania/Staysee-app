@@ -5,7 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  // deploy/supabase-selfhost/functions-main is the official Supabase router for self-hosting (Deno code, one small change), not ours to lint.
+  { ignores: ['dist', 'deploy/supabase-selfhost/functions-main'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],

@@ -1,0 +1,202 @@
+# StaySee: Supabase on our own server, trimmed to what the app uses.
+# Cut from the official docker/docker-compose.yml (supabase/supabase, 2026-11-19, image versions as of 2026-11-05).
+#
+# Stays: db (Postgres + pgvector + pg_cron), auth, rest (PostgREST), functions (Edge Runtime), kong (gateway).
+# Removed on purpose, the app uses none of them: studio, realtime, storage, imgproxy, meta, logflare, vector, supavisor.
+#
+# Start (rehearsal on a computer): sh rehearsal.sh   |   details: README.md
+# Every published port is bound to 127.0.0.1 only: nothing here is reachable from the internet until nginx is pointed at it.
+
+name: staysee-selfhost
+
+services:
+  db:
+    container_name: staysee-selfhost-db
+    image: public.ecr.aws/supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    volumes:
+      # Sets the passwords of the service roles (authenticator, supabase_auth_admin) and the token lifetime. Runs once, on the first start.
+      # webhooks.sql creates the role supabase_functions_admin, which roles.sql then needs: without it the whole first start of the database stops halfway.
+      - ./db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+      - ./db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+      - ./db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - db-data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom
+    ports:
+      # Only for the migration tool run from the same machine.
+      - 127.0.0.1:${DB_PORT_ON_HOST:-54522}:5432
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: 5432
+      POSTGRES_PORT: 5432
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      POSTGRES_DB: postgres
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "log_min_messages=fatal"]
+
+  auth:
+    container_name: staysee-selfhost-auth
+    image: public.ecr.aws/supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 6
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:?set API_EXTERNAL_URL in .env}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      # Rehearsal: "true" (no mail server). The real server: "false" and the Send Email hook below.
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-false}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-noreply@example.invalid}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-localhost}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-2500}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-StaySee}
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+      # Mails of the app go through the function auth-email (supabase/functions/auth-email): the Send Email hook.
+      # Off in the rehearsal. On the real server set in .env: AUTH_EMAIL_HOOK_ENABLED=true, AUTH_EMAIL_HOOK_SECRET=v1,whsec_...,
+      # AUTH_EMAIL_HOOK_URI=https://<our domain>/supabase/functions/v1/auth-email
+      # Auth (v2.197) refuses a plain http address that is not localhost, so the address inside the Docker network
+      # (http://functions:9000/auth-email) does not work: the hook goes through the public https address.
+      GOTRUE_HOOK_SEND_EMAIL_ENABLED: ${AUTH_EMAIL_HOOK_ENABLED:-false}
+      GOTRUE_HOOK_SEND_EMAIL_URI: ${AUTH_EMAIL_HOOK_URI:-}
+      GOTRUE_HOOK_SEND_EMAIL_SECRETS: ${AUTH_EMAIL_HOOK_SECRET:-}
+
+  rest:
+    container_name: staysee-selfhost-rest
+    image: public.ecr.aws/supabase/postgrest:v14.18
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      # The app uses only the public schema.
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+    command: ["postgrest"]
+
+  functions:
+    container_name: staysee-selfhost-functions
+    image: public.ecr.aws/supabase/edge-runtime:v1.77.9
+    # The runtime itself keeps every function worker under 256 MB (same as the cloud).
+    mem_limit: ${FUNCTIONS_MEMORY_LIMIT:-1g}
+    restart: unless-stopped
+    volumes:
+      # Built by prepare-functions.mjs: the app functions + the router (functions-main).
+      - ./functions-build:/home/deno/functions:ro
+      - deno-cache:/root/.cache/deno
+    depends_on:
+      kong:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/9000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    # Secrets and switches of the functions (model keys, STAYSEE_* ...). Not in git. Missing file = the rehearsal without model keys.
+    env_file:
+      - path: ./functions.env
+        required: false
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      VERIFY_JWT: "true"
+      # The functions that check their own secret or a webhook signature (supabase/config.toml: verify_jwt = false).
+      FUNCTIONS_OPEN_NAMES: memory-health-check,purge-scheduled-rooms,backfill-conversation-summaries,auth-email
+    command:
+      [
+        "start",
+        "--user-worker-request-idle-timeout",
+        "150000",
+        "--main-service",
+        "/home/deno/functions/main",
+      ]
+
+  kong:
+    container_name: staysee-selfhost-kong
+    image: kong/kong:3.9.3
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${API_PORT_ON_HOST:-8100}:8000/tcp
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+    volumes:
+      - ./kong.yml:/home/kong/temp.yml:ro
+      - ./kong-entrypoint.sh:/home/kong/kong-entrypoint.sh:ro
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_DNS_NOT_FOUND_TTL: 1
+      KONG_DNS_VALID_TTL: 5
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth,request-termination,ip-restriction,post-function
+      # By default Kong starts one worker per processor core of the machine (12 on a big computer = 667 MB). Fixed on purpose.
+      KONG_NGINX_WORKER_PROCESSES: ${KONG_WORKERS:-2}
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_PROXY_ACCESS_LOG: /dev/stdout combined
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+    entrypoint: ["/bin/sh", "/home/kong/kong-entrypoint.sh"]
+
+volumes:
+  db-data:
+  db-config:
+  deno-cache:
