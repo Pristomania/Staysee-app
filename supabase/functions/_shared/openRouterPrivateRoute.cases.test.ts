@@ -78,6 +78,12 @@ describe("the private route for model requests", () => {
     assert.equal((reranker.match(/OPENROUTER_RERANK_URL/g) ?? []).length, 2, "the import and the one request");
   });
 
+  it("is on the one-time preparation of old messages for the search, which sends what people wrote (found without it on 26.11.2026)", () => {
+    const script = readFileSync(new URL("../../../scripts/backfill-embeddings.mjs", import.meta.url), "utf8");
+    assert.match(script, /body: JSON\.stringify\(\{ model: EMBEDDING_MODEL, input: texts, provider: \{ data_collection: "deny", zdr: true \} \}\)/);
+    assert.match(script, /loadEnvFile\(join\(process\.cwd\(\), "\.env"\)\)/, "the keys are read from the folder it is started in, like the other scripts");
+  });
+
   it("is on the long-message summary, whose request is built in another file", () => {
     assert.match(read("_shared/longMessageSummarizer.ts"), /body: JSON\.stringify\(buildLongMessageSummaryRequest\(/);
     assert.match(read("_shared/longMessages.ts"), /data_collection: "deny", zdr: true/);
