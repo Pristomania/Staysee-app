@@ -89,6 +89,7 @@ describe("a question about what was said before is answered from the lines, not 
   });
 
   it("the chat gives the model the note only on a recall turn", () => {
-    assert.match(chat, /const modelMessages = recallTurn \? withRecallUserNote\(messages\) : messages;/);
+    assert.match(chat, /const modelMessages = recallTurn \? withRecallUserNote\(messages, recallUserNote\) : messages;/);
+    assert.match(chat, /let recallUserNote: string = RECALL_USER_NOTE;/);
   });
 });

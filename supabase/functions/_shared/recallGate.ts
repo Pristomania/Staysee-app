@@ -1,9 +1,11 @@
 /**
  * The small model that stands before the search in the past ("the gate").
  *
- * It reads ONE message of the person and answers two things: does the answer need the earlier messages of this conversation
- * (the person asks to remember, or asks about a fact of their own life that only the earlier messages can know), and what
- * to search for (a short phrase about the topic). The app decides nothing by the words of the message: the model reads the meaning.
+ * It reads ONE message of the person and answers three things: does the answer need the earlier messages of this conversation
+ * (the person asks to remember, or asks about a fact of their own life that only the earlier messages can know), what to search
+ * for (a short phrase about the topic), and which time the person asks about, if they name one (the first and the last day, counted
+ * from today; added 26.11.2026 after «помнишь моё состояние в июне?» found nothing: the search never looked at the dates).
+ * The app decides nothing by the words of the message: the model reads the meaning.
  *
  * Measured on Cloud.ru (21.11.2026, a made-up conversation of nine months): 41 of 41 requests to remember recognised,
  * 1 of 58 ordinary messages taken for a request, 0 of 18 ordinary messages that carry words like «раньше», «тогда», «помнишь»
@@ -41,15 +43,44 @@ export function resolveRecallGateMode(raw: string | undefined | null): RecallGat
 
 export const RECALL_GATE_SYSTEM_PROMPT = `Ты — вспомогательный модуль приложения-собеседницы. Тебе дают ПОСЛЕДНЕЕ сообщение человека. Определи, нужно ли для ответа заглянуть в ПРОШЛЫЕ сообщения этой беседы. Это так, если человек:
 1) просит вспомнить или найти, что он говорил или просил запомнить, или прошлый разговор на тему; ИЛИ
-2) спрашивает о фактах о себе и своей жизни, которые приложение может знать только из прошлых сообщений (возраст, имена близких, место жительства, привычки, планы, здоровье, работа).
+2) спрашивает о фактах о себе и своей жизни, которые приложение может знать только из прошлых сообщений (возраст, имена близких, место жительства, привычки, планы, здоровье, работа, своё состояние в прошлом).
 НЕ нужно заглядывать в прошлое, если: обычный рассказ о событиях (даже со словами «раньше», «тогда», «вчера»), собственные воспоминания человека из жизни, просьба совета, вопрос о мире или общий вопрос, продолжение текущей мысли.
-Верни ТОЛЬКО JSON без пояснений: {"recall": true или false, "query": "..."}.
-Поле query: если recall=true, короткая поисковая фраза из 2-5 слов о ТЕМЕ. Используй ТЕ ЖЕ существительные и слова, что в сообщении человека, не заменяй их синонимами и не добавляй слов вроде «дата», «причина», «информация», «имя». Не включай слова «вспомни», «помнишь», «говорила», «рассказывала» и местоимения «я», «мне», «мой» (например «любимый цвет», «поездка летом», «аллергия на лекарства», «зубной врач»). Если recall=false, пустая строка.`;
+Верни ТОЛЬКО JSON без пояснений: {"recall": true или false, "query": "...", "from": "...", "to": "..."}.
+Поле query: если recall=true, короткая поисковая фраза из 2-5 слов о ТЕМЕ. Используй ТЕ ЖЕ существительные и слова, что в сообщении человека, не заменяй их синонимами и не добавляй слов вроде «дата», «причина», «информация», «имя». Не включай слова «вспомни», «помнишь», «говорила», «рассказывала» и местоимения «я», «мне», «мой» (например «любимый цвет», «поездка летом», «аллергия на лекарства», «зубной врач»). Если recall=false, пустая строка.
+Поля "from" и "to": заполняй, только когда recall=true И человек называет ВРЕМЯ, о котором спрашивает: что было, что говорилось или каким было состояние в это время (месяц, год, время года, день, «на прошлой неделе», «месяц назад», «в начале лета»). Это первый и последний день названного времени в виде ГГГГ-ММ-ДД, считая от сегодняшней даты. Месяц или время года без года — те, что идут сейчас, или ближайшие прошедшие. Если сказано «в начале или в конце месяца», это первые или последние десять дней; «месяц назад», «пару недель назад» и подобное без точного дня — по неделе в обе стороны от этой даты. Если время не названо или вопрос о постоянном факте (имя, возраст, город, привычка), обе строки пустые. Слова о времени в query не включай.`;
 
 export interface RecallDecision {
   recall: boolean;
   /** The phrase to search for ("" when recall is false). */
   query: string;
+  /** The time the person asks about (days by Moscow time, both included), when they named one. */
+  period?: { from: string; to: string };
+}
+
+/** Today by Moscow time, as the model gets it and as the days of a period are counted. */
+export function recallGateToday(now: number = Date.now()): string {
+  return new Date(now + 3 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** A real calendar day written as YYYY-MM-DD, or nothing. */
+function calendarDay(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  // Only the exact form survives the round trip: «2026-6-1», «2026-02-30» and words do not.
+  const at = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value ? value : null;
+}
+
+/** Both days are real, in order and not in the future; a time that is still running ends today. Anything else is no period. */
+function readPeriod(from: unknown, to: unknown, today: string): { from: string; to: string } | undefined {
+  const first = calendarDay(from);
+  const last = calendarDay(to);
+  if (!first || !last || first > last || first > today) return undefined;
+  return { from: first, to: last > today ? today : last };
+}
+
+/** The instruction with the date of today: without it «в июне» or «месяц назад» cannot be turned into days. */
+function recallGateInstruction(today: string): string {
+  return `${RECALL_GATE_SYSTEM_PROMPT}\nСегодня: ${today}.`;
 }
 
 export interface RecallGateUsage {
@@ -75,15 +106,16 @@ export interface RecallGateResult {
 }
 
 /** Reads the answer of the model. Anything that is not the expected JSON is null (never guessed). */
-export function parseRecallDecision(content: unknown): RecallDecision | null {
+export function parseRecallDecision(content: unknown, today: string = recallGateToday()): RecallDecision | null {
   if (typeof content !== "string") return null;
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {
-    const parsed = JSON.parse(match[0]) as { recall?: unknown; query?: unknown };
+    const parsed = JSON.parse(match[0]) as { recall?: unknown; query?: unknown; from?: unknown; to?: unknown };
     if (typeof parsed.recall !== "boolean") return null;
     const query = typeof parsed.query === "string" ? parsed.query.replace(/\s+/g, " ").trim().slice(0, 200) : "";
-    return { recall: parsed.recall, query: parsed.recall ? query : "" };
+    const period = parsed.recall ? readPeriod(parsed.from, parsed.to, today) : undefined;
+    return { recall: parsed.recall, query: parsed.recall ? query : "", ...(period ? { period } : {}) };
   } catch {
     return null;
   }
@@ -114,9 +146,10 @@ function readUsage(raw: unknown): RecallGateUsage | null {
 
 export async function askRecallGate(
   message: string,
-  config: { apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string }
+  config: { apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string; today?: string }
 ): Promise<RecallGateResult> {
   const started = Date.now();
+  const today = config.today ?? recallGateToday(started);
   const fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const baseUrl = config.baseUrl ?? CLOUDRU_BASE_URL;
   const body = {
@@ -124,7 +157,7 @@ export async function askRecallGate(
     temperature: 0,
     max_tokens: 600,
     messages: [
-      { role: "system", content: RECALL_GATE_SYSTEM_PROMPT },
+      { role: "system", content: recallGateInstruction(today) },
       { role: "user", content: clipForRecallGate(message) },
     ],
   };
@@ -160,7 +193,7 @@ export async function askRecallGate(
       };
     }
     const data = await response.json();
-    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "cloudru" };
+    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content, today), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "cloudru" };
   } catch (e) {
     console.warn("[recallGate] failed:", e instanceof Error ? e.message : "unknown");
     return { decision: null, usage: null, latencyMs: Date.now() - started, provider: "cloudru", failure: "unavailable" };
@@ -168,13 +201,18 @@ export async function askRecallGate(
 }
 
 const OPENROUTER_GATE_TIMEOUT_MS = 5000;
+/**
+ * The private route without one host. Measured on 26.11.2026 on 41 made-up questions: 20 of 21 answers that came from Google had the end
+ * cut off (finish=stop, no closing quote or bracket), so they could not be read; without it 41 of 41 were whole, at the same speed and price.
+ */
 
 /** The same question to the same model on OpenRouter (the reserve), through the private route. */
 export async function askRecallGateOpenRouter(
   message: string,
-  access: OpenRouterAccess & { fetchImpl?: typeof fetch; timeoutMs?: number }
+  access: OpenRouterAccess & { fetchImpl?: typeof fetch; timeoutMs?: number; today?: string }
 ): Promise<RecallGateResult> {
   const started = Date.now();
+  const today = access.today ?? recallGateToday(started);
   const fetchImpl = access.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), access.timeoutMs ?? OPENROUTER_GATE_TIMEOUT_MS);
@@ -188,9 +226,9 @@ export async function askRecallGateOpenRouter(
         max_tokens: 600,
         reasoning: { effort: "low", exclude: true },
         usage: { include: true },
-        provider: OPENROUTER_PRIVATE_ROUTE,
+        provider: { ...OPENROUTER_PRIVATE_ROUTE, ignore: ["Google"] },
         messages: [
-          { role: "system", content: RECALL_GATE_SYSTEM_PROMPT },
+          { role: "system", content: recallGateInstruction(today) },
           { role: "user", content: clipForRecallGate(message) },
         ],
       }),
@@ -209,7 +247,7 @@ export async function askRecallGateOpenRouter(
       };
     }
     const data = await response.json();
-    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "openrouter" };
+    return { decision: parseRecallDecision(data?.choices?.[0]?.message?.content, today), usage: readUsage(data?.usage), latencyMs: Date.now() - started, provider: "openrouter" };
   } catch (e) {
     console.warn("[recallGate] OpenRouter failed:", e instanceof Error ? e.message : "unknown");
     return { decision: null, usage: null, latencyMs: Date.now() - started, provider: "openrouter", failure: "unavailable" };

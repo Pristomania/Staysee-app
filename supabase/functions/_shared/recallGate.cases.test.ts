@@ -65,7 +65,8 @@ describe("the small model that reads a message before the search in the past", (
     assert.equal(body.model, "openai/gpt-oss-120b");
     assert.equal(body.temperature, 0);
     assert.equal(body.reasoning_effort, "low");
-    assert.equal(body.messages[0].content, RECALL_GATE_SYSTEM_PROMPT);
+    assert.ok(body.messages[0].content.startsWith(`${RECALL_GATE_SYSTEM_PROMPT}
+Сегодня: `), "the instruction, then the date of today");
     assert.equal(body.messages[1].content, "вспомни, на что у меня аллергия");
     assert.ok(!calls[0].init.body.includes("secret-key"), "the key is never part of the body");
   });

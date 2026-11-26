@@ -76,7 +76,7 @@ describe("the small model: Cloud.ru first, the reserve on OpenRouter when Cloud.
     assert.equal(call.headers.Authorization, "Bearer o");
     assert.equal(call.headers["X-Title"], "StaySee AI");
     assert.equal(call.body.model, "openai/gpt-oss-120b");
-    assert.deepEqual(call.body.provider, PRIVATE_ROUTE, "the private route: no collection of data, zero retention");
+    assert.deepEqual(call.body.provider, { ...PRIVATE_ROUTE, ignore: ["Google"] }, "the private route: no collection of data, zero retention; without the host that cuts answers off");
     assert.deepEqual(call.body.reasoning, { effort: "low", exclude: true });
     assert.deepEqual(call.body.usage, { include: true });
     assert.equal(cloudruIsPaused(), true, "Cloud.ru is left alone after the refusal");
@@ -340,7 +340,8 @@ describe("the chat and the guards", () => {
       const code = read(file);
       assert.match(code, /OPENROUTER_PRIVATE_ROUTE/, file);
     }
-    assert.match(read("./recallGate.ts"), /provider: OPENROUTER_PRIVATE_ROUTE/);
+    // the whole private route, narrowed by one host (recallGate.ts)
+    assert.match(read("./recallGate.ts"), /provider: \{ \.\.\.OPENROUTER_PRIVATE_ROUTE, ignore: \["Google"\] \}/);
     assert.match(read("./reranker.ts"), /provider: OPENROUTER_PRIVATE_ROUTE/);
   });
 });
