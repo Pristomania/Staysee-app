@@ -68,7 +68,8 @@ describe("the private route for model requests", () => {
   it("the small model and the reranker of the recall search go to Cloud.ru first; the reserve on OpenRouter is asked only through the private route", () => {
     const gate = read("_shared/recallGate.ts");
     assert.match(gate, /CLOUDRU_BASE_URL/);
-    assert.match(gate, /provider: OPENROUTER_PRIVATE_ROUTE/);
+    // the whole private route, narrowed by one host that cuts answers off (recallGate.ts): never widened
+    assert.match(gate, /provider: \{ \.\.\.OPENROUTER_PRIVATE_ROUTE, ignore: \["Google"\] \}/);
     const reranker = read("_shared/reranker.ts");
     assert.match(reranker, /RERANK_URL/);
     assert.match(reranker, /provider: OPENROUTER_PRIVATE_ROUTE/);

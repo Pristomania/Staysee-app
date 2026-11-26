@@ -18,6 +18,7 @@ import {
 } from "./messageEmbeddings.ts";
 import { normalizeMessageRole } from "./messageRole.ts";
 import type { RecallDecision } from "./recallGate.ts";
+import type { PeriodRecall } from "./recallGrounding.ts";
 import { DEFAULT_RERANK_THRESHOLD, type OpenRouterRerankConfig, type RankedLines, type RerankConfig, rerankWithFallback } from "./reranker.ts";
 import { FALLBACK_RERANK_THRESHOLD } from "./searchProviders.ts";
 
@@ -479,6 +480,8 @@ export function mergeArchiveExcerpts(
 export interface ArchiveSearchResult {
   excerpts: ArchiveExcerpt[];
   userEvidenceQuotes: UserEvidenceQuote[];
+  /** Set when the person asks about a named time: then the lines are here and the two lists above are empty. */
+  period?: PeriodRecall;
 }
 
 export type RetrievalFetchScope = "recent" | "all";
@@ -591,6 +594,72 @@ interface ArchiveSearchParams {
   onSemanticFailure?: () => void | Promise<void>;
 }
 
+/** The most lines of a named time handed to the answer. */
+const PERIOD_LINES = 12;
+/** The most lines of a named time the reranker scores (it is paid by the text and Cloud.ru limits parallel calls): spread over all of it. */
+const PERIOD_SCORED_CAP = 100;
+/** Lines about the topic from another time, given apart. */
+const PERIOD_OTHER_CAP = 3;
+
+function sameText(a: string, b: string): boolean {
+  return a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
+}
+
+/** The two days are Moscow days, both included. */
+function insidePeriod(createdAt: string, period: { from: string; to: string }): boolean {
+  const at = Date.parse(createdAt);
+  return at >= Date.parse(`${period.from}T00:00:00+03:00`) && at < Date.parse(`${period.to}T00:00:00+03:00`) + 24 * 3600_000;
+}
+
+/**
+ * The person's own lines of the named time, a few from all of it: the time is cut into equal parts by the count of lines, and each part
+ * gives the line the reranker finds closest (without it, the longest one). No threshold: a question about a time is usually a general one,
+ * and a line of June does not say «June», so a search by meaning over the whole conversation misses it (live, 26.11.2026).
+ */
+async function pickPeriodLines(
+  messages: RetrievalMessage[],
+  period: { from: string; to: string },
+  phrase: string,
+  params: ArchiveSearchParams
+): Promise<{ total: number; lines: Array<{ createdAt: string; text: string }> }> {
+  const own = messages
+    .filter((m) => m.role === "user" && insidePeriod(m.created_at, period))
+    .map((m) => ({ createdAt: m.created_at, text: (m.content ?? "").replace(/\s+/g, " ").trim() }))
+    .filter((l) => l.text.length >= SEMANTIC_MIN_LINE_CHARS && !sameText(l.text, params.query));
+  const shown = (l: { createdAt: string; text: string }) => ({ createdAt: l.createdAt, text: trimExcerpt(l.text, RETRIEVAL_MAX_EXCERPT_CHARS) });
+  if (own.length <= PERIOD_LINES) return { total: own.length, lines: own.map(shown) };
+
+  const pool = own.length <= PERIOD_SCORED_CAP
+    ? own
+    : Array.from({ length: PERIOD_SCORED_CAP }, (_, i) => own[Math.round((i * (own.length - 1)) / (PERIOD_SCORED_CAP - 1))]);
+  const ranked = params.rerank || params.rerankFallback
+    ? await rerankWithFallback(phrase, pool.map((l) => l.text), { cloudru: params.rerank, openrouter: params.rerankFallback })
+    : null;
+  if (ranked) await reportRerankOutcome(params, ranked);
+  const scores = ranked?.scores ?? null;
+
+  const lines = Array.from({ length: PERIOD_LINES }, (_, part) => {
+    const start = Math.floor((part * pool.length) / PERIOD_LINES);
+    const end = Math.floor(((part + 1) * pool.length) / PERIOD_LINES);
+    let best = start;
+    for (let i = start + 1; i < end; i += 1) {
+      const better = scores && scores[i] !== scores[best] ? scores[i] > scores[best] : pool[i].text.length > pool[best].text.length;
+      if (better) best = i;
+    }
+    return shown(pool[best]);
+  });
+  return { total: own.length, lines };
+}
+
+async function reportRerankOutcome(params: ArchiveSearchParams, ranked: RankedLines): Promise<void> {
+  if (!params.onRerankOutcome) return;
+  try {
+    await params.onRerankOutcome({ provider: ranked.provider, refusedStatus: ranked.refusedStatus, switchedBecause: ranked.switchedBecause });
+  } catch (e) {
+    console.warn("[retrieval] rerank outcome handler failed:", e);
+  }
+}
+
 /** The person asked to remember (the small model says so): the phrase to search for, candidates by meaning and by words, the reranker chooses. */
 async function searchRecallPrecise(
   supabase: SupabaseClient,
@@ -643,13 +712,7 @@ async function searchRecallPrecise(
     (params.rerank || params.rerankFallback) && lines.length
       ? await rerankWithFallback(phrase, lines.map((e) => e.userText), { cloudru: params.rerank, openrouter: params.rerankFallback })
       : null;
-  if (ranked && params.onRerankOutcome) {
-    try {
-      await params.onRerankOutcome({ provider: ranked.provider, refusedStatus: ranked.refusedStatus, switchedBecause: ranked.switchedBecause });
-    } catch (e) {
-      console.warn("[retrieval] rerank outcome handler failed:", e);
-    }
-  }
+  if (ranked) await reportRerankOutcome(params, ranked);
   const scores = ranked?.scores ?? null;
 
   let picked: ArchiveExcerpt[];
@@ -685,6 +748,24 @@ async function searchRecallPrecise(
     ...ex,
     userText: trimExcerpt(ex.userText, RETRIEVAL_MAX_EXCERPT_CHARS),
   }));
+  if (decision.period) {
+    const time = decision.period;
+    const ofTime = await pickPeriodLines(messages, time, phrase, params);
+    const otherTime = excerpts
+      .filter((ex) => !insidePeriod(ex.createdAt, time) && !sameText(ex.userText, params.query))
+      .slice(0, PERIOD_OTHER_CAP)
+      .map((ex) => ({ createdAt: ex.createdAt, text: ex.userText }));
+    console.log(
+      `[retrieval] conversation=${params.conversationId} mode=full-period how=${how} period=${time.from}..${time.to} ` +
+        `totalMsgs=${messages.length} inPeriod=${ofTime.total} lines=${ofTime.lines.length} otherTime=${otherTime.length}`
+    );
+    return {
+      excerpts: [],
+      userEvidenceQuotes: [],
+      period: { from: time.from, to: time.to, totalInPeriod: ofTime.total, lines: ofTime.lines, otherTime },
+    };
+  }
+
   const userEvidenceQuotes = evidenceFromArchiveUserLines(excerpts);
 
   console.log(

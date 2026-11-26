@@ -16,7 +16,10 @@ import { fetchConversationCrossMemoryEnabled } from "../_shared/profilePrefs.ts"
 import {
   buildMemoryContinuityPrompt,
   buildRecallGroundingPrompt,
+  buildRecallPeriodPrompt,
+  RECALL_PERIOD_USER_NOTE,
   RECALL_TURN_TEMPERATURE,
+  RECALL_USER_NOTE,
   withRecallUserNote,
   collectMemoryCorrectionHints,
   fetchTranscriptForSummary,
@@ -933,6 +936,7 @@ Deno.serve(async (req: Request) => {
     // A turn where the person asks what they said before: the instruction for it stands last in the prompt, and the answer is given colder.
     let recallTurn = false;
     let recallGroundingBlock = "";
+    let recallUserNote: string = RECALL_USER_NOTE;
     // Carry packet out of block for background summary task
     let packetForSummary: Awaited<ReturnType<typeof buildContextPacket>> | null = null;
     const smokeDiagSnapshot: Record<string, unknown> = {};
@@ -1356,10 +1360,14 @@ Deno.serve(async (req: Request) => {
         systemPrompt = [BASE_PROMPT, contextPrompt].join("\n\n");
 
         if (recallDecision ? recallDecision.recall : hasRecallIntent(message)) {
-          const recallGrounding = buildRecallGroundingPrompt({
-            evidenceCount: trimmedPacket.userEvidenceQuotes?.length ?? 0,
-            archiveCount: trimmedPacket.archiveExcerpts?.length ?? 0,
-          });
+          // A question about a named time has its own lines and its own instruction (see recallGrounding.ts).
+          const recallGrounding = archiveSearch.period
+            ? buildRecallPeriodPrompt(archiveSearch.period)
+            : buildRecallGroundingPrompt({
+              evidenceCount: trimmedPacket.userEvidenceQuotes?.length ?? 0,
+              archiveCount: trimmedPacket.archiveExcerpts?.length ?? 0,
+            });
+          if (archiveSearch.period) recallUserNote = RECALL_PERIOD_USER_NOTE;
           recallTurn = true;
           recallGroundingBlock = recallGrounding;
           console.log(
@@ -1415,7 +1423,7 @@ Deno.serve(async (req: Request) => {
         : [...historyMessages, { role: "user", content: message }];
 
     // On a recall turn the person's last message gets the note for the model (not saved, not shown): see recallGrounding.ts.
-    const modelMessages = recallTurn ? withRecallUserNote(messages) : messages;
+    const modelMessages = recallTurn ? withRecallUserNote(messages, recallUserNote) : messages;
 
     // ── L7: Response budget + model call ─────────────────────────────────────
     // Nothing here is decided by the words of the message: the reply may be as long as the tier allows, and the model is the one
