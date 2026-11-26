@@ -1,7 +1,7 @@
 /**
  * Backfill message_embeddings for existing conversations (one chat at a time).
  *
- * Requires: VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY in .env
+ * Requires: VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENROUTER_API_KEY in .env of the folder it is started in
  *
  * Usage:
  *   npm run backfill:embeddings
@@ -9,13 +9,10 @@
  */
 
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import { wrapForOffAppUsage } from "./lib/off-app-usage-log.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = join(__dirname, "..");
 
 const EMBEDDING_MODEL =
   process.env.STAYSEE_EMBEDDING_MODEL ?? "baai/bge-m3";
@@ -72,7 +69,8 @@ async function createEmbeddings(texts, apiKey) {
       "HTTP-Referer": "https://staysee.app",
       "X-Title": "StaySee AI",
     },
-    body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts }),
+    // What people wrote goes only to endpoints that keep nothing and do not train on it, as in the app (openRouterPrivateRoute.ts).
+    body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts, provider: { data_collection: "deny", zdr: true } }),
   });
   if (!res.ok) {
     throw new Error(`embeddings ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -147,7 +145,7 @@ async function backfillConversation(supabase, conv, apiKey) {
   return done;
 }
 
-const env = loadEnvFile(join(root, ".env"));
+const env = loadEnvFile(join(process.cwd(), ".env"));
 const { conversationId } = parseArgs(process.argv.slice(2));
 
 const baseUrl = env.VITE_SUPABASE_URL ?? env.SUPABASE_URL;
