@@ -65,7 +65,11 @@ check("Sign-up and sign-in by e-mail work", Boolean(alice.token && alice.id), `s
 const bob = await makeUser("b");
 
 if (alice.token) {
-  // 2. Database through the API, as the app does it
+  // 2. Database through the API, as the app does it. The app creates the profile itself after sign-in (src/lib/ensureProfile.ts),
+  // and a conversation can be created only by a person who has one.
+  for (const person of [alice, bob]) {
+    if (person.token) await call("/rest/v1/profiles", { method: "POST", token: person.token, body: { id: person.id, email: person.email } });
+  }
   const conv = await call("/rest/v1/conversations", {
     method: "POST",
     token: alice.token,
