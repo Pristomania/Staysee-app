@@ -1,8 +1,13 @@
+import { ownOriginBase } from './appOrigins';
 import type { VoiceDictationPrepareProgress } from './voiceDictationContract';
 
 /** Bump this one string when the model or engine build changes. */
 export const VOICE_MODEL_REVISION = '83bbf6f-large-int8';
-export const VOICE_MODEL_BASE_URL = `https://staysee.ru/voice-model/${VOICE_MODEL_REVISION}/`;
+export const VOICE_MODEL_BASE_URL = ownOriginBase(
+  globalThis.location,
+  `/voice-model/${VOICE_MODEL_REVISION}/`,
+  `https://staysee.ru/voice-model/${VOICE_MODEL_REVISION}/`,
+);
 export const VOICE_MODEL_CACHE_PREFIX = 'staysee-voice-model-';
 export const VOICE_MODEL_CACHE_NAME = `${VOICE_MODEL_CACHE_PREFIX}${VOICE_MODEL_REVISION}`;
 

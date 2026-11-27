@@ -2,6 +2,8 @@
  * Production guard: browser must use same-origin /supabase proxy, not *.supabase.co.
  */
 
+import { ownOriginBase } from './appOrigins';
+
 const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
@@ -26,5 +28,6 @@ export function resolveSupabasePublicConfig(): { url: string; anonKey: string } 
     }
   }
 
-  return { url, anonKey: anonKey.trim() };
+  // At an extra address of the app (appOrigins.ts) the same proxy of that address is used.
+  return { url: ownOriginBase(globalThis.location, '/supabase', url), anonKey: anonKey.trim() };
 }
