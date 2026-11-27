@@ -8,6 +8,8 @@ on:
   push:
     branches:
       - main
+  # To publish the current main again by hand (after a server change): gh workflow run deploy.yml
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -67,66 +69,70 @@ jobs:
       - name: Smoke-test built site
         run: npm run smoke:bundle
 
+
+  # The server in Russia (Beget), prepared with deploy/ru-server/bootstrap.sh: the site is built here and only the finished files are sent.
+  # Needed in GitHub: variable STAYSEE_SUPABASE_ANON_KEY (the public key, it ends up in the browser anyway); secrets RU_HOST, RU_USER,
+  # RU_SSH_KEY (the key of the limited user "deploy"), RU_HOST_FINGERPRINT.
   deploy:
     needs: [verify, verify-linux-build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_SUPABASE_ANON_KEY: ${{ vars.STAYSEE_SUPABASE_ANON_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Normalize nginx script line endings
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production build
         run: |
-          sed -i 's/\r$//' deploy/nginx/*.sh deploy/nginx/*.conf
-          chmod +x deploy/nginx/*.sh
+          test -n "$VITE_SUPABASE_ANON_KEY" || { echo "STAYSEE_SUPABASE_ANON_KEY is not set"; exit 1; }
+          npm run build
 
-      - name: Copy nginx scripts to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.STAYSEE_HOST }}
-          username: ${{ secrets.STAYSEE_USER }}
-          key: ${{ secrets.STAYSEE_SSH_KEY }}
-          port: ${{ secrets.STAYSEE_PORT }}
-          source: "deploy/nginx/staysee.ru.conf,deploy/nginx/apply-on-vps.sh,deploy/nginx/resolve-web-root.sh,deploy/nginx/reload-or-start-nginx.sh"
-          target: "/tmp/staysee-nginx/"
+      - name: Smoke-test built site
+        run: npm run smoke:bundle
 
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.STAYSEE_HOST }}
-          username: ${{ secrets.STAYSEE_USER }}
-          key: ${{ secrets.STAYSEE_SSH_KEY }}
-          port: ${{ secrets.STAYSEE_PORT }}
-          script: |
-            set -euo pipefail
-            # Build frontend / sync dist. A failure here (build error, bad
-            # bundle, sync failure) must stop the deploy -- it used to be
-            # swallowed with only a warning so a broken build could still
-            # report success. Nginx being briefly inactive is not a reason
-            # to tolerate this: reload-or-start-nginx.sh below already
-            # starts nginx on its own if it isn't running, and fails loudly
-            # if that doesn't work either.
-            # deploy-staysee starts with `git pull`. A local edit of package-lock.json left on the server
-            # (a leftover of an earlier install) makes git refuse the pull as soon as a commit changes that
-            # file -- the site then stays on the old version while this step fails. Nobody edits the lock file
-            # on the server on purpose, so the repository version simply wins. Where the file is untouched
-            # this does nothing. A failure here is only reported: whether the deploy can go on is decided by
-            # deploy-staysee below, which stops loudly if the pull still cannot happen.
-            for repo in "$HOME/Staysee-app" /var/www/Staysee-app; do
-              if [ -d "$repo/.git" ]; then
-                git -C "$repo" checkout -- package-lock.json || echo "could not reset package-lock.json in $repo"
-              fi
-            done
-            deploy-staysee
-            NGINX_SCRIPTS=/tmp/staysee-nginx/deploy/nginx
-            chmod +x "$NGINX_SCRIPTS"/*.sh
-            sed -i 's/\r$//' "$NGINX_SCRIPTS"/*.sh "$NGINX_SCRIPTS"/*.conf
-            STAYSEE_NGINX_SRC="$NGINX_SCRIPTS/staysee.ru.conf"
-            test -f "$STAYSEE_NGINX_SRC"
-            test -f "$NGINX_SCRIPTS/reload-or-start-nginx.sh"
-            export STAYSEE_NGINX_SRC
-            bash "$NGINX_SCRIPTS/apply-on-vps.sh"
-            bash "$NGINX_SCRIPTS/reload-or-start-nginx.sh"
+      - name: Upload the site and apply nginx
+        env:
+          RU_HOST: ${{ secrets.RU_HOST }}
+          RU_USER: ${{ secrets.RU_USER }}
+          RU_SSH_KEY: ${{ secrets.RU_SSH_KEY }}
+          RU_HOST_FINGERPRINT: ${{ secrets.RU_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          for v in RU_HOST RU_USER RU_SSH_KEY RU_HOST_FINGERPRINT; do
+            test -n "${!v}" || { echo "Secret $v is not set"; exit 1; }
+          done
+          umask 077
+          dir=$(mktemp -d)
+          trap 'rm -rf "$dir"' EXIT
+          ssh-keyscan -T 10 -t ed25519 "$RU_HOST" > "$dir/known_hosts" 2>/dev/null
+          found=$(ssh-keygen -lf "$dir/known_hosts" | awk '{print $2}')
+          if [ "$found" != "$RU_HOST_FINGERPRINT" ]; then
+            echo "The server's key does not match the recorded one. Nothing was sent."
+            exit 1
+          fi
+          printf '%s\n' "$RU_SSH_KEY" > "$dir/id"
+          SSH="ssh -i $dir/id -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$dir/known_hosts"
+          rsync -az --delete -e "$SSH" dist/ "$RU_USER@$RU_HOST:/var/www/Staysee-app/dist/"
+          rsync -az -e "$SSH" deploy/nginx/staysee.ru.conf "$RU_USER@$RU_HOST:/home/deploy/incoming/staysee.ru.conf"
+          $SSH "$RU_USER@$RU_HOST" "sudo -n /usr/local/bin/staysee-apply-nginx"
 
       - name: Verify production site
-        run: curl --fail --silent --show-error --retry 5 --retry-delay 3 --max-time 20 https://staysee.ru/ > /dev/null
+        env:
+          RU_HOST: ${{ secrets.RU_HOST }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 --max-time 20 --resolve "staysee.ru:443:$RU_HOST" https://staysee.ru/ > /dev/null
+          proxy=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 --resolve "staysee.ru:443:$RU_HOST" https://staysee.ru/supabase/auth/v1/health)
+          echo "Way to the database: HTTP $proxy"
+          case "$proxy" in 200|401) ;; *) echo "The way to the database does not answer as it should"; exit 1 ;; esac
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 --max-time 20 https://staysee.ru/ > /dev/null

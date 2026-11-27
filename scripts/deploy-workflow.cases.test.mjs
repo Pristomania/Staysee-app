@@ -52,15 +52,26 @@ describe('production deployment gate', () => {
     assert.match(workflow, /curl[^\n]*https:\/\/staysee\.ru\//u);
   });
 
-  it('clears a stray package-lock.json change on the server before deploy-staysee pulls', () => {
-    // deploy-staysee starts with `git pull`. A local edit of package-lock.json left on the server (a leftover of
-    // an earlier install) makes git refuse the pull as soon as a commit changes that file, and the site stays on
-    // the old version while the workflow turns red. The lock file on the server is never edited on purpose.
-    const reset = position('checkout -- package-lock.json');
-    const pull = workflow.search(/^ +deploy-staysee\s*$/mu);
-    assert.notEqual(pull, -1, 'the deploy-staysee call is missing');
-    assert.ok(reset < pull, 'the reset must come before deploy-staysee');
-    assert.ok(reset > position('name: Deploy to VPS'), 'the reset belongs to the Deploy to VPS step');
+  it('builds the real site on GitHub and uploads the finished files to the server in Russia, whose identity it checks first', () => {
+    // Moved on 28.11.2026: the old server could not be reached from Russia. The new one has no git and no Node: nothing is built on it.
+    const deploy = workflow.slice(position('\n  deploy:'));
+    assert.match(deploy, /VITE_SUPABASE_ANON_KEY: \$\{\{ vars\.STAYSEE_SUPABASE_ANON_KEY \}\}/u);
+    assert.match(deploy, /test -n "\$VITE_SUPABASE_ANON_KEY"/u, 'an empty public key stops the update instead of publishing a broken site');
+    for (const name of ['RU_HOST', 'RU_USER', 'RU_SSH_KEY', 'RU_HOST_FINGERPRINT']) {
+      assert.ok(deploy.includes(`secrets.${name}`), name);
+    }
+    assert.match(deploy, /StrictHostKeyChecking=yes/u);
+    assert.ok(deploy.indexOf('ssh-keygen -lf') < deploy.indexOf('rsync -az'), 'the identity is checked before anything is sent');
+    assert.match(deploy, /rsync -az --delete[^\n]*dist\/ [^\n]*:\/var\/www\/Staysee-app\/dist\//u);
+    assert.match(deploy, /sudo -n \/usr\/local\/bin\/staysee-apply-nginx/u);
+    assert.doesNotMatch(workflow, /secrets\.STAYSEE_/u, 'nothing is sent to the old server any more');
+  });
+
+  it('checks the new server itself after the upload: the page and the way to the database', () => {
+    const verify = workflow.slice(position('name: Verify production site'));
+    assert.match(verify, /--resolve "staysee\.ru:443:\$RU_HOST" https:\/\/staysee\.ru\/ /u);
+    assert.match(verify, /https:\/\/staysee\.ru\/supabase\/auth\/v1\/health/u);
+    assert.match(verify, /200\|401\)/u);
   });
 
   it('keeps the complete offline suite and bundle smoke behind package scripts', () => {
