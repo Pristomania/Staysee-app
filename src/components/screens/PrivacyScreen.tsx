@@ -286,10 +286,6 @@ export function PrivacyScreen() {
       )}
     >
 
-        <h2 className={`${theme.textPrimary} text-lg sm:text-xl font-light leading-[1.6] tracking-tight mb-6`}>
-          Ваши беседы принадлежат только <span className={ACCENT_TEXT_CLASS}>вам</span>.
-        </h2>
-
         <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5 mb-6`}>
           <p className={`${theme.textSecondary} text-[13px] font-light leading-[1.75] opacity-90`}>
             Администрация StaySee AI не имеет штатного интерфейса для просмотра личных разговоров.
