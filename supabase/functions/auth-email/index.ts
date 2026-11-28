@@ -11,8 +11,11 @@ function required(name: string): string {
 }
 
 // Existing SMTP stays active until this function is ready AND the hook is enabled.
-const authUrl = required('SUPABASE_URL');
-const service = createClient(authUrl, required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } });
+const serviceUrl = required('SUPABASE_URL');
+// The address people's browsers reach the database at: on our own server SUPABASE_URL is the inside address of the stack.
+const authUrl = Deno.env.get('STAYSEE_PUBLIC_API_URL') ?? serviceUrl;
+const siteUrl = Deno.env.get('STAYSEE_SITE_URL') ?? 'https://app.stayseeai.online';
+const service = createClient(serviceUrl, required('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false, autoRefreshToken: false } });
 const webhook = new Webhook(required('SEND_EMAIL_HOOK_SECRET').replace(/^v1,whsec_/, ''));
 const smtpOptions = {
   host: 'postbox.cloud.yandex.net', port: 587, secure: false, requireTLS: true,
@@ -23,7 +26,7 @@ const smtpOptions = {
 
 Deno.serve(createAuthEmailHandler({
   authUrl,
-  siteUrl: 'https://staysee.ru',
+  siteUrl,
   verify: (payload, headers) => webhook.verify(payload, Object.fromEntries(headers)),
   lookupProfile: async (userId, signal) => {
     const { data, error } = await service.from('profiles')
