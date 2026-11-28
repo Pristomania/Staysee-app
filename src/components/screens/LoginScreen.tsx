@@ -9,6 +9,7 @@ import { AUTH_NOTICE_COPY, forgetAuthCallbackNotice, peekAuthCallbackNotice } fr
 import { forgetRoomDeletedNotice, peekRoomDeletedNotice } from '../../lib/roomDeletedNotice';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { ACCENT_TEXT_CLASS, AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
+import { PublicLegalLinks } from '../legal/PublicLegalLinks';
 
 export function LoginScreen() {
   const { signIn } = useAuth();
@@ -181,6 +182,7 @@ export function LoginScreen() {
           </div>
 
         </div>
+        <PublicLegalLinks className={theme.textSecondary} />
       </AppContainer>
     </div>
   );

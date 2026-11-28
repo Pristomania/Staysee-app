@@ -2,6 +2,7 @@ import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { ROOM_COPY } from '../../lib/roomCopy';
 import { AppContainer, LAYOUT_FORM_INNER_CLASS } from '../layout';
+import { PublicLegalLinks } from '../legal/PublicLegalLinks';
 
 export function WelcomeScreen() {
   const { navigateTo } = useApp();
@@ -56,6 +57,7 @@ export function WelcomeScreen() {
           </p>
 
         </div>
+        <PublicLegalLinks className={theme.textSecondary} />
       </AppContainer>
     </div>
   );

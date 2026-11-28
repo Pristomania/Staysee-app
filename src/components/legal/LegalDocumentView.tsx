@@ -25,7 +25,7 @@ export function LegalDocumentView({ meta, sections }: LegalDocumentViewProps) {
       <p className={`${theme.textMuted} text-xs font-light mb-1`}>{meta.subtitle}</p>
       <p className={`${theme.textMuted} text-[11px] font-light opacity-70 mb-8`}>
         Версия {meta.version}
-        {meta.effectiveDate !== '—' ? ` · действует с ${meta.effectiveDate}` : ''}
+        {meta.effectiveDate !== '—' ? ` · опубликовано ${meta.effectiveDate}` : ''}
       </p>
 
       <div className="space-y-6">

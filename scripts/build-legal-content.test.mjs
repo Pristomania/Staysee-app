@@ -67,16 +67,14 @@ describe("the texts in the app are the published documents", () => {
     }
   });
 
-  it("have no drafting notes, placeholders or developer instructions, except the one field for the notification number", () => {
+  it("have no drafting notes, placeholders or invented notification numbers", () => {
     for (const [path, content] of Object.entries(files)) {
       assert.doesNotMatch(content, /черновик|Рекомендуется консультация|TODO|готовится к публикации|Инструкция для разработчика|0\.1-draft/i, path);
       assert.doesNotMatch(content, /\[ \]/, `${path} has an open checklist`);
     }
-    const policy = files["src/content/legal/privacy.ts"];
-    assert.equal(policy.split("[заполнить дату и номер уведомления после его подачи]").length - 1, 1, "one field for the notification number");
     for (const [path, content] of Object.entries(files)) {
-      if (path.endsWith("privacy.ts")) continue;
       assert.doesNotMatch(content, /\[заполнить/, path);
+      assert.doesNotMatch(content, /\{\{PUBLIC_TARIFFS\}\}/, path);
     }
   });
 
@@ -84,7 +82,7 @@ describe("the texts in the app are the published documents", () => {
     for (const name of ["privacy.ts", "consent.ts"]) {
       const content = files[`src/content/legal/${name}`];
       assert.match(content, /Изображения|изображени/, `${name} mentions pictures`);
-      for (const company of ["OpenRouter", "OpenAI", "Microsoft", "Google", "Anthropic", "Supabase"]) {
+      for (const company of ["Cloud.ru", "Бегет", "Postbox"]) {
         assert.match(content, new RegExp(company), `${name} names ${company}`);
       }
       assert.match(content, /не хранит|не хранятся/, `${name} says pictures are not stored`);
