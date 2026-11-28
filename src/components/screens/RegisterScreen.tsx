@@ -5,7 +5,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import { mapSignUpError } from '../../lib/authErrors';
 import { ROOM_COPY } from '../../lib/roomCopy';
-import { saveRegisterDraft, takeRegisterDraft } from '../../lib/registerDraft';
+import { takeRegisterDraft } from '../../lib/registerDraft';
+import { PublicDocumentLink } from '../legal/PublicLegalLinks';
 import { OFFER_META } from '../../content/legal/offer';
 import { CONSENT_META } from '../../content/legal/consent';
 import { AGE_18_META } from '../../lib/consents';
@@ -30,24 +31,6 @@ export function RegisterScreen() {
   const [acceptedPd, setAcceptedPd] = useState(draft?.acceptedPd ?? false);
 
   const canSubmit = confirmedAge18 && acceptedTerms && acceptedPd && !loading;
-
-  const rememberTyped = () =>
-    saveRegisterDraft({ email, password, confirmPassword, confirmedAge18, acceptedTerms, acceptedPd });
-
-  const openTerms = () => {
-    rememberTyped();
-    navigateTo('terms', { legalReturnScreen: 'register' });
-  };
-
-  const openPolicy = () => {
-    rememberTyped();
-    navigateTo('policy', { legalReturnScreen: 'register' });
-  };
-
-  const openConsent = () => {
-    rememberTyped();
-    navigateTo('consent', { legalReturnScreen: 'register' });
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,27 +192,21 @@ export function RegisterScreen() {
             />
             <span className={`${theme.textMuted} text-xs font-light leading-[1.65] group-hover:opacity-90`}>
               Я принимаю{' '}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openTerms();
-                }}
+              <PublicDocumentLink
+                document="terms"
+                pinned
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
                 публичную оферту
-              </button>
+              </PublicDocumentLink>
               {' '}и ознакомлен(а) с{' '}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openPolicy();
-                }}
+              <PublicDocumentLink
+                document="policy"
+                pinned
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
                 политикой обработки персональных данных
-              </button>
+              </PublicDocumentLink>
               .
             </span>
           </label>
@@ -243,16 +220,13 @@ export function RegisterScreen() {
             />
             <span className={`${theme.textMuted} text-xs font-light leading-[1.65] group-hover:opacity-90`}>
               Даю{' '}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  openConsent();
-                }}
+              <PublicDocumentLink
+                document="consent"
+                pinned
                 className={`${theme.textSecondary} underline underline-offset-2 decoration-dotted`}
               >
                 согласие на обработку персональных данных
-              </button>
+              </PublicDocumentLink>
               , в том числе сведений о моём психологическом состоянии, которые я могу сообщить в беседах.
             </span>
           </label>

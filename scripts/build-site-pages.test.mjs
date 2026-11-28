@@ -63,21 +63,18 @@ describe("every page carries what a buyer and the payment service must see", () 
     assert.match(html, /50 сообщений/);
     assert.match(html, /Робокасса/);
     assert.match(html, /Возврат/);
-    assert.match(html, /href="https:\/\/staysee\.ru\/"/, "the way into the app");
+    assert.match(html, /href="https:\/\/app\.stayseeai\.online\/"/, "the way into the app");
     assert.match(html, /href="\/offer\.html#sec-6"/);
     assert.ok(pages["offer.html"].includes('id="sec-6"'), "the refund section the tariffs page links to exists");
   });
 
-  it("the tariffs page shows the premium plan and promises nothing that does not exist yet", () => {
+  it("the tariffs page sells basic and packs, without the premium plan or unbuilt AI voice", () => {
     const html = pages["pricing.html"];
-    assert.match(html, /Премиум/);
-    assert.ok(html.includes("4 900"), "premium price");
-    assert.match(html, /1 000 сообщений на 30 дней/);
-    assert.match(html, /6 бесед/);
+    assert.doesNotMatch(html, /data-plan="premium"|4 900|1 000 сообщений|6 бесед/);
     // the AI voice input of premium is not built: the site must not promise it
     assert.doesNotMatch(html, /ввод[а-я]* с ИИ|распознавани[а-я]* с ИИ|ИИ-ввод/i);
-    // the top-up pack is not built either
-    assert.doesNotMatch(html, /докуп|пакет/i);
+    assert.match(html, /data-product="pack100"/);
+    assert.match(html, /590 ₽/);
   });
 
   it("each card shows what the plan gives and, marked closed, what it does not", () => {
@@ -86,11 +83,10 @@ describe("every page carries what a buyer and the payment service must see", () 
     for (const closed of ["Сквозная память", "Динамика бесед", "Прикрепление файлов", "Голосовой ввод"]) {
       assert.match(free, new RegExp(`<li class="off">${closed}</li>`), `free: ${closed} is shown closed`);
       assert.match(card("basic"), new RegExp(`<li class="on">${closed}</li>`), `basic: ${closed}`);
-      assert.match(card("premium"), new RegExp(`<li class="on">${closed}</li>`), `premium: ${closed}`);
     }
     assert.match(free, /<li class="on">1 беседа<\/li>/);
     assert.match(card("basic"), /<li class="on">3 беседы<\/li>/);
-    assert.match(card("premium"), /<li class="on">6 бесед<\/li>/);
+    assert.equal(card('premium'), '');
   });
 
   it("the authored pages use no long dash (the site's rule)", () => {
@@ -130,7 +126,7 @@ describe("the site and the app agree on the numbers", () => {
     assert.match(pages["pricing.html"], /новые через 3 месяца после последнего/);
     assert.match(pages["pricing.html"], /Бесплатный/);
     assert.doesNotMatch(pages["pricing.html"], /один раз на учётную запись/, "the old one-time promise is gone");
-    assert.match(pages["offer.html"], /возобновляются через 3 \(три\) месяца после последнего сообщения Пользователя/);
+    assert.match(pages["offer.html"], /возобновляются через 3 месяца после последнего сообщения Пользователя/);
   });
 
   it("the offer sends the person to the policy where it really is, on the site and in the app", () => {
@@ -144,10 +140,10 @@ describe("the site and the app agree on the numbers", () => {
   it("the offer names the site and the app, in the first clause and in the requisites", () => {
     const html = pages["offer.html"];
     const clause11 = /<strong>1\.1\.<\/strong>[^]*?<\/p>/.exec(html)?.[0] ?? "";
-    assert.match(clause11, /href="https:\/\/staysee\.ru">https:\/\/staysee\.ru<\/a>[^]*«Приложение»/, "the app address in 1.1");
+    assert.match(clause11, /href="https:\/\/app\.stayseeai\.online">https:\/\/app\.stayseeai\.online<\/a>[^]*«Приложение»/, "the app address in 1.1");
     assert.match(clause11, /href="https:\/\/stayseeai\.online">https:\/\/stayseeai\.online<\/a>[^]*«Сайт»/, "the site address in 1.1");
     assert.match(html, /<td>Сайт<\/td><td><a href="https:\/\/stayseeai\.online">/);
-    assert.match(html, /<td>Приложение<\/td><td><a href="https:\/\/staysee\.ru">/);
+    assert.match(html, /<td>Приложение<\/td><td><a href="https:\/\/app\.stayseeai\.online">/);
     assert.match(html, /href="https:\/\/stayseeai\.online\/pricing\.html"/, "5.1 names the tariff page");
   });
 });

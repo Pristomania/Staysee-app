@@ -2,8 +2,9 @@
 // The .md files are the source; src/content/legal/{offer,privacy,consent}.ts are generated: run `npm run build:legal`
 // after changing a document. A test fails if the committed files are out of date.
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readLegalMarkdown } from './lib/legal-documents.mjs';
 
 const ROOT = new URL("../", import.meta.url);
 
@@ -114,7 +115,7 @@ function renderFile({ source, prefix, withType }, doc, sha256) {
 export function buildLegalFiles() {
   const files = {};
   for (const document of DOCUMENTS) {
-    const md = normalize(readFileSync(new URL(document.source, ROOT), "utf8"));
+    const md = normalize(readLegalMarkdown(document.source));
     const doc = parseLegalDocument(md, { splitLevel: document.splitLevel });
     const sha256 = createHash("sha256").update(md, "utf8").digest("hex");
     files[document.target] = renderFile(document, doc, sha256);

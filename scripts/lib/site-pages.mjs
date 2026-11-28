@@ -1,10 +1,12 @@
 // Pages for the public site (https://stayseeai.online): tariffs, the offer, the app's privacy policy, the consent and
-// the contacts. The app itself stays on https://staysee.ru and shows no prices: everything a buyer reads lives here.
+// the contacts. The application is at app.stayseeai.online; the public storefront and its waitlist remain here.
 // The legal pages are rendered from the same documents the app shows (docs/legal), so the two never drift apart.
 // The look copies the site's existing document page (privacy.html). Authored copy follows the site's rule: no long dash.
 
+import { PLANS, PACK, voiceInputFor } from '../../supabase/functions/_shared/plans.ts';
+
 export const SITE_URL = "https://stayseeai.online";
-export const APP_URL = "https://staysee.ru/";
+export const APP_URL = "https://app.stayseeai.online/";
 
 export const SELLER = {
   name: "Индивидуальный предприниматель Успенская Анастасия Сергеевна",
@@ -13,34 +15,19 @@ export const SELLER = {
   ogrnip: "321332800043821",
   address: "600022, Владимирская обл., г. Владимир, ул. Верхняя Дуброва, д. 23",
   email: "support.stayseeai@gmail.com",
+  telegram: 'https://t.me/StaySee_AI',
 };
 
 /** The same facts as the app's plans table (src/lib/plans.ts) and the limits migrations 085 to 087; plans.cases.test.ts compares them. */
-export const TARIFFS = {
-  free: {
-    label: "Бесплатный",
-    messages: 50,
-    renewMonths: 3,
-    conversations: 1,
-    features: { crossMemory: false, conversationDynamics: false, fileAttachments: false, voiceInput: false },
-  },
-  basic: {
-    label: "Базовый",
-    priceRub: 1990,
-    periodDays: 30,
-    messages: 400,
-    conversations: 3,
-    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true, voiceInput: true },
-  },
-  premium: {
-    label: "Премиум",
-    priceRub: 4900,
-    periodDays: 30,
-    messages: 1000,
-    conversations: 6,
-    features: { crossMemory: true, conversationDynamics: true, fileAttachments: true, voiceInput: true },
-  },
-};
+export const TARIFFS = Object.fromEntries(Object.entries(PLANS).map(([id, plan]) => [id, {
+  label: plan.label,
+  priceRub: plan.priceRub,
+  periodDays: plan.periodDays,
+  messages: plan.messages,
+  renewMonths: plan.renewAfterIdleMonths,
+  conversations: plan.maxConversations,
+  features: { ...plan.features, voiceInput: voiceInputFor(id) !== 'none' },
+}]));
 
 export const PAGES = [
   { file: "pricing.html", title: "Тарифы", nav: "Тарифы" },
@@ -194,7 +181,7 @@ const CSS = `
     .details{display:grid;grid-template-columns:180px 1fr;margin:28px 0;border-top:1px solid var(--line)}
     .details div{padding:14px 0;border-bottom:1px solid var(--line)}
     .details div:nth-child(odd){color:var(--gold);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-    .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:34px 0 26px}
+    .plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:34px 0 26px}
     .plan{margin:0;padding:26px 24px 20px;border:1px solid var(--line);border-radius:20px;background:var(--panel)}
     .plan--main{border-color:rgba(201,169,110,.55)}
     .plan-name{margin:0 0 6px;color:var(--gold);font-size:11px;font-weight:650;letter-spacing:.18em;text-transform:uppercase}
@@ -269,6 +256,7 @@ function layout({ file, title, description, eyebrow, body }) {
           <p>ИНН ${SELLER.inn} · ОГРНИП ${SELLER.ogrnip}</p>
           <p>${esc(SELLER.address)}</p>
           <p><a href="mailto:${SELLER.email}">${SELLER.email}</a></p>
+          <p><a href="${SELLER.telegram}">Telegram @StaySee_AI</a></p>
         </div>
       </div>
       <p class="fine">StaySee AI · Оплата принимается через платёжный сервис Робокасса · Для лиц старше 18 лет</p>
@@ -316,22 +304,28 @@ function planCard(plan, id) {
 }
 
 function pricingBody() {
-  const { free, basic, premium } = TARIFFS;
+  const { free, basic } = TARIFFS;
   return `<h1>Тарифы StaySee AI</h1>
     <p class="lead">StaySee AI - приложение для спокойного разговора с ИИ-собеседником Стэйси. Объём тарифа измеряется в сообщениях: одно ваше сообщение вместе с ответом Стэйси считается за одно.</p>
 
     <div class="plans">
       ${planCard(free, "free")}
       ${planCard(basic, "basic")}
-      ${planCard(premium, "premium")}
     </div>
+    <p>На платном тарифе можно прикреплять документы .txt, .md, .docx, .pdf и картинки. Голосовой ввод использует возможности устройства; отдельное ИИ-распознавание сейчас не предлагается.</p>
+    <section class="note" data-product="pack100">
+      <h2>Дополнительные ${PACK.messages} сообщений</h2>
+      <p class="price">${formatRub(PACK.priceRub)} ₽</p>
+      <p>${PACK.messages} сообщений действуют ${PACK.validMonths} месяцев с покупки и расходуются после включённых сообщений тарифа. Пакет подходит и к бесплатному тарифу, не меняет тариф или его срок и не открывает дополнительные функции.</p>
+      <p>После первой покупки тарифа или пакета бесплатные сообщения больше не возобновляются. При первой покупке только пакета первоначальный пробный остаток сохраняется; при покупке тарифа он завершается.</p>
+    </section>
     <p><a class="btn" href="${APP_URL}">Открыть приложение</a></p>
 
     <h2>Как это работает</h2>
     <ol>
       <li>Создайте учётную запись в приложении по адресу электронной почты и подтвердите её по ссылке из письма.</li>
       <li>Используйте ${free.messages} бесплатных сообщений. Платить для этого не нужно.</li>
-      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый» или «Премиум». Или подождите: бесплатные сообщения возвращаются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения.</li>
+      <li>Когда сообщения закончатся, приложение сообщит об этом. Можно выбрать тариф «Базовый» или дополнительный пакет сообщений. Если вы никогда не покупали тариф или пакет, бесплатные сообщения возвращаются через ${formatMonths(free.renewMonths)} после вашего последнего сообщения.</li>
     </ol>
 
     <h2>Оплата и получение доступа</h2>
@@ -361,7 +355,8 @@ function contactsBody() {
       <div>Адрес</div><div>${esc(SELLER.address)}</div>
       <div>Электронная почта</div><div><a href="mailto:${SELLER.email}">${SELLER.email}</a></div>
       <div>Сайт</div><div>stayseeai.online</div>
-      <div>Приложение</div><div><a href="${APP_URL}">staysee.ru</a></div>
+      <div>Приложение</div><div><a href="${APP_URL}">app.stayseeai.online</a></div>
+      <div>Telegram</div><div><a href="${SELLER.telegram}">@StaySee_AI</a></div>
     </div>
 
     <h2>О чём писать</h2>

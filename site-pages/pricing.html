@@ -45,7 +45,7 @@
     .details{display:grid;grid-template-columns:180px 1fr;margin:28px 0;border-top:1px solid var(--line)}
     .details div{padding:14px 0;border-bottom:1px solid var(--line)}
     .details div:nth-child(odd){color:var(--gold);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-    .plans{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:34px 0 26px}
+    .plans{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:34px 0 26px}
     .plan{margin:0;padding:26px 24px 20px;border:1px solid var(--line);border-radius:20px;background:var(--panel)}
     .plan--main{border-color:rgba(201,169,110,.55)}
     .plan-name{margin:0 0 6px;color:var(--gold);font-size:11px;font-weight:650;letter-spacing:.18em;text-transform:uppercase}
@@ -110,27 +110,21 @@
         </ul>
         <p class="plan-note">неиспользованные сообщения не переносятся, автоматических списаний нет</p>
       </section>
-      <section class="plan" data-plan="premium">
-        <p class="plan-name">Премиум</p>
-        <p class="price">4 900&nbsp;₽ <span>за 30 дней</span></p>
-        <ul class="rows">
-          <li class="on">1 000 сообщений на 30 дней</li>
-          <li class="on">6 бесед</li>
-          <li class="on">Сквозная память</li>
-          <li class="on">Динамика бесед</li>
-          <li class="on">Прикрепление файлов</li>
-          <li class="on">Голосовой ввод</li>
-        </ul>
-        <p class="plan-note">неиспользованные сообщения не переносятся, автоматических списаний нет</p>
-      </section>
     </div>
-    <p><a class="btn" href="https://staysee.ru/">Открыть приложение</a></p>
+    <p>На платном тарифе можно прикреплять документы .txt, .md, .docx, .pdf и картинки. Голосовой ввод использует возможности устройства; отдельное ИИ-распознавание сейчас не предлагается.</p>
+    <section class="note" data-product="pack100">
+      <h2>Дополнительные 100 сообщений</h2>
+      <p class="price">590 ₽</p>
+      <p>100 сообщений действуют 12 месяцев с покупки и расходуются после включённых сообщений тарифа. Пакет подходит и к бесплатному тарифу, не меняет тариф или его срок и не открывает дополнительные функции.</p>
+      <p>После первой покупки тарифа или пакета бесплатные сообщения больше не возобновляются. При первой покупке только пакета первоначальный пробный остаток сохраняется; при покупке тарифа он завершается.</p>
+    </section>
+    <p><a class="btn" href="https://app.stayseeai.online/">Открыть приложение</a></p>
 
     <h2>Как это работает</h2>
     <ol>
       <li>Создайте учётную запись в приложении по адресу электронной почты и подтвердите её по ссылке из письма.</li>
       <li>Используйте 50 бесплатных сообщений. Платить для этого не нужно.</li>
-      <li>Когда сообщения закончатся, приложение сообщит об этом. Чтобы продолжить сразу, оплатите тариф «Базовый» или «Премиум». Или подождите: бесплатные сообщения возвращаются через 3 месяца после вашего последнего сообщения.</li>
+      <li>Когда сообщения закончатся, приложение сообщит об этом. Можно выбрать тариф «Базовый» или дополнительный пакет сообщений. Если вы никогда не покупали тариф или пакет, бесплатные сообщения возвращаются через 3 месяца после вашего последнего сообщения.</li>
     </ol>
 
     <h2>Оплата и получение доступа</h2>
@@ -166,6 +160,7 @@
           <p>ИНН 332709365323 · ОГРНИП 321332800043821</p>
           <p>600022, Владимирская обл., г. Владимир, ул. Верхняя Дуброва, д. 23</p>
           <p><a href="mailto:support.stayseeai@gmail.com">support.stayseeai@gmail.com</a></p>
+          <p><a href="https://t.me/StaySee_AI">Telegram @StaySee_AI</a></p>
         </div>
       </div>
       <p class="fine">StaySee AI · Оплата принимается через платёжный сервис Робокасса · Для лиц старше 18 лет</p>
