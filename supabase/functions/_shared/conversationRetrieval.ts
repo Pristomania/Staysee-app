@@ -532,6 +532,13 @@ const RERANK_POOL_CAP = 40;
 /** The most lines handed to the answer when the reranker has chosen. */
 const RECALL_FINAL_CAP = 5;
 const CANDIDATE_TEXT_CHARS = 1000;
+/**
+ * The reranker scores a search of one word far too low: «море» against the very line about the sea got 0.0175 under a bar of 0.03.
+ * A line that carries that very word passes from this score. Measured on 28.11.2026 on 79 made-up questions, together with scoring
+ * the lines by the person's own words too: the right line was found for 44 of 51 questions instead of 39 and stood first for 35
+ * instead of 27, with the same count of lines that do not answer. Measured on the main reranker only (the reserve scores otherwise).
+ */
+const ONE_WORD_RERANK_FLOOR = 0.01;
 
 /** Lines of the person that carry the words of the phrase (names, numbers, rare words that the vectors may miss); nothing else is added. */
 function keywordCandidates(
@@ -708,12 +715,19 @@ async function searchRecallPrecise(
   }
   const lines = dedupeEqualTexts(pool);
 
-  const ranked: RankedLines | null =
+  // The lines are scored with the phrase of the small model and with the person's own words, side by side: each finds lines the
+  // other misses, and each line keeps its better score.
+  const score = (query: string) =>
+    rerankWithFallback(query, lines.map((e) => e.userText), { cloudru: params.rerank, openrouter: params.rerankFallback });
+  const ownWords = params.query.trim().slice(0, 300);
+  const [ranked, byOwnWords]: [RankedLines | null, RankedLines | null] =
     (params.rerank || params.rerankFallback) && lines.length
-      ? await rerankWithFallback(phrase, lines.map((e) => e.userText), { cloudru: params.rerank, openrouter: params.rerankFallback })
-      : null;
+      ? await Promise.all([score(phrase), ownWords && !sameText(ownWords, phrase) ? score(ownWords) : null])
+      : [null, null];
   if (ranked) await reportRerankOutcome(params, ranked);
-  const scores = ranked?.scores ?? null;
+  // The two hosts score on different scales: scores of another host than the one that scored the phrase are not mixed in.
+  const second = byOwnWords && byOwnWords.provider === ranked?.provider ? byOwnWords.scores : null;
+  const scores = ranked?.scores?.map((s, i) => Math.max(s, second?.[i] ?? 0)) ?? null;
 
   let picked: ArchiveExcerpt[];
   let how: string;
@@ -723,9 +737,11 @@ async function searchRecallPrecise(
       ranked?.provider === "openrouter"
         ? params.rerankFallbackThreshold ?? FALLBACK_RERANK_THRESHOLD
         : params.rerankThreshold ?? DEFAULT_RERANK_THRESHOLD;
+    const searched = tokenizeQuery(phrase).filter((t) => t.length >= 3);
+    const oneWord = ranked?.provider === "cloudru" && searched.length === 1 ? searched[0] : null;
     picked = lines
       .map((ex, i) => ({ ex, s: scores[i] }))
-      .filter((x) => x.s > threshold)
+      .filter((x) => x.s > threshold || (oneWord !== null && x.s > ONE_WORD_RERANK_FLOOR && x.ex.userText.toLowerCase().includes(oneWord)))
       .sort((a, b) => b.s - a.s)
       .slice(0, RECALL_FINAL_CAP)
       .map(({ ex, s }) => ({ ...ex, score: s }));
