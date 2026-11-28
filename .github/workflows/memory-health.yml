@@ -1,7 +1,7 @@
 name: Memory health check
 
 # Once an hour, asks the memory-health-check function to look at the last two
-# hours of Memory V3 runs in the production database and to alert Telegram
+# hours of Memory V3 runs in the production database (on the app's server in Russia) and to alert Telegram
 # (@error_stayseeai_bot) if runs fail too often or the memory has gone silent.
 # The check itself runs inside Supabase, where the database and Telegram keys
 # already live; this workflow holds only the shared secret that lets it call
@@ -58,7 +58,7 @@ jobs:
           esac
           code=$(curl -sS --max-time 60 --retry 2 --retry-delay 10 --retry-connrefused \
             -o response.json -w '%{http_code}' -X POST \
-            "https://jnxrildlwvtxhtiwucbt.supabase.co/functions/v1/memory-health-check" \
+            "https://app.stayseeai.online/supabase/functions/v1/memory-health-check" \
             -H "X-Health-Secret: ${HEALTH_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$body")

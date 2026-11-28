@@ -54,14 +54,17 @@ export function getServiceKey(env = loadEnvFile()) {
 }
 
 const PRODUCTION_PROJECT_HOST = "jnxrildlwvtxhtiwucbt.supabase.co";
+/** Since the move of 28.11.2026 the production database answers behind the app's own addresses. */
+const OWN_PRODUCTION_URL_RE = /^https:\/\/(?:app\.stayseeai\.online|(?:www\.)?staysee\.ru)\/supabase(?:\/|$)/i;
 
 export function isProdSupabaseUrl(url) {
-  return /supabase\.co/i.test(url) && !/localhost|127\.0\.0\.1/i.test(url);
+  return OWN_PRODUCTION_URL_RE.test(url ?? "") || (/supabase\.co/i.test(url) && !/localhost|127\.0\.0\.1/i.test(url));
 }
 
 /** Production project only — not staging. */
 export function isProductionProjectUrl(url) {
-  return (url ?? "").replace(/\/$/, "").includes(PRODUCTION_PROJECT_HOST);
+  const clean = (url ?? "").replace(/\/$/, "");
+  return OWN_PRODUCTION_URL_RE.test(clean) || clean.includes(PRODUCTION_PROJECT_HOST);
 }
 
 const UUID_RE =
