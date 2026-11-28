@@ -47,7 +47,7 @@ export function WelcomeScreen() {
           <button
             type="button"
             onClick={() => navigateTo('register')}
-            className={`mt-3 w-full py-3 ${theme.textMuted} text-sm font-light underline underline-offset-4 decoration-dotted hover:opacity-80`}
+            className={`mt-3 w-full py-3 rounded-xl border bg-transparent transition-colors duration-300 ${theme.btnBorder} ${theme.btnBorderHover} ${theme.btnBgHover} ${theme.btnText} text-sm font-light tracking-wide focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4`}
           >
             {ROOM_COPY.createRoom}
           </button>
