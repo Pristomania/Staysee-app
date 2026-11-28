@@ -253,3 +253,34 @@ describe("when the write to the database fails", () => {
     assert.doesNotMatch(message, new RegExp(KEY), "the key is not");
   });
 });
+
+// The owner's rule: no partner models of Cloud.ru (they send the text outside it) unless she allowed one as a reserve.
+describe("a call to Cloud.ru goes only to a model Cloud.ru hosts itself", () => {
+  const CLOUDRU = "https://foundation-models.api.cloud.ru/v1/chat/completions";
+
+  it("refuses a partner model before the request leaves, and writes nothing", async () => {
+    for (const model of ["deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V4-Flash", "anthropic/claude-sonnet-4.5", "openai/gpt-oss-20b"]) {
+      let sent = 0;
+      const { wrapped, inserts } = setup({ provider: async () => { sent += 1; return jsonResponse({}); } });
+      await assert.rejects(wrapped(CLOUDRU, post({ ...chatBody, model })), /партнёр/, model);
+      assert.equal(sent, 0, model);
+      assert.equal(inserts.length, 0, model);
+    }
+  });
+
+  it("lets Cloud.ru's own models through, in any spelling of the letters", async () => {
+    for (const model of ["deepseek-ai/DeepSeek-V4-Pro", "deepseek-ai/deepseek-v4-pro", "openai/gpt-oss-120b", "BAAI/bge-m3", "moonshotai/Kimi-K2.6"]) {
+      let sent = 0;
+      const { wrapped } = setup({ provider: async () => { sent += 1; return jsonResponse({ usage: { prompt_tokens: 1, total_tokens: 1 } }); } });
+      await wrapped(CLOUDRU, post({ ...chatBody, model }));
+      assert.equal(sent, 1, model);
+    }
+  });
+
+  it("says nothing about other hosts", async () => {
+    let sent = 0;
+    const { wrapped } = setup({ provider: async () => { sent += 1; return jsonResponse({ usage: { prompt_tokens: 1, total_tokens: 1 } }); } });
+    await wrapped(CHAT, post({ ...chatBody, model: "deepseek/deepseek-v4.1-flash" }));
+    assert.equal(sent, 1);
+  });
+});
