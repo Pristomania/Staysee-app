@@ -14,8 +14,12 @@
  * this file exists to prevent. If a single write fails after retries, the row is printed in full on stderr so it can be entered by hand,
  * and the run goes on (the money is already spent).
  *
+ * A request to Cloud.ru for a partner model (the text would leave Cloud.ru) is refused before it is sent: see cloudru-models.mjs.
+ *
  * Nothing here prints or stores the key. The database is written with the service key through the REST address, like the other scripts.
  */
+
+import { isAllowedCloudruModel, isCloudruAddress } from './cloudru-models.mjs';
 
 export const OFF_APP_KIND_PREFIX = 'offapp:';
 
@@ -149,6 +153,9 @@ export function createOffAppUsageRecorder({
       if (!isPaidCall(input)) return inner(input, init);
 
       const requested = readRequest(init);
+      if (isCloudruAddress(addressOf(input)) && !isAllowedCloudruModel(requested.model)) {
+        throw new Error(`Запрос не отправлен: ${requested.model ?? 'модель не названа'} — партнёрская (внешняя) или неизвестная модель Cloud.ru. Свои модели перечислены в scripts/lib/cloudru-models.mjs.`);
+      }
       const started = Date.now();
       let response;
       try {
