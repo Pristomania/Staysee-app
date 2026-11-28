@@ -13,6 +13,7 @@ import {
   rankArchiveExcerpts,
   searchConversationArchive,
 } from "./conversationRetrieval.ts";
+import { resetSearchProvidersForTests } from "./searchProviders.ts";
 
 const source = readFileSync(new URL("./conversationRetrieval.ts", import.meta.url), "utf8");
 const memorySource = readFileSync(new URL("./recallGrounding.ts", import.meta.url), "utf8");
@@ -301,8 +302,12 @@ describe("when the small model has decided that the person asks to remember", ()
     assert.equal(search.args.match_threshold, 0.45);
     assert.equal(search.args.p_conversation_id, "c1");
 
-    assert.equal(providers.rerankCalls.length, 1);
-    assert.equal(providers.rerankCalls[0].query, "йога по вторникам", "the reranker gets the phrase too");
+    assert.deepEqual(
+      providers.rerankCalls.map((c) => c.query),
+      ["йога по вторникам", "помнишь, я говорила про йогу?"],
+      "the reranker is asked with the phrase and with the person's own words",
+    );
+    assert.deepEqual(providers.rerankCalls[1].documents, providers.rerankCalls[0].documents, "about the same lines");
     assert.ok(providers.rerankCalls[0].documents.some((d) => d.includes("кроссовки")), "the candidate that is not an answer was sent to it");
     assert.ok(providers.rerankCalls[0].documents.length <= 40);
     assert.equal(providers.rerankCalls[0].documents.filter((d) => d.includes("йог")).length, 1, "a line found both by meaning and by words is sent once");
@@ -312,7 +317,7 @@ describe("when the small model has decided that the person asks to remember", ()
     assert.equal(result.excerpts[0].assistantText, "Рада, что тебе там спокойно.");
     assert.equal(result.excerpts[0].score, 0.9);
     assert.deepEqual(result.userEvidenceQuotes.map((q) => q.text), [yoga.content]);
-    assert.deepEqual(usages, [50], "the reranker's cost is reported");
+    assert.deepEqual(usages, [50, 50], "the reranker's cost is reported, both times");
   });
 
   it("falls back to the closeness of the vectors when the reranker does not answer", async () => {
@@ -335,6 +340,7 @@ describe("when the small model has decided that the person asks to remember", ()
     const providers = stubProviders();
     await run({ recall: true, query: "" }, { message: "что я говорила про йогу" }).promise;
     assert.deepEqual(providers.embedInputs, ["что я говорила про йогу"]);
+    assert.equal(providers.rerankCalls.length, 1, "the same words are not scored twice");
   });
 
   it("does not dig into the past when the model says this is not a request to remember, even if the message carries words of asking", async () => {
@@ -353,6 +359,58 @@ describe("when the small model has decided that the person asks to remember", ()
     assert.deepEqual(providers.embedInputs, ["помнишь, что я говорила про йогу?"], "the question itself, as before");
     assert.equal(providers.rerankCalls.length, 0);
     assert.equal(user.rpcCalls.find((c) => c.name === "match_conversation_embeddings_by_model")?.args.match_count, 12);
+  });
+
+  /** A reranker whose score depends on what it is asked with. `fails`: the requests that get an error (by host or by query). */
+  function stubScores(scoreOf: (query: string, text: string) => number, fails: (url: string, query: string) => boolean = () => false) {
+    globalThis.fetch = (async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      if (String(url).endsWith("/rerank")) {
+        if (fails(String(url), body.query)) return { ok: false, status: 500, json: async () => ({}), text: async () => "" };
+        const results = body.documents.map((text: string, index: number) => ({ index, relevance_score: scoreOf(body.query, text) }));
+        return { ok: true, status: 200, json: async () => ({ usage: { total_tokens: 50 }, results }), text: async () => "" };
+      }
+      return {
+        ok: true, status: 200, text: async () => "",
+        json: async () => ({ data: body.input.map((_: string, index: number) => ({ index, embedding: Array(1024).fill(0.01) })), usage: { prompt_tokens: 5, total_tokens: 5, cost: 0 } }),
+      };
+    }) as never;
+  }
+  const asked = "помнишь, я говорила про йогу?";
+
+  it("keeps the better of the two scores of each line", async () => {
+    stubScores((query, text) => (text.includes("йог") ? (query === asked ? 0.5 : 0.001) : 0.02));
+    const result = await run({ recall: true, query: "занятия по вторникам" }).promise;
+    assert.deepEqual(result.excerpts.map((e) => [e.userText, e.score]), [[yoga.content, 0.5]]);
+  });
+
+  it("goes by the phrase alone when the request with the person's words fails", async () => {
+    stubScores((_query, text) => (text.includes("йог") ? 0.9 : 0.001), (_url, query) => query === asked);
+    const result = await run({ recall: true, query: "занятия по вторникам" }).promise;
+    assert.deepEqual(result.excerpts.map((e) => e.userText), [yoga.content]);
+  });
+
+  // Measured on 28.11.2026: the reranker scores a search of one word far too low («море» against the very line about the sea: 0.0175).
+  it("lets a line that carries the very word of a one-word search pass at a lower score", async () => {
+    stubScores(() => 0.015);
+    const one = await run({ recall: true, query: "йогу" }).promise;
+    assert.deepEqual(one.excerpts.map((e) => e.userText), [yoga.content], "the line with the word passes, the other does not");
+    const two = await run({ recall: true, query: "йогу вечером" }).promise;
+    assert.deepEqual(two.excerpts, [], "a search of two words keeps the usual bar");
+    stubScores(() => 0.009);
+    assert.deepEqual((await run({ recall: true, query: "йогу" }).promise).excerpts, [], "below the lower bar nothing passes");
+  });
+
+  it("the lower bar belongs to the main reranker only: the reserve scores on another scale", async () => {
+    resetSearchProvidersForTests();
+    stubScores(() => 0.005, (url) => url.includes("cloud.ru"));
+    const user = fakeMessagesClient(rows, { rpc: () => ({ data: [semanticRow(yoga, 0.72, rows[21])], error: null }) });
+    const result = await searchConversationArchive(user.client, {
+      conversationId: "c1", query: asked, excludeTailCount: 6, userId: "u1", embedConfig: { apiKey: "key" },
+      supabaseService: fakeMessagesClient([]).client, decision: { recall: true, query: "йогу" },
+      rerank: { apiKey: "cloudru-key" }, rerankFallback: { apiKey: "or-key" }, rerankThreshold: 0.03, rerankFallbackThreshold: 0.01,
+    });
+    assert.deepEqual(result.excerpts, []);
   });
 });
 
@@ -425,7 +483,7 @@ describe("equal lines take one place, and short facts are not cut off", () => {
       conversationId: "c1", query: "как мне было в то время?", excludeTailCount: 6, userId: "u1", embedConfig: { apiKey: "key" },
       supabaseService: fakeMessagesClient([]).client, decision: { recall: true, query: "тяжело" }, rerank: { apiKey: "cloudru-key" },
     });
-    const documents = rerankDocuments.flat();
+    const documents = rerankDocuments[0];
     assert.equal(documents.filter((d) => d.toLowerCase() === "мне тяжело").length, 1, "three equal lines, one place");
     const heavy = result.excerpts.filter((e) => e.userText.toLowerCase() === "мне тяжело");
     assert.equal(heavy.length, 1);
