@@ -147,7 +147,7 @@ console.log("✓ createEmbeddings reports what it cost");
 // ── the chat gives every embeddings call a logger ──────────────────────────────────────────────────────────
 {
   const chat = readFileSync(resolve("supabase/functions/staysee-chat/index.ts"), "utf8").replace(/\r/g, "");
-  const embedConfigs = [...chat.matchAll(/embedConfig:\s*(?:embedApiKey\s*\?\s*)?\{[\s\S]*?\}/g)].map((m) => m[0]);
+  const embedConfigs = [...chat.matchAll(/embedConfig:\s*(?:embedAccess\s*\?\s*)?\{[\s\S]*?\}/g)].map((m) => m[0]);
   assert(embedConfigs.length >= 2, `the chat builds the embeddings config in two places (${embedConfigs.length})`);
   for (const config of embedConfigs) assert(/onUsage/.test(config) && /logEmbeddingUsage/.test(config), `every embeddings config of the chat writes its cost: ${config.slice(0, 80)}`);
 }

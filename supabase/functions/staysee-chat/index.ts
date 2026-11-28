@@ -11,6 +11,7 @@ import { FALLBACK_RERANK_MODEL, resolveFallbackRerankThreshold } from "../_share
 import { RERANK_MODEL, resolveRerankThreshold } from "../_shared/reranker.ts";
 import { ensureConversationEmbeddings } from "../_shared/messageEmbeddings.ts";
 import { logEmbeddingUsage } from "../_shared/embeddingUsage.ts";
+import { embeddingAccess, type EmbeddingHostOutcome } from "../_shared/embeddings.ts";
 import { buildContextPacket, buildContextPrompt, stampMemoryUsed } from "../_shared/context.ts";
 import { fetchConversationCrossMemoryEnabled } from "../_shared/profilePrefs.ts";
 import {
@@ -926,7 +927,20 @@ Deno.serve(async (req: Request) => {
 
     const tierCfg = TIER_CONFIG[userTier];
     const gapTier = classifyTimeGap(timeGap);
-    const embedApiKey = Deno.env.get(PROVIDERS[ACTIVE_PROVIDER].envKey) ?? undefined;
+    // The vectors of the search by meaning: Cloud.ru first, OpenRouter as the reserve, whatever model writes the replies.
+    const embedKeys = embeddingAccess({
+      cloudruKey: Deno.env.get(CLOUDRU_API_KEY_ENV),
+      openrouterKey: Deno.env.get(PROVIDERS.openrouter.envKey),
+      openrouterHeaders: PROVIDERS.openrouter.extraHeaders,
+    });
+    const embedAccess = embedKeys && {
+      ...embedKeys,
+      // A refusal of Cloud.ru is told to the owner, as for the rest of the search.
+      onHostOutcome: async (outcome: EmbeddingHostOutcome) => {
+        const kind = searchAlertKind(outcome);
+        if (kind) await sendProviderAlertSafely(kind);
+      },
+    };
 
     // ── L4: Build context packet ────────────────────────────────────────────
 
@@ -1269,15 +1283,14 @@ Deno.serve(async (req: Request) => {
             await sendProviderAlertSafely("search_failed");
           },
           userId,
-          embedConfig: embedApiKey
+          embedConfig: embedAccess
             ? {
-                apiKey: embedApiKey,
-                extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
+                ...embedAccess,
                 // The vector of the question is a paid call: its cost goes into the log like every other (the owner's rule: all costs).
                 onUsage: (usage) => logEmbeddingUsage(embedUsageClient, { userId, conversationId }, usage),
               }
             : undefined,
-          supabaseService: embedApiKey ? embedUsageClient : undefined,
+          supabaseService: embedAccess ? embedUsageClient : undefined,
         });
 
         // Preserve corrections through trim — they are high-priority context
@@ -2178,13 +2191,12 @@ Deno.serve(async (req: Request) => {
             : Promise.resolve(),
 
           // Embed new messages for semantic archive (this chat only)
-          conversationId && embedApiKey
+          conversationId && embedAccess
             ? ensureConversationEmbeddings(svc, {
                 conversationId,
                 userId,
                 embedConfig: {
-                  apiKey: embedApiKey,
-                  extraHeaders: PROVIDERS[ACTIVE_PROVIDER].extraHeaders,
+                  ...embedAccess,
                   // The vectors of the new messages are a paid call too: written into the cost log.
                   onUsage: (usage) => logEmbeddingUsage(svc, { userId, conversationId }, usage),
                 },
