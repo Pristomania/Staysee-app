@@ -57,7 +57,7 @@ const sections = [
   {
     icon: Trash2,
     title: 'Удаление данных',
-    body: 'Удалить беседу — значит удалить её навсегда. Вместе со всеми сообщениями. Без резервных копий, без возможности восстановления. Это ваш выбор, и мы его уважаем.',
+    body: 'Удалённая беседа и её сообщения больше не доступны в приложении; восстановить их через приложение нельзя. Резервные копии удаляются в рамках ротации в срок не более 90 календарных дней после удаления основных данных. Полные сроки хранения и исключения указаны в Политике обработки персональных данных.',
   },
 ];
 
@@ -285,10 +285,6 @@ export function PrivacyScreen() {
         />
       )}
     >
-
-        <h2 className={`${theme.textPrimary} text-lg sm:text-xl font-light leading-[1.6] tracking-tight mb-6`}>
-          Ваши беседы принадлежат только <span className={ACCENT_TEXT_CLASS}>вам</span>.
-        </h2>
 
         <div className={`rounded-xl border ${theme.border} ${theme.surface} px-4 sm:px-5 py-3.5 mb-6`}>
           <p className={`${theme.textSecondary} text-[13px] font-light leading-[1.75] opacity-90`}>

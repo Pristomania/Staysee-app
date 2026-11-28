@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertCircle } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { EMERGENCY_HELP_COPY } from '../lib/emergencyHelp';
+import { EmergencyHelpContacts } from './EmergencyHelpContacts';
 
 /**
  * The exclamation mark at the end of the top row of the chat. A press opens the approved emergency contacts.
@@ -55,26 +56,10 @@ export function EmergencyHelpButton() {
             <h2 id="emergency-help-title" className={`${theme.textPrimary} text-base font-light tracking-wide mb-4`}>
               {EMERGENCY_HELP_COPY.title}
             </h2>
-            <div className={`space-y-3 ${theme.textSecondary} text-sm font-light leading-relaxed`}>
-              {EMERGENCY_HELP_COPY.rows.map((row, rowIndex) => (
-                <p key={rowIndex}>
-                  {row.map((part, partIndex) =>
-                    typeof part === 'string' ? (
-                      <span key={partIndex}>{part}</span>
-                    ) : (
-                      <a
-                        key={partIndex}
-                        href={part.href}
-                        className={`${theme.textPrimary} underline underline-offset-4 whitespace-nowrap`}
-                        {...(part.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                      >
-                        {part.label}
-                      </a>
-                    ),
-                  )}
-                </p>
-              ))}
-            </div>
+            <EmergencyHelpContacts
+              className={`space-y-3 ${theme.textSecondary} text-sm font-light leading-relaxed`}
+              linkClassName={`${theme.textPrimary} underline underline-offset-4 whitespace-nowrap`}
+            />
             <button
               ref={closeRef}
               type="button"
