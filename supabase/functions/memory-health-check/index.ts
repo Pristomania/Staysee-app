@@ -16,6 +16,7 @@ import {
   runMemoryV3HealthCheck,
   sendMemoryV3HealthTelegram,
 } from "../_shared/memoryV3/healthCheck.ts";
+import { deliverToOwner, ownerAlertMailer } from "../_shared/ownerAlert.ts";
 
 const HEALTH_WINDOW_MINUTES = 120;
 
@@ -69,13 +70,24 @@ Deno.serve(async (req) => {
         if (error) throw new Error("alert reservation failed");
         return data === true;
       },
-      sendTelegram: (text) =>
-        sendMemoryV3HealthTelegram({
-          botToken: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN"),
-          chatId: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID"),
-          text,
-          fetchImpl: globalThis.fetch.bind(globalThis),
-        }),
+      // Telegram and, when switched on, a letter. A normal run fails only if nothing got through; the connectivity test
+      // fails if any one channel did not work.
+      sendTelegram: (text) => {
+        const mailer = ownerAlertMailer();
+        return deliverToOwner(
+          [
+            () =>
+              sendMemoryV3HealthTelegram({
+                botToken: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN"),
+                chatId: Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID"),
+                text,
+                fetchImpl: globalThis.fetch.bind(globalThis),
+              }),
+            ...(mailer ? [() => mailer(text)] : []),
+          ],
+          { requireAll: body?.test === true },
+        );
+      },
       now: () => new Date(),
     });
     return respond(200, { ok: true, ...result });

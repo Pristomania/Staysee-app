@@ -1,10 +1,11 @@
 /**
- * A short alert to the founder's Telegram when the model host refuses the key or has no money left.
+ * A short alert to the founder (Telegram and, when switched on, e-mail) when the model host refuses the key or has no money left.
  * No user data in it. Fail-open: an alert that cannot be sent never breaks a reply. At most one alert of a kind in half an hour
  * per running copy of the function (a restart of the copy may repeat it; that is acceptable for a rare event).
  * The bot and the chat are the ones of the Memory V3 alerts (the same secrets).
  */
 
+import { deliverToOwner, ownerAlertMailer, type OwnerMailer } from "./ownerAlert.ts";
 import type { SwitchReason } from "./searchProviders.ts";
 
 export type ProviderAlertKind = "balance_empty" | "key_rejected" | "search_balance_empty" | "search_key_rejected" | "search_failed" | "search_switched" | "memory_switched" | "aux_switched";
@@ -47,6 +48,8 @@ export interface ProviderAlertOptions {
   botToken?: string | null;
   chatId?: string | null;
   fetchImpl?: (url: string, init: { method: "POST"; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{ ok: boolean }>;
+  /** The letter to the owner; by default from the settings of the function, null when it is switched off. */
+  mailer?: OwnerMailer | null;
 }
 
 /** Test hook: forget what was sent. */
@@ -62,18 +65,28 @@ export async function sendProviderAlertSafely(kind: ProviderAlertKind, options: 
 
     const botToken = options.botToken ?? (typeof Deno !== "undefined" ? Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_BOT_TOKEN") : undefined);
     const chatId = options.chatId ?? (typeof Deno !== "undefined" ? Deno.env.get("STAYSEE_MEMORY_V3_ALERT_TELEGRAM_CHAT_ID") : undefined);
-    if (typeof botToken !== "string" || !BOT_TOKEN.test(botToken) || typeof chatId !== "string" || !CHAT_ID.test(chatId)) return false;
+    const telegram = typeof botToken === "string" && BOT_TOKEN.test(botToken) && typeof chatId === "string" && CHAT_ID.test(chatId);
+    const mailer = options.mailer === undefined ? ownerAlertMailer() : options.mailer;
+    if (!telegram && !mailer) return false;
 
     // Marked before the call: a second failure in the same moment must not send a second alert.
     lastSentAt.set(kind, now);
-    const send = options.fetchImpl ?? ((url, init) => fetch(url, init));
-    const response = await send(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: TEXT[kind] }),
-      signal: AbortSignal.timeout(3000),
-    });
-    return response.ok === true;
+    const channels: Array<() => Promise<boolean>> = [];
+    if (telegram) {
+      const send = options.fetchImpl ?? ((url, init) => fetch(url, init));
+      channels.push(async () => {
+        const response = await send(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text: TEXT[kind] }),
+          signal: AbortSignal.timeout(3000),
+        });
+        return response.ok === true;
+      });
+    }
+    if (mailer) channels.push(() => mailer(TEXT[kind]));
+    await deliverToOwner(channels);
+    return true;
   } catch {
     return false;
   }
