@@ -16,8 +16,8 @@ export function PublicDocumentLink({document, children, className, pinned = fals
 }
 
 export function PublicLegalLinks({className = ''}: {className?: string}) {
-  return <nav aria-label="Документы приложения" className={`mt-8 flex flex-wrap justify-center gap-x-5 gap-y-3 text-sm leading-relaxed ${className}`}>
+  return <nav aria-label="Документы приложения" className={`mt-8 flex flex-wrap justify-center gap-x-5 gap-y-3 text-xs leading-relaxed opacity-[0.97] ${className}`}>
     {(Object.keys(PUBLIC_LEGAL_LINKS) as (keyof typeof PUBLIC_LEGAL_LINKS)[]).map(document =>
-      <PublicDocumentLink key={document} document={document} className="underline underline-offset-4 decoration-dotted hover:opacity-80" />)}
+      <PublicDocumentLink key={document} document={document} className="underline underline-offset-4 decoration-dotted hover:decoration-solid focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4" />)}
   </nav>;
 }

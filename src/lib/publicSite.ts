@@ -5,8 +5,8 @@ import { CONSENT_META } from '../content/legal/consent';
 export const PUBLIC_SITE_URL = 'https://stayseeai.online';
 export const APP_URL = 'https://app.stayseeai.online';
 export const PUBLIC_LEGAL_LINKS = {
-  terms: {path: '/offer.html', label: 'Оферта приложения'},
-  policy: {path: '/app-privacy.html', label: 'Политика данных приложения'},
+  terms: {path: '/offer.html', label: 'Оферта'},
+  policy: {path: '/app-privacy.html', label: 'Политика данных'},
   consent: {path: '/consent.html', label: 'Согласие на обработку данных'},
   pricing: {path: '/pricing.html', label: 'Тарифы'},
   contacts: {path: '/contacts.html', label: 'Контакты и реквизиты'},
