@@ -670,7 +670,7 @@ async function searchRecallPrecise(
   const phrase = (decision.query.trim() || params.query).slice(0, 300);
 
   let semantic: ArchiveExcerpt[] = [];
-  if (params.embedConfig?.apiKey && params.supabaseService && params.userId && messages.length >= 6) {
+  if (params.embedConfig && params.supabaseService && params.userId && messages.length >= 6) {
     try {
       await ensureConversationEmbeddings(params.supabaseService, {
         conversationId: params.conversationId,
@@ -816,7 +816,7 @@ export async function searchConversationArchive(
 
   if (
     mode === "full" &&
-    params.embedConfig?.apiKey &&
+    params.embedConfig &&
     params.supabaseService &&
     params.userId &&
     messages.length >= 6

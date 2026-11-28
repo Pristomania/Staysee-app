@@ -192,6 +192,38 @@ describe("the search by meaning gets the question alone", () => {
     assert.equal(service.rpcCalls[0].name, "messages_missing_embeddings");
   });
 
+  it("runs on a server that has only Cloud.ru, with and without a decision of the small model", async () => {
+    for (const decision of [undefined, { recall: true, query: "йога" }]) {
+      const urls: string[] = [];
+      globalThis.fetch = (async (url: string, init: { body: string }) => {
+        urls.push(url);
+        const body = JSON.parse(init.body);
+        return {
+          ok: true,
+          json: async () => ({ data: body.input.map((_: string, index: number) => ({ index, embedding: Array(1024).fill(0.01) })), usage: { prompt_tokens: 5, total_tokens: 5 } }),
+          text: async () => "",
+        };
+      }) as never;
+
+      const user = fakeMessagesClient(conversation(60));
+      const service = fakeMessagesClient([]);
+      await searchConversationArchive(user.client, {
+        conversationId: "c1",
+        query: "помнишь, что я говорила про йогу?",
+        excludeTailCount: 6,
+        userId: "u1",
+        embedConfig: { cloudru: { apiKey: "ru-key" } },
+        supabaseService: service.client,
+        ...(decision ? { decision } : {}),
+      });
+
+      const how = decision ? "after the decision" : "by the words";
+      assert.deepEqual(urls, ["https://foundation-models.api.cloud.ru/v1/embeddings"], how);
+      assert.ok(user.rpcCalls.some((c) => c.name === "match_conversation_embeddings_by_model"), `the search by meaning ran (${how})`);
+      assert.equal(service.rpcCalls[0]?.name, "messages_missing_embeddings", how);
+    }
+  });
+
   it("no longer takes a context parameter or builds one in the chat", () => {
     assert.ok(!source.includes("queryContext"));
     assert.ok(!source.includes("contextBlob"));
