@@ -21,14 +21,18 @@ export function Harness(){
       const buttons=[...document.querySelectorAll<HTMLButtonElement>('#fixture button')];
       const login=buttons.find(b=>b.textContent?.trim()==='Войти')!;
       const create=buttons.find(b=>b.textContent?.trim()==='Создать комнату')!;
+      const tagline=[...document.querySelectorAll<HTMLElement>('#fixture p')].find(p=>p.textContent?.trim()==='Точка опоры для осознанной жизни')!;
       const nav=document.querySelector<HTMLElement>('#fixture nav[aria-label="Документы приложения"]')!;
       const bg=color(getComputedStyle(document.body).backgroundColor);
       const navStyle=getComputedStyle(nav), opacity=Number(navStyle.opacity);
       const fg=color(navStyle.color).map((v,i)=>v*opacity+bg[i]*(1-opacity));
       const contrast=(Math.max(luminance(fg),luminance(bg))+0.05)/(Math.min(luminance(fg),luminance(bg))+0.05);
-      const metrics={theme:name,createBorder:parseFloat(getComputedStyle(create).borderTopWidth),loginHeight:login.getBoundingClientRect().height,createHeight:create.getBoundingClientRect().height,documentFont:parseFloat(navStyle.fontSize),createFont:parseFloat(getComputedStyle(create).fontSize),documentContrast:Number(contrast.toFixed(2)),documentLinks:nav.querySelectorAll('a').length};
+      const taglineColor=getComputedStyle(tagline).color,taglineAlpha=Number(taglineColor.match(/[\d.]+/g)?.[3]??1);
+      const taglineRgb=color(taglineColor).map((v,i)=>v*taglineAlpha+bg[i]*(1-taglineAlpha));
+      const taglineContrast=(Math.max(luminance(taglineRgb),luminance(bg))+0.05)/(Math.min(luminance(taglineRgb),luminance(bg))+0.05);
+      const metrics={theme:name,createBorder:parseFloat(getComputedStyle(create).borderTopWidth),loginHeight:login.getBoundingClientRect().height,createHeight:create.getBoundingClientRect().height,loginWeight:Number(getComputedStyle(login.querySelector('span')??login).fontWeight),documentFont:parseFloat(navStyle.fontSize),createFont:parseFloat(getComputedStyle(create).fontSize),documentContrast:Number(contrast.toFixed(2)),taglineContrast:Number(taglineContrast.toFixed(2)),documentLinks:nav.querySelectorAll('a').length};
       rows.push(metrics);
-      if(metrics.createBorder<=0||metrics.createHeight>=metrics.loginHeight||metrics.documentFont>=metrics.createFont||contrast<4.5||metrics.documentLinks!==5){setResult('FAIL '+JSON.stringify(rows));return;}
+      if(metrics.createBorder<=0||metrics.createHeight>=metrics.loginHeight||metrics.loginWeight<600||metrics.documentFont>=metrics.createFont||contrast<4.5||taglineContrast<4.5||metrics.documentLinks!==5){setResult('FAIL '+JSON.stringify(rows));return;}
       const expectedLinks=[['Оферта','https://stayseeai.online/offer.html'],['Политика данных','https://stayseeai.online/app-privacy.html'],['Согласие на обработку данных','https://stayseeai.online/consent.html'],['Тарифы','https://stayseeai.online/pricing.html'],['Контакты и реквизиты','https://stayseeai.online/contacts.html']];
       const links=[...nav.querySelectorAll('a')];
       if(expectedLinks.some(([label,href])=>!links.some(a=>a.textContent?.trim()===label&&a.href===href))){setResult('FAIL legal link labels/destinations');return;}

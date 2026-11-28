@@ -7,6 +7,7 @@ import { PublicLegalLinks } from '../legal/PublicLegalLinks';
 export function WelcomeScreen() {
   const { navigateTo } = useApp();
   const { theme } = useTheme();
+  const taglineColor = theme.name === 'light' ? 'text-[#786346]' : 'text-[#c9a96e]';
 
   return (
     <div className={`min-h-screen ${theme.bg} flex flex-col`}>
@@ -17,7 +18,7 @@ export function WelcomeScreen() {
             <h1 className={`${theme.textPrimary} text-2xl font-light tracking-wide mb-2`}>
               StaySee AI
             </h1>
-            <p className="text-[#b8a882]/75 text-xs font-light tracking-widest uppercase">
+            <p className={`${taglineColor} text-xs font-light tracking-widest uppercase`}>
               Точка опоры для осознанной жизни
             </p>
           </div>
@@ -39,7 +40,7 @@ export function WelcomeScreen() {
               ${theme.btnBg} ${theme.btnBgHover} ${theme.btnBorder} ${theme.btnBorderHover}
             `}
           >
-            <span className={`${theme.btnText} font-light text-sm tracking-widest`}>
+            <span className={`${theme.btnText} font-semibold text-sm tracking-widest`}>
               Войти
             </span>
           </button>
