@@ -34,4 +34,11 @@ describe('documents for the public storefront', () => {
       assert.match(html, /href="\/app-privacy\.html"/);
     }
   });
+
+  it('keeps the five-column tariff table readable inside a horizontal scroller on phones', () => {
+    const offer = pages['offer.html'];
+    assert.match(offer, /class="table-wrap table-wrap--wide"><table>/);
+    assert.match(offer, /\.table-wrap--wide table\{min-width:680px\}/);
+    assert.match(offer, /\.table-wrap\{[^}]*overflow-x:auto/);
+  });
 });

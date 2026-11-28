@@ -121,7 +121,7 @@ export function mdToHtml(md) {
       const body = hasHeader ? rows.slice(2) : rows;
       const cells = (row, tag) => row.map((cell) => `<${tag}>${inline(cell)}</${tag}>`).join("");
       out.push(
-        `<div class="table-wrap"><table>${head ? `<thead><tr>${cells(head, "th")}</tr></thead>` : ""}<tbody>${body
+        `<div class="table-wrap${rows.some(row => row.length > 3) ? ' table-wrap--wide' : ''}"><table>${head ? `<thead><tr>${cells(head, "th")}</tr></thead>` : ""}<tbody>${body
           .map((row) => `<tr>${cells(row, "td")}</tr>`)
           .join("")}</tbody></table></div>`,
       );
@@ -175,6 +175,7 @@ const CSS = `
     li{margin:6px 0}
     hr{margin:34px 0;border:0;border-top:1px solid var(--line)}
     .table-wrap{margin:22px 0;overflow-x:auto}
+    .table-wrap--wide table{min-width:680px}
     table{width:100%;border-collapse:collapse;font-size:15px}
     th,td{padding:11px 14px 11px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
     th{color:var(--gold);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
