@@ -8,6 +8,8 @@
  * is therefore a separate, minimal function rather than an extension of
  * that one. */
 
+import { deliverToOwner, ownerAlertMailer, type OwnerMailer } from "../ownerAlert.ts";
+
 export interface MemoryV3StaleConversationRow {
   userId: string;
   conversationId: string;
@@ -27,6 +29,8 @@ export interface MemoryV3StaleAlertOptions {
       body: string;
     },
   ) => Promise<unknown>;
+  /** The letter to the owner; by default from the settings of the function, null when it is switched off. */
+  mailer?: OwnerMailer | null;
 }
 
 const BOT_TOKEN = /^\d{5,20}:[A-Za-z0-9_-]{20,100}$/;
@@ -47,8 +51,10 @@ function isValidRow(row: unknown): row is MemoryV3StaleConversationRow {
 export async function sendMemoryV3StaleAlertSafely(
   options: MemoryV3StaleAlertOptions,
 ): Promise<void> {
-  if (typeof options.botToken !== "string" || !BOT_TOKEN.test(options.botToken)) return;
-  if (typeof options.chatId !== "string" || !CHAT_ID.test(options.chatId)) return;
+  const telegram = typeof options.botToken === "string" && BOT_TOKEN.test(options.botToken) &&
+    typeof options.chatId === "string" && CHAT_ID.test(options.chatId);
+  const mailer = options.mailer === undefined ? ownerAlertMailer() : options.mailer;
+  if (!telegram && !mailer) return;
   if (!isValidRow(options.row)) return;
   if (typeof options.fetchImpl !== "function") return;
 
@@ -64,14 +70,18 @@ export async function sendMemoryV3StaleAlertSafely(
       "Подробности: таблица memory_v3_stale_alerts",
       `Время: ${new Date().toISOString()}`,
     ].join("\n");
-    await options.fetchImpl(
-      `https://api.telegram.org/bot${options.botToken}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: options.chatId, text }),
-      },
-    );
+    const channels: Array<() => Promise<unknown>> = [];
+    if (telegram) {
+      channels.push(() =>
+        options.fetchImpl(`https://api.telegram.org/bot${options.botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: options.chatId, text }),
+        })
+      );
+    }
+    if (mailer) channels.push(() => mailer(text));
+    await deliverToOwner(channels);
   } catch {
     // Operator alerting is best-effort and must never affect the reply path.
   }

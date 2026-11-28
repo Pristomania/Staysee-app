@@ -1,3 +1,5 @@
+import { deliverToOwner, ownerAlertMailer, type OwnerMailer } from "../ownerAlert.ts";
+
 export type MemoryV3TelegramAlertPath = "read" | "write";
 
 export type MemoryV3TelegramAlertDiagnostic =
@@ -35,6 +37,8 @@ export interface MemoryV3TelegramAlertOptions {
       body: string;
     },
   ) => Promise<unknown>;
+  /** The letter to the owner; by default from the settings of the function, null when it is switched off. */
+  mailer?: OwnerMailer | null;
 }
 
 const OPTION_FIELDS = new Set([
@@ -45,6 +49,7 @@ const OPTION_FIELDS = new Set([
   "reserveAlertKey",
   "fetchImpl",
 ]);
+const OPTIONAL_FIELDS = new Set(["mailer"]);
 const BOT_TOKEN = /^\d{5,20}:[A-Za-z0-9_-]{20,100}$/;
 const CHAT_ID = /^-?[1-9]\d{0,19}$/;
 const READ_DIAGNOSTICS = new Set<MemoryV3TelegramAlertDiagnostic>([
@@ -105,6 +110,7 @@ type ProjectedOptions = {
   diagnosticCode: unknown;
   reserveAlertKey: unknown;
   fetchImpl: unknown;
+  mailer?: unknown;
 };
 
 function inspectOptions(value: unknown): ProjectedOptions | null {
@@ -115,10 +121,9 @@ function inspectOptions(value: unknown): ProjectedOptions | null {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return null;
     const keys = Reflect.ownKeys(value);
-    if (keys.length !== OPTION_FIELDS.size) return null;
     const projected: Record<string, unknown> = {};
     for (const key of keys) {
-      if (typeof key !== "string" || !OPTION_FIELDS.has(key)) return null;
+      if (typeof key !== "string" || !(OPTION_FIELDS.has(key) || OPTIONAL_FIELDS.has(key))) return null;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !descriptor.enumerable || !("value" in descriptor)) {
         return null;
@@ -157,12 +162,12 @@ export async function sendMemoryV3TelegramAlertSafely(
 ): Promise<void> {
   const options = inspectOptions(optionsValue);
   if (options === null) return;
-  if (typeof options.botToken !== "string" || !BOT_TOKEN.test(options.botToken)) {
-    return;
-  }
-  if (typeof options.chatId !== "string" || !CHAT_ID.test(options.chatId)) {
-    return;
-  }
+  const telegram = typeof options.botToken === "string" && BOT_TOKEN.test(options.botToken) &&
+    typeof options.chatId === "string" && CHAT_ID.test(options.chatId);
+  const mailer = options.mailer === undefined
+    ? ownerAlertMailer()
+    : typeof options.mailer === "function" ? options.mailer as OwnerMailer : null;
+  if (!telegram && !mailer) return;
   if (!isClosedDiagnostic(options.path, options.diagnosticCode)) return;
   if (
     typeof options.reserveAlertKey !== "function" ||
@@ -184,14 +189,19 @@ export async function sendMemoryV3TelegramAlertSafely(
       `Time: ${new Date().toISOString()}`,
       `Что это: ${MEANING[diagnosticCode]}`,
     ].join("\n");
-    await options.fetchImpl(
-      `https://api.telegram.org/bot${options.botToken}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: options.chatId, text }),
-      },
-    );
+    const fetchImpl = options.fetchImpl as MemoryV3TelegramAlertOptions["fetchImpl"];
+    const channels: Array<() => Promise<unknown>> = [];
+    if (telegram) {
+      channels.push(() =>
+        fetchImpl(`https://api.telegram.org/bot${options.botToken}/sendMessage`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: options.chatId, text }),
+        })
+      );
+    }
+    if (mailer) channels.push(() => mailer(text));
+    await deliverToOwner(channels);
   } catch {
     // Operator alerting is best-effort and must never affect the reply path.
   }
